@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'nonce-litelauncher-probe'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>LiteLauncher</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -13,7 +17,7 @@
           id="search-input"
           class="search-input"
           type="text"
-          placeholder="输入应用、文件、命令（如 calc 1+2*3）"
+          placeholder="搜索应用（图标网格）"
           autocomplete="off"
           spellcheck="false"
         />
@@ -22,10 +26,26 @@
         <ul id="result-list" class="result-list"></ul>
       </section>
       <footer class="footer">
-        <div id="status-text" class="status-text">就绪</div>
-        <div class="hint-text">Enter 执行 · Esc 清空/隐藏 · ↑↓ 切换</div>
+        <div id="status-text" class="status-text">启动中...</div>
+        <div id="hint-text" class="hint-text">Enter 执行 - Esc 清空/隐藏 - 方向键移动</div>
       </footer>
     </main>
+    <script nonce="litelauncher-probe">
+      window.__LL_RENDERER_BOOTSTRAPPED__ = false;
+      setTimeout(function () {
+        if (window.__LL_RENDERER_BOOTSTRAPPED__) {
+          return;
+        }
+
+        var status = document.getElementById("status-text");
+        if (!status) {
+          return;
+        }
+
+        status.textContent =
+          "渲染脚本未启动，请先彻底退出 LiteLauncher 再重新执行 pnpm start";
+      }, 1500);
+    </script>
     <script src="./renderer.js"></script>
   </body>
 </html>

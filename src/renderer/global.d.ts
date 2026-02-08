@@ -1,9 +1,17 @@
-import { ClipItem, ExecuteResult, LaunchItem } from "../shared/types";
+import {
+  ClipItem,
+  DebugKeyEvent,
+  ExecuteResult,
+  LaunchItem
+} from "../shared/types";
 
 declare global {
   interface Window {
     launcher: {
+      isDebugKeysEnabled(): boolean;
       getInitialItems(): Promise<LaunchItem[]>;
+      getRecommendedItems(): Promise<LaunchItem[]>;
+      getPluginItems(): Promise<LaunchItem[]>;
       search(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;
       hide(): Promise<boolean>;
@@ -13,6 +21,7 @@ declare global {
       clearClipItems(): Promise<number>;
       onFocusInput(handler: () => void): () => void;
       onOpenPanel(handler: (panel: string) => void): () => void;
+      onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
     };
   }
 }

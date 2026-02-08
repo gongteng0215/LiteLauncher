@@ -63,9 +63,11 @@ export class SearchWorkerClient {
     });
 
     this.worker.on("error", (error) => {
+      const workerError =
+        error instanceof Error ? error : new Error(String(error));
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timeout);
-        pending.reject(error);
+        pending.reject(workerError);
       }
       this.pending.clear();
     });

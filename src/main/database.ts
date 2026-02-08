@@ -40,7 +40,10 @@ export class LiteDatabase {
     params: SqlParam[] = []
   ): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.db.run(sql, params, function callback(error) {
+      this.db.run(sql, params, function callback(
+        this: sqlite3.RunResult,
+        error: Error | null
+      ) {
         if (error) {
           reject(error);
           return;

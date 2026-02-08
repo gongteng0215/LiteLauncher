@@ -4,3 +4,5 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+_tmp_*
+pnpm-debug.log*

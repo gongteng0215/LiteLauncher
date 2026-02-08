@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import { ClipItem, ExecuteResult, LaunchItem } from "../shared/types";
@@ -7,6 +7,8 @@ import { UsageStore } from "./usage-store";
 
 type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
+  getRecommendedItems: (limit: number) => Promise<LaunchItem[]>;
+  getPluginItems: (limit: number) => Promise<LaunchItem[]>;
   searchItems: (query: string, limit: number) => Promise<LaunchItem[]>;
 };
 
@@ -26,6 +28,8 @@ type IpcOptions = {
 
 const HANDLED_CHANNELS = [
   IPC_CHANNELS.getInitialItems,
+  IPC_CHANNELS.getRecommendedItems,
+  IPC_CHANNELS.getPluginItems,
   IPC_CHANNELS.search,
   IPC_CHANNELS.execute,
   IPC_CHANNELS.hide,
@@ -34,6 +38,368 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.deleteClipItem,
   IPC_CHANNELS.clearClipItems
 ] as const;
+
+const ICON_ELIGIBLE_TYPES = new Set<LaunchItem["type"]>([
+  "application",
+  "file",
+  "folder"
+]);
+
+const iconDataCache = new Map<string, string>();
+const shortcutInfoCache = new Map<string, { target?: string; icon?: string } | null>();
+const ICON_DEBUG_ENABLED = process.env.LITELAUNCHER_DEBUG_ICONS === "1";
+const ALLOW_SHORTCUT_FILE_ICON_FALLBACK = false;
+
+type IconCandidate = {
+  source: string;
+  reason: string;
+};
+
+function debugIcon(message: string): void {
+  if (!ICON_DEBUG_ENABLED) {
+    return;
+  }
+
+  console.info(`[debug:icon] ${message}`);
+}
+
+function escapeForLog(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, (char) => {
+    const code = char.codePointAt(0);
+    if (code === undefined) {
+      return "?";
+    }
+
+    if (code <= 0xffff) {
+      return `\\u${code.toString(16).padStart(4, "0")}`;
+    }
+
+    return `\\u{${code.toString(16)}}`;
+  });
+}
+
+function getEnvironmentVariable(name: string): string | undefined {
+  const direct = process.env[name];
+  if (direct) {
+    return direct;
+  }
+
+  const lowerName = name.toLowerCase();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.toLowerCase() === lowerName && value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function expandEnvironmentVariables(value: string): string {
+  return value.replace(/%([^%]+)%/g, (_, variableName: string) => {
+    return getEnvironmentVariable(variableName) ?? `%${variableName}%`;
+  });
+}
+
+function normalizePathCandidate(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let candidate = trimmed;
+  const quotedDouble = candidate.match(/^"([^"]+)"/);
+  if (quotedDouble?.[1]) {
+    candidate = quotedDouble[1].trim();
+  }
+
+  const quotedSingle = candidate.match(/^'([^']+)'/);
+  if (!quotedDouble?.[1] && quotedSingle?.[1]) {
+    candidate = quotedSingle[1].trim();
+  }
+
+  if (candidate.startsWith("\"") && candidate.endsWith("\"")) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+
+  if (candidate.startsWith("'") && candidate.endsWith("'")) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+  if (!candidate) {
+    return null;
+  }
+
+  const expanded = expandEnvironmentVariables(candidate);
+  return expanded.trim() || null;
+}
+
+function normalizeIconLocation(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.startsWith(",")) {
+    return null;
+  }
+
+  const iconWithIndex = trimmed.match(/^(.*?),\s*-?\d+\s*$/);
+  const withoutIndex = (iconWithIndex ? iconWithIndex[1] : trimmed).trim();
+  return normalizePathCandidate(withoutIndex);
+}
+
+function readShortcutInfo(shortcutPath: string): { target?: string; icon?: string } | null {
+  try {
+    const shortcut = shell.readShortcutLink(shortcutPath);
+    const target = normalizePathCandidate(shortcut.target ?? null) ?? undefined;
+    let icon: string | undefined;
+
+    const rawIcon = normalizePathCandidate(shortcut.icon ?? null);
+    if (rawIcon) {
+      const iconIndex =
+        typeof shortcut.iconIndex === "number" ? shortcut.iconIndex : undefined;
+      icon = iconIndex !== undefined ? `${rawIcon},${iconIndex}` : rawIcon;
+    }
+
+    return { target, icon };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveShortcutInfo(
+  shortcutPath: string
+): Promise<{ target?: string; icon?: string } | null> {
+  const cacheKey = shortcutPath.toLowerCase();
+  if (shortcutInfoCache.has(cacheKey)) {
+    return shortcutInfoCache.get(cacheKey) ?? null;
+  }
+
+  const info = readShortcutInfo(shortcutPath);
+  shortcutInfoCache.set(cacheKey, info);
+  return info;
+}
+
+function stripInvalidIconPath(item: LaunchItem): LaunchItem {
+  if (!item.iconPath || item.iconPath.startsWith("data:image/")) {
+    return item;
+  }
+
+  const { iconPath: _iconPath, ...rest } = item;
+  return rest;
+}
+
+function isShortcutPath(pathValue: string): boolean {
+  return pathValue.toLowerCase().endsWith(".lnk");
+}
+
+function pushIconCandidate(
+  candidates: IconCandidate[],
+  seen: Set<string>,
+  source: string | null,
+  reason: string
+): void {
+  if (!source) {
+    return;
+  }
+
+  const normalized = source.trim();
+  if (!normalized) {
+    return;
+  }
+
+  const key = normalized.toLowerCase();
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  candidates.push({ source: normalized, reason });
+}
+
+async function buildIconCandidates(item: LaunchItem): Promise<IconCandidate[]> {
+  const candidates: IconCandidate[] = [];
+  const seen = new Set<string>();
+
+  pushIconCandidate(
+    candidates,
+    seen,
+    normalizePathCandidate(item.iconPath ?? null),
+    "item-icon-path"
+  );
+  pushIconCandidate(
+    candidates,
+    seen,
+    normalizeIconLocation(item.iconPath ?? null),
+    "item-icon-location"
+  );
+
+  const normalizedTarget = normalizePathCandidate(item.target);
+  const isShortcut = normalizedTarget ? isShortcutPath(normalizedTarget) : false;
+
+  if (item.type === "application" && normalizedTarget && isShortcut) {
+    const info = await resolveShortcutInfo(item.target);
+    pushIconCandidate(
+      candidates,
+      seen,
+      normalizeIconLocation(info?.icon),
+      "shortcut-icon"
+    );
+    pushIconCandidate(
+      candidates,
+      seen,
+      normalizePathCandidate(info?.target),
+      "shortcut-target"
+    );
+    if (ALLOW_SHORTCUT_FILE_ICON_FALLBACK) {
+      pushIconCandidate(candidates, seen, normalizedTarget, "shortcut-file");
+    }
+    return candidates;
+  }
+
+  pushIconCandidate(candidates, seen, normalizedTarget, "item-target");
+  return candidates;
+}
+
+function getIconCacheKey(iconSource: string): string {
+  return iconSource.toLowerCase();
+}
+
+function looksLikeStaticImagePath(iconSource: string): boolean {
+  const normalized = iconSource.toLowerCase();
+  return (
+    normalized.endsWith(".ico") ||
+    normalized.endsWith(".png") ||
+    normalized.endsWith(".jpg") ||
+    normalized.endsWith(".jpeg") ||
+    normalized.endsWith(".bmp") ||
+    normalized.endsWith(".webp")
+  );
+}
+
+function tryReadImageFileAsDataUrl(iconSource: string): string | null {
+  if (!looksLikeStaticImagePath(iconSource)) {
+    return null;
+  }
+
+  try {
+    const image = nativeImage.createFromPath(iconSource);
+    if (image.isEmpty()) {
+      return null;
+    }
+
+    const data = image.toDataURL();
+    if (!data.startsWith("data:image/")) {
+      return null;
+    }
+
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveIconData(item: LaunchItem): Promise<string | null> {
+  const candidates = await buildIconCandidates(item);
+  if (candidates.length === 0) {
+    const targetText = escapeForLog(item.target ?? "");
+    const isShortcut = item.target.toLowerCase().endsWith(".lnk");
+    debugIcon(
+      `fallback no-candidate title=${escapeForLog(item.title)} target=${targetText} shortcut=${isShortcut ? "yes" : "no"}`
+    );
+    return null;
+  }
+
+  for (const candidate of candidates) {
+    const iconSource = candidate.source;
+    const cacheKey = getIconCacheKey(iconSource);
+    const cached = iconDataCache.get(cacheKey);
+    if (cached) {
+      debugIcon(
+        `cache-hit reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+      );
+      return cached;
+    }
+
+    try {
+      const icon = await app.getFileIcon(iconSource, { size: "normal" });
+      if (icon.isEmpty()) {
+        const imageData = tryReadImageFileAsDataUrl(iconSource);
+        if (imageData) {
+          iconDataCache.set(cacheKey, imageData);
+          debugIcon(
+            `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+          );
+          return imageData;
+        }
+        debugIcon(
+          `candidate-empty reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+        );
+        continue;
+      }
+
+      const iconData = icon.toDataURL();
+      if (!iconData.startsWith("data:image/")) {
+        debugIcon(
+          `candidate-non-image reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+        );
+        continue;
+      }
+
+      iconDataCache.set(cacheKey, iconData);
+      debugIcon(
+        `resolved reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+      );
+      return iconData;
+    } catch {
+      const imageData = tryReadImageFileAsDataUrl(iconSource);
+      if (imageData) {
+        iconDataCache.set(cacheKey, imageData);
+        debugIcon(
+          `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+        );
+        return imageData;
+      }
+      debugIcon(
+        `candidate-error reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+      );
+      continue;
+    }
+  }
+
+  debugIcon(`fallback title=${escapeForLog(item.title)} (no icon candidates worked)`);
+  return null;
+}
+
+async function attachIcon(item: LaunchItem): Promise<LaunchItem> {
+  const sanitizedItem = stripInvalidIconPath(item);
+
+  if (!ICON_ELIGIBLE_TYPES.has(sanitizedItem.type)) {
+    return sanitizedItem;
+  }
+
+  if (!sanitizedItem.target) {
+    return sanitizedItem;
+  }
+
+  if (sanitizedItem.iconPath && sanitizedItem.iconPath.startsWith("data:image/")) {
+    return sanitizedItem;
+  }
+
+  const iconData = await resolveIconData(sanitizedItem);
+  if (!iconData) {
+    return sanitizedItem;
+  }
+
+  return { ...sanitizedItem, iconPath: iconData };
+}
+
+async function attachIcons(items: LaunchItem[]): Promise<LaunchItem[]> {
+  return Promise.all(items.map((item) => attachIcon(item)));
+}
 
 export function registerIpcHandlers(
   window: BrowserWindow,
@@ -44,11 +410,23 @@ export function registerIpcHandlers(
   }
 
   ipcMain.handle(IPC_CHANNELS.getInitialItems, async () => {
-    return options.searchProvider.getInitialItems(10);
+    const items = await options.searchProvider.getInitialItems(20);
+    return attachIcons(items);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRecommendedItems, async () => {
+    const items = await options.searchProvider.getRecommendedItems(20);
+    return attachIcons(items);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getPluginItems, async () => {
+    const items = await options.searchProvider.getPluginItems(20);
+    return attachIcons(items);
   });
 
   ipcMain.handle(IPC_CHANNELS.search, async (_, query: string) => {
-    return options.searchProvider.searchItems(query ?? "", 20);
+    const items = await options.searchProvider.searchItems(query ?? "", 20);
+    return attachIcons(items);
   });
 
   ipcMain.handle(IPC_CHANNELS.execute, async (_, itemInput: LaunchItem) => {

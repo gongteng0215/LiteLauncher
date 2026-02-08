@@ -27,3 +27,17 @@ export interface ClipItem {
   hash: string;
   createdAt: number;
 }
+
+export interface DebugKeyEvent {
+  source: "main" | "renderer";
+  phase: string;
+  key: string;
+  code?: string;
+  alt?: boolean;
+  control?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  repeat?: boolean;
+  ts: number;
+  note?: string;
+}

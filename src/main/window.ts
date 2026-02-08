@@ -41,8 +41,23 @@ export function showLauncherWindow(window: BrowserWindow): void {
 
   window.setPosition(targetX, targetY);
   window.show();
+  window.moveTop();
   window.focus();
+  window.webContents.focus();
+
+  // Focus can be dropped by OS focus-stealing prevention.
+  // Retry a few times to make the input reliably active.
   window.webContents.send(IPC_CHANNELS.focusInput);
+  setTimeout(() => {
+    if (window.isVisible()) {
+      window.webContents.send(IPC_CHANNELS.focusInput);
+    }
+  }, 40);
+  setTimeout(() => {
+    if (window.isVisible()) {
+      window.webContents.send(IPC_CHANNELS.focusInput);
+    }
+  }, 120);
 }
 
 export function toggleLauncherWindow(window: BrowserWindow): void {

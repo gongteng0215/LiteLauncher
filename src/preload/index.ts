@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
-import { ClipItem, ExecuteResult, LaunchItem } from "../shared/types";
+import {
+  ClipItem,
+  DebugKeyEvent,
+  ExecuteResult,
+  LaunchItem
+} from "../shared/types";
 
 type Cleanup = () => void;
 
@@ -17,8 +22,17 @@ function on(
 }
 
 const api = {
+  isDebugKeysEnabled(): boolean {
+    return process.env.LITELAUNCHER_DEBUG_KEYS === "1";
+  },
   getInitialItems(): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getInitialItems);
+  },
+  getRecommendedItems(): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getRecommendedItems);
+  },
+  getPluginItems(): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getPluginItems);
   },
   search(query: string): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.search, query);
@@ -46,6 +60,11 @@ const api = {
   },
   onOpenPanel(handler: (panel: string) => void): Cleanup {
     return on(IPC_CHANNELS.openPanel, (panel) => handler(String(panel)));
+  },
+  onDebugKey(handler: (event: DebugKeyEvent) => void): Cleanup {
+    return on(IPC_CHANNELS.debugKey, (event) =>
+      handler(event as DebugKeyEvent)
+    );
   }
 };
 

@@ -1,11 +1,12 @@
 {
   "name": "litelauncher",
   "version": "1.0.0",
-  "description": "LiteLauncher MVP",
+  "description": "LiteLauncher 最小可用版本",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc && node scripts/copy-assets.cjs",
-    "start": "npm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron .",
+    "start": "pnpm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron .",
+    "start:debug-keys": "set LITELAUNCHER_DEBUG_KEYS=1&& pnpm start",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -19,5 +20,6 @@
   "devDependencies": {
     "@types/node": "^25.2.2",
     "typescript": "^5.9.3"
-  }
+  },
+  "packageManager": "pnpm@10.28.2"
 }
