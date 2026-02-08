@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiteLauncher</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <input
+          id="search-input"
+          class="search-input"
+          type="text"
+          placeholder="输入应用、文件、命令（如 calc 1+2*3）"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </header>
+      <section class="results">
+        <ul id="result-list" class="result-list"></ul>
+      </section>
+      <footer class="footer">
+        <div id="status-text" class="status-text">就绪</div>
+        <div class="hint-text">Enter 执行 · Esc 清空/隐藏 · ↑↓ 切换</div>
+      </footer>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

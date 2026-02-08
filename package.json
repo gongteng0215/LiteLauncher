@@ -1,0 +1,23 @@
+{
+  "name": "litelauncher",
+  "version": "1.0.0",
+  "description": "LiteLauncher MVP",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.cjs",
+    "start": "npm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "electron": "^40.2.1",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.2",
+    "typescript": "^5.9.3"
+  }
+}
