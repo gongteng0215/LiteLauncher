@@ -2,7 +2,8 @@ import {
   ClipItem,
   DebugKeyEvent,
   ExecuteResult,
-  LaunchItem
+  LaunchItem,
+  SearchDisplayConfig
 } from "../shared/types";
 
 declare global {
@@ -10,8 +11,13 @@ declare global {
     launcher: {
       isDebugKeysEnabled(): boolean;
       getInitialItems(): Promise<LaunchItem[]>;
-      getRecommendedItems(): Promise<LaunchItem[]>;
+      getPinnedItems(): Promise<LaunchItem[]>;
       getPluginItems(): Promise<LaunchItem[]>;
+      getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
+      setSearchDisplayConfig(
+        config: Partial<SearchDisplayConfig>
+      ): Promise<SearchDisplayConfig>;
+      setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
       search(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;
       hide(): Promise<boolean>;
@@ -20,7 +26,7 @@ declare global {
       deleteClipItem(itemId: string): Promise<boolean>;
       clearClipItems(): Promise<number>;
       onFocusInput(handler: () => void): () => void;
-      onOpenPanel(handler: (panel: string) => void): () => void;
+      onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
       onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
     };
   }

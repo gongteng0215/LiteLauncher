@@ -7,7 +7,10 @@
     "build": "tsc && node scripts/copy-assets.cjs",
     "start": "pnpm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron .",
     "start:debug-keys": "set LITELAUNCHER_DEBUG_KEYS=1&& pnpm start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:cashflow": "pnpm run build && node dist/test/cashflow-state-machine.test.js && node dist/test/cashflow-persistence.test.js && node dist/test/cashflow-plugin-contract.test.js && node dist/test/cashflow-performance.test.js",
+    "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
+    "check:encoding": "node scripts/check-encoding.cjs"
   },
   "keywords": [],
   "author": "",

@@ -1,13 +1,19 @@
 import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
-import { ClipItem, ExecuteResult, LaunchItem } from "../shared/types";
+import {
+  ClipItem,
+  ExecuteResult,
+  LaunchItem,
+  SearchDisplayConfig
+} from "../shared/types";
+import { normalizeSearchDisplayConfig } from "../shared/settings";
 import { executeItem } from "./actions";
 import { UsageStore } from "./usage-store";
 
 type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
-  getRecommendedItems: (limit: number) => Promise<LaunchItem[]>;
+  getPinnedItems: (limit: number) => Promise<LaunchItem[]>;
   getPluginItems: (limit: number) => Promise<LaunchItem[]>;
   searchItems: (query: string, limit: number) => Promise<LaunchItem[]>;
 };
@@ -19,17 +25,33 @@ type ClipProvider = {
   clearClipItems: () => Promise<number>;
 };
 
+type SettingsProvider = {
+  getSearchDisplayConfig: () => SearchDisplayConfig;
+  setSearchDisplayConfig: (
+    config: Partial<SearchDisplayConfig>
+  ) => Promise<SearchDisplayConfig>;
+};
+
+type PinProvider = {
+  setItemPinned: (itemId: string, pinned: boolean) => Promise<boolean>;
+};
+
 type IpcOptions = {
   searchProvider: SearchProvider;
   clipProvider: ClipProvider;
+  settingsProvider: SettingsProvider;
+  pinProvider: PinProvider;
   usageStore: UsageStore;
   onItemUsed?: (itemId: string) => Promise<void>;
 };
 
 const HANDLED_CHANNELS = [
   IPC_CHANNELS.getInitialItems,
-  IPC_CHANNELS.getRecommendedItems,
+  IPC_CHANNELS.getPinnedItems,
   IPC_CHANNELS.getPluginItems,
+  IPC_CHANNELS.getSearchDisplayConfig,
+  IPC_CHANNELS.setSearchDisplayConfig,
+  IPC_CHANNELS.setItemPinned,
   IPC_CHANNELS.search,
   IPC_CHANNELS.execute,
   IPC_CHANNELS.hide,
@@ -184,8 +206,17 @@ async function resolveShortcutInfo(
 }
 
 function stripInvalidIconPath(item: LaunchItem): LaunchItem {
-  if (!item.iconPath || item.iconPath.startsWith("data:image/")) {
+  if (!item.iconPath) {
     return item;
+  }
+
+  if (item.iconPath.startsWith("data:image/")) {
+    return item;
+  }
+
+  const normalizedIconPath = normalizePathCandidate(item.iconPath);
+  if (normalizedIconPath) {
+    return { ...item, iconPath: normalizedIconPath };
   }
 
   const { iconPath: _iconPath, ...rest } = item;
@@ -238,6 +269,7 @@ async function buildIconCandidates(item: LaunchItem): Promise<IconCandidate[]> {
   );
 
   const normalizedTarget = normalizePathCandidate(item.target);
+  const isCommandTarget = item.target.trim().toLowerCase().startsWith("command:");
   const isShortcut = normalizedTarget ? isShortcutPath(normalizedTarget) : false;
 
   if (item.type === "application" && normalizedTarget && isShortcut) {
@@ -260,7 +292,9 @@ async function buildIconCandidates(item: LaunchItem): Promise<IconCandidate[]> {
     return candidates;
   }
 
-  pushIconCandidate(candidates, seen, normalizedTarget, "item-target");
+  if (!isCommandTarget) {
+    pushIconCandidate(candidates, seen, normalizedTarget, "item-target");
+  }
   return candidates;
 }
 
@@ -324,6 +358,15 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
       return cached;
     }
 
+    const staticImageData = tryReadImageFileAsDataUrl(iconSource);
+    if (staticImageData) {
+      iconDataCache.set(cacheKey, staticImageData);
+      debugIcon(
+        `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+      );
+      return staticImageData;
+    }
+
     try {
       const icon = await app.getFileIcon(iconSource, { size: "normal" });
       if (icon.isEmpty()) {
@@ -376,22 +419,25 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
 
 async function attachIcon(item: LaunchItem): Promise<LaunchItem> {
   const sanitizedItem = stripInvalidIconPath(item);
-
-  if (!ICON_ELIGIBLE_TYPES.has(sanitizedItem.type)) {
-    return sanitizedItem;
-  }
-
-  if (!sanitizedItem.target) {
-    return sanitizedItem;
-  }
+  const hasPathIcon =
+    typeof sanitizedItem.iconPath === "string" &&
+    !sanitizedItem.iconPath.startsWith("data:image/");
 
   if (sanitizedItem.iconPath && sanitizedItem.iconPath.startsWith("data:image/")) {
     return sanitizedItem;
   }
 
+  if (!ICON_ELIGIBLE_TYPES.has(sanitizedItem.type) && !hasPathIcon) {
+    return sanitizedItem;
+  }
+
+  if (!sanitizedItem.target && !hasPathIcon) {
+    return sanitizedItem;
+  }
+
   const iconData = await resolveIconData(sanitizedItem);
   if (!iconData) {
-    return sanitizedItem;
+    return stripInvalidIconPath(sanitizedItem);
   }
 
   return { ...sanitizedItem, iconPath: iconData };
@@ -410,22 +456,50 @@ export function registerIpcHandlers(
   }
 
   ipcMain.handle(IPC_CHANNELS.getInitialItems, async () => {
-    const items = await options.searchProvider.getInitialItems(20);
+    const config = options.settingsProvider.getSearchDisplayConfig();
+    const items = await options.searchProvider.getInitialItems(config.recentLimit);
     return attachIcons(items);
   });
 
-  ipcMain.handle(IPC_CHANNELS.getRecommendedItems, async () => {
-    const items = await options.searchProvider.getRecommendedItems(20);
+  ipcMain.handle(IPC_CHANNELS.getPinnedItems, async () => {
+    const config = options.settingsProvider.getSearchDisplayConfig();
+    const items = await options.searchProvider.getPinnedItems(config.pinnedLimit);
     return attachIcons(items);
   });
 
   ipcMain.handle(IPC_CHANNELS.getPluginItems, async () => {
-    const items = await options.searchProvider.getPluginItems(20);
+    const config = options.settingsProvider.getSearchDisplayConfig();
+    const items = await options.searchProvider.getPluginItems(config.pluginLimit);
     return attachIcons(items);
   });
 
+  ipcMain.handle(IPC_CHANNELS.getSearchDisplayConfig, () => {
+    return options.settingsProvider.getSearchDisplayConfig();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.setSearchDisplayConfig,
+    async (_, configInput: Partial<SearchDisplayConfig> | null) => {
+      const normalized = normalizeSearchDisplayConfig(configInput);
+      return options.settingsProvider.setSearchDisplayConfig(normalized);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setItemPinned,
+    async (_, itemIdInput: string, pinnedInput: boolean) => {
+      const itemId = String(itemIdInput ?? "").trim();
+      const pinned = Boolean(pinnedInput);
+      return options.pinProvider.setItemPinned(itemId, pinned);
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.search, async (_, query: string) => {
-    const items = await options.searchProvider.searchItems(query ?? "", 20);
+    const config = options.settingsProvider.getSearchDisplayConfig();
+    const items = await options.searchProvider.searchItems(
+      query ?? "",
+      config.searchLimit
+    );
     return attachIcons(items);
   });
 

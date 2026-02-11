@@ -5,7 +5,8 @@ import {
   ClipItem,
   DebugKeyEvent,
   ExecuteResult,
-  LaunchItem
+  LaunchItem,
+  SearchDisplayConfig
 } from "../shared/types";
 
 type Cleanup = () => void;
@@ -28,11 +29,22 @@ const api = {
   getInitialItems(): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getInitialItems);
   },
-  getRecommendedItems(): Promise<LaunchItem[]> {
-    return ipcRenderer.invoke(IPC_CHANNELS.getRecommendedItems);
+  getPinnedItems(): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getPinnedItems);
   },
   getPluginItems(): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getPluginItems);
+  },
+  getSearchDisplayConfig(): Promise<SearchDisplayConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getSearchDisplayConfig);
+  },
+  setSearchDisplayConfig(
+    config: Partial<SearchDisplayConfig>
+  ): Promise<SearchDisplayConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setSearchDisplayConfig, config);
+  },
+  setItemPinned(itemId: string, pinned: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);
   },
   search(query: string): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.search, query);
@@ -58,8 +70,8 @@ const api = {
   onFocusInput(handler: () => void): Cleanup {
     return on(IPC_CHANNELS.focusInput, handler);
   },
-  onOpenPanel(handler: (panel: string) => void): Cleanup {
-    return on(IPC_CHANNELS.openPanel, (panel) => handler(String(panel)));
+  onOpenPanel(handler: (panelPayload: unknown) => void): Cleanup {
+    return on(IPC_CHANNELS.openPanel, (panelPayload) => handler(panelPayload));
   },
   onDebugKey(handler: (event: DebugKeyEvent) => void): Cleanup {
     return on(IPC_CHANNELS.debugKey, (event) =>

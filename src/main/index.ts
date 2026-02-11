@@ -2,11 +2,24 @@ import path from "node:path";
 import { app, BrowserWindow, globalShortcut } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
-import { DebugKeyEvent, LaunchItem } from "../shared/types";
+import {
+  DebugKeyEvent,
+  LaunchItem,
+  SearchDisplayConfig
+} from "../shared/types";
+import {
+  DEFAULT_SEARCH_DISPLAY_CONFIG,
+  normalizeSearchDisplayConfig
+} from "../shared/settings";
 import { buildCatalog } from "./catalog";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
+import {
+  CashflowDatabasePersistence,
+  setCashflowGamePersistence
+} from "./plugins/cashflow-game";
+import { getPluginQueryItems, isPluginCatalogItem } from "./plugins";
 import { getInitialItems, searchItems } from "./search";
 import { SearchWorkerClient } from "./search-worker";
 import { destroyAppTray, setupAppTray } from "./tray";
@@ -20,6 +33,10 @@ import {
 const DEFAULT_SHORTCUT = "Alt+Space";
 const FALLBACK_SHORTCUTS = ["Ctrl+Space", "Alt+Shift+Space", "Ctrl+Alt+Space"];
 const DEBUG_KEYS_ENABLED = process.env.LITELAUNCHER_DEBUG_KEYS === "1";
+const APP_USER_MODEL_ID = "LiteLauncher";
+const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
+const PINNED_ITEMS_KEY = "pinnedItemIds";
+const PINNED_ITEMS_MAX = 200;
 
 let database: LiteDatabase | null = null;
 let usageStore: UsageStore | null = null;
@@ -30,6 +47,10 @@ let activeShortcut: string | null = null;
 let searchWorker: SearchWorkerClient | null = null;
 let clipService: ClipService | null = null;
 let appQuitting = false;
+let searchDisplayConfig: SearchDisplayConfig = {
+  ...DEFAULT_SEARCH_DISPLAY_CONFIG
+};
+let pinnedItemIds: string[] = [];
 
 function buildShortcutCandidates(): string[] {
   const envShortcut = (process.env.LITELAUNCHER_SHORTCUT ?? "").trim();
@@ -237,16 +258,196 @@ async function ensureDataLayer(): Promise<void> {
   }
 }
 
+async function loadSearchDisplayConfig(
+  db: LiteDatabase
+): Promise<SearchDisplayConfig> {
+  const raw = await db.getSetting(SEARCH_DISPLAY_CONFIG_KEY);
+  if (!raw) {
+    return { ...DEFAULT_SEARCH_DISPLAY_CONFIG };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<SearchDisplayConfig>;
+    return normalizeSearchDisplayConfig(parsed);
+  } catch {
+    return { ...DEFAULT_SEARCH_DISPLAY_CONFIG };
+  }
+}
+
+async function saveSearchDisplayConfig(
+  db: LiteDatabase,
+  config: Partial<SearchDisplayConfig>
+): Promise<SearchDisplayConfig> {
+  const next = normalizeSearchDisplayConfig(config, searchDisplayConfig);
+  await db.setSetting(SEARCH_DISPLAY_CONFIG_KEY, JSON.stringify(next));
+  searchDisplayConfig = next;
+  return next;
+}
+
+function normalizePinnedItemIds(
+  input: unknown,
+  catalogIds?: Set<string>
+): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+
+    const id = raw.trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+
+    if (catalogIds && !catalogIds.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    result.push(id);
+    if (result.length >= PINNED_ITEMS_MAX) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+async function loadPinnedItemIds(
+  db: LiteDatabase,
+  catalogIds: Set<string>
+): Promise<string[]> {
+  const raw = await db.getSetting(PINNED_ITEMS_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    return normalizePinnedItemIds(JSON.parse(raw), catalogIds);
+  } catch {
+    return [];
+  }
+}
+
+async function persistPinnedItemIds(db: LiteDatabase): Promise<void> {
+  await db.setSetting(PINNED_ITEMS_KEY, JSON.stringify(pinnedItemIds));
+}
+
+function withPinnedState(items: LaunchItem[]): LaunchItem[] {
+  const pinnedSet = new Set(pinnedItemIds);
+  return items.map((item) => ({ ...item, pinned: pinnedSet.has(item.id) }));
+}
+
+function getPinnedItemsFromCatalog(limit: number): LaunchItem[] {
+  const byId = new Map(catalog.map((item) => [item.id, item]));
+  const picked: LaunchItem[] = [];
+
+  for (const itemId of pinnedItemIds) {
+    const item = byId.get(itemId);
+    if (!item) {
+      continue;
+    }
+
+    picked.push({ ...item, pinned: true });
+    if (picked.length >= limit) {
+      break;
+    }
+  }
+
+  return picked;
+}
+
+function mergeSearchItems(
+  preferred: LaunchItem[],
+  fallback: LaunchItem[],
+  limit: number
+): LaunchItem[] {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const result: LaunchItem[] = [];
+  const seen = new Set<string>();
+
+  const push = (items: LaunchItem[]): void => {
+    for (const item of items) {
+      const id = item.id.trim();
+      if (!id || seen.has(id)) {
+        continue;
+      }
+
+      seen.add(id);
+      result.push(item);
+      if (result.length >= limit) {
+        return;
+      }
+    }
+  };
+
+  push(preferred);
+  if (result.length < limit) {
+    push(fallback);
+  }
+
+  return result.slice(0, limit);
+}
+
+async function setItemPinned(
+  db: LiteDatabase,
+  itemId: string,
+  pinned: boolean
+): Promise<boolean> {
+  const normalizedId = itemId.trim();
+  if (!normalizedId) {
+    return false;
+  }
+
+  const catalogIdSet = new Set(catalog.map((item) => item.id));
+  if (!catalogIdSet.has(normalizedId)) {
+    return false;
+  }
+
+  const exists = pinnedItemIds.includes(normalizedId);
+  if (pinned) {
+    if (!exists) {
+      pinnedItemIds = [normalizedId, ...pinnedItemIds].slice(0, PINNED_ITEMS_MAX);
+    }
+  } else if (exists) {
+    pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
+  }
+
+  pinnedItemIds = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+  await persistPinnedItemIds(db);
+  return pinnedItemIds.includes(normalizedId);
+}
+
 async function bootstrap(): Promise<void> {
   await ensureDataLayer();
 
   const activeUsageStore = usageStore;
   const activeClipService = clipService;
+  const activeDatabase = database;
   if (!activeUsageStore) {
     throw new Error("Usage store was not initialized");
   }
   if (!activeClipService) {
     throw new Error("Clip service was not initialized");
+  }
+  if (!activeDatabase) {
+    throw new Error("Database was not initialized");
+  }
+
+  searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
+  setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
+  const catalogIdSet = new Set(catalog.map((item) => item.id));
+  pinnedItemIds = await loadPinnedItemIds(activeDatabase, catalogIdSet);
+  if (pinnedItemIds.length > 0) {
+    await persistPinnedItemIds(activeDatabase);
   }
 
   const launcherWindow = createLauncherWindow();
@@ -275,69 +476,46 @@ async function bootstrap(): Promise<void> {
         const usage = activeUsageStore.toObject();
         if (searchWorker) {
           try {
-            return await searchWorker.getInitialItems(catalog, usage, limit);
+            const items = await searchWorker.getInitialItems(catalog, usage, limit);
+            return withPinnedState(items);
           } catch (error) {
             console.warn("Search worker initial fallback", error);
           }
         }
 
-        return getInitialItems(catalog, activeUsageStore, limit);
+        return withPinnedState(getInitialItems(catalog, activeUsageStore, limit));
       },
-      getRecommendedItems: async (limit) => {
-        const recentItems = getInitialItems(catalog, activeUsageStore, 20);
-        const recentIds = new Set(recentItems.map((item) => item.id));
-
-        const ranked = getInitialItems(
-          catalog,
-          activeUsageStore,
-          Math.max(limit * 6, 120)
-        );
-        const picked: LaunchItem[] = [];
-        const pickedIds = new Set<string>();
-
-        for (const item of ranked) {
-          if (item.type === "command" || recentIds.has(item.id)) {
-            continue;
-          }
-          picked.push(item);
-          pickedIds.add(item.id);
-          if (picked.length >= limit) {
-            return picked;
-          }
-        }
-
-        const fallbackCandidates = catalog
-          .filter(
-            (item) =>
-              item.type !== "command" &&
-              !recentIds.has(item.id) &&
-              !pickedIds.has(item.id)
-          )
-          .sort((a, b) => a.title.localeCompare(b.title));
-
-        for (const item of fallbackCandidates) {
-          picked.push(item);
-          if (picked.length >= limit) {
-            break;
-          }
-        }
-
-        return picked;
+      getPinnedItems: async (limit) => {
+        return getPinnedItemsFromCatalog(limit);
       },
       getPluginItems: async (limit) => {
-        return catalog.filter((item) => item.type === "command").slice(0, limit);
+        return withPinnedState(
+          catalog.filter((item) => item.type === "command" && isPluginCatalogItem(item)).slice(0, limit)
+        );
       },
       searchItems: async (query, limit) => {
+        const pluginItems = getPluginQueryItems(query);
         const usage = activeUsageStore.toObject();
+        let baseItems: LaunchItem[] | null = null;
         if (searchWorker) {
           try {
-            return await searchWorker.searchItems(query, catalog, usage, limit);
+            baseItems = await searchWorker.searchItems(
+              query,
+              catalog,
+              usage,
+              limit
+            );
           } catch (error) {
             console.warn("Search worker query fallback", error);
           }
         }
 
-        return searchItems(query, catalog, activeUsageStore, limit);
+        if (!baseItems) {
+          baseItems = searchItems(query, catalog, activeUsageStore, limit);
+        }
+
+        const mergedItems = mergeSearchItems(pluginItems, baseItems, limit);
+        return withPinnedState(mergedItems);
       }
     },
     clipProvider: {
@@ -345,6 +523,15 @@ async function bootstrap(): Promise<void> {
       copyClipItem: (itemId) => activeClipService.copyClipItem(itemId),
       deleteClipItem: (itemId) => activeClipService.deleteClipItem(itemId),
       clearClipItems: () => activeClipService.clearClipItems()
+    },
+    settingsProvider: {
+      getSearchDisplayConfig: () => ({ ...searchDisplayConfig }),
+      setSearchDisplayConfig: (config) =>
+        saveSearchDisplayConfig(activeDatabase, config)
+    },
+    pinProvider: {
+      setItemPinned: (itemId, pinned) =>
+        setItemPinned(activeDatabase, itemId, pinned)
     },
     onItemUsed: async (itemId) => {
       await database?.recordUsage(itemId);
@@ -371,6 +558,10 @@ if (!singleInstanceLock) {
   app.quit();
 }
 
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
+}
+
 app.whenReady().then(bootstrap).catch((error) => {
   console.error("Failed to bootstrap app", error);
   app.quit();
@@ -384,6 +575,10 @@ app.on("second-instance", () => {
   const windows = BrowserWindow.getAllWindows();
   const first = windows[0];
   if (first) {
+    void setupAppTray(first).catch((error) => {
+      console.warn("Failed to refresh tray icon on second-instance", error);
+    });
+
     if (!app.isPackaged) {
       const shouldShow = !first.isVisible();
       first.webContents.reloadIgnoringCache();
@@ -423,6 +618,7 @@ app.on("will-quit", () => {
     void database.close();
     database = null;
   }
+  setCashflowGamePersistence(null);
   usageStore = null;
   catalog = [];
   catalogInitialized = false;

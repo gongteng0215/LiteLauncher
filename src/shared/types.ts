@@ -8,6 +8,7 @@ export interface LaunchItem {
   target: string;
   keywords: string[];
   iconPath?: string;
+  pinned?: boolean;
 }
 
 export interface UsageRecord {
@@ -19,6 +20,13 @@ export interface ExecuteResult {
   ok: boolean;
   message?: string;
   keepOpen?: boolean;
+  data?: Record<string, unknown>;
+}
+
+export interface PasswordGeneratorOptions {
+  length: number;
+  includeSymbols: boolean;
+  count: number;
 }
 
 export interface ClipItem {
@@ -40,4 +48,11 @@ export interface DebugKeyEvent {
   repeat?: boolean;
   ts: number;
   note?: string;
+}
+
+export interface SearchDisplayConfig {
+  recentLimit: number;
+  pinnedLimit: number;
+  pluginLimit: number;
+  searchLimit: number;
 }

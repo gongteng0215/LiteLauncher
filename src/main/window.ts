@@ -2,11 +2,13 @@ import { BrowserWindow, screen } from "electron";
 import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
+import { resolveBundledAppIconPath } from "./app-icon";
 
 const DEFAULT_WINDOW_WIDTH = 760;
 const DEFAULT_WINDOW_HEIGHT = 460;
 
 export function createLauncherWindow(): BrowserWindow {
+  const iconPath = resolveBundledAppIconPath();
   const window = new BrowserWindow({
     width: DEFAULT_WINDOW_WIDTH,
     height: DEFAULT_WINDOW_HEIGHT,
@@ -18,6 +20,7 @@ export function createLauncherWindow(): BrowserWindow {
     alwaysOnTop: true,
     skipTaskbar: true,
     backgroundColor: "#10161f",
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

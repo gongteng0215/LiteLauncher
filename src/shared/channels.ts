@@ -1,7 +1,10 @@
 export const IPC_CHANNELS = {
   getInitialItems: "launcher:get-initial-items",
-  getRecommendedItems: "launcher:get-recommended-items",
+  getPinnedItems: "launcher:get-pinned-items",
   getPluginItems: "launcher:get-plugin-items",
+  getSearchDisplayConfig: "launcher:get-search-display-config",
+  setSearchDisplayConfig: "launcher:set-search-display-config",
+  setItemPinned: "launcher:set-item-pinned",
   search: "launcher:search",
   execute: "launcher:execute",
   hide: "launcher:hide",

@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, shell } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import { ExecuteResult, LaunchItem } from "../shared/types";
+import { executePluginCommand } from "./plugins";
 
 const SAFE_CALC_EXPRESSION = /^[\d+\-*/().%\s]+$/;
 
@@ -47,7 +48,11 @@ function parseCommandTarget(target: string): { command: string; arg?: string } {
   };
 }
 
-function handleCommand(target: string, window: BrowserWindow): ExecuteResult {
+async function handleCommand(
+  target: string,
+  window: BrowserWindow,
+  item: LaunchItem
+): Promise<ExecuteResult> {
   const { command, arg } = parseCommandTarget(target);
 
   if (command === "calc") {
@@ -69,6 +74,10 @@ function handleCommand(target: string, window: BrowserWindow): ExecuteResult {
     return { ok: true };
   }
 
+  if (command === "plugin") {
+    return executePluginCommand(arg, window, item);
+  }
+
   return { ok: false, message: `Unknown command: ${command}` };
 }
 
@@ -86,7 +95,7 @@ export async function executeItem(
   }
 
   if (item.type === "command") {
-    return handleCommand(item.target, window);
+    return handleCommand(item.target, window, item);
   }
 
   return { ok: false, message: `Unsupported item type: ${item.type}` };

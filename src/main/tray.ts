@@ -1,5 +1,9 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
+import { app, BrowserWindow, Menu, NativeImage, Tray, nativeImage } from "electron";
 
+import {
+  loadBundledTrayIcon,
+  resolveBundledAppIconPath
+} from "./app-icon";
 import { showLauncherWindow, toggleLauncherWindow } from "./window";
 
 const FALLBACK_ICON_SVG = [
@@ -15,23 +19,37 @@ const FALLBACK_ICON_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComp
 
 let appTray: Tray | null = null;
 
-async function resolveTrayIcon() {
-  try {
-    const icon = await app.getFileIcon(process.execPath, { size: "small" });
-    if (!icon.isEmpty()) {
-      return icon;
+function buildFallbackTrayIcon(): NativeImage {
+  return nativeImage.createFromDataURL(FALLBACK_ICON_DATA_URL);
+}
+
+function resolveTrayIcon(): NativeImage {
+  const bundledIconPath = resolveBundledAppIconPath();
+  const bundledTrayIcon = loadBundledTrayIcon();
+  if (bundledTrayIcon && !bundledTrayIcon.isEmpty()) {
+    if (bundledIconPath) {
+      console.info(`[tray] using bundled icon: ${bundledIconPath}`);
+    } else {
+      console.info("[tray] using bundled icon");
     }
-  } catch {
-    // Ignore and fallback below.
+    return bundledTrayIcon;
   }
 
-  return nativeImage.createFromDataURL(FALLBACK_ICON_DATA_URL);
+  if (bundledIconPath) {
+    console.warn(
+      `[tray] failed to decode bundled icon, using generated fallback icon: ${bundledIconPath}`
+    );
+    return buildFallbackTrayIcon();
+  }
+
+  console.warn("[tray] bundled icon not found, using generated fallback icon");
+  return buildFallbackTrayIcon();
 }
 
 function buildTrayMenu(window: BrowserWindow): Menu {
   return Menu.buildFromTemplate([
     {
-      label: "显示主页面",
+      label: "\u663e\u793a\u4e3b\u754c\u9762",
       click: () => {
         if (!window.isDestroyed()) {
           showLauncherWindow(window);
@@ -40,7 +58,7 @@ function buildTrayMenu(window: BrowserWindow): Menu {
     },
     { type: "separator" },
     {
-      label: "退出 LiteLauncher",
+      label: "\u9000\u51fa LiteLauncher",
       click: () => {
         app.quit();
       }
@@ -49,11 +67,16 @@ function buildTrayMenu(window: BrowserWindow): Menu {
 }
 
 export async function setupAppTray(window: BrowserWindow): Promise<void> {
+  const icon = resolveTrayIcon();
   const menu = buildTrayMenu(window);
 
   if (!appTray) {
-    const icon = await resolveTrayIcon();
-    appTray = new Tray(icon);
+    try {
+      appTray = new Tray(icon);
+    } catch (error) {
+      console.warn("Failed to create tray with preferred icon, fallback to built-in", error);
+      appTray = new Tray(buildFallbackTrayIcon());
+    }
     appTray.setToolTip("LiteLauncher");
 
     appTray.on("click", () => {
@@ -71,6 +94,12 @@ export async function setupAppTray(window: BrowserWindow): Promise<void> {
     });
   }
 
+  try {
+    appTray.setImage(icon);
+  } catch (error) {
+    console.warn("Failed to update tray icon, fallback to built-in", error);
+    appTray.setImage(buildFallbackTrayIcon());
+  }
   appTray.setContextMenu(menu);
 }
 

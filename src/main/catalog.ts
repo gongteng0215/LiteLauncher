@@ -1,7 +1,8 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 
 import { LaunchItem } from "../shared/types";
+import { getPluginCatalogItems } from "./plugins";
 
 const START_MENU_RELATIVE_PATH = path.join(
   "Microsoft",
@@ -9,6 +10,36 @@ const START_MENU_RELATIVE_PATH = path.join(
   "Start Menu",
   "Programs"
 );
+
+const PINYIN_BOUNDARIES = [
+  "\u963f",
+  "\u82ad",
+  "\u64e6",
+  "\u642d",
+  "\u86fe",
+  "\u53d1",
+  "\u5676",
+  "\u54c8",
+  "\u51fb",
+  "\u5580",
+  "\u5783",
+  "\u5988",
+  "\u62ff",
+  "\u54e6",
+  "\u556a",
+  "\u671f",
+  "\u7136",
+  "\u6492",
+  "\u584c",
+  "\u6316",
+  "\u6614",
+  "\u538b",
+  "\u531d"
+] as const;
+
+const PINYIN_INITIALS = "abcdefghijklmnopqrstuvwxyz"
+  .split("")
+  .filter((letter) => !"iuv".includes(letter));
 
 function getStartMenuDirs(): string[] {
   const dirs: string[] = [];
@@ -47,47 +78,6 @@ function walkShortcutFiles(dirPath: string, result: string[]): void {
     }
   }
 }
-
-function toKeywords(value: string): string[] {
-  const baseTokens = value
-    .toLowerCase()
-    .split(/[\s._\-\\/]+/)
-    .filter(Boolean);
-
-  const initials = toPinyinInitialTokens(value);
-  const merged = new Set<string>([...baseTokens, ...initials]);
-  return Array.from(merged);
-}
-
-const PINYIN_BOUNDARIES = [
-  "阿",
-  "芭",
-  "擦",
-  "搭",
-  "蛾",
-  "发",
-  "噶",
-  "哈",
-  "击",
-  "喀",
-  "垃",
-  "妈",
-  "拿",
-  "哦",
-  "啪",
-  "期",
-  "然",
-  "撒",
-  "塌",
-  "挖",
-  "昔",
-  "压",
-  "匝"
-] as const;
-
-const PINYIN_INITIALS = "abcdefghijklmnopqrstuvwxyz"
-  .split("")
-  .filter((letter) => !"iuv".includes(letter));
 
 function isCjkChar(char: string): boolean {
   return /[\u3400-\u9fff]/.test(char);
@@ -149,6 +139,17 @@ function toPinyinInitialTokens(value: string): string[] {
   return Array.from(tokens).filter(Boolean);
 }
 
+function toKeywords(value: string): string[] {
+  const baseTokens = value
+    .toLowerCase()
+    .split(/[\s._\-\\/]+/)
+    .filter(Boolean);
+
+  const initials = toPinyinInitialTokens(value);
+  const merged = new Set<string>([...baseTokens, ...initials]);
+  return Array.from(merged);
+}
+
 function commandItem(
   id: string,
   title: string,
@@ -170,19 +171,19 @@ function createBuiltinItems(): LaunchItem[] {
     commandItem(
       "command:clip",
       "clip",
-      "打开剪贴板历史",
+      "\u6253\u5f00\u526a\u8d34\u677f\u5386\u53f2",
       "command:clip"
     ),
     commandItem(
       "command:settings",
       "settings",
-      "打开设置页面",
+      "\u6253\u5f00\u8bbe\u7f6e\u9875\u9762",
       "command:settings"
     ),
     commandItem(
       "command:exit",
       "exit",
-      "退出 LiteLauncher",
+      "\u9000\u51fa LiteLauncher",
       "command:exit"
     )
   ];
@@ -210,5 +211,9 @@ function createAppItemsFromStartMenu(): LaunchItem[] {
 }
 
 export function buildCatalog(): LaunchItem[] {
-  return [...createBuiltinItems(), ...createAppItemsFromStartMenu()];
+  return [
+    ...createBuiltinItems(),
+    ...getPluginCatalogItems(),
+    ...createAppItemsFromStartMenu()
+  ];
 }

@@ -10,6 +10,15 @@ function copyFile(src, dest) {
   fs.copyFileSync(src, dest);
 }
 
+function copyDirIfExists(srcDir, destDir) {
+  if (!fs.existsSync(srcDir)) {
+    return;
+  }
+
+  ensureDir(destDir);
+  fs.cpSync(srcDir, destDir, { recursive: true, force: true });
+}
+
 function main() {
   const filesToCopy = [
     ["src/renderer/index.html", "dist/renderer/index.html"],
@@ -19,6 +28,8 @@ function main() {
   for (const [src, dest] of filesToCopy) {
     copyFile(src, dest);
   }
+
+  copyDirIfExists("src/assets", "dist/assets");
 }
 
 main();
