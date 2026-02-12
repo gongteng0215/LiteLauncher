@@ -464,6 +464,16 @@ async function bootstrap(): Promise<void> {
     }
     launcherWindow.hide();
   });
+  launcherWindow.on("hide", () => {
+    if (
+      appQuitting ||
+      launcherWindow.isDestroyed() ||
+      launcherWindow.webContents.isDestroyed()
+    ) {
+      return;
+    }
+    launcherWindow.webContents.send(IPC_CHANNELS.clearInput);
+  });
 
   setupDebugKeyTracing(launcherWindow);
   setupRendererDiagnostics(launcherWindow);

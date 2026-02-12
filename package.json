@@ -24,5 +24,11 @@
     "@types/node": "^25.2.2",
     "typescript": "^5.9.3"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "sqlite3"
+    ]
+  },
   "packageManager": "pnpm@10.28.2"
 }

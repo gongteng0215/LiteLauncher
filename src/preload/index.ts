@@ -70,6 +70,9 @@ const api = {
   onFocusInput(handler: () => void): Cleanup {
     return on(IPC_CHANNELS.focusInput, handler);
   },
+  onClearInput(handler: () => void): Cleanup {
+    return on(IPC_CHANNELS.clearInput, handler);
+  },
   onOpenPanel(handler: (panelPayload: unknown) => void): Cleanup {
     return on(IPC_CHANNELS.openPanel, (panelPayload) => handler(panelPayload));
   },

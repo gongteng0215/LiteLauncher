@@ -26,6 +26,7 @@ declare global {
       deleteClipItem(itemId: string): Promise<boolean>;
       clearClipItems(): Promise<number>;
       onFocusInput(handler: () => void): () => void;
+      onClearInput(handler: () => void): () => void;
       onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
       onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
     };

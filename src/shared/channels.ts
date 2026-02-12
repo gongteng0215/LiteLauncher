@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   deleteClipItem: "launcher:delete-clip-item",
   clearClipItems: "launcher:clear-clip-items",
   focusInput: "launcher:focus-input",
+  clearInput: "launcher:clear-input",
   openPanel: "launcher:open-panel",
   debugKey: "launcher:debug-key"
 } as const;
