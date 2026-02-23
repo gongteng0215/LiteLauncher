@@ -41,9 +41,72 @@ body {
   color: rgba(237, 245, 255, 0.62);
 }
 
+.mode-cashflow .header {
+  padding: 10px 14px 8px;
+}
+
+.mode-cashflow .search-input {
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: rgba(233, 242, 255, 0.82);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mode-cashflow .results {
+  padding: 8px 10px;
+}
+
+.mode-cashflow .footer {
+  padding: 6px 10px;
+}
+
+.mode-cashflow .settings-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 .results {
   overflow: auto;
   padding: 6px 8px;
+}
+
+.results,
+.cashflow-log-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125, 211, 252, 0.58) rgba(255, 255, 255, 0.06);
+}
+
+.results::-webkit-scrollbar,
+.cashflow-log-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.results::-webkit-scrollbar-track,
+.cashflow-log-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+.results::-webkit-scrollbar-thumb,
+.cashflow-log-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(141, 224, 255, 0.9),
+    rgba(103, 200, 248, 0.78)
+  );
+  border: 2px solid rgba(12, 27, 42, 0.65);
+}
+
+.results::-webkit-scrollbar-thumb:hover,
+.cashflow-log-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(171, 235, 255, 0.95),
+    rgba(125, 211, 252, 0.86)
+  );
 }
 
 .result-list {
@@ -332,7 +395,18 @@ body {
 
 .cashflow-panel {
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  position: relative;
+}
+
+.cashflow-panel.settings-panel {
+  padding: 14px;
+  border-radius: 12px;
+  border-color: rgba(125, 211, 252, 0.2);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(56, 189, 248, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+  box-shadow: 0 18px 45px rgba(2, 8, 23, 0.28);
 }
 
 .cashflow-hud {
@@ -340,10 +414,11 @@ body {
   border-radius: 10px;
   padding: 10px;
   background:
-    radial-gradient(circle at 88% 8%, rgba(56, 189, 248, 0.22), transparent 38%),
-    linear-gradient(160deg, rgba(8, 35, 58, 0.78), rgba(7, 22, 39, 0.82));
+    radial-gradient(circle at 88% 8%, rgba(56, 189, 248, 0.24), transparent 38%),
+    linear-gradient(160deg, rgba(8, 35, 58, 0.86), rgba(7, 22, 39, 0.86));
   display: grid;
   gap: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .cashflow-hud-top {
@@ -354,7 +429,7 @@ body {
 }
 
 .cashflow-hud-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: #eaf7ff;
@@ -404,12 +479,12 @@ body {
 }
 
 .cashflow-progress-label {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(233, 242, 255, 0.88);
 }
 
 .cashflow-progress-track {
-  height: 9px;
+  height: 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;
@@ -424,20 +499,30 @@ body {
 }
 
 .cashflow-progress-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(233, 242, 255, 0.75);
 }
 
 .cashflow-board {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
   gap: 10px;
+  align-content: start;
 }
 
 .cashflow-column {
   display: grid;
   gap: 10px;
   align-content: start;
+  min-width: 0;
+}
+
+.cashflow-column-side {
+  align-content: start;
+}
+
+.cashflow-block-logs {
+  grid-column: 1 / -1;
 }
 
 .cashflow-stats {
@@ -448,9 +533,9 @@ body {
 
 .cashflow-stat {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .cashflow-stat-emphasis {
@@ -459,13 +544,13 @@ body {
 }
 
 .cashflow-stat-label {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(233, 242, 255, 0.7);
 }
 
 .cashflow-stat-value {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   color: #ecf5ff;
   font-weight: 600;
 }
@@ -481,27 +566,28 @@ body {
 
 .cashflow-block {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 9px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(16, 30, 47, 0.78);
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .cashflow-block-title {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: #d4ecff;
 }
 
 .cashflow-opportunity-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #edf6ff;
 }
 
 .cashflow-opportunity-desc {
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.45;
   color: rgba(233, 242, 255, 0.78);
 }
 
@@ -512,11 +598,12 @@ body {
 
 .cashflow-opportunity-card {
   border: 1px solid rgba(125, 211, 252, 0.34);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: 10px;
+  padding: 10px;
   background: rgba(9, 31, 51, 0.45);
   display: grid;
   gap: 8px;
+  box-shadow: 0 10px 25px rgba(2, 8, 23, 0.2);
 }
 
 .cashflow-opportunity-tags {
@@ -599,7 +686,7 @@ body {
 
 .cashflow-ai-card {
   border: 1px solid rgba(125, 211, 252, 0.28);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 8px;
   background: rgba(56, 189, 248, 0.08);
   display: grid;
@@ -677,7 +764,7 @@ body {
 
 .cashflow-report-item {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.04);
   display: grid;
@@ -741,8 +828,8 @@ body {
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 4px;
-  max-height: 150px;
+  gap: 6px;
+  max-height: 170px;
   overflow: auto;
 }
 
@@ -775,10 +862,12 @@ body {
 .cashflow-actions {
   justify-content: flex-start;
   flex-wrap: wrap;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .cashflow-action-main {
-  min-width: 136px;
+  min-width: 148px;
 }
 
 .cashflow-actions .settings-btn:disabled {
@@ -788,15 +877,22 @@ body {
 
 .settings-btn {
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 12px;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease, border-color 120ms ease;
+}
+
+.settings-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
 }
 
 .settings-btn-primary {
   color: #062033;
-  background: #7dd3fc;
+  background: linear-gradient(180deg, #8de0ff, #67c8f8);
   border-color: rgba(125, 211, 252, 0.65);
 }
 
@@ -806,9 +902,64 @@ body {
   border-color: rgba(255, 255, 255, 0.24);
 }
 
-@media (max-width: 980px) {
+.settings-btn-secondary:hover {
+  border-color: rgba(125, 211, 252, 0.5);
+}
+
+@media (max-width: 1280px) {
+  .cashflow-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .cashflow-panel {
+    gap: 10px;
+  }
+
+  .cashflow-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .cashflow-stat {
+    padding: 8px;
+  }
+
+  .cashflow-board {
+    grid-template-columns: minmax(420px, 1.12fr) minmax(320px, 0.88fr);
+    gap: 10px;
+  }
+
+  .cashflow-column {
+    gap: 10px;
+  }
+
+  .cashflow-block-logs {
+    grid-column: 1 / -1;
+  }
+
+  .cashflow-opportunity-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .cashflow-opportunity-actions .settings-btn {
+    width: 100%;
+  }
+
+  .cashflow-log-list {
+    max-height: 210px;
+  }
+}
+
+@media (max-width: 920px) {
   .cashflow-board {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cashflow-column {
+    gap: 8px;
   }
 
   .cashflow-stats {
@@ -830,6 +981,10 @@ body {
 
   .cashflow-opportunity-actions {
     flex-direction: column;
+  }
+
+  .cashflow-block-logs {
+    grid-column: auto;
   }
 }
 

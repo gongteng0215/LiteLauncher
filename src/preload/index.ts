@@ -6,6 +6,7 @@ import {
   DebugKeyEvent,
   ExecuteResult,
   LaunchItem,
+  LaunchAtLoginStatus,
   SearchDisplayConfig
 } from "../shared/types";
 
@@ -43,6 +44,12 @@ const api = {
   ): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.setSearchDisplayConfig, config);
   },
+  getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getLaunchAtLoginStatus);
+  },
+  setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setLaunchAtLoginEnabled, enabled);
+  },
   setItemPinned(itemId: string, pinned: boolean): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);
   },
@@ -51,6 +58,9 @@ const api = {
   },
   execute(item: LaunchItem): Promise<ExecuteResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.execute, item);
+  },
+  setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setWindowSizePreset, preset);
   },
   hide(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.hide);

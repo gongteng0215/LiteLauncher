@@ -5,6 +5,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import {
   DebugKeyEvent,
   LaunchItem,
+  LaunchAtLoginStatus,
   SearchDisplayConfig
 } from "../shared/types";
 import {
@@ -25,6 +26,7 @@ import { SearchWorkerClient } from "./search-worker";
 import { destroyAppTray, setupAppTray } from "./tray";
 import { UsageStore } from "./usage-store";
 import {
+  applyLauncherWindowSizePreset,
   createLauncherWindow,
   showLauncherWindow,
   toggleLauncherWindow
@@ -51,6 +53,79 @@ let searchDisplayConfig: SearchDisplayConfig = {
   ...DEFAULT_SEARCH_DISPLAY_CONFIG
 };
 let pinnedItemIds: string[] = [];
+
+function resolveLoginItemPathAndArgs(): { path: string; args: string[] } {
+  if (app.isPackaged) {
+    return {
+      path: process.execPath,
+      args: []
+    };
+  }
+
+  return {
+    path: process.execPath,
+    args: [app.getAppPath()]
+  };
+}
+
+function getLaunchAtLoginStatus(): LaunchAtLoginStatus {
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    return {
+      enabled: false,
+      supported: false,
+      reason: "当前平台不支持开机启动"
+    };
+  }
+
+  try {
+    const { path, args } = resolveLoginItemPathAndArgs();
+    const settings = app.getLoginItemSettings({ path, args });
+    const enabled =
+      typeof settings.executableWillLaunchAtLogin === "boolean"
+        ? settings.executableWillLaunchAtLogin
+        : Boolean(settings.openAtLogin);
+
+    return {
+      enabled,
+      supported: true
+    };
+  } catch (error) {
+    return {
+      enabled: false,
+      supported: false,
+      reason: error instanceof Error ? error.message : "读取开机启动状态失败"
+    };
+  }
+}
+
+async function setLaunchAtLoginEnabled(
+  enabled: boolean
+): Promise<LaunchAtLoginStatus> {
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    return {
+      enabled: false,
+      supported: false,
+      reason: "当前平台不支持开机启动"
+    };
+  }
+
+  try {
+    const { path, args } = resolveLoginItemPathAndArgs();
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: false,
+      path,
+      args
+    });
+    return getLaunchAtLoginStatus();
+  } catch (error) {
+    return {
+      enabled: false,
+      supported: false,
+      reason: error instanceof Error ? error.message : "设置开机启动失败"
+    };
+  }
+}
 
 function buildShortcutCandidates(): string[] {
   const envShortcut = (process.env.LITELAUNCHER_SHORTCUT ?? "").trim();
@@ -456,12 +531,14 @@ async function bootstrap(): Promise<void> {
       return;
     }
     event.preventDefault();
+    applyLauncherWindowSizePreset(launcherWindow, "compact");
     launcherWindow.hide();
   });
   launcherWindow.on("blur", () => {
     if (appQuitting || launcherWindow.isDestroyed() || !launcherWindow.isVisible()) {
       return;
     }
+    applyLauncherWindowSizePreset(launcherWindow, "compact");
     launcherWindow.hide();
   });
   launcherWindow.on("hide", () => {
@@ -537,7 +614,10 @@ async function bootstrap(): Promise<void> {
     settingsProvider: {
       getSearchDisplayConfig: () => ({ ...searchDisplayConfig }),
       setSearchDisplayConfig: (config) =>
-        saveSearchDisplayConfig(activeDatabase, config)
+        saveSearchDisplayConfig(activeDatabase, config),
+      getLaunchAtLoginStatus: () => getLaunchAtLoginStatus(),
+      setLaunchAtLoginEnabled: (enabled) =>
+        setLaunchAtLoginEnabled(enabled)
     },
     pinProvider: {
       setItemPinned: (itemId, pinned) =>

@@ -5,11 +5,13 @@ import {
   ClipItem,
   ExecuteResult,
   LaunchItem,
+  LaunchAtLoginStatus,
   SearchDisplayConfig
 } from "../shared/types";
 import { normalizeSearchDisplayConfig } from "../shared/settings";
 import { executeItem } from "./actions";
 import { UsageStore } from "./usage-store";
+import { applyLauncherWindowSizePreset } from "./window";
 
 type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
@@ -30,6 +32,10 @@ type SettingsProvider = {
   setSearchDisplayConfig: (
     config: Partial<SearchDisplayConfig>
   ) => Promise<SearchDisplayConfig>;
+  getLaunchAtLoginStatus: () => LaunchAtLoginStatus;
+  setLaunchAtLoginEnabled: (
+    enabled: boolean
+  ) => Promise<LaunchAtLoginStatus>;
 };
 
 type PinProvider = {
@@ -51,9 +57,12 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getPluginItems,
   IPC_CHANNELS.getSearchDisplayConfig,
   IPC_CHANNELS.setSearchDisplayConfig,
+  IPC_CHANNELS.getLaunchAtLoginStatus,
+  IPC_CHANNELS.setLaunchAtLoginEnabled,
   IPC_CHANNELS.setItemPinned,
   IPC_CHANNELS.search,
   IPC_CHANNELS.execute,
+  IPC_CHANNELS.setWindowSizePreset,
   IPC_CHANNELS.hide,
   IPC_CHANNELS.getClipItems,
   IPC_CHANNELS.copyClipItem,
@@ -477,11 +486,24 @@ export function registerIpcHandlers(
     return options.settingsProvider.getSearchDisplayConfig();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getLaunchAtLoginStatus, () => {
+    return options.settingsProvider.getLaunchAtLoginStatus();
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.setSearchDisplayConfig,
     async (_, configInput: Partial<SearchDisplayConfig> | null) => {
       const normalized = normalizeSearchDisplayConfig(configInput);
       return options.settingsProvider.setSearchDisplayConfig(normalized);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setLaunchAtLoginEnabled,
+    async (_, enabledInput: unknown) => {
+      return options.settingsProvider.setLaunchAtLoginEnabled(
+        Boolean(enabledInput)
+      );
     }
   );
 
@@ -523,7 +545,19 @@ export function registerIpcHandlers(
     return result;
   });
 
+  ipcMain.handle(IPC_CHANNELS.setWindowSizePreset, (_, presetInput: unknown) => {
+    const preset =
+      typeof presetInput === "string" ? presetInput.trim().toLowerCase() : "";
+    if (preset !== "compact" && preset !== "cashflow") {
+      return false;
+    }
+
+    applyLauncherWindowSizePreset(window, preset);
+    return true;
+  });
+
   ipcMain.handle(IPC_CHANNELS.hide, () => {
+    applyLauncherWindowSizePreset(window, "compact");
     window.hide();
     return true;
   });

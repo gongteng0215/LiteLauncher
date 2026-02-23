@@ -56,3 +56,9 @@ export interface SearchDisplayConfig {
   pluginLimit: number;
   searchLimit: number;
 }
+
+export interface LaunchAtLoginStatus {
+  enabled: boolean;
+  supported: boolean;
+  reason?: string;
+}

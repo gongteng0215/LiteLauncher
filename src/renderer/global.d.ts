@@ -3,6 +3,7 @@ import {
   DebugKeyEvent,
   ExecuteResult,
   LaunchItem,
+  LaunchAtLoginStatus,
   SearchDisplayConfig
 } from "../shared/types";
 
@@ -17,9 +18,12 @@ declare global {
       setSearchDisplayConfig(
         config: Partial<SearchDisplayConfig>
       ): Promise<SearchDisplayConfig>;
+      getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
+      setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
       setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
       search(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;
+      setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
       hide(): Promise<boolean>;
       getClipItems(query: string): Promise<ClipItem[]>;
       copyClipItem(itemId: string): Promise<boolean>;

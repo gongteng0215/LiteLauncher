@@ -139,6 +139,29 @@ function toPinyinInitialTokens(value: string): string[] {
   return Array.from(tokens).filter(Boolean);
 }
 
+function toAcronymTokens(baseTokens: string[]): string[] {
+  const words = baseTokens.filter((token) => /^[a-z0-9]+$/.test(token));
+  if (words.length < 2) {
+    return [];
+  }
+
+  let acronym = "";
+  for (const word of words) {
+    acronym += word[0] ?? "";
+  }
+
+  if (acronym.length < 2) {
+    return [];
+  }
+
+  const tokens = new Set<string>();
+  for (let length = 2; length <= acronym.length; length += 1) {
+    tokens.add(acronym.slice(0, length));
+  }
+
+  return Array.from(tokens);
+}
+
 function toKeywords(value: string): string[] {
   const baseTokens = value
     .toLowerCase()
@@ -146,7 +169,8 @@ function toKeywords(value: string): string[] {
     .filter(Boolean);
 
   const initials = toPinyinInitialTokens(value);
-  const merged = new Set<string>([...baseTokens, ...initials]);
+  const acronyms = toAcronymTokens(baseTokens);
+  const merged = new Set<string>([...baseTokens, ...initials, ...acronyms]);
   return Array.from(merged);
 }
 

@@ -171,6 +171,12 @@ interface SearchDisplayConfig {
   searchLimit: number;
 }
 
+interface LaunchAtLoginStatus {
+  enabled: boolean;
+  supported: boolean;
+  reason?: string;
+}
+
 interface DebugKeyEvent {
   source: "main" | "renderer";
   phase: string;
@@ -194,9 +200,12 @@ interface LauncherApi {
   setSearchDisplayConfig(
     config: Partial<SearchDisplayConfig>
   ): Promise<SearchDisplayConfig>;
+  getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
+  setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
   setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
   search(query: string): Promise<LaunchItem[]>;
   execute(item: LaunchItem): Promise<ExecuteResult>;
+  setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
   hide(): Promise<boolean>;
   getClipItems(query: string): Promise<ClipItem[]>;
   copyClipItem(itemId: string): Promise<boolean>;
@@ -274,11 +283,18 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat("zh-CN", {
 });
 const debugLogs: string[] = [];
 const debugPanel = document.createElement("div");
+let currentWindowSizePreset: "compact" | "cashflow" = "compact";
+let pendingWindowSizePreset: "compact" | "cashflow" = "compact";
 let searchDisplayConfig: SearchDisplayConfig = {
   recentLimit: 20,
   pinnedLimit: 20,
   pluginLimit: 20,
   searchLimit: 20
+};
+let launchAtLoginStatus: LaunchAtLoginStatus = {
+  enabled: false,
+  supported: false,
+  reason: "加载中..."
 };
 
 function getLauncherApi(): LauncherApi | null {
@@ -377,8 +393,61 @@ function setHint(message: string): void {
   hintText.textContent = message;
 }
 
+function applyModeClass(nextMode: PanelMode): void {
+  document.body.classList.toggle("mode-cashflow", nextMode === "cashflow");
+}
+
+function requestWindowSizePreset(
+  preset: "compact" | "cashflow",
+  retriesLeft = 1
+): void {
+  const launcher = getLauncherApi();
+  if (!launcher?.setWindowSizePreset) {
+    return;
+  }
+
+  pendingWindowSizePreset = preset;
+  void launcher
+    .setWindowSizePreset(preset)
+    .then((applied) => {
+      if (applied) {
+        if (pendingWindowSizePreset === preset) {
+          currentWindowSizePreset = preset;
+        } else {
+          requestWindowSizePreset(pendingWindowSizePreset, 1);
+        }
+        return;
+      }
+
+      if (retriesLeft > 0 && pendingWindowSizePreset === preset) {
+        setTimeout(() => requestWindowSizePreset(preset, retriesLeft - 1), 70);
+      }
+    })
+    .catch(() => {
+      if (retriesLeft > 0 && pendingWindowSizePreset === preset) {
+        setTimeout(() => requestWindowSizePreset(preset, retriesLeft - 1), 70);
+      }
+    });
+}
+
+function syncWindowSizePreset(nextMode: PanelMode, force = false): void {
+  const preset: "compact" | "cashflow" =
+    nextMode === "cashflow" ? "cashflow" : "compact";
+  if (
+    !force &&
+    preset === currentWindowSizePreset &&
+    preset === pendingWindowSizePreset
+  ) {
+    return;
+  }
+
+  requestWindowSizePreset(preset, force ? 2 : 1);
+}
+
 function setMode(nextMode: PanelMode): void {
   mode = nextMode;
+  syncWindowSizePreset(nextMode);
+  applyModeClass(nextMode);
   input.value = "";
   currentQuery = "";
   input.readOnly = mode === "settings" || mode === "password" || mode === "cashflow";
@@ -1428,9 +1497,23 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
     searchLimit: readNumber("searchLimit")
   };
 
-  const normalized = normalizeSettingsInput(inputConfig);
-  searchDisplayConfig = await launcher.setSearchDisplayConfig(normalized);
-  setStatus("\u8bbe\u7f6e\u5df2\u4fdd\u5b58");
+  const launchAtLoginNode = form.elements.namedItem("launchAtLogin");
+  const nextLaunchAtLoginEnabled =
+    launchAtLoginNode instanceof HTMLInputElement
+      ? launchAtLoginNode.checked
+      : launchAtLoginStatus.enabled;
+
+  try {
+    const normalized = normalizeSettingsInput(inputConfig);
+    searchDisplayConfig = await launcher.setSearchDisplayConfig(normalized);
+    launchAtLoginStatus = await launcher.setLaunchAtLoginEnabled(
+      nextLaunchAtLoginEnabled
+    );
+    setStatus("\u8bbe\u7f6e\u5df2\u4fdd\u5b58");
+  } catch {
+    setStatus("\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25");
+  }
+
   renderList();
 }
 
@@ -1447,7 +1530,8 @@ function renderSettingsPanel(): void {
 
   const description = document.createElement("p");
   description.className = "settings-description";
-  description.textContent = "\u4fee\u6539\u540e\u70b9\u51fb\u4fdd\u5b58\uff0c\u7acb\u5373\u5f71\u54cd\u9996\u9875\u548c\u641c\u7d22\u7ed3\u679c\u6570\u91cf\u3002";
+  description.textContent =
+    "\u53ef\u4ee5\u8c03\u6574\u641c\u7d22\u6761\u76ee\u6570\u91cf\uff0c\u5e76\u914d\u7f6e\u662f\u5426\u5f00\u673a\u81ea\u542f\u3002";
 
   const form = document.createElement("form");
   form.className = "settings-form";
@@ -1493,6 +1577,48 @@ function renderSettingsPanel(): void {
     row.append(label, inputNode, hint);
     form.appendChild(row);
   }
+
+  const launchAtLoginRow = document.createElement("label");
+  launchAtLoginRow.className = "settings-row";
+
+  const launchAtLoginLabel = document.createElement("span");
+  launchAtLoginLabel.className = "settings-row-label";
+  launchAtLoginLabel.textContent = "\u5f00\u673a\u542f\u52a8";
+
+  const launchAtLoginWrap = document.createElement("div");
+  launchAtLoginWrap.className = "password-checkbox-wrap";
+
+  const launchAtLoginInput = document.createElement("input");
+  launchAtLoginInput.type = "checkbox";
+  launchAtLoginInput.name = "launchAtLogin";
+  launchAtLoginInput.className = "password-checkbox";
+  launchAtLoginInput.checked = launchAtLoginStatus.enabled;
+  launchAtLoginInput.disabled = !launchAtLoginStatus.supported;
+
+  const launchAtLoginText = document.createElement("span");
+  launchAtLoginText.className = "settings-row-hint";
+  launchAtLoginText.textContent = launchAtLoginStatus.enabled
+    ? "\u5df2\u542f\u7528"
+    : "\u672a\u542f\u7528";
+  launchAtLoginInput.addEventListener("change", () => {
+    launchAtLoginText.textContent = launchAtLoginInput.checked
+      ? "\u5df2\u542f\u7528"
+      : "\u672a\u542f\u7528";
+  });
+  launchAtLoginWrap.append(launchAtLoginInput, launchAtLoginText);
+
+  const launchAtLoginHint = document.createElement("span");
+  launchAtLoginHint.className = "settings-row-hint";
+  launchAtLoginHint.textContent = launchAtLoginStatus.supported
+    ? "Windows \u767b\u5f55\u540e\u81ea\u52a8\u542f\u52a8 LiteLauncher"
+    : launchAtLoginStatus.reason ?? "\u5f53\u524d\u73af\u5883\u6682\u4e0d\u652f\u6301";
+
+  launchAtLoginRow.append(
+    launchAtLoginLabel,
+    launchAtLoginWrap,
+    launchAtLoginHint
+  );
+  form.appendChild(launchAtLoginRow);
 
   const actions = document.createElement("div");
   actions.className = "settings-actions";
@@ -1931,6 +2057,7 @@ function renderCashflowPanel(): void {
 
   const roleBlock = document.createElement("section");
   roleBlock.className = "cashflow-block";
+  roleBlock.classList.add("cashflow-block-role");
   const roleTitle = document.createElement("h4");
   roleTitle.className = "cashflow-block-title";
   roleTitle.textContent = "\u5f00\u5c40\u804c\u4e1a";
@@ -1979,6 +2106,7 @@ function renderCashflowPanel(): void {
 
   const aiBlock = document.createElement("section");
   aiBlock.className = "cashflow-block";
+  aiBlock.classList.add("cashflow-block-ai");
   const aiTitle = document.createElement("h4");
   aiTitle.className = "cashflow-block-title";
   aiTitle.textContent = "AI \u5bf9\u624b";
@@ -2046,6 +2174,7 @@ function renderCashflowPanel(): void {
 
   const opportunityBlock = document.createElement("section");
   opportunityBlock.className = "cashflow-block";
+  opportunityBlock.classList.add("cashflow-block-opportunity");
   const opportunityTitle = document.createElement("h4");
   opportunityTitle.className = "cashflow-block-title";
   opportunityTitle.textContent = "\u5f53\u524d\u673a\u4f1a";
@@ -2158,6 +2287,7 @@ function renderCashflowPanel(): void {
 
   const assetsBlock = document.createElement("section");
   assetsBlock.className = "cashflow-block";
+  assetsBlock.classList.add("cashflow-block-assets");
   const assetsTitle = document.createElement("h4");
   assetsTitle.className = "cashflow-block-title";
   assetsTitle.textContent = "\u8d44\u4ea7\u7ec4\u5408";
@@ -2206,6 +2336,7 @@ function renderCashflowPanel(): void {
 
   const reportsBlock = document.createElement("section");
   reportsBlock.className = "cashflow-block";
+  reportsBlock.classList.add("cashflow-block-reports");
   const reportsTitle = document.createElement("h4");
   reportsTitle.className = "cashflow-block-title";
   reportsTitle.textContent = "\u8d22\u52a1\u62a5\u8868";
@@ -2277,6 +2408,7 @@ function renderCashflowPanel(): void {
 
   const logsBlock = document.createElement("section");
   logsBlock.className = "cashflow-block";
+  logsBlock.classList.add("cashflow-block-logs");
   const logsTitle = document.createElement("h4");
   logsTitle.className = "cashflow-block-title";
   logsTitle.textContent = "\u56de\u5408\u8bb0\u5f55";
@@ -2305,13 +2437,15 @@ function renderCashflowPanel(): void {
 
   const board = document.createElement("div");
   board.className = "cashflow-board";
-  const primaryColumn = document.createElement("div");
-  primaryColumn.className = "cashflow-column";
-  const secondaryColumn = document.createElement("div");
-  secondaryColumn.className = "cashflow-column";
-  primaryColumn.append(roleBlock, opportunityBlock, assetsBlock);
-  secondaryColumn.append(aiBlock, reportsBlock, logsBlock);
-  board.append(primaryColumn, secondaryColumn);
+  const mainColumn = document.createElement("div");
+  mainColumn.className = "cashflow-column cashflow-column-main";
+  mainColumn.append(opportunityBlock, roleBlock, assetsBlock);
+
+  const sideColumn = document.createElement("div");
+  sideColumn.className = "cashflow-column cashflow-column-side";
+  sideColumn.append(aiBlock, reportsBlock);
+
+  board.append(mainColumn, sideColumn, logsBlock);
 
   const actions = document.createElement("div");
   actions.className = "settings-actions cashflow-actions";
@@ -2409,7 +2543,12 @@ async function refreshEntries(query: string): Promise<void> {
     }
 
     if (mode === "settings") {
-      searchDisplayConfig = await launcher.getSearchDisplayConfig();
+      const [nextSearchConfig, nextLaunchAtLoginStatus] = await Promise.all([
+        launcher.getSearchDisplayConfig(),
+        launcher.getLaunchAtLoginStatus()
+      ]);
+      searchDisplayConfig = nextSearchConfig;
+      launchAtLoginStatus = nextLaunchAtLoginStatus;
       if (token !== latestSearchToken) {
         return;
       }
@@ -2632,6 +2771,7 @@ async function openCashflowPanel(reset = false): Promise<void> {
 function backToSearch(): void {
   if (mode !== "search") {
     setMode("search");
+    syncWindowSizePreset("search", true);
     void refreshEntries("");
     return;
   }
@@ -2641,6 +2781,7 @@ function backToSearch(): void {
     setStatus("\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u65e0\u6cd5\u9690\u85cf\u7a97\u53e3");
     return;
   }
+  syncWindowSizePreset("search", true);
   void launcher.hide();
 }
 
@@ -2887,6 +3028,7 @@ function registerEvents(): void {
 
   window.addEventListener("focus", () => {
     pushDebugLog("renderer window focus");
+    syncWindowSizePreset(mode, true);
     focusInput(false);
   });
 

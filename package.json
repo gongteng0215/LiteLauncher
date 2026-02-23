@@ -10,19 +10,53 @@
     "typecheck": "tsc --noEmit",
     "test:cashflow": "pnpm run build && node dist/test/cashflow-state-machine.test.js && node dist/test/cashflow-persistence.test.js && node dist/test/cashflow-plugin-contract.test.js && node dist/test/cashflow-performance.test.js",
     "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
-    "check:encoding": "node scripts/check-encoding.cjs"
+    "check:encoding": "node scripts/check-encoding.cjs",
+    "dist:win": "pnpm run build && electron-builder --win nsis --x64",
+    "dist:win:portable": "pnpm run build && electron-builder --win portable --x64"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "electron": "^40.2.1",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "@types/node": "^25.2.2",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.litelauncher.app",
+    "productName": "LiteLauncher",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "pnpm": {
     "onlyBuiltDependencies": [

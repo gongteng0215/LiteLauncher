@@ -1,126 +1,34 @@
-﻿# LiteLauncher（最小可用版本）
+﻿# LiteLauncher
 
-LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器，目标是把日常高频操作压缩成一个动作链：
+LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器，核心目标是“快速唤起 + 搜索 + 执行”，并内置 Cashflow 财商训练插件。
 
-`唤起 -> 输入 -> 命中 -> 执行`
+## 当前能力
 
-它面向“需要频繁切换应用、文件、命令”的用户，强调三件事：
-- 快：尽量减少从“想到”到“做到”的路径长度
-- 稳：核心行为可预测，重启后数据仍然保留
-- 轻：先解决高频刚需，再逐步扩展高级能力
+- 全局快捷键唤起（默认 `Alt+Space`，冲突自动回退）
+- 统一搜索与执行：应用、文件夹、文件、网页、命令
+- 首页分区：最近访问、置顶、插件
+- 结果右键置顶/取消置顶（持久化）
+- 剪贴板历史（搜索、复制、删除、清空）
+- 设置页：
+  - 搜索显示数量配置（最近/置顶/插件/搜索结果）
+  - 开机启动开关（Windows/macOS）
+- 插件：
+  - 密码生成器（可视化面板）
+  - Cashflow Lite（现金流游戏、AI 对战、统计入口）
+- Windows 打包：NSIS 安装包 + Portable 便携包
 
-## 产品简介
+## 环境要求
 
-LiteLauncher 的定位不是“大而全工具箱”，而是“低学习成本的桌面入口层”：
-- 你不需要记很多复杂指令，只要记住唤起键和少量关键词
-- 常用目标会随着使用记录和置顶设置更容易被命中
-- 通过统一搜索框把应用、网页、命令、剪贴板等入口收敛到同一个交互面板
-
-当前版本优先覆盖 Windows 11 场景，后续计划扩展到 macOS / Linux。
-
-## 核心流程
-
-1. 按 `Alt+Space`（冲突时自动回退）唤起主窗口  
-2. 输入关键词，结果实时刷新  
-3. `Enter` 直接执行，或鼠标点击执行  
-4. 对搜索结果右键可置顶，下次空输入时优先可见  
-5. `Esc` 清空或隐藏，回到“随用随开”的状态
-
-## 适用场景
-
-- 办公场景：快速打开常用应用、工具页和搜索入口
-- 开发场景：用统一入口触发常用命令与工具链
-- 重复操作场景：把高频目标置顶，减少反复检索成本
-
-## 当前边界（最小可用版本）
-
-- 已覆盖：开始菜单应用检索、内置命令、剪贴板历史、置顶分区、设置页基础配置
-- 未覆盖：自定义目录文件索引（`T15~T17`）、快捷键完整设置与冲突检测（`T18`）
-- 这意味着当前更偏“应用与命令入口”，不是完整的全盘文件检索器
-
-## 当前已经实现的功能
-
-- 全局唤起窗口（优先 `Alt+Space`，冲突会自动回退快捷键）
-- 键盘交互（`Enter`、`Esc`、`Up`、`Down`、`Left`、`Right`）
-- 应用索引（Windows 开始菜单）
-- 搜索匹配与排序（匹配分 + 使用分 + 最近分）
-- 搜索计算在 `Worker` 线程执行
-- 动作执行（应用/文件/文件夹/网页）
-- 内置命令：`calc`、`clip`、`settings`、`exit`
-- 插件模块化：每个插件独立目录（`src/main/plugins/<插件名>/index.ts`）
-- 首个插件：`密码生成器`（支持长度、特殊符号、生成数量）
-- 剪贴板历史（仅文本）：搜索、复制、删除、清空
-- SQLite 持久化（`settings`、`items`、`usage`、`clip_items`）
-- 搜索首页三分区：
-  - `最近访问`（最多 20）
-  - `置顶`（最多 20）
-  - `插件`（最多 20）
-- 搜索结果改为图标网格（每行 10 个）
-- 系统托盘图标与右键菜单（显示主页面、退出）
-- 图标加载容错（无法解析时回退为文字图标，避免坏图占位）
-- 设置面板（基础版）：可配置并持久化搜索显示数量（最近/置顶/插件/搜索结果）
-- 搜索结果支持右键置顶/取消置顶，置顶项下次启动仍可见
-
-## 当前可直接输入测试
-
-先唤起窗口，然后在输入框测试：
-
-- `ch`：匹配并打开 Chrome（前提是开始菜单有该应用快捷方式）
-- `calc 1+2*3`：计算并复制结果
-- `g ChatGPT`：浏览器搜索
-- `clip`：进入剪贴板历史面板
-- `settings`：进入设置面板（可调整显示数量并保存）
-- `exit`：退出程序
-- `pwd`：打开密码生成器可视化页面（默认 16 位、1 个、含符号）
-- `pwd 20`：打开密码页面并预设长度 20
-- `pwd 20 5`：打开密码页面并预设长度 20、数量 5
-- `pwd 20 5 no`：打开密码页面并预设为不含特殊符号
-- `pwd length=24 count=3 symbols=yes`：键值形式预设参数
-- 在密码页面点 `生成并复制`（或按 `Enter`）即可生成并展示结果
-
-## 搜索与自动检索说明
-
-- 搜索模式下是“输入即检索”，每次输入变化都会自动刷新结果
-- 输入为空时展示首页三分区（最近访问/置顶/插件）
-- 输入非空时展示“搜索结果”分区
-- 点击任一图标会立即执行该项
-- 在搜索结果上右键可置顶或取消置顶
-
-## 置顶用法
-
-- 先输入关键词进入“搜索结果”分区
-- 对目标图标点击鼠标右键：
-  - 未置顶 -> 置顶
-  - 已置顶 -> 取消置顶
-- 置顶项会出现在空输入时的“置顶”分区
-- 置顶状态会持久化，重启后仍保留
-
-## 为什么你会感觉“没有自动检索”
-
-当前版本的自动检索范围是有限的，不是“任意内容都能搜到”：
-
-- 目前只做了“开始菜单应用索引”，还没做“自定义目录文件索引”（任务 `T15`~`T17` 未完成）
-- 所以输入普通文件名、项目目录名时，常见情况是 0 结果
-- 网页搜索目前是命令形式，需要以 `g ` 开头（例如 `g vscode`）
-- 如果你刚进入了 `settings` 面板，输入框不会走正常搜索；按一次 `Esc` 回到搜索面板
-
-## 运行方式（pnpm）
-
-环境要求：
-- Node.js 22+
+- Windows 11（主目标平台）
+- Node.js 22 LTS（建议）
 - pnpm 10+
-- Windows 11
+
+## 开发与运行
 
 安装依赖：
 
 ```bash
 pnpm install
-```
-
-类型检查：
-
-```bash
-pnpm run typecheck
 ```
 
 构建：
@@ -129,96 +37,143 @@ pnpm run typecheck
 pnpm run build
 ```
 
-运行：
+启动：
 
 ```bash
 pnpm start
 ```
 
-或使用一键按键调试启动：
+类型检查：
 
 ```bash
-pnpm run start:debug-keys
+pnpm run typecheck
 ```
 
-## 按键调试模式（排查 Enter/Esc 无响应）
+Cashflow 测试：
 
-开启方式（PowerShell）：
+```bash
+pnpm run test:cashflow
+```
+
+## 常用输入命令
+
+在主搜索框输入：
+
+- `calc 1+2*3`：计算并复制结果
+- `g ChatGPT`：Google 搜索
+- `clip`：打开剪贴板历史
+- `settings`：打开设置页面
+- `pwd`：打开密码生成器
+- `cashflow` / `cash` / `cf` / `现金流`：打开现金流游戏
+- `cash stat`：查看现金流统计
+- `cash ai`：开启 AI 对战
+- `cash review`：复盘入口（占位）
+- `exit`：退出程序
+
+## Cashflow 插件说明
+
+当前 Cashflow 已支持：
+
+- 职业开局与回合推进
+- 机会买入（现金买入 / 贷款买入）与跳过
+- 资产累计、现金流与关键指标
+- 财务报表（收入、支出、资产负债）
+- Big Deal 机会
+- AI 玩家并行推进
+- 胜利 / 失败判定
+- SQLite 存档恢复（失败存档自动重开）
+
+交互：
+
+- `Enter`：推进一回合
+- `Esc`：返回主搜索页
+- 从 Cashflow 返回后，窗口会自动回到主页面紧凑尺寸
+
+## 打包（Windows 11）
+
+先确保本机有 C++ 编译环境（给 `sqlite3` 使用）：
+
+- 推荐安装 Visual Studio 2022 Build Tools
+- 组件勾选 `Desktop development with C++`
+
+打包安装版：
 
 ```powershell
-$env:LITELAUNCHER_DEBUG_KEYS='1'; pnpm start
+pnpm.cmd run dist:win
 ```
 
-开启后你会看到两类调试信息：
-- 终端日志：主进程捕获到的按键事件（`before-input-event`）
-- 窗口右下角调试面板：主进程与渲染层按键日志
-
-可选图标调试（PowerShell）：
+打包便携版：
 
 ```powershell
-$env:LITELAUNCHER_DEBUG_ICONS='1'; pnpm start
+pnpm.cmd run dist:win:portable
 ```
 
-开启后可在终端看到图标解析命中与回退日志（`[debug:icon] ...`）。
+产物目录：`release/`
 
-如果按下 `Enter`/`Esc` 后终端和面板都没有日志，说明按键没有进入应用窗口（通常是焦点不在该窗口）。
+常见产物：
 
-## 常见问题排查
+- `LiteLauncher Setup x.y.z.exe`：NSIS 安装包
+- `LiteLauncher x.y.z.exe`：Portable 便携包
+- `latest.yml`：自动更新元数据
+- `*.blockmap`：增量更新块映射
 
-- 底部状态一直不变、列表空白：
-  - 如果看到 `渲染脚本未启动，请先彻底退出 LiteLauncher 再重新执行 pnpm start`，说明渲染脚本没有成功运行。
-  - 先彻底退出已运行的 LiteLauncher 进程，再执行 `pnpm start`。
-- 修改代码后执行 `pnpm start` 但像“没更新”：
-  - 开发模式下再次启动会自动刷新已运行实例的渲染页面。
-  - 如果仍异常，优先彻底退出后再启动。
-- 输入后没有结果：
-  - 当前只索引开始菜单应用和内置命令。
-  - 普通文件名/目录名检索要等 `T15`~`T17` 完成后才会覆盖。
+## 发布到 GitHub Release
 
-## 脚本说明
-
-- `pnpm run typecheck`：执行 TypeScript 类型检查（`tsc --noEmit`）
-- `pnpm run build`：编译 TypeScript 并复制渲染层静态资源到 `dist/`
-- `pnpm start`：先构建再启动 Electron
-
-## 自定义图标
-
-- 图标放置路径（源码目录）：
-  - `src/assets/icon.ico`（推荐，Windows）
-  - 或 `src/assets/icon.png`
-- 构建时会自动复制到 `dist/assets/`
-- 启动后会优先使用该图标作为托盘/窗口图标；若未找到则回退默认图标
-
-## 快捷键冲突说明
-
-- 如果 `Alt+Space` 被占用，程序会依次尝试：
-  - `Ctrl+Space`
-  - `Alt+Shift+Space`
-  - `Ctrl+Alt+Space`
-- 你也可以手动指定快捷键（PowerShell）：
+示例（建议上传安装包 + `latest.yml` + `blockmap`）：
 
 ```powershell
-$env:LITELAUNCHER_SHORTCUT='Ctrl+Shift+Space'; pnpm start
+gh release create v1.0.0 release/*.exe release/latest.yml release/*.blockmap -t "LiteLauncher v1.0.0" -n "Windows build"
 ```
+
+说明：
+
+- `latest.yml`：客户端自动更新时读取的版本与下载信息
+- `*.blockmap`：用于增量更新，减少下载体积
+
+## 常见问题
+
+### 1. Electron failed to install correctly
+
+```powershell
+Remove-Item -Recurse -Force node_modules
+pnpm install
+```
+
+如果仍失败，检查是否禁用了依赖脚本（Electron 的 postinstall 需要执行）。
+
+### 2. 打包时报 `electron` 只能在 `devDependencies`
+
+请确保 `package.json` 中：
+
+- `dependencies` 不包含 `electron`
+- `devDependencies` 包含 `electron`
+
+### 3. `Ctrl+C` 退出时 VSCode 一起关闭
+
+这是同一控制台会话的信号联动，不是 LiteLauncher 主动关闭 VSCode。建议在 VSCode 集成终端中单独运行 `pnpm start`。
 
 ## 项目结构
 
 ```text
 src/
-  main/       # 主进程：IPC、数据库、索引、动作执行
-  preload/    # 预加载桥接层：向渲染层暴露最小能力
-  renderer/   # 界面层：输入、列表、交互
-  shared/     # 跨进程共享：类型、通道、搜索逻辑
+  main/       # 主进程（窗口、IPC、数据库、插件）
+  preload/    # 桥接层
+  renderer/   # 渲染层 UI
+  shared/     # 共享类型与通道
 scripts/
   copy-assets.cjs
-dist/         # 构建产物
+docs/
+  cashflow-game/
 ```
 
-## 文档
+## 文档索引
 
-- 产品需求文档：`PRD_LiteLauncher.md`
-- 开发任务清单：`TASKS_LiteLauncher.md`
+- `PRD_LiteLauncher.md`
+- `TASKS_LiteLauncher.md`
+- `docs/cashflow-game/cashflow-prd.md`
+- `docs/cashflow-game/cashflow-tasks.md`
+- `docs/cashflow-game/cashflow-mvp-regression.md`
 
-## 许可证
+## License
 
 ISC
