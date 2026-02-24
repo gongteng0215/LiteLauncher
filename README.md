@@ -6,9 +6,13 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 
 - 全局快捷键唤起（默认 `Alt+Space`，冲突自动回退）
 - 统一搜索与执行：应用、文件夹、文件、网页、命令
+- macOS 应用搜索增强：目录扫描 + Spotlight（`mdfind`）应用索引兜底
+- macOS 应用图标显示：支持从 `.app` 的 `.icns` 提取真实图标
 - 首页分区：最近访问、置顶、插件
+- 最近访问按实际使用记录生成（按最近使用时间排序）
 - 结果右键置顶/取消置顶（持久化）
 - 剪贴板历史（搜索、复制、删除、清空）
+- 主窗口尺寸按当前显示器分辨率动态调整（含 `compact` / `cashflow` 预设）
 - 设置页：
   - 搜索显示数量配置（最近/置顶/插件/搜索结果）
   - 开机启动开关（Windows/macOS）
@@ -20,6 +24,7 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 ## 环境要求
 
 - Windows 11（主目标平台）
+- macOS（开发与体验已支持：应用搜索、图标、开机启动、Spotlight 应用索引兜底）
 - Node.js 22 LTS（建议）
 - pnpm 10+
 
@@ -151,6 +156,17 @@ pnpm install
 ### 3. `Ctrl+C` 退出时 VSCode 一起关闭
 
 这是同一控制台会话的信号联动，不是 LiteLauncher 主动关闭 VSCode。建议在 VSCode 集成终端中单独运行 `pnpm start`。
+
+### 4. 改了主进程代码后重新 `pnpm start` 看起来没变化
+
+LiteLauncher 是托盘常驻 + 单实例应用。再次执行 `pnpm start` 在开发态通常只会命中已有进程并刷新渲染层，不会重启主进程。
+
+涉及主进程逻辑的修改（如应用索引、图标提取、窗口尺寸策略）请先彻底退出：
+
+- 在 LiteLauncher 输入 `exit`
+- 或从托盘菜单退出
+
+然后再执行 `pnpm start`。
 
 ## 项目结构
 

@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
@@ -280,6 +282,30 @@ async function buildIconCandidates(item: LaunchItem): Promise<IconCandidate[]> {
   const normalizedTarget = normalizePathCandidate(item.target);
   const isCommandTarget = item.target.trim().toLowerCase().startsWith("command:");
   const isShortcut = normalizedTarget ? isShortcutPath(normalizedTarget) : false;
+  const realTarget =
+    normalizedTarget && !isCommandTarget
+      ? safeRealPathCandidate(normalizedTarget)
+      : null;
+
+  if (realTarget && realTarget.toLowerCase() !== normalizedTarget?.toLowerCase()) {
+    pushIconCandidate(candidates, seen, realTarget, "item-target-realpath");
+  }
+
+  if (normalizedTarget && isMacAppBundlePath(normalizedTarget)) {
+    for (const iconPath of getMacBundleIconCandidates(normalizedTarget)) {
+      pushIconCandidate(candidates, seen, iconPath, "mac-app-bundle-icon");
+    }
+  }
+
+  if (
+    realTarget &&
+    realTarget.toLowerCase() !== normalizedTarget?.toLowerCase() &&
+    isMacAppBundlePath(realTarget)
+  ) {
+    for (const iconPath of getMacBundleIconCandidates(realTarget)) {
+      pushIconCandidate(candidates, seen, iconPath, "mac-app-bundle-icon-realpath");
+    }
+  }
 
   if (item.type === "application" && normalizedTarget && isShortcut) {
     const info = await resolveShortcutInfo(item.target);
@@ -311,10 +337,85 @@ function getIconCacheKey(iconSource: string): string {
   return iconSource.toLowerCase();
 }
 
+const PNG_SIGNATURE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+]);
+
+function isIcnsPath(iconSource: string): boolean {
+  return iconSource.toLowerCase().endsWith(".icns");
+}
+
+function safeRealPathCandidate(pathValue: string): string | null {
+  try {
+    return fs.realpathSync.native(pathValue);
+  } catch {
+    return null;
+  }
+}
+
+function isMacAppBundlePath(pathValue: string): boolean {
+  return process.platform === "darwin" && pathValue.toLowerCase().endsWith(".app");
+}
+
+function scoreMacBundleIconFilename(filename: string, bundleName: string): number {
+  const lowerFilename = filename.toLowerCase();
+  const normalizedBundleName = bundleName.toLowerCase();
+  let score = 0;
+
+  if (lowerFilename === `${normalizedBundleName}.icns`) {
+    score += 100;
+  }
+  if (lowerFilename.includes("appicon")) {
+    score += 80;
+  }
+  if (lowerFilename.includes(normalizedBundleName)) {
+    score += 50;
+  }
+  if (lowerFilename.includes("icon")) {
+    score += 20;
+  }
+
+  return score;
+}
+
+function getMacBundleIconCandidates(bundlePath: string): string[] {
+  if (!isMacAppBundlePath(bundlePath)) {
+    return [];
+  }
+
+  const resourcesDir = path.join(bundlePath, "Contents", "Resources");
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(resourcesDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const bundleName = path.basename(bundlePath, ".app");
+  return entries
+    .filter((entry) => {
+      if (!entry.isFile() && !entry.isSymbolicLink()) {
+        return false;
+      }
+      return entry.name.toLowerCase().endsWith(".icns");
+    })
+    .sort((left, right) => {
+      const diff =
+        scoreMacBundleIconFilename(right.name, bundleName) -
+        scoreMacBundleIconFilename(left.name, bundleName);
+      if (diff !== 0) {
+        return diff;
+      }
+      return left.name.localeCompare(right.name);
+    })
+    .map((entry) => path.join(resourcesDir, entry.name));
+}
+
 function looksLikeStaticImagePath(iconSource: string): boolean {
   const normalized = iconSource.toLowerCase();
   return (
     normalized.endsWith(".ico") ||
+    normalized.endsWith(".icns") ||
     normalized.endsWith(".png") ||
     normalized.endsWith(".jpg") ||
     normalized.endsWith(".jpeg") ||
@@ -323,9 +424,71 @@ function looksLikeStaticImagePath(iconSource: string): boolean {
   );
 }
 
+function tryReadIcnsAsDataUrl(iconSource: string): string | null {
+  if (!isIcnsPath(iconSource)) {
+    return null;
+  }
+
+  let fileBuffer: Buffer;
+  try {
+    fileBuffer = fs.readFileSync(iconSource);
+  } catch {
+    return null;
+  }
+
+  if (fileBuffer.length < 8 || fileBuffer.toString("ascii", 0, 4) !== "icns") {
+    return null;
+  }
+
+  let bestDataUrl: string | null = null;
+  let bestArea = 0;
+  let offset = 8;
+  while (offset + 8 <= fileBuffer.length) {
+    const chunkLength = fileBuffer.readUInt32BE(offset + 4);
+    if (chunkLength < 8) {
+      break;
+    }
+
+    const nextOffset = offset + chunkLength;
+    if (nextOffset > fileBuffer.length) {
+      break;
+    }
+
+    const payload = fileBuffer.subarray(offset + 8, nextOffset);
+    if (payload.length >= PNG_SIGNATURE.length) {
+      const header = payload.subarray(0, PNG_SIGNATURE.length);
+      if (header.equals(PNG_SIGNATURE)) {
+        try {
+          const image = nativeImage.createFromBuffer(payload);
+          if (!image.isEmpty()) {
+            const { width, height } = image.getSize();
+            const area = Math.max(1, width) * Math.max(1, height);
+            const data = image.toDataURL();
+            if (data.startsWith("data:image/") && area >= bestArea) {
+              bestArea = area;
+              bestDataUrl = data;
+            }
+          }
+        } catch {
+          // Ignore malformed chunks and continue scanning the icns container.
+        }
+      }
+    }
+
+    offset = nextOffset;
+  }
+
+  return bestDataUrl;
+}
+
 function tryReadImageFileAsDataUrl(iconSource: string): string | null {
   if (!looksLikeStaticImagePath(iconSource)) {
     return null;
+  }
+
+  const icnsData = tryReadIcnsAsDataUrl(iconSource);
+  if (icnsData) {
+    return icnsData;
   }
 
   try {

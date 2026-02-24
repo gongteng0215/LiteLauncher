@@ -1,5 +1,6 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { LaunchItem } from "../shared/types";
 import { getPluginCatalogItems } from "./plugins";
@@ -10,6 +11,16 @@ const START_MENU_RELATIVE_PATH = path.join(
   "Start Menu",
   "Programs"
 );
+const MAC_APPLICATION_DIRS = [
+  "/Applications",
+  "/Applications/Utilities",
+  "/System/Applications",
+  "/System/Applications/Utilities"
+] as const;
+const MAC_CASKROOM_DIRS = [
+  "/opt/homebrew/Caskroom",
+  "/usr/local/Caskroom"
+] as const;
 
 const PINYIN_BOUNDARIES = [
   "\u963f",
@@ -76,6 +87,99 @@ function walkShortcutFiles(dirPath: string, result: string[]): void {
     if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".lnk") {
       result.push(fullPath);
     }
+  }
+}
+
+function getMacApplicationDirs(): string[] {
+  const dirs = new Set<string>(MAC_APPLICATION_DIRS);
+  const homeDir = process.env.HOME;
+  if (homeDir) {
+    dirs.add(path.join(homeDir, "Applications"));
+  }
+  for (const caskroomDir of MAC_CASKROOM_DIRS) {
+    dirs.add(caskroomDir);
+  }
+  return Array.from(dirs);
+}
+
+function getMacSpotlightApplicationPaths(): string[] {
+  if (process.platform !== "darwin") {
+    return [];
+  }
+
+  const query = "kMDItemContentTypeTree == 'com.apple.application-bundle'";
+  let stdout = "";
+  try {
+    const result = spawnSync("/usr/bin/mdfind", [query], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 4000
+    });
+    if (result.error || result.status !== 0) {
+      return [];
+    }
+    stdout = typeof result.stdout === "string" ? result.stdout : "";
+  } catch {
+    return [];
+  }
+
+  if (!stdout.trim()) {
+    return [];
+  }
+
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((candidate) => candidate.toLowerCase().endsWith(".app"))
+    .filter((candidate) => !candidate.includes("/Contents/"))
+    .filter((candidate) => {
+      try {
+        return fs.existsSync(candidate);
+      } catch {
+        return false;
+      }
+    });
+}
+
+function walkMacApplicationBundles(dirPath: string, result: string[]): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const isDirectory = entry.isDirectory();
+    const isSymlink = entry.isSymbolicLink();
+    if (!isDirectory && !isSymlink) {
+      continue;
+    }
+
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const fullPath = path.join(dirPath, entry.name);
+    if (path.extname(entry.name).toLowerCase() === ".app") {
+      result.push(fullPath);
+      continue;
+    }
+
+    if (isSymlink) {
+      continue;
+    }
+
+    walkMacApplicationBundles(fullPath, result);
+  }
+}
+
+function normalizeRealPathCandidate(pathValue: string): string {
+  try {
+    return fs.realpathSync.native(pathValue).toLowerCase();
+  } catch {
+    return pathValue.toLowerCase();
   }
 }
 
@@ -234,10 +338,51 @@ function createAppItemsFromStartMenu(): LaunchItem[] {
   return appItems;
 }
 
+function createAppItemsFromMacApplications(): LaunchItem[] {
+  const bundles: string[] = getMacSpotlightApplicationPaths();
+  for (const appDir of getMacApplicationDirs()) {
+    walkMacApplicationBundles(appDir, bundles);
+  }
+
+  const deduped = new Set<string>();
+  const items: LaunchItem[] = [];
+  for (const bundlePath of bundles) {
+    const normalizedPath = normalizeRealPathCandidate(bundlePath);
+    if (deduped.has(normalizedPath)) {
+      continue;
+    }
+    deduped.add(normalizedPath);
+
+    const title = path.basename(bundlePath, ".app");
+    items.push({
+      id: `app:${bundlePath}`,
+      type: "application",
+      title,
+      subtitle: bundlePath,
+      target: bundlePath,
+      keywords: toKeywords(title)
+    });
+  }
+
+  return items;
+}
+
+function createApplicationItems(): LaunchItem[] {
+  if (process.platform === "win32") {
+    return createAppItemsFromStartMenu();
+  }
+
+  if (process.platform === "darwin") {
+    return createAppItemsFromMacApplications();
+  }
+
+  return [];
+}
+
 export function buildCatalog(): LaunchItem[] {
   return [
     ...createBuiltinItems(),
     ...getPluginCatalogItems(),
-    ...createAppItemsFromStartMenu()
+    ...createApplicationItems()
   ];
 }

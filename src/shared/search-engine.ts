@@ -320,7 +320,48 @@ export function computeInitialItems(
   usageMap: UsageMap,
   limit = 10
 ): LaunchItem[] {
-  return scoreAndSort(catalog, "", usageMap).slice(0, limit);
+  if (limit <= 0) {
+    return [];
+  }
+
+  const catalogById = new Map(catalog.map((item) => [item.id, item] as const));
+
+  return Object.entries(usageMap)
+    .map(([itemId, usage]) => {
+      const item = catalogById.get(itemId);
+      if (!item) {
+        return null;
+      }
+
+      return {
+        item,
+        count:
+          typeof usage?.count === "number" && Number.isFinite(usage.count)
+            ? usage.count
+            : 0,
+        lastUsedAt:
+          typeof usage?.lastUsedAt === "number" && Number.isFinite(usage.lastUsedAt)
+            ? usage.lastUsedAt
+            : 0
+      };
+    })
+    .filter((record): record is { item: LaunchItem; count: number; lastUsedAt: number } => {
+      if (!record) {
+        return false;
+      }
+      return record.lastUsedAt > 0;
+    })
+    .sort((a, b) => {
+      if (a.lastUsedAt !== b.lastUsedAt) {
+        return b.lastUsedAt - a.lastUsedAt;
+      }
+      if (a.count !== b.count) {
+        return b.count - a.count;
+      }
+      return a.item.title.localeCompare(b.item.title);
+    })
+    .slice(0, limit)
+    .map((record) => record.item);
 }
 
 export function computeSearchItems(

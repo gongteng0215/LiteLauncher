@@ -6,23 +6,86 @@ import { resolveBundledAppIconPath } from "./app-icon";
 
 const COMPACT_WINDOW_WIDTH = 760;
 const COMPACT_WINDOW_HEIGHT = 460;
+const COMPACT_WINDOW_MAX_WIDTH = 1360;
+const COMPACT_WINDOW_MAX_HEIGHT = 760;
+const COMPACT_WINDOW_WIDTH_RATIO = 0.72;
+const COMPACT_WINDOW_HEIGHT_RATIO = 0.62;
+
 const CASHFLOW_WINDOW_WIDTH = 1040;
 const CASHFLOW_WINDOW_HEIGHT = 680;
+const CASHFLOW_WINDOW_MAX_WIDTH = 1680;
+const CASHFLOW_WINDOW_MAX_HEIGHT = 980;
+const CASHFLOW_WINDOW_WIDTH_RATIO = 0.88;
+const CASHFLOW_WINDOW_HEIGHT_RATIO = 0.82;
+
 const MIN_WINDOW_WIDTH = 760;
 const MIN_WINDOW_HEIGHT = 460;
+const WINDOW_WORKAREA_MARGIN_X = 40;
+const WINDOW_WORKAREA_MARGIN_Y = 60;
 
 export type WindowSizePreset = "compact" | "cashflow";
 
-function getPresetSize(preset: WindowSizePreset): [number, number] {
-  if (preset === "cashflow") {
-    return [CASHFLOW_WINDOW_WIDTH, CASHFLOW_WINDOW_HEIGHT];
+function clampWindowDimension(
+  target: number,
+  min: number,
+  max: number,
+  available: number
+): number {
+  const safeAvailable = Math.max(320, Math.floor(available));
+  const safeMax = Math.min(max, safeAvailable);
+  if (safeMax < min) {
+    return safeMax;
   }
-  return [COMPACT_WINDOW_WIDTH, COMPACT_WINDOW_HEIGHT];
+  return Math.max(min, Math.min(Math.round(target), safeMax));
+}
+
+function getDisplayForCursor() {
+  const cursorPoint = screen.getCursorScreenPoint();
+  return screen.getDisplayNearestPoint(cursorPoint);
+}
+
+function getPresetSize(preset: WindowSizePreset): [number, number] {
+  const targetDisplay = getDisplayForCursor();
+  const areaWidth = targetDisplay.workArea.width;
+  const areaHeight = targetDisplay.workArea.height;
+  const availableWidth = areaWidth - WINDOW_WORKAREA_MARGIN_X;
+  const availableHeight = areaHeight - WINDOW_WORKAREA_MARGIN_Y;
+
+  if (preset === "cashflow") {
+    return [
+      clampWindowDimension(
+        areaWidth * CASHFLOW_WINDOW_WIDTH_RATIO,
+        CASHFLOW_WINDOW_WIDTH,
+        CASHFLOW_WINDOW_MAX_WIDTH,
+        availableWidth
+      ),
+      clampWindowDimension(
+        areaHeight * CASHFLOW_WINDOW_HEIGHT_RATIO,
+        CASHFLOW_WINDOW_HEIGHT,
+        CASHFLOW_WINDOW_MAX_HEIGHT,
+        availableHeight
+      )
+    ];
+  }
+
+  return [
+    clampWindowDimension(
+      areaWidth * COMPACT_WINDOW_WIDTH_RATIO,
+      COMPACT_WINDOW_WIDTH,
+      COMPACT_WINDOW_MAX_WIDTH,
+      availableWidth
+    ),
+    clampWindowDimension(
+      areaHeight * COMPACT_WINDOW_HEIGHT_RATIO,
+      COMPACT_WINDOW_HEIGHT,
+      COMPACT_WINDOW_MAX_HEIGHT,
+      availableHeight
+    )
+  ];
 }
 
 function centerWindow(window: BrowserWindow): void {
-  const cursorPoint = screen.getCursorScreenPoint();
-  const targetDisplay = screen.getDisplayNearestPoint(cursorPoint);
+  const targetDisplay = getDisplayForCursor();
   const { x, y, width, height } = targetDisplay.workArea;
   const [windowWidth, windowHeight] = window.getSize();
 
@@ -37,8 +100,7 @@ function getCenteredBounds(
   width: number,
   height: number
 ): { x: number; y: number; width: number; height: number } {
-  const cursorPoint = screen.getCursorScreenPoint();
-  const targetDisplay = screen.getDisplayNearestPoint(cursorPoint);
+  const targetDisplay = getDisplayForCursor();
   const { x, y, width: areaWidth, height: areaHeight } = targetDisplay.workArea;
   const centeredX = Math.round(x + (areaWidth - width) / 2);
   const centeredY = Math.round(y + (areaHeight - height) / 2);
@@ -80,9 +142,10 @@ export function applyLauncherWindowSizePreset(
 
 export function createLauncherWindow(): BrowserWindow {
   const iconPath = resolveBundledAppIconPath();
+  const [initialWidth, initialHeight] = getPresetSize("compact");
   const window = new BrowserWindow({
-    width: COMPACT_WINDOW_WIDTH,
-    height: COMPACT_WINDOW_HEIGHT,
+    width: initialWidth,
+    height: initialHeight,
     frame: false,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
@@ -135,5 +198,6 @@ export function toggleLauncherWindow(window: BrowserWindow): void {
     return;
   }
 
+  applyLauncherWindowSizePreset(window, "compact");
   showLauncherWindow(window);
 }
