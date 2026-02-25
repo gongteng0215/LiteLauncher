@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      electron:
-        specifier: ^40.2.1
-        version: 40.2.1
       sqlite3:
         specifier: ^5.1.7
         version: 5.1.7
@@ -18,6 +15,9 @@ importers:
       '@types/node':
         specifier: ^25.2.2
         version: 25.2.2
+      electron:
+        specifier: ^40.2.1
+        version: 40.2.1
       electron-builder:
         specifier: ^26.7.0
         version: 26.7.0(electron-builder-squirrel-windows@26.7.0)
