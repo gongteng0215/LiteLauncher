@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "LiteLauncher 最小可用版本",
   "main": "dist/main/index.js",
   "scripts": {
@@ -61,7 +61,6 @@
       ]
     },
     "win": {
-      "icon": "src/assets/icon.ico",
       "target": [
         {
           "target": "nsis",
