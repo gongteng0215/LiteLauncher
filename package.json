@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "LiteLauncher 最小可用版本",
   "main": "dist/main/index.js",
   "scripts": {
@@ -11,12 +11,22 @@
     "test:cashflow": "pnpm run build && node dist/test/cashflow-state-machine.test.js && node dist/test/cashflow-persistence.test.js && node dist/test/cashflow-plugin-contract.test.js && node dist/test/cashflow-performance.test.js",
     "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
     "check:encoding": "node scripts/check-encoding.cjs",
-    "dist:win": "pnpm run build && electron-builder --win nsis --x64",
-    "dist:win:portable": "pnpm run build && electron-builder --win portable --x64"
+    "pack": "pnpm run build && electron-builder --dir --publish never",
+    "dist:mac": "pnpm run build && electron-builder --mac dmg zip --publish never",
+    "dist:mac:arm64": "pnpm run build && electron-builder --mac dmg zip --arm64 --publish never",
+    "dist:mac:x64": "pnpm run build && electron-builder --mac dmg zip --x64 --publish never",
+    "dist:win": "pnpm run build && electron-builder --win nsis zip --x64 --publish never",
+    "dist:win:portable": "pnpm run build && electron-builder --win portable --x64 --publish never",
+    "release:mac": "pnpm run build && electron-builder --mac dmg zip -p always",
+    "release:win": "pnpm run build && electron-builder --win nsis zip --x64 -p always"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gongteng0215/LiteLauncher.git"
+  },
   "type": "commonjs",
   "dependencies": {
     "sqlite3": "^5.1.7"
@@ -33,11 +43,25 @@
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist/**",
+      "node_modules/**",
+      "package.json"
+    ],
     "asar": true,
     "asarUnpack": [
       "**/*.node"
     ],
+    "mac": {
+      "minimumSystemVersion": "12.0.0",
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
     "win": {
+      "icon": "src/assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -50,13 +74,25 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "draft"
+      }
+    ]
   },
   "pnpm": {
     "onlyBuiltDependencies": [
