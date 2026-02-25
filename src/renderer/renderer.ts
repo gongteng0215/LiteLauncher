@@ -239,8 +239,17 @@ const statusElement = document.getElementById(
   "status-text"
 ) as HTMLDivElement | null;
 const hintElement = document.getElementById("hint-text") as HTMLDivElement | null;
+const settingsShortcutButtonElement = document.getElementById(
+  "settings-shortcut-btn"
+) as HTMLButtonElement | null;
 
-if (!inputElement || !listElement || !statusElement || !hintElement) {
+if (
+  !inputElement ||
+  !listElement ||
+  !statusElement ||
+  !hintElement ||
+  !settingsShortcutButtonElement
+) {
   throw new Error("\u6e32\u67d3\u5c42\u521d\u59cb\u5316\u5931\u8d25\uff1a\u7f3a\u5c11\u5fc5\u8981 DOM \u8282\u70b9");
 }
 
@@ -248,6 +257,7 @@ const input = inputElement;
 const list = listElement;
 const statusText = statusElement;
 const hintText = hintElement;
+const settingsShortcutButton = settingsShortcutButtonElement;
 
 let entries: ResultEntry[] = [];
 let searchSections: SearchSection[] = [];
@@ -268,7 +278,6 @@ let cashflowReports: CashflowReports | null = null;
 let cashflowJobs: CashflowJobOption[] = [];
 
 const DEBUG_LOG_LIMIT = 22;
-const GRID_COLUMNS = 10;
 const SETTINGS_LIMIT_MIN = 5;
 const SETTINGS_LIMIT_MAX = 50;
 const PASSWORD_LENGTH_MIN = 4;
@@ -1268,6 +1277,10 @@ function resetSearchSections(): void {
   searchSections = [];
 }
 
+function isStandaloneToolbarCommand(item: LaunchItem): boolean {
+  return item.target.trim().toLowerCase() === "command:settings";
+}
+
 function addSearchSection(
   id: SectionId,
   title: string,
@@ -1276,7 +1289,9 @@ function addSearchSection(
   emptyText: string
 ): void {
   const indexes: number[] = [];
-  const limited = items.slice(0, displayLimit);
+  const filteredItems =
+    id === "search" ? items : items.filter((item) => !isStandaloneToolbarCommand(item));
+  const limited = filteredItems.slice(0, displayLimit);
 
   for (const item of limited) {
     indexes.push(entries.length);
@@ -1426,6 +1441,42 @@ function renderSearchSections(): void {
     block.appendChild(grid);
     list.appendChild(block);
   }
+}
+
+function getVisibleGridColumnCount(selected = selectedIndex): number {
+  if (mode !== "search") {
+    return 1;
+  }
+
+  const tile = list.querySelector<HTMLElement>(
+    `.result-item.result-tile[data-index="${selected}"]`
+  );
+  if (!tile) {
+    return 1;
+  }
+
+  const grid = tile.closest(".section-grid");
+  if (!(grid instanceof HTMLElement)) {
+    return 1;
+  }
+
+  const tiles = Array.from(
+    grid.querySelectorAll<HTMLElement>(".result-item.result-tile")
+  );
+  if (tiles.length === 0) {
+    return 1;
+  }
+
+  const firstRowTop = tiles[0]?.offsetTop ?? 0;
+  let columns = 0;
+  for (const item of tiles) {
+    if (item.offsetTop !== firstRowTop) {
+      break;
+    }
+    columns += 1;
+  }
+
+  return Math.max(1, columns);
 }
 
 function renderDetailList(): void {
@@ -1663,6 +1714,11 @@ function renderSettingsPanel(): void {
   panel.append(title, description, form);
   panelItem.appendChild(panel);
   list.appendChild(panelItem);
+}
+
+function openSettingsPanel(): void {
+  setMode("settings");
+  void refreshEntries("");
 }
 
 function buildPasswordGenerateTarget(options: PasswordGeneratorOptions): string {
@@ -2875,7 +2931,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
   if (isArrowDown) {
     event.preventDefault();
-    const step = mode === "search" ? GRID_COLUMNS : 1;
+    const step = mode === "search" ? getVisibleGridColumnCount() : 1;
     pushDebugLog(`renderer action: moveSelection(+${step})`);
     moveSelection(step);
     return;
@@ -2883,7 +2939,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
   if (isArrowUp) {
     event.preventDefault();
-    const step = mode === "search" ? GRID_COLUMNS : 1;
+    const step = mode === "search" ? getVisibleGridColumnCount() : 1;
     pushDebugLog(`renderer action: moveSelection(-${step})`);
     moveSelection(-step);
     return;
@@ -2936,6 +2992,13 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 function registerEvents(): void {
+  settingsShortcutButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    pushDebugLog("renderer action: toolbar settings");
+    openSettingsPanel();
+  });
+
   input.addEventListener("input", () => {
     currentQuery = input.value;
     void refreshEntries(currentQuery);
@@ -3007,9 +3070,8 @@ function registerEvents(): void {
       }
 
       if (panel === "settings") {
-        setMode("settings");
         pushDebugLog("renderer openPanel=settings");
-        void refreshEntries("");
+        openSettingsPanel();
         return;
       }
 

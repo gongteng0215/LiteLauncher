@@ -13,14 +13,25 @@
   <body>
     <main class="shell">
       <header class="header">
-        <input
-          id="search-input"
-          class="search-input"
-          type="text"
-          placeholder="搜索应用（图标网格）"
-          autocomplete="off"
-          spellcheck="false"
-        />
+        <div class="header-row">
+          <input
+            id="search-input"
+            class="search-input"
+            type="text"
+            placeholder="搜索应用（图标网格）"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            id="settings-shortcut-btn"
+            class="header-toolbar-btn"
+            type="button"
+            aria-label="打开设置"
+            title="设置"
+          >
+            设置
+          </button>
+        </div>
       </header>
       <section class="results">
         <ul id="result-list" class="result-list"></ul>
