@@ -272,9 +272,13 @@ body {
   font-size: 10px;
   line-height: 1.2;
   color: rgba(233, 242, 255, 0.9);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .result-item.result-tile.is-pinned {
@@ -297,7 +301,7 @@ body {
 .result-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
 }
@@ -306,9 +310,14 @@ body {
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
-  white-space: nowrap;
+  line-height: 1.22;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .result-type {
@@ -320,6 +329,7 @@ body {
   border-radius: 999px;
   padding: 1px 6px;
   flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .result-subtitle {
@@ -552,6 +562,7 @@ body {
   grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
   gap: 10px;
   align-content: start;
+  align-items: start;
 }
 
 .cashflow-column {
@@ -970,16 +981,42 @@ body {
   }
 
   .cashflow-board {
-    grid-template-columns: minmax(420px, 1.12fr) minmax(320px, 0.88fr);
+    grid-template-columns: minmax(460px, 1.12fr) minmax(340px, 0.88fr);
+    grid-template-areas:
+      "opportunity ai"
+      "assets role"
+      "logs reports";
     gap: 10px;
   }
 
   .cashflow-column {
+    display: contents;
     gap: 10px;
   }
 
+  .cashflow-block-opportunity {
+    grid-area: opportunity;
+  }
+
+  .cashflow-block-assets {
+    grid-area: assets;
+  }
+
+  .cashflow-block-role {
+    grid-area: role;
+  }
+
+  .cashflow-block-ai {
+    grid-area: ai;
+  }
+
+  .cashflow-block-reports {
+    grid-area: reports;
+  }
+
   .cashflow-block-logs {
-    grid-column: 1 / -1;
+    grid-area: logs;
+    grid-column: auto;
   }
 
   .cashflow-opportunity-actions {
@@ -993,7 +1030,7 @@ body {
   }
 
   .cashflow-log-list {
-    max-height: 210px;
+    max-height: 220px;
   }
 }
 

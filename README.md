@@ -19,7 +19,8 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 - 插件：
   - 密码生成器（可视化面板）
   - Cashflow Lite（现金流游戏、AI 对战、统计入口）
-- Windows 打包：NSIS 安装包 + Portable 便携包
+- 跨平台打包脚本：Windows（NSIS/Portable/zip）+ macOS（dmg/zip）
+- GitHub Actions 自动发布：`v*` tag 构建并上传 GitHub Release 资产
 
 ## 环境要求
 
@@ -94,45 +95,75 @@ pnpm run test:cashflow
 - `Esc`：返回主搜索页
 - 从 Cashflow 返回后，窗口会自动回到主页面紧凑尺寸
 
-## 打包（Windows 11）
+## 打包（本地）
 
 先确保本机有 C++ 编译环境（给 `sqlite3` 使用）：
 
 - 推荐安装 Visual Studio 2022 Build Tools
 - 组件勾选 `Desktop development with C++`
 
-打包安装版：
+通用目录打包（不生成安装器）：
+
+```powershell
+pnpm.cmd run pack
+```
+
+Windows 安装版（NSIS + zip）：
 
 ```powershell
 pnpm.cmd run dist:win
 ```
 
-打包便携版：
+Windows 便携版：
 
 ```powershell
 pnpm.cmd run dist:win:portable
+```
+
+macOS（本地需要在 macOS 环境执行）：
+
+```bash
+pnpm run dist:mac
+pnpm run dist:mac:arm64
+pnpm run dist:mac:x64
 ```
 
 产物目录：`release/`
 
 常见产物：
 
-- `LiteLauncher Setup x.y.z.exe`：NSIS 安装包
-- `LiteLauncher x.y.z.exe`：Portable 便携包
-- `latest.yml`：自动更新元数据
-- `*.blockmap`：增量更新块映射
+- Windows：`LiteLauncher Setup x.y.z.exe`、`LiteLauncher x.y.z.exe`、`*.zip`
+- macOS：`*.dmg`、`*.zip`
+- 自动更新元数据：`latest.yml`（Windows）、`latest-mac.yml`（macOS）
+- 增量更新映射：`*.blockmap`
 
-## 发布到 GitHub Release
+## GitHub Release（手动 + 自动）
 
-示例（建议上传安装包 + `latest.yml` + `blockmap`）：
+### 自动发布（推荐）
+
+已接入 GitHub Actions 工作流：`/.github/workflows/build-desktop.yml`
+
+- `workflow_dispatch`：手动触发，仅上传到 Actions Artifacts
+- `push tags: v*`：触发 Windows/macOS 构建，并在完成后自动上传到对应 GitHub Release
+
+说明：
+
+- Intel macOS 构建使用 `macos-12` runner（`MACOSX_DEPLOYMENT_TARGET=12.0`），GitHub 队列可能较慢
+- 工作流会自动创建 Release（若不存在）并上传产物
+- 两个 macOS job 都会生成 `latest-mac.yml`，因文件名冲突，当前自动上传阶段跳过该文件（保留 `dmg/zip/blockmap`）
+
+### 手动发布（备用）
+
+示例（Windows 产物）：
 
 ```powershell
-gh release create v1.0.0 release/*.exe release/latest.yml release/*.blockmap -t "LiteLauncher v1.0.0" -n "Windows build"
+gh release create v1.0.4 release/*.exe release/*.zip release/latest.yml release/*.blockmap -t "LiteLauncher v1.0.4" -n "Windows build"
 ```
 
 说明：
 
-- `latest.yml`：客户端自动更新时读取的版本与下载信息
+- `latest.yml`：Windows 自动更新读取的版本与下载信息
+- `latest-mac.yml`：macOS 自动更新元数据（arm64/x64 默认同名，手动上传时建议区分或仅保留目标架构）
 - `*.blockmap`：用于增量更新，减少下载体积
 
 ## 常见问题
