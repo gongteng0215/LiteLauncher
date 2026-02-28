@@ -1,6 +1,6 @@
 ﻿# Cashflow Lite 开发任务清单
 
-更新时间：2026-02-25
+更新时间：2026-02-26
 来源：`docs/cashflow-game/cashflow-prd.md`
 
 状态：`待办` / `进行中` / `阻塞` / `完成`

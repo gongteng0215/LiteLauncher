@@ -57,6 +57,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getInitialItems,
   IPC_CHANNELS.getPinnedItems,
   IPC_CHANNELS.getPluginItems,
+  IPC_CHANNELS.getAppVersion,
   IPC_CHANNELS.getSearchDisplayConfig,
   IPC_CHANNELS.setSearchDisplayConfig,
   IPC_CHANNELS.getLaunchAtLoginStatus,
@@ -643,6 +644,10 @@ export function registerIpcHandlers(
     const config = options.settingsProvider.getSearchDisplayConfig();
     const items = await options.searchProvider.getPluginItems(config.pluginLimit);
     return attachIcons(items);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAppVersion, () => {
+    return app.getVersion();
   });
 
   ipcMain.handle(IPC_CHANNELS.getSearchDisplayConfig, () => {

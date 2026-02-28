@@ -196,6 +196,7 @@ interface LauncherApi {
   getInitialItems(): Promise<LaunchItem[]>;
   getPinnedItems(): Promise<LaunchItem[]>;
   getPluginItems(): Promise<LaunchItem[]>;
+  getAppVersion(): Promise<string>;
   getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
   setSearchDisplayConfig(
     config: Partial<SearchDisplayConfig>
@@ -305,6 +306,7 @@ let launchAtLoginStatus: LaunchAtLoginStatus = {
   supported: false,
   reason: "加载中..."
 };
+let appVersion = "加载中...";
 
 function getLauncherApi(): LauncherApi | null {
   return ((window as Window & { launcher?: LauncherApi }).launcher ??
@@ -1711,6 +1713,20 @@ function renderSettingsPanel(): void {
   actions.append(resetButton, saveButton);
   form.appendChild(actions);
 
+  const versionRow = document.createElement("div");
+  versionRow.className = "settings-version";
+
+  const versionLabel = document.createElement("span");
+  versionLabel.className = "settings-version-label";
+  versionLabel.textContent = "当前版本";
+
+  const versionValue = document.createElement("span");
+  versionValue.className = "settings-version-value";
+  versionValue.textContent = /^\d/.test(appVersion) ? `v${appVersion}` : appVersion;
+
+  versionRow.append(versionLabel, versionValue);
+  form.appendChild(versionRow);
+
   panel.append(title, description, form);
   panelItem.appendChild(panel);
   list.appendChild(panelItem);
@@ -2599,12 +2615,18 @@ async function refreshEntries(query: string): Promise<void> {
     }
 
     if (mode === "settings") {
-      const [nextSearchConfig, nextLaunchAtLoginStatus] = await Promise.all([
-        launcher.getSearchDisplayConfig(),
-        launcher.getLaunchAtLoginStatus()
-      ]);
+      const [nextSearchConfig, nextLaunchAtLoginStatus, nextAppVersion] =
+        await Promise.all([
+          launcher.getSearchDisplayConfig(),
+          launcher.getLaunchAtLoginStatus(),
+          launcher.getAppVersion().catch(() => "")
+        ]);
       searchDisplayConfig = nextSearchConfig;
       launchAtLoginStatus = nextLaunchAtLoginStatus;
+      appVersion =
+        typeof nextAppVersion === "string" && nextAppVersion.trim()
+          ? nextAppVersion.trim()
+          : "未知版本";
       if (token !== latestSearchToken) {
         return;
       }

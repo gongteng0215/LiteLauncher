@@ -14,6 +14,7 @@ declare global {
       getInitialItems(): Promise<LaunchItem[]>;
       getPinnedItems(): Promise<LaunchItem[]>;
       getPluginItems(): Promise<LaunchItem[]>;
+      getAppVersion(): Promise<string>;
       getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
       setSearchDisplayConfig(
         config: Partial<SearchDisplayConfig>

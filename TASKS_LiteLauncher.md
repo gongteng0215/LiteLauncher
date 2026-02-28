@@ -1,6 +1,6 @@
 ﻿# LiteLauncher 开发任务清单
 
-更新时间：2026-02-25
+更新时间：2026-02-26
 来源：`PRD_LiteLauncher.md`
 
 状态：`待办` / `进行中` / `阻塞` / `完成`
@@ -58,7 +58,7 @@
 | [x] | LL-402 | `package.json` 打包配置收敛 | P0 | 完成 | `electron` 在 devDependencies |
 | [x] | LL-403 | README 打包与 Release 指南 | P0 | 完成 | 包含 `latest.yml`/`blockmap` |
 | [ ] | LL-404 | 自动更新端到端验证 | P1 | 待办 | 需发布后联调（`latest.yml`/`latest-mac.yml`） |
-| [x] | LL-405 | GitHub Actions 自动打包发布 | P2 | 完成 | `v*` tag 触发构建并上传 GitHub Release 资产 |
+| [x] | LL-405 | GitHub Actions 自动打包发布 | P2 | 完成 | `v*` tag 触发构建并上传 GitHub Release 资产（含 `macOS x64` on `macos-14`、发布 job `--repo` 修复） |
 | [ ] | LL-406 | 正式图标资源接入（合法 `.ico` / `.icns`） | P1 | 待办 | 当前 Windows icon 配置已临时移除，macOS 亦缺 `.icns` |
 | [ ] | LL-407 | macOS 签名与公证流程 | P1 | 待办 | 需 Apple 证书与 Secrets |
 | [ ] | LL-408 | GitHub Release 自动生成更新说明 | P2 | 待办 | 基于 tag/commit 自动汇总 |

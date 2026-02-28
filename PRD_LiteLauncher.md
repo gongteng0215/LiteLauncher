@@ -1,6 +1,6 @@
 ﻿# LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-02-25
+更新时间：2026-02-26
 
 ## 1. 产品目标
 
@@ -70,7 +70,7 @@
 
 - `electron-builder` 本地打包脚本：Windows（NSIS/Portable/zip）、macOS（dmg/zip）
 - 产物输出到 `release/`
-- GitHub Actions：`v*` tag 触发 Windows/macOS 构建并自动上传 GitHub Release 资产
+- GitHub Actions：`v*` tag 触发 Windows/macOS 构建并自动上传 GitHub Release 资产（macOS x64 在 `macos-14` 构建，目标 `macOS 12`）
 
 ### 3.2 规划中
 

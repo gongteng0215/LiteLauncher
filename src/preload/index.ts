@@ -36,6 +36,9 @@ const api = {
   getPluginItems(): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getPluginItems);
   },
+  getAppVersion(): Promise<string> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getAppVersion);
+  },
   getSearchDisplayConfig(): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.getSearchDisplayConfig);
   },

@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   getInitialItems: "launcher:get-initial-items",
   getPinnedItems: "launcher:get-pinned-items",
   getPluginItems: "launcher:get-plugin-items",
+  getAppVersion: "launcher:get-app-version",
   getSearchDisplayConfig: "launcher:get-search-display-config",
   setSearchDisplayConfig: "launcher:set-search-display-config",
   getLaunchAtLoginStatus: "launcher:get-launch-at-login-status",

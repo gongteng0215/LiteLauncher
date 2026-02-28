@@ -148,8 +148,9 @@ pnpm run dist:mac:x64
 
 说明：
 
-- Intel macOS 构建使用 `macos-12` runner（`MACOSX_DEPLOYMENT_TARGET=12.0`），GitHub 队列可能较慢
+- macOS x64 包当前在 `macos-14` runner 构建，并保留 `MACOSX_DEPLOYMENT_TARGET=12.0`
 - 工作流会自动创建 Release（若不存在）并上传产物
+- 发布 job 已使用 `gh --repo` 显式指定仓库，不依赖 `checkout` 的 `.git` 目录
 - 两个 macOS job 都会生成 `latest-mac.yml`，因文件名冲突，当前自动上传阶段跳过该文件（保留 `dmg/zip/blockmap`）
 
 ### 手动发布（备用）
@@ -157,7 +158,7 @@ pnpm run dist:mac:x64
 示例（Windows 产物）：
 
 ```powershell
-gh release create v1.0.4 release/*.exe release/*.zip release/latest.yml release/*.blockmap -t "LiteLauncher v1.0.4" -n "Windows build"
+gh release create v1.0.5 release/*.exe release/*.zip release/latest.yml release/*.blockmap -t "LiteLauncher v1.0.5" -n "Windows build"
 ```
 
 说明：
