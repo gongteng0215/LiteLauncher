@@ -2,6 +2,7 @@
 
 LiteLauncher is a lightweight desktop launcher built with `Electron + TypeScript + SQLite`.
 It focuses on one fast flow: **invoke -> search -> run**, and includes plugin support (Password Generator and Cashflow Lite game).
+Last updated: 2026-03-01
 
 ---
 
@@ -36,6 +37,7 @@ It is optimized for quick keyboard use while still supporting mouse interaction 
   - Password Generator (visual panel, length/symbol/count options)
   - Cashflow Lite (round-based finance game with AI opponents and persistence)
 - App icon and tray icon support
+- Better Windows shortcut icon resolving (real target first, system associated icon fallback)
 - Cross-platform packaging scripts:
   - Windows: NSIS / Portable / zip
   - macOS: dmg / zip
@@ -211,6 +213,7 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
   - 密码生成器（可视化面板，长度/特殊符号/生成数量）
   - Cashflow Lite（现金流游戏、AI 对战、存档与统计）
 - 应用图标与托盘图标支持
+- Windows 快捷方式图标解析增强（优先真实目标图标，失败时回退系统关联图标）
 - 跨平台打包脚本（Windows + macOS）
 
 ### 环境要求
