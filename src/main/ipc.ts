@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -80,9 +81,16 @@ const ICON_ELIGIBLE_TYPES = new Set<LaunchItem["type"]>([
 ]);
 
 const iconDataCache = new Map<string, string>();
-const shortcutInfoCache = new Map<string, { target?: string; icon?: string } | null>();
+type ShortcutInfo = {
+  target?: string;
+  icon?: string;
+  launchTarget?: string;
+};
+const shortcutInfoCache = new Map<string, ShortcutInfo | null>();
+const windowsAssociatedIconCache = new Map<string, string | null>();
+const windowsAssociatedIconPending = new Map<string, Promise<string | null>>();
 const ICON_DEBUG_ENABLED = process.env.LITELAUNCHER_DEBUG_ICONS === "1";
-const ALLOW_SHORTCUT_FILE_ICON_FALLBACK = false;
+const ALLOW_SHORTCUT_FILE_ICON_FALLBACK = true;
 
 type IconCandidate = {
   source: string;
@@ -185,10 +193,168 @@ function normalizeIconLocation(raw: string | null | undefined): string | null {
   return normalizePathCandidate(withoutIndex);
 }
 
-function readShortcutInfo(shortcutPath: string): { target?: string; icon?: string } | null {
+function splitCommandLineArgs(raw: string): string[] {
+  const text = raw.trim();
+  if (!text) {
+    return [];
+  }
+
+  const tokens: string[] = [];
+  const pattern = /"([^"]*)"|'([^']*)'|([^\s]+)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const token = match[1] ?? match[2] ?? match[3] ?? "";
+    if (token) {
+      tokens.push(token);
+    }
+  }
+
+  return tokens;
+}
+
+function resolveShortcutArgPath(
+  token: string,
+  workingDirectory: string | undefined
+): string | null {
+  const normalized = normalizePathCandidate(token);
+  if (!normalized) {
+    return null;
+  }
+
+  if (path.isAbsolute(normalized)) {
+    return fs.existsSync(normalized) ? normalized : null;
+  }
+
+  if (!workingDirectory) {
+    return null;
+  }
+
+  const combined = path.resolve(workingDirectory, normalized);
+  return fs.existsSync(combined) ? combined : null;
+}
+
+function resolveSquirrelProcessStartTarget(
+  shortcutTarget: string | undefined,
+  processStartValue: string,
+  workingDirectory: string | undefined
+): string | undefined {
+  if (!shortcutTarget) {
+    return undefined;
+  }
+
+  const targetBase = path.basename(shortcutTarget).toLowerCase();
+  if (targetBase !== "update.exe") {
+    return undefined;
+  }
+
+  const direct = resolveShortcutArgPath(processStartValue, workingDirectory);
+  if (direct) {
+    return direct;
+  }
+
+  const installRoot = path.dirname(shortcutTarget);
+  const directInRoot = path.resolve(installRoot, processStartValue);
+  if (fs.existsSync(directInRoot)) {
+    return directInRoot;
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(installRoot, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (!entry.name.toLowerCase().startsWith("app-")) {
+      continue;
+    }
+
+    const candidate = path.resolve(installRoot, entry.name, processStartValue);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveShortcutLaunchTarget(
+  shortcutTarget: string | undefined,
+  shortcutArgs: string | undefined,
+  workingDirectory: string | undefined
+): string | undefined {
+  if (!shortcutArgs) {
+    return undefined;
+  }
+
+  const tokens = splitCommandLineArgs(shortcutArgs);
+  if (tokens.length === 0) {
+    return undefined;
+  }
+
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const key = tokens[i]?.trim().toLowerCase();
+    if (
+      key !== "--processstart" &&
+      key !== "-processstart" &&
+      key !== "/processstart"
+    ) {
+      continue;
+    }
+
+    const processStartValue = tokens[i + 1]?.trim();
+    if (!processStartValue) {
+      continue;
+    }
+
+    const squirrelResolved = resolveSquirrelProcessStartTarget(
+      shortcutTarget,
+      processStartValue,
+      workingDirectory
+    );
+    if (squirrelResolved) {
+      return squirrelResolved;
+    }
+
+    const direct = resolveShortcutArgPath(processStartValue, workingDirectory);
+    if (direct) {
+      return direct;
+    }
+  }
+
+  for (const token of tokens) {
+    const resolved = resolveShortcutArgPath(token, workingDirectory);
+    if (!resolved) {
+      continue;
+    }
+    if (!/\.(exe|com|bat|cmd|lnk)$/i.test(resolved)) {
+      continue;
+    }
+    return resolved;
+  }
+
+  return undefined;
+}
+
+function readShortcutInfo(shortcutPath: string): ShortcutInfo | null {
   try {
     const shortcut = shell.readShortcutLink(shortcutPath);
     const target = normalizePathCandidate(shortcut.target ?? null) ?? undefined;
+    const shortcutMeta = shortcut as unknown as {
+      cwd?: string;
+      workingDirectory?: string;
+    };
+    const workingDirectoryRaw =
+      shortcutMeta.workingDirectory ?? shortcutMeta.cwd ?? null;
+    const workingDirectory =
+      normalizePathCandidate(workingDirectoryRaw) ?? undefined;
+    const shortcutArgs =
+      typeof shortcut.args === "string" ? shortcut.args.trim() : "";
     let icon: string | undefined;
 
     const rawIcon = normalizePathCandidate(shortcut.icon ?? null);
@@ -198,7 +364,13 @@ function readShortcutInfo(shortcutPath: string): { target?: string; icon?: strin
       icon = iconIndex !== undefined ? `${rawIcon},${iconIndex}` : rawIcon;
     }
 
-    return { target, icon };
+    const launchTarget = resolveShortcutLaunchTarget(
+      target,
+      shortcutArgs || undefined,
+      workingDirectory
+    );
+
+    return { target, icon, launchTarget };
   } catch {
     return null;
   }
@@ -206,7 +378,7 @@ function readShortcutInfo(shortcutPath: string): { target?: string; icon?: strin
 
 async function resolveShortcutInfo(
   shortcutPath: string
-): Promise<{ target?: string; icon?: string } | null> {
+): Promise<ShortcutInfo | null> {
   const cacheKey = shortcutPath.toLowerCase();
   if (shortcutInfoCache.has(cacheKey)) {
     return shortcutInfoCache.get(cacheKey) ?? null;
@@ -310,6 +482,23 @@ async function buildIconCandidates(item: LaunchItem): Promise<IconCandidate[]> {
 
   if (item.type === "application" && normalizedTarget && isShortcut) {
     const info = await resolveShortcutInfo(item.target);
+    pushIconCandidate(
+      candidates,
+      seen,
+      normalizePathCandidate(info?.launchTarget),
+      "shortcut-launch-target"
+    );
+    const launchRealTarget = info?.launchTarget
+      ? safeRealPathCandidate(info.launchTarget)
+      : null;
+    if (launchRealTarget) {
+      pushIconCandidate(
+        candidates,
+        seen,
+        launchRealTarget,
+        "shortcut-launch-target-realpath"
+      );
+    }
     pushIconCandidate(
       candidates,
       seen,
@@ -423,6 +612,122 @@ function looksLikeStaticImagePath(iconSource: string): boolean {
     normalized.endsWith(".bmp") ||
     normalized.endsWith(".webp")
   );
+}
+
+function isWindowsAssociatedIconCandidate(iconSource: string): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  const lower = iconSource.toLowerCase();
+  return (
+    lower.endsWith(".exe") ||
+    lower.endsWith(".lnk") ||
+    lower.endsWith(".com") ||
+    lower.endsWith(".bat") ||
+    lower.endsWith(".cmd")
+  );
+}
+
+function escapeForPowerShellSingleQuote(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+async function tryReadWindowsAssociatedIconAsDataUrl(
+  iconSource: string
+): Promise<string | null> {
+  if (!isWindowsAssociatedIconCandidate(iconSource)) {
+    return null;
+  }
+
+  const cacheKey = `assoc:${iconSource.toLowerCase()}`;
+  if (windowsAssociatedIconCache.has(cacheKey)) {
+    return windowsAssociatedIconCache.get(cacheKey) ?? null;
+  }
+
+  const pending = windowsAssociatedIconPending.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const escaped = escapeForPowerShellSingleQuote(iconSource);
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    "Add-Type -AssemblyName System.Drawing",
+    `$path='${escaped}'`,
+    "if(-not (Test-Path -LiteralPath $path)){ return }",
+    "$icon=$null;$bmp=$null;$ms=$null",
+    "try{",
+    "  $icon=[System.Drawing.Icon]::ExtractAssociatedIcon($path)",
+    "  if($null -eq $icon){ return }",
+    "  $bmp=$icon.ToBitmap()",
+    "  $ms=New-Object System.IO.MemoryStream",
+    "  $bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png)",
+    "  [System.Convert]::ToBase64String($ms.ToArray())",
+    "} finally {",
+    "  if($ms){ $ms.Dispose() }",
+    "  if($bmp){ $bmp.Dispose() }",
+    "  if($icon){ $icon.Dispose() }",
+    "}"
+  ].join("; ");
+
+  const promise = new Promise<string | null>((resolve) => {
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script
+      ],
+      {
+        windowsHide: true
+      }
+    );
+
+    let stdout = "";
+    let resolved = false;
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const finish = (value: string | null) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      windowsAssociatedIconCache.set(cacheKey, value);
+      resolve(value);
+    };
+
+    child.once("error", () => {
+      finish(null);
+    });
+
+    child.once("close", (code) => {
+      if (code !== 0) {
+        finish(null);
+        return;
+      }
+
+      const base64 = stdout.trim();
+      if (!base64) {
+        finish(null);
+        return;
+      }
+
+      finish(`data:image/png;base64,${base64}`);
+    });
+  }).finally(() => {
+    windowsAssociatedIconPending.delete(cacheKey);
+  });
+
+  windowsAssociatedIconPending.set(cacheKey, promise);
+  return promise;
 }
 
 function tryReadIcnsAsDataUrl(iconSource: string): string | null {
@@ -540,8 +845,23 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
       return staticImageData;
     }
 
+    if (candidate.reason.startsWith("shortcut-")) {
+      const associatedData =
+        await tryReadWindowsAssociatedIconAsDataUrl(iconSource);
+      if (associatedData) {
+        iconDataCache.set(cacheKey, associatedData);
+        debugIcon(
+          `resolved reason=${candidate.reason}:win-associated title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
+        );
+        return associatedData;
+      }
+    }
+
     try {
-      const icon = await app.getFileIcon(iconSource, { size: "normal" });
+      let icon = await app.getFileIcon(iconSource, { size: "large" });
+      if (icon.isEmpty()) {
+        icon = await app.getFileIcon(iconSource, { size: "normal" });
+      }
       if (icon.isEmpty()) {
         const imageData = tryReadImageFileAsDataUrl(iconSource);
         if (imageData) {

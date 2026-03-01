@@ -307,6 +307,7 @@ let launchAtLoginStatus: LaunchAtLoginStatus = {
   reason: "加载中..."
 };
 let appVersion = "加载中...";
+let activeSearchContextMenu: HTMLDivElement | null = null;
 
 function getLauncherApi(): LauncherApi | null {
   return ((window as Window & { launcher?: LauncherApi }).launcher ??
@@ -1348,6 +1349,179 @@ async function togglePinned(index: number): Promise<void> {
   await refreshEntries(currentQuery);
 }
 
+function isAdminRunnableItem(item: LaunchItem): boolean {
+  return item.type === "application" || item.type === "file";
+}
+
+function isRevealableItem(item: LaunchItem): boolean {
+  return (
+    item.type === "application" ||
+    item.type === "file" ||
+    item.type === "folder"
+  );
+}
+
+function closeSearchContextMenu(): void {
+  if (!activeSearchContextMenu) {
+    return;
+  }
+
+  activeSearchContextMenu.remove();
+  activeSearchContextMenu = null;
+}
+
+async function runAsAdmin(index: number): Promise<void> {
+  if (mode !== "search") {
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法管理员运行");
+    return;
+  }
+
+  const selected = entries[index];
+  if (!selected || selected.kind !== "launch") {
+    return;
+  }
+
+  const item = selected.item;
+  if (!isAdminRunnableItem(item)) {
+    setStatus(`不支持管理员运行：${item.title}`);
+    return;
+  }
+
+  const commandItem: LaunchItem = {
+    id: `command:runas:${item.id}`,
+    type: "command",
+    title: item.title,
+    subtitle: `管理员运行：${item.subtitle}`,
+    target: `command:runas:${encodeURIComponent(item.target)}`,
+    keywords: ["runas", "admin"]
+  };
+
+  const result = await launcher.execute(commandItem);
+  if (!result.ok) {
+    setStatus(result.message ?? `管理员运行失败：${item.title}`);
+    return;
+  }
+
+  setStatus(result.message ?? `已请求管理员运行：${item.title}`);
+}
+
+async function revealItemLocation(index: number): Promise<void> {
+  if (mode !== "search") {
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法打开所在位置");
+    return;
+  }
+
+  const selected = entries[index];
+  if (!selected || selected.kind !== "launch") {
+    return;
+  }
+
+  const item = selected.item;
+  if (!isRevealableItem(item)) {
+    setStatus(`不支持打开所在位置：${item.title}`);
+    return;
+  }
+
+  const commandItem: LaunchItem = {
+    id: `command:reveal:${item.id}`,
+    type: "command",
+    title: item.title,
+    subtitle: `打开所在位置：${item.subtitle}`,
+    target: `command:reveal:${encodeURIComponent(item.target)}`,
+    keywords: ["reveal", "location", "folder"]
+  };
+
+  const result = await launcher.execute(commandItem);
+  if (!result.ok) {
+    setStatus(result.message ?? `打开所在位置失败：${item.title}`);
+    return;
+  }
+
+  setStatus(result.message ?? `已打开所在位置：${item.title}`);
+}
+
+function openSearchContextMenu(
+  event: MouseEvent,
+  index: number,
+  entry: ResultEntry
+): void {
+  if (entry.kind !== "launch") {
+    return;
+  }
+
+  closeSearchContextMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "search-context-menu";
+  menu.style.left = `${event.clientX}px`;
+  menu.style.top = `${event.clientY}px`;
+  menu.addEventListener("mousedown", (menuEvent) => {
+    menuEvent.stopPropagation();
+  });
+  menu.addEventListener("click", (menuEvent) => {
+    menuEvent.stopPropagation();
+  });
+
+  const pinButton = document.createElement("button");
+  pinButton.type = "button";
+  pinButton.className = "search-context-menu-item";
+  pinButton.textContent = entry.item.pinned ? "取消置顶" : "置顶";
+  pinButton.addEventListener("click", () => {
+    closeSearchContextMenu();
+    void togglePinned(index);
+  });
+  menu.appendChild(pinButton);
+
+  if (isRevealableItem(entry.item)) {
+    const revealButton = document.createElement("button");
+    revealButton.type = "button";
+    revealButton.className = "search-context-menu-item";
+    revealButton.textContent = "打开所在位置";
+    revealButton.addEventListener("click", () => {
+      closeSearchContextMenu();
+      void revealItemLocation(index);
+    });
+    menu.appendChild(revealButton);
+  }
+
+  if (isAdminRunnableItem(entry.item)) {
+    const adminButton = document.createElement("button");
+    adminButton.type = "button";
+    adminButton.className = "search-context-menu-item";
+    adminButton.textContent = "管理员运行";
+    adminButton.addEventListener("click", () => {
+      closeSearchContextMenu();
+      void runAsAdmin(index);
+    });
+    menu.appendChild(adminButton);
+  }
+
+  document.body.appendChild(menu);
+  activeSearchContextMenu = menu;
+
+  const bounds = menu.getBoundingClientRect();
+  let left = bounds.left;
+  let top = bounds.top;
+  if (bounds.right > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - bounds.width - 8);
+  }
+  if (bounds.bottom > window.innerHeight - 8) {
+    top = Math.max(8, window.innerHeight - bounds.height - 8);
+  }
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+}
+
 function bindResultInteractions(
   element: HTMLElement,
   index: number,
@@ -1372,7 +1546,7 @@ function bindResultInteractions(
     event.stopPropagation();
     selectedIndex = index;
     renderList();
-    void togglePinned(index);
+    openSearchContextMenu(event, index, entry);
   });
 }
 
@@ -2560,6 +2734,7 @@ function renderCashflowPanel(): void {
 }
 
 function renderList(): void {
+  closeSearchContextMenu();
   clearList();
 
   if (mode === "settings") {
@@ -2666,7 +2841,11 @@ async function refreshEntries(query: string): Promise<void> {
       const trimmed = query.trim();
 
       if (trimmed) {
-        const launchItems = await launcher.search(query);
+        const [launchItems, pinnedItems, pluginItems] = await Promise.all([
+          launcher.search(query),
+          launcher.getPinnedItems(),
+          launcher.getPluginItems()
+        ]);
         if (token !== latestSearchToken) {
           return;
         }
@@ -2679,9 +2858,34 @@ async function refreshEntries(query: string): Promise<void> {
           searchDisplayConfig.searchLimit,
           "\u6ca1\u6709\u5339\u914d\u7ed3\u679c"
         );
+        addSearchSection(
+          "pinned",
+          "\u7f6e\u9876",
+          pinnedItems,
+          searchDisplayConfig.pinnedLimit,
+          "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
+        );
+        addSearchSection(
+          "plugin",
+          "\u63d2\u4ef6",
+          pluginItems,
+          searchDisplayConfig.pluginLimit,
+          "\u6682\u65e0\u63d2\u4ef6"
+        );
         selectedIndex = entries.length ? 0 : 0;
         renderList();
-        setStatus(`\u641c\u7d22\u7ed3\u679c\uff1a${entries.length}`);
+        setStatus(
+          `\u641c\u7d22\u7ed3\u679c ${Math.min(
+            launchItems.length,
+            searchDisplayConfig.searchLimit
+          )} \u00b7 \u7f6e\u9876 ${Math.min(
+            pinnedItems.length,
+            searchDisplayConfig.pinnedLimit
+          )} \u00b7 \u63d2\u4ef6 ${Math.min(
+            pluginItems.length,
+            searchDisplayConfig.pluginLimit
+          )}`
+        );
         return;
       }
 
@@ -2894,6 +3098,12 @@ function handleKeydown(event: KeyboardEvent): void {
     )}${key} code=${code || "-"} target=${targetName}`
   );
 
+  if (isEscape && activeSearchContextMenu) {
+    event.preventDefault();
+    closeSearchContextMenu();
+    return;
+  }
+
   if (mode === "settings" && !isEscape) {
     return;
   }
@@ -3022,6 +3232,7 @@ function registerEvents(): void {
   });
 
   input.addEventListener("input", () => {
+    closeSearchContextMenu();
     currentQuery = input.value;
     void refreshEntries(currentQuery);
   });
@@ -3040,6 +3251,15 @@ function registerEvents(): void {
   );
 
   document.addEventListener("keydown", handleKeydown, true);
+  document.addEventListener("mousedown", () => {
+    closeSearchContextMenu();
+  });
+  list.addEventListener("scroll", () => {
+    closeSearchContextMenu();
+  });
+  window.addEventListener("blur", () => {
+    closeSearchContextMenu();
+  });
 
   const launcher = getLauncherApi();
   if (launcher?.onFocusInput) {

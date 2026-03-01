@@ -53,7 +53,7 @@ function buildPinyinFallbackTokens(token: string): string[] {
 
   // Long queries should not degrade to single-letter fallback,
   // otherwise random input (e.g. "baiasds...") can produce noisy matches.
-  const minVariantLength = token.length <= 4 ? 1 : 2;
+  const minVariantLength = token.length <= 2 ? 1 : 2;
   return Array.from(variants).filter(
     (variant) => Boolean(variant) && variant.length >= minVariantLength
   );
@@ -115,7 +115,7 @@ function fuzzyFieldScore(text: string, query: string): number {
   }
 
   // Very short query fuzziness is noisy; rely on prefix/include instead.
-  if (query.length <= 2) {
+  if (query.length <= 3) {
     return 0;
   }
 
@@ -231,7 +231,13 @@ function minMatchThreshold(query: string): number {
   if (normalized.length === 2) {
     return 0.66;
   }
-  return 0.42;
+  if (normalized.length === 3) {
+    return 0.54;
+  }
+  if (normalized.length <= 5) {
+    return 0.5;
+  }
+  return 0.46;
 }
 
 function usageScore(itemId: string, usageMap: UsageMap): number {

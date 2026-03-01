@@ -1,4 +1,7 @@
 import { app, BrowserWindow, clipboard, shell } from "electron";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import { ExecuteResult, LaunchItem } from "../shared/types";
@@ -13,6 +16,71 @@ async function openWithSystem(target: string): Promise<ExecuteResult> {
   }
 
   return { ok: true };
+}
+
+function escapeForPowerShellSingleQuote(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function runAsAdmin(target: string): ExecuteResult {
+  const normalized = target.trim();
+  if (!normalized) {
+    return { ok: false, message: "管理员运行失败：目标为空" };
+  }
+
+  if (process.platform !== "win32") {
+    return { ok: false, message: "管理员运行仅支持 Windows" };
+  }
+
+  const safeTarget = escapeForPowerShellSingleQuote(normalized);
+  const command = `Start-Process -FilePath '${safeTarget}' -Verb RunAs`;
+
+  try {
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command
+      ],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      }
+    );
+    child.unref();
+    const title = path.basename(normalized) || normalized;
+    return { ok: true, keepOpen: true, message: `已请求管理员权限：${title}` };
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.message ? error.message : "未知错误";
+    return { ok: false, message: `管理员运行失败：${reason}` };
+  }
+}
+
+function revealInFolder(target: string): ExecuteResult {
+  const normalized = target.trim();
+  if (!normalized) {
+    return { ok: false, message: "打开所在位置失败：目标为空" };
+  }
+
+  if (!fs.existsSync(normalized)) {
+    return { ok: false, message: `打开所在位置失败：路径不存在` };
+  }
+
+  try {
+    shell.showItemInFolder(normalized);
+    const title = path.basename(normalized) || normalized;
+    return { ok: true, keepOpen: true, message: `已打开所在位置：${title}` };
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.message ? error.message : "未知错误";
+    return { ok: false, message: `打开所在位置失败：${reason}` };
+  }
 }
 
 function evaluateCalcExpression(expression: string): ExecuteResult {
@@ -76,6 +144,28 @@ async function handleCommand(
 
   if (command === "plugin") {
     return executePluginCommand(arg, window, item);
+  }
+
+  if (command === "runas") {
+    const rawTarget = arg ?? "";
+    let decodedTarget = rawTarget;
+    try {
+      decodedTarget = decodeURIComponent(rawTarget);
+    } catch {
+      decodedTarget = rawTarget;
+    }
+    return runAsAdmin(decodedTarget);
+  }
+
+  if (command === "reveal") {
+    const rawTarget = arg ?? "";
+    let decodedTarget = rawTarget;
+    try {
+      decodedTarget = decodeURIComponent(rawTarget);
+    } catch {
+      decodedTarget = rawTarget;
+    }
+    return revealInFolder(decodedTarget);
   }
 
   return { ok: false, message: `Unknown command: ${command}` };

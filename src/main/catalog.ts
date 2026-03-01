@@ -52,6 +52,81 @@ const PINYIN_INITIALS = "abcdefghijklmnopqrstuvwxyz"
   .split("")
   .filter((letter) => !"iuv".includes(letter));
 
+const APP_TITLE_ALIAS_RULES: ReadonlyArray<{
+  pattern: RegExp;
+  aliases: readonly string[];
+}> = [
+  {
+    pattern: /钉钉|dingtalk/i,
+    aliases: ["ding", "dingtalk", "dd"]
+  },
+  {
+    pattern: /微信|wechat/i,
+    aliases: ["weixin", "wechat", "wx"]
+  },
+  {
+    pattern: /百度网盘|baidu\s*netdisk|baidunetdisk/i,
+    aliases: ["baidu", "wangpan", "netdisk", "bdwp"]
+  }
+] as const;
+
+const CJK_PINYIN_SYLLABLE_MAP: Readonly<Record<string, string>> = {
+  阿: "a",
+  百: "bai",
+  度: "du",
+  钉: "ding",
+  微: "wei",
+  信: "xin",
+  网: "wang",
+  盘: "pan",
+  输: "shu",
+  入: "ru",
+  法: "fa",
+  设: "she",
+  置: "zhi",
+  管: "guan",
+  理: "li",
+  器: "qi",
+  办: "ban",
+  公: "gong",
+  文: "wen",
+  件: "jian",
+  浏: "liu",
+  览: "lan",
+  视: "shi",
+  频: "pin",
+  音: "yin",
+  图: "tu",
+  片: "pian",
+  安: "an",
+  全: "quan",
+  中: "zhong",
+  心: "xin",
+  云: "yun",
+  腾: "teng",
+  讯: "xun",
+  飞: "fei",
+  书: "shu",
+  剪: "jian",
+  映: "ying",
+  搜: "sou",
+  狗: "gou",
+  拼: "pin",
+  隐: "yin",
+  藏: "cang",
+  启: "qi",
+  动: "dong",
+  终: "zhong",
+  端: "duan",
+  命: "ming",
+  令: "ling",
+  提: "ti",
+  示: "shi",
+  控: "kong",
+  制: "zhi",
+  台: "tai"
+} as const;
+
 function getStartMenuDirs(): string[] {
   const dirs: string[] = [];
   const appData = process.env.APPDATA;
@@ -266,6 +341,56 @@ function toAcronymTokens(baseTokens: string[]): string[] {
   return Array.from(tokens);
 }
 
+function getMappedPinyinSyllables(value: string): string[] {
+  const syllables: string[] = [];
+  for (const char of value) {
+    const mapped = CJK_PINYIN_SYLLABLE_MAP[char];
+    if (mapped) {
+      syllables.push(mapped);
+    }
+  }
+  return syllables;
+}
+
+function toPinyinSyllableTokens(value: string): string[] {
+  const syllables = getMappedPinyinSyllables(value);
+  if (syllables.length === 0) {
+    return [];
+  }
+
+  const tokens = new Set<string>();
+  const joined = syllables.join("");
+  if (joined) {
+    tokens.add(joined);
+  }
+
+  let cumulative = "";
+  for (const syllable of syllables) {
+    cumulative += syllable;
+    if (cumulative) {
+      tokens.add(cumulative);
+    }
+  }
+
+  const initials = syllables
+    .map((syllable) => syllable[0] ?? "")
+    .join("");
+  if (initials.length >= 2) {
+    tokens.add(initials);
+    for (let i = 2; i <= initials.length; i += 1) {
+      tokens.add(initials.slice(0, i));
+    }
+  }
+
+  for (const syllable of syllables) {
+    if (syllable) {
+      tokens.add(syllable);
+    }
+  }
+
+  return Array.from(tokens);
+}
+
 function toKeywords(value: string): string[] {
   const baseTokens = value
     .toLowerCase()
@@ -274,8 +399,28 @@ function toKeywords(value: string): string[] {
 
   const initials = toPinyinInitialTokens(value);
   const acronyms = toAcronymTokens(baseTokens);
-  const merged = new Set<string>([...baseTokens, ...initials, ...acronyms]);
+  const pinyinTokens = toPinyinSyllableTokens(value);
+  const merged = new Set<string>([
+    ...baseTokens,
+    ...initials,
+    ...acronyms,
+    ...pinyinTokens
+  ]);
   return Array.from(merged);
+}
+
+function getAliasKeywords(title: string): string[] {
+  const aliases = new Set<string>();
+  for (const rule of APP_TITLE_ALIAS_RULES) {
+    if (!rule.pattern.test(title)) {
+      continue;
+    }
+
+    for (const alias of rule.aliases) {
+      aliases.add(alias);
+    }
+  }
+  return Array.from(aliases);
 }
 
 function commandItem(
@@ -325,13 +470,14 @@ function createAppItemsFromStartMenu(): LaunchItem[] {
 
   const appItems: LaunchItem[] = files.map((shortcutPath) => {
     const title = path.basename(shortcutPath, path.extname(shortcutPath));
+    const aliasKeywords = getAliasKeywords(title);
     return {
       id: `app:${shortcutPath}`,
       type: "application",
       title,
       subtitle: shortcutPath,
       target: shortcutPath,
-      keywords: toKeywords(title)
+      keywords: toKeywords(`${title} ${shortcutPath} ${aliasKeywords.join(" ")}`)
     };
   });
 
@@ -354,13 +500,14 @@ function createAppItemsFromMacApplications(): LaunchItem[] {
     deduped.add(normalizedPath);
 
     const title = path.basename(bundlePath, ".app");
+    const aliasKeywords = getAliasKeywords(title);
     items.push({
       id: `app:${bundlePath}`,
       type: "application",
       title,
       subtitle: bundlePath,
       target: bundlePath,
-      keywords: toKeywords(title)
+      keywords: toKeywords(`${title} ${bundlePath} ${aliasKeywords.join(" ")}`)
     });
   }
 
