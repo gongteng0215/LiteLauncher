@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "LiteLauncher 最小可用版本",
   "main": "dist/main/index.js",
   "scripts": {

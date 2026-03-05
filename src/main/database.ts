@@ -626,6 +626,18 @@ export class LiteDatabase {
           ]
         );
       }
+
+      const itemIds = items.map((item) => item.id);
+      if (itemIds.length > 0) {
+        const placeholders = itemIds.map(() => "?").join(", ");
+        await this.run(
+          `DELETE FROM items WHERE id NOT IN (${placeholders})`,
+          itemIds
+        );
+      } else {
+        await this.run("DELETE FROM items");
+      }
+
       await this.run("COMMIT");
     } catch (error) {
       await this.run("ROLLBACK");
