@@ -57,8 +57,65 @@ export interface SearchDisplayConfig {
   searchLimit: number;
 }
 
+export type SearchScope =
+  | "all"
+  | "application"
+  | "folder"
+  | "file"
+  | "web"
+  | "command"
+  | "plugin";
+
+export interface SearchRequestOptions {
+  limit?: number;
+  scope?: SearchScope;
+}
+
+export interface CatalogScanConfig {
+  scanProgramFiles: boolean;
+  customScanDirs: string[];
+  excludeScanDirs: string[];
+  resultIncludeDirs: string[];
+  resultExcludeDirs: string[];
+}
+
+export interface CatalogRebuildResult {
+  ok: boolean;
+  message: string;
+  totalItems: number;
+  applicationItems: number;
+  durationMs: number;
+}
+
 export interface LaunchAtLoginStatus {
   enabled: boolean;
   supported: boolean;
   reason?: string;
+}
+
+export type AppErrorLogScope =
+  | "main"
+  | "renderer"
+  | "ipc"
+  | "execute"
+  | "system";
+
+export type AppErrorLogLevel = "error" | "warn";
+
+export interface AppErrorLogInput {
+  scope: AppErrorLogScope;
+  message: string;
+  level?: AppErrorLogLevel;
+  context?: string;
+  detail?: string;
+}
+
+export interface AppErrorLogEntry {
+  id: number;
+  scope: AppErrorLogScope;
+  level: AppErrorLogLevel;
+  message: string;
+  context?: string;
+  detail?: string;
+  createdAt: number;
 }

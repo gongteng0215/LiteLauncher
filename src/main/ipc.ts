@@ -5,10 +5,15 @@ import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  AppErrorLogEntry,
+  AppErrorLogInput,
+  CatalogRebuildResult,
+  CatalogScanConfig,
   ClipItem,
   ExecuteResult,
   LaunchItem,
   LaunchAtLoginStatus,
+  SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
 import { normalizeSearchDisplayConfig } from "../shared/settings";
@@ -20,7 +25,11 @@ type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
   getPinnedItems: (limit: number) => Promise<LaunchItem[]>;
   getPluginItems: (limit: number) => Promise<LaunchItem[]>;
-  searchItems: (query: string, limit: number) => Promise<LaunchItem[]>;
+  searchItems: (
+    query: string,
+    limit: number,
+    options?: SearchRequestOptions
+  ) => Promise<LaunchItem[]>;
 };
 
 type ClipProvider = {
@@ -35,10 +44,24 @@ type SettingsProvider = {
   setSearchDisplayConfig: (
     config: Partial<SearchDisplayConfig>
   ) => Promise<SearchDisplayConfig>;
+  getCatalogScanConfig: () => CatalogScanConfig;
+  setCatalogScanConfig: (
+    config: Partial<CatalogScanConfig>
+  ) => Promise<CatalogScanConfig>;
   getLaunchAtLoginStatus: () => LaunchAtLoginStatus;
   setLaunchAtLoginEnabled: (
     enabled: boolean
   ) => Promise<LaunchAtLoginStatus>;
+};
+
+type CatalogProvider = {
+  rebuildCatalog: () => Promise<CatalogRebuildResult>;
+};
+
+type ErrorLogProvider = {
+  recordError: (input: AppErrorLogInput) => Promise<void>;
+  getErrorLogs: (limit: number) => Promise<AppErrorLogEntry[]>;
+  clearErrorLogs: () => Promise<number>;
 };
 
 type PinProvider = {
@@ -49,6 +72,8 @@ type IpcOptions = {
   searchProvider: SearchProvider;
   clipProvider: ClipProvider;
   settingsProvider: SettingsProvider;
+  catalogProvider: CatalogProvider;
+  errorLogProvider: ErrorLogProvider;
   pinProvider: PinProvider;
   usageStore: UsageStore;
   onItemUsed?: (itemId: string) => Promise<void>;
@@ -61,6 +86,12 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getAppVersion,
   IPC_CHANNELS.getSearchDisplayConfig,
   IPC_CHANNELS.setSearchDisplayConfig,
+  IPC_CHANNELS.getCatalogScanConfig,
+  IPC_CHANNELS.setCatalogScanConfig,
+  IPC_CHANNELS.rebuildCatalog,
+  IPC_CHANNELS.reportErrorLog,
+  IPC_CHANNELS.getErrorLogs,
+  IPC_CHANNELS.clearErrorLogs,
   IPC_CHANNELS.getLaunchAtLoginStatus,
   IPC_CHANNELS.setLaunchAtLoginEnabled,
   IPC_CHANNELS.setItemPinned,
@@ -944,6 +975,14 @@ export function registerIpcHandlers(
   window: BrowserWindow,
   options: IpcOptions
 ): void {
+  const persistErrorLog = async (input: AppErrorLogInput): Promise<void> => {
+    try {
+      await options.errorLogProvider.recordError(input);
+    } catch (error) {
+      console.error("[error-log] failed to persist error", error);
+    }
+  };
+
   for (const channel of HANDLED_CHANNELS) {
     ipcMain.removeHandler(channel);
   }
@@ -974,6 +1013,10 @@ export function registerIpcHandlers(
     return options.settingsProvider.getSearchDisplayConfig();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getCatalogScanConfig, () => {
+    return options.settingsProvider.getCatalogScanConfig();
+  });
+
   ipcMain.handle(IPC_CHANNELS.getLaunchAtLoginStatus, () => {
     return options.settingsProvider.getLaunchAtLoginStatus();
   });
@@ -985,6 +1028,68 @@ export function registerIpcHandlers(
       return options.settingsProvider.setSearchDisplayConfig(normalized);
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setCatalogScanConfig,
+    async (_, configInput: Partial<CatalogScanConfig> | null) => {
+      const input = configInput ?? {};
+      return options.settingsProvider.setCatalogScanConfig(input);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.rebuildCatalog, async () => {
+    const result = await options.catalogProvider.rebuildCatalog();
+    if (!result.ok) {
+      await persistErrorLog({
+        scope: "ipc",
+        level: "error",
+        message: "重建索引失败",
+        detail: result.message,
+        context: "channel=rebuildCatalog"
+      });
+    }
+    return result;
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.reportErrorLog,
+    async (_, input: Partial<AppErrorLogInput> | null | undefined) => {
+      const payload = input ?? {};
+      const message = String(payload.message ?? "").trim();
+      if (!message) {
+        return false;
+      }
+
+      await persistErrorLog({
+        scope:
+          payload.scope === "renderer" ||
+          payload.scope === "main" ||
+          payload.scope === "ipc" ||
+          payload.scope === "execute" ||
+          payload.scope === "system"
+            ? payload.scope
+            : "renderer",
+        level: payload.level === "warn" ? "warn" : "error",
+        message,
+        context:
+          typeof payload.context === "string" ? payload.context : undefined,
+        detail: typeof payload.detail === "string" ? payload.detail : undefined
+      });
+      return true;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getErrorLogs, async (_, limitInput: unknown) => {
+    const parsedLimit = Number(limitInput);
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.max(1, Math.min(500, Math.round(parsedLimit)))
+      : 100;
+    return options.errorLogProvider.getErrorLogs(limit);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearErrorLogs, async () => {
+    return options.errorLogProvider.clearErrorLogs();
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.setLaunchAtLoginEnabled,
@@ -1004,33 +1109,125 @@ export function registerIpcHandlers(
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.search, async (_, query: string) => {
-    const config = options.settingsProvider.getSearchDisplayConfig();
-    const items = await options.searchProvider.searchItems(
-      query ?? "",
-      config.searchLimit
-    );
-    return attachIcons(items);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.search,
+    async (
+      _,
+      query: string,
+      optionsInput: SearchRequestOptions | number | null | undefined
+    ) => {
+      try {
+        const config = options.settingsProvider.getSearchDisplayConfig();
+        const requestOptions =
+          typeof optionsInput === "number"
+            ? { limit: optionsInput }
+            : optionsInput ?? {};
+        const parsedLimit = Number(requestOptions.limit);
+        const limit = Number.isFinite(parsedLimit)
+          ? Math.max(1, Math.min(500, Math.round(parsedLimit)))
+          : config.searchLimit;
+        const scope =
+          requestOptions.scope === "application" ||
+          requestOptions.scope === "folder" ||
+          requestOptions.scope === "file" ||
+          requestOptions.scope === "web" ||
+          requestOptions.scope === "command" ||
+          requestOptions.scope === "plugin"
+            ? requestOptions.scope
+            : "all";
+        const items = await options.searchProvider.searchItems(
+          query ?? "",
+          limit,
+          { limit, scope }
+        );
+        return attachIcons(items);
+      } catch (error) {
+        const detail =
+          error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+        await persistErrorLog({
+          scope: "ipc",
+          level: "error",
+          message: "搜索请求失败",
+          detail,
+          context: `query=${String(query ?? "").slice(0, 120)}`
+        });
+        return [];
+      }
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.execute, async (_, itemInput: LaunchItem) => {
-    const selected = itemInput;
-    if (!selected) {
-      return { ok: false, message: "No selected item" } satisfies ExecuteResult;
-    }
-
-    const result = await executeItem(selected, window);
-    if (result.ok) {
-      options.usageStore.markUsed(selected.id);
-      if (options.onItemUsed) {
-        await options.onItemUsed(selected.id);
+    try {
+      const selected = itemInput;
+      if (!selected) {
+        await persistErrorLog({
+          scope: "execute",
+          level: "warn",
+          message: "执行失败：未选中条目",
+          context: "itemInput is empty"
+        });
+        return { ok: false, message: "No selected item" } satisfies ExecuteResult;
       }
-      if (!result.keepOpen) {
-        window.hide();
-      }
-    }
 
-    return result;
+      if (
+        selected.type === "command" &&
+        selected.target.trim().toLowerCase() === "command:reindex"
+      ) {
+        const rebuildResult = await options.catalogProvider.rebuildCatalog();
+        if (!rebuildResult.ok) {
+          await persistErrorLog({
+            scope: "execute",
+            level: "error",
+            message: "执行重建索引失败",
+            detail: rebuildResult.message,
+            context: `itemId=${selected.id}`
+          });
+        }
+        return {
+          ok: rebuildResult.ok,
+          keepOpen: true,
+          message: rebuildResult.message,
+          data: {
+            totalItems: rebuildResult.totalItems,
+            applicationItems: rebuildResult.applicationItems,
+            durationMs: rebuildResult.durationMs
+          }
+        } satisfies ExecuteResult;
+      }
+
+      const result = await executeItem(selected, window);
+      if (result.ok) {
+        options.usageStore.markUsed(selected.id);
+        if (options.onItemUsed) {
+          await options.onItemUsed(selected.id);
+        }
+        if (!result.keepOpen) {
+          window.hide();
+        }
+      } else {
+        await persistErrorLog({
+          scope: "execute",
+          level: "error",
+          message: result.message || "执行失败",
+          context: `itemId=${selected.id}; target=${selected.target}`
+        });
+      }
+      return result;
+    } catch (error) {
+      const detail =
+        error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+      await persistErrorLog({
+        scope: "execute",
+        level: "error",
+        message: "执行过程异常",
+        detail
+      });
+      return {
+        ok: false,
+        keepOpen: true,
+        message: "执行异常，已写入错误日志"
+      } satisfies ExecuteResult;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.setWindowSizePreset, (_, presetInput: unknown) => {

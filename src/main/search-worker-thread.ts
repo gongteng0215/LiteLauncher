@@ -1,7 +1,7 @@
 import { parentPort } from "node:worker_threads";
 
 import { computeInitialItems, computeSearchItems } from "../shared/search-engine";
-import { LaunchItem, UsageRecord } from "../shared/types";
+import { LaunchItem, SearchRequestOptions, UsageRecord } from "../shared/types";
 
 type UsageMap = Record<string, UsageRecord>;
 
@@ -20,6 +20,7 @@ type SearchRequest =
       catalog: LaunchItem[];
       usage: UsageMap;
       limit: number;
+      options?: SearchRequestOptions;
     };
 
 type SearchResponse =
@@ -39,7 +40,8 @@ parentPort.on("message", (request: SearchRequest) => {
             request.query,
             request.catalog,
             request.usage,
-            request.limit
+            request.limit,
+            request.options
           );
 
     const response: SearchResponse = { id: request.id, ok: true, items };

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 
-import { LaunchItem, UsageRecord } from "../shared/types";
+import { LaunchItem, SearchRequestOptions, UsageRecord } from "../shared/types";
 
 type UsageMap = Record<string, UsageRecord>;
 
@@ -20,6 +20,7 @@ type SearchRequest =
       catalog: LaunchItem[];
       usage: UsageMap;
       limit: number;
+      options?: SearchRequestOptions;
     };
 
 type SearchResponse =
@@ -91,7 +92,8 @@ export class SearchWorkerClient {
     query: string,
     catalog: LaunchItem[],
     usage: UsageMap,
-    limit: number
+    limit: number,
+    options?: SearchRequestOptions
   ): Promise<LaunchItem[]> {
     return this.request({
       id: this.nextId(),
@@ -99,7 +101,8 @@ export class SearchWorkerClient {
       query,
       catalog,
       usage,
-      limit
+      limit,
+      options
     });
   }
 

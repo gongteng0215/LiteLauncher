@@ -22,7 +22,7 @@ function escapeForPowerShellSingleQuote(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-function runAsAdmin(target: string): ExecuteResult {
+async function runAsAdmin(target: string): Promise<ExecuteResult> {
   const normalized = target.trim();
   if (!normalized) {
     return { ok: false, message: "管理员运行失败：目标为空" };
@@ -33,33 +33,110 @@ function runAsAdmin(target: string): ExecuteResult {
   }
 
   const safeTarget = escapeForPowerShellSingleQuote(normalized);
-  const command = `Start-Process -FilePath '${safeTarget}' -Verb RunAs`;
+  const successMarker = "__LL_RUNAS_OK__";
+  const cancelMarker = "__LL_RUNAS_CANCEL__";
+  const command =
+    `$ErrorActionPreference = 'Stop';` +
+    `try {` +
+    `  $process = Start-Process -FilePath '${safeTarget}' -Verb RunAs -PassThru -ErrorAction Stop;` +
+    `  Write-Output '${successMarker}:' + $process.Id;` +
+    `  exit 0;` +
+    `} catch {` +
+    `  $message = $_.Exception.Message;` +
+    `  if ($message -match 'canceled by the user' -or $message -match '操作已被用户取消' -or $message -match '已取消') {` +
+    `    Write-Output '${cancelMarker}';` +
+    `    exit 2;` +
+    `  }` +
+    `  Write-Error $message;` +
+    `  exit 1;` +
+    `}`;
 
-  try {
-    const child = spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        command
-      ],
-      {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true
-      }
-    );
-    child.unref();
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
     const title = path.basename(normalized) || normalized;
-    return { ok: true, keepOpen: true, message: `已请求管理员权限：${title}` };
-  } catch (error) {
-    const reason =
-      error instanceof Error && error.message ? error.message : "未知错误";
-    return { ok: false, message: `管理员运行失败：${reason}` };
-  }
+
+    const finish = (result: ExecuteResult): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+
+    try {
+      const child = spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          command
+        ],
+        {
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      );
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+      });
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+      });
+
+      child.once("error", (error) => {
+        const reason =
+          error instanceof Error && error.message ? error.message : "未知错误";
+        finish({
+          ok: false,
+          keepOpen: true,
+          message: `管理员运行失败：${reason}`
+        });
+      });
+
+      child.once("close", (code) => {
+        const combined = `${stdout}\n${stderr}`.trim();
+        if (combined.includes(cancelMarker) || code === 2) {
+          finish({
+            ok: false,
+            keepOpen: true,
+            message: `已取消管理员授权：${title}`
+          });
+          return;
+        }
+
+        if (combined.includes(successMarker) && code === 0) {
+          finish({
+            ok: true,
+            keepOpen: true,
+            message: `已弹出管理员授权：${title}`
+          });
+          return;
+        }
+
+        const reason = combined || "未能启动提权进程";
+        finish({
+          ok: false,
+          keepOpen: true,
+          message: `管理员运行失败：${reason}`
+        });
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.message ? error.message : "未知错误";
+      finish({
+        ok: false,
+        keepOpen: true,
+        message: `管理员运行失败：${reason}`
+      });
+    }
+  });
 }
 
 function revealInFolder(target: string): ExecuteResult {
@@ -69,7 +146,7 @@ function revealInFolder(target: string): ExecuteResult {
   }
 
   if (!fs.existsSync(normalized)) {
-    return { ok: false, message: `打开所在位置失败：路径不存在` };
+    return { ok: false, message: "打开所在位置失败：路径不存在" };
   }
 
   try {
@@ -175,7 +252,11 @@ export async function executeItem(
   item: LaunchItem,
   window: BrowserWindow
 ): Promise<ExecuteResult> {
-  if (item.type === "application" || item.type === "file" || item.type === "folder") {
+  if (
+    item.type === "application" ||
+    item.type === "file" ||
+    item.type === "folder"
+  ) {
     return openWithSystem(item.target);
   }
 

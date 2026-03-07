@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import sqlite3 from "sqlite3";
 
-import { ClipItem, LaunchItem, UsageRecord } from "../shared/types";
+import {
+  AppErrorLogEntry,
+  AppErrorLogInput,
+  ClipItem,
+  LaunchItem,
+  UsageRecord
+} from "../shared/types";
 
 function ensureParentDirectory(filePath: string): void {
   const parent = path.dirname(filePath);
@@ -10,6 +16,7 @@ function ensureParentDirectory(filePath: string): void {
 }
 
 type SqlParam = string | number | null;
+const APP_ERROR_LOG_LIMIT = 2000;
 
 export type CashflowAssetSnapshot = {
   key: string;
@@ -129,6 +136,22 @@ export class LiteDatabase {
          key TEXT PRIMARY KEY,
          value TEXT NOT NULL
        )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS app_error_logs (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         scope TEXT NOT NULL,
+         level TEXT NOT NULL,
+         message TEXT NOT NULL,
+         context TEXT,
+         detail TEXT,
+         createdAt INTEGER NOT NULL
+       )`
+    );
+
+    await this.run(
+      "CREATE INDEX IF NOT EXISTS app_error_logs_created_idx ON app_error_logs(createdAt DESC)"
     );
 
     await this.run(
@@ -801,5 +824,74 @@ export class LiteDatabase {
 
   public async clearClipItems(): Promise<number> {
     return this.runWithChanges("DELETE FROM clip_items");
+  }
+
+  public async recordErrorLog(input: AppErrorLogInput): Promise<void> {
+    const message = String(input.message ?? "").trim().slice(0, 2000);
+    if (!message) {
+      return;
+    }
+
+    const scope = String(input.scope ?? "system")
+      .trim()
+      .toLowerCase()
+      .slice(0, 64);
+    const level = input.level === "warn" ? "warn" : "error";
+    const context = input.context ? String(input.context).trim().slice(0, 4000) : null;
+    const detail = input.detail ? String(input.detail).trim().slice(0, 12000) : null;
+    const now = Date.now();
+
+    await this.run(
+      `INSERT INTO app_error_logs (scope, level, message, context, detail, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [scope || "system", level, message, context, detail, now]
+    );
+
+    await this.run(
+      `DELETE FROM app_error_logs
+       WHERE id NOT IN (
+         SELECT id FROM app_error_logs
+         ORDER BY createdAt DESC, id DESC
+         LIMIT ?
+       )`,
+      [APP_ERROR_LOG_LIMIT]
+    );
+  }
+
+  public async getErrorLogs(limit = 100): Promise<AppErrorLogEntry[]> {
+    type ErrorLogRow = {
+      id: number;
+      scope: string;
+      level: string;
+      message: string;
+      context: string | null;
+      detail: string | null;
+      createdAt: number;
+    };
+
+    const safeLimit = Number.isFinite(limit)
+      ? Math.max(1, Math.min(500, Math.round(limit)))
+      : 100;
+    const rows = await this.all<ErrorLogRow>(
+      `SELECT id, scope, level, message, context, detail, createdAt
+       FROM app_error_logs
+       ORDER BY createdAt DESC, id DESC
+       LIMIT ?`,
+      [safeLimit]
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      scope: row.scope as AppErrorLogEntry["scope"],
+      level: row.level === "warn" ? "warn" : "error",
+      message: row.message,
+      context: row.context ?? undefined,
+      detail: row.detail ?? undefined,
+      createdAt: row.createdAt
+    }));
+  }
+
+  public async clearErrorLogs(): Promise<number> {
+    return this.runWithChanges("DELETE FROM app_error_logs");
   }
 }

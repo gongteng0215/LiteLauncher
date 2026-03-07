@@ -2,7 +2,8 @@
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { LaunchItem } from "../shared/types";
+import { DEFAULT_CATALOG_SCAN_CONFIG } from "../shared/settings";
+import { CatalogScanConfig, LaunchItem } from "../shared/types";
 import { getPluginCatalogItems } from "./plugins";
 
 const START_MENU_RELATIVE_PATH = path.join(
@@ -126,6 +127,26 @@ const CJK_PINYIN_SYLLABLE_MAP: Readonly<Record<string, string>> = {
   制: "zhi",
   台: "tai"
 } as const;
+
+const WINDOWS_PROGRAM_DIR_ENV_KEYS = [
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "ProgramW6432"
+] as const;
+const WINDOWS_EXECUTABLE_MAX_DEPTH = 4;
+const WINDOWS_EXECUTABLE_MAX_FILES = 12000;
+const WINDOWS_SKIP_DIRS = new Set<string>([
+  "windowsapps",
+  "$windows.~ws",
+  "$recycle.bin",
+  "recycler",
+  "recovery"
+]);
+const WINDOWS_SKIP_EXE_NAME_PATTERNS: readonly RegExp[] = [
+  /^unins\d*$/i,
+  /^uninstall/i,
+  /^vc_redist/i
+];
 
 function getStartMenuDirs(): string[] {
   const dirs: string[] = [];
@@ -256,6 +277,36 @@ function normalizeRealPathCandidate(pathValue: string): string {
   } catch {
     return pathValue.toLowerCase();
   }
+}
+
+function normalizeDirPathForCompare(pathValue: string): string {
+  const resolved = path.resolve(pathValue);
+  const normalized = normalizeRealPathCandidate(resolved);
+  return normalized.replace(/[\\/]+$/, "");
+}
+
+function getExcludedScanDirs(options: CatalogScanConfig): string[] {
+  return Array.isArray(options.excludeScanDirs)
+    ? options.excludeScanDirs
+        .map((candidate) => candidate.trim())
+        .filter(Boolean)
+        .map((candidate) => normalizeDirPathForCompare(candidate))
+    : [];
+}
+
+function isPathExcluded(pathValue: string, excludedDirs: string[]): boolean {
+  if (excludedDirs.length === 0) {
+    return false;
+  }
+
+  const normalized = normalizeDirPathForCompare(pathValue);
+  return excludedDirs.some((excludedDir) => {
+    if (normalized === excludedDir) {
+      return true;
+    }
+
+    return normalized.startsWith(`${excludedDir}${path.sep.toLowerCase()}`);
+  });
 }
 
 function isCjkChar(char: string): boolean {
@@ -454,6 +505,12 @@ function createBuiltinItems(): LaunchItem[] {
       "command:settings"
     ),
     commandItem(
+      "command:reindex",
+      "reindex",
+      "\u91cd\u5efa\u641c\u7d22\u7d22\u5f15",
+      "command:reindex"
+    ),
+    commandItem(
       "command:exit",
       "exit",
       "\u9000\u51fa LiteLauncher",
@@ -480,6 +537,163 @@ function createAppItemsFromStartMenu(): LaunchItem[] {
       keywords: toKeywords(`${title} ${shortcutPath} ${aliasKeywords.join(" ")}`)
     };
   });
+
+  return appItems;
+}
+
+function getWindowsExecutableRoots(options: CatalogScanConfig): string[] {
+  const roots = new Set<string>();
+  const excludedDirs = getExcludedScanDirs(options);
+  if (options.scanProgramFiles) {
+    for (const key of WINDOWS_PROGRAM_DIR_ENV_KEYS) {
+      const value = process.env[key];
+      if (!value) {
+        continue;
+      }
+      roots.add(value);
+    }
+
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) {
+      roots.add(path.join(localAppData, "Programs"));
+    }
+  }
+
+  for (const customDir of options.customScanDirs) {
+    roots.add(customDir);
+  }
+
+  return Array.from(roots).filter((candidate) => {
+    try {
+      return (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        !isPathExcluded(candidate, excludedDirs)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function shouldSkipExecutableName(fileName: string): boolean {
+  const baseName = path.basename(fileName, ".exe");
+  return WINDOWS_SKIP_EXE_NAME_PATTERNS.some((pattern) => pattern.test(baseName));
+}
+
+function walkExecutableFiles(rootDir: string, excludedDirs: string[]): string[] {
+  const result: string[] = [];
+  const stack: Array<{ dir: string; depth: number }> = [{ dir: rootDir, depth: 0 }];
+  const seenDirs = new Set<string>();
+
+  while (stack.length > 0 && result.length < WINDOWS_EXECUTABLE_MAX_FILES) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+
+    if (isPathExcluded(current.dir, excludedDirs)) {
+      continue;
+    }
+
+    const normalized = current.dir.toLowerCase();
+    if (seenDirs.has(normalized)) {
+      continue;
+    }
+    seenDirs.add(normalized);
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current.dir, entry.name);
+
+      if (entry.isDirectory()) {
+        if (current.depth >= WINDOWS_EXECUTABLE_MAX_DEPTH) {
+          continue;
+        }
+
+        const dirName = entry.name.toLowerCase();
+        if (WINDOWS_SKIP_DIRS.has(dirName)) {
+          continue;
+        }
+
+        if (isPathExcluded(fullPath, excludedDirs)) {
+          continue;
+        }
+
+        stack.push({ dir: fullPath, depth: current.depth + 1 });
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      if (path.extname(entry.name).toLowerCase() !== ".exe") {
+        continue;
+      }
+
+      if (shouldSkipExecutableName(entry.name)) {
+        continue;
+      }
+
+      if (isPathExcluded(fullPath, excludedDirs)) {
+        continue;
+      }
+
+      result.push(fullPath);
+      if (result.length >= WINDOWS_EXECUTABLE_MAX_FILES) {
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+function createAppItemsFromExecutableRoots(
+  options: CatalogScanConfig
+): LaunchItem[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const roots = getWindowsExecutableRoots(options);
+  const excludedDirs = getExcludedScanDirs(options);
+  if (roots.length === 0) {
+    return [];
+  }
+
+  const appItems: LaunchItem[] = [];
+  const seenTargets = new Set<string>();
+  for (const root of roots) {
+    const executableFiles = walkExecutableFiles(root, excludedDirs);
+    for (const executablePath of executableFiles) {
+      const key = executablePath.toLowerCase();
+      if (seenTargets.has(key)) {
+        continue;
+      }
+      seenTargets.add(key);
+
+      const title = path.basename(executablePath, ".exe");
+      const aliasKeywords = getAliasKeywords(title);
+      appItems.push({
+        id: `app:${executablePath}`,
+        type: "application",
+        title,
+        subtitle: executablePath,
+        target: executablePath,
+        keywords: toKeywords(
+          `${title} ${executablePath} ${aliasKeywords.join(" ")}`
+        )
+      });
+    }
+  }
 
   return appItems;
 }
@@ -514,9 +728,22 @@ function createAppItemsFromMacApplications(): LaunchItem[] {
   return items;
 }
 
-function createApplicationItems(): LaunchItem[] {
+function createApplicationItems(options: CatalogScanConfig): LaunchItem[] {
   if (process.platform === "win32") {
-    return createAppItemsFromStartMenu();
+    const fromStartMenu = createAppItemsFromStartMenu();
+    const fromExecutableRoots = createAppItemsFromExecutableRoots(options);
+    const merged = [...fromStartMenu, ...fromExecutableRoots];
+    const deduped: LaunchItem[] = [];
+    const seen = new Set<string>();
+    for (const item of merged) {
+      const key = item.target.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(item);
+    }
+    return deduped;
   }
 
   if (process.platform === "darwin") {
@@ -527,9 +754,29 @@ function createApplicationItems(): LaunchItem[] {
 }
 
 export function buildCatalog(): LaunchItem[] {
+  const options = DEFAULT_CATALOG_SCAN_CONFIG;
+  return buildCatalogWithOptions(options);
+}
+
+export function buildCatalogWithOptions(optionsInput: CatalogScanConfig): LaunchItem[] {
+  const options: CatalogScanConfig = {
+    scanProgramFiles: Boolean(optionsInput.scanProgramFiles),
+    customScanDirs: Array.isArray(optionsInput.customScanDirs)
+      ? optionsInput.customScanDirs
+      : [],
+    excludeScanDirs: Array.isArray(optionsInput.excludeScanDirs)
+      ? optionsInput.excludeScanDirs
+      : [],
+    resultIncludeDirs: Array.isArray(optionsInput.resultIncludeDirs)
+      ? optionsInput.resultIncludeDirs
+      : [],
+    resultExcludeDirs: Array.isArray(optionsInput.resultExcludeDirs)
+      ? optionsInput.resultExcludeDirs
+      : []
+  };
   return [
     ...createBuiltinItems(),
     ...getPluginCatalogItems(),
-    ...createApplicationItems()
+    ...createApplicationItems(options)
   ];
 }

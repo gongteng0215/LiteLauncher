@@ -1,4 +1,4 @@
-import { LaunchItem, UsageRecord } from "./types";
+import { LaunchItem, SearchRequestOptions, SearchScope, UsageRecord } from "./types";
 
 type UsageMap = Record<string, UsageRecord>;
 
@@ -299,15 +299,40 @@ function maybeCreateDynamicItem(rawQuery: string): LaunchItem | null {
   return null;
 }
 
+function matchesScope(item: LaunchItem, scope: SearchScope): boolean {
+  if (scope === "all") {
+    return true;
+  }
+
+  if (scope === "plugin") {
+    return (
+      item.type === "command" &&
+      item.target.trim().toLowerCase().startsWith("command:plugin:")
+    );
+  }
+
+  if (
+    scope === "command" &&
+    item.type === "command" &&
+    item.target.trim().toLowerCase().startsWith("command:plugin:")
+  ) {
+    return false;
+  }
+
+  return item.type === scope;
+}
+
 function scoreAndSort(
   items: LaunchItem[],
   query: string,
-  usageMap: UsageMap
+  usageMap: UsageMap,
+  scope: SearchScope
 ): LaunchItem[] {
   const lowerQuery = normalize(query);
   const threshold = minMatchThreshold(lowerQuery);
 
   return items
+    .filter((item) => matchesScope(item, scope))
     .map((item) => {
       const match = matchScore(item, lowerQuery);
       const usage = usageScore(item.id, usageMap);
@@ -374,9 +399,11 @@ export function computeSearchItems(
   query: string,
   catalog: LaunchItem[],
   usageMap: UsageMap,
-  limit = 20
+  limit = 20,
+  options?: SearchRequestOptions
 ): LaunchItem[] {
+  const scope = options?.scope ?? "all";
   const dynamic = maybeCreateDynamicItem(query);
   const all = dynamic ? [dynamic, ...catalog] : catalog;
-  return scoreAndSort(all, query, usageMap).slice(0, limit);
+  return scoreAndSort(all, query, usageMap, scope).slice(0, limit);
 }

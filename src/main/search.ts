@@ -1,5 +1,5 @@
 import { computeInitialItems, computeSearchItems } from "../shared/search-engine";
-import { LaunchItem } from "../shared/types";
+import { LaunchItem, SearchRequestOptions } from "../shared/types";
 import { UsageStore } from "./usage-store";
 
 export function getInitialItems(
@@ -14,7 +14,8 @@ export function searchItems(
   query: string,
   catalog: LaunchItem[],
   usageStore: UsageStore,
-  limit = 20
+  limit = 20,
+  options?: SearchRequestOptions
 ): LaunchItem[] {
-  return computeSearchItems(query, catalog, usageStore.toObject(), limit);
+  return computeSearchItems(query, catalog, usageStore.toObject(), limit, options);
 }

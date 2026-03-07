@@ -1,7 +1,7 @@
 {
   "name": "litelauncher",
-  "version": "1.0.7",
-  "description": "LiteLauncher 最小可用版本",
+  "version": "1.0.8",
+  "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc && node scripts/copy-assets.cjs",
@@ -29,6 +29,7 @@
   },
   "type": "commonjs",
   "dependencies": {
+    "jose": "^6.2.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
@@ -61,6 +62,7 @@
       ]
     },
     "win": {
+      "icon": "src/assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -84,7 +86,12 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "src/assets/icon.ico",
+      "uninstallerIcon": "src/assets/icon.ico",
+      "installerHeaderIcon": "src/assets/icon.ico",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     },
     "publish": [
       {

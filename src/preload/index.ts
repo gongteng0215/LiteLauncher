@@ -2,11 +2,16 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  AppErrorLogEntry,
+  AppErrorLogInput,
+  CatalogRebuildResult,
+  CatalogScanConfig,
   ClipItem,
   DebugKeyEvent,
   ExecuteResult,
   LaunchItem,
   LaunchAtLoginStatus,
+  SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
 
@@ -47,6 +52,17 @@ const api = {
   ): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.setSearchDisplayConfig, config);
   },
+  getCatalogScanConfig(): Promise<CatalogScanConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getCatalogScanConfig);
+  },
+  setCatalogScanConfig(
+    config: Partial<CatalogScanConfig>
+  ): Promise<CatalogScanConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setCatalogScanConfig, config);
+  },
+  rebuildCatalog(): Promise<CatalogRebuildResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.rebuildCatalog);
+  },
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus> {
     return ipcRenderer.invoke(IPC_CHANNELS.getLaunchAtLoginStatus);
   },
@@ -56,8 +72,8 @@ const api = {
   setItemPinned(itemId: string, pinned: boolean): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);
   },
-  search(query: string): Promise<LaunchItem[]> {
-    return ipcRenderer.invoke(IPC_CHANNELS.search, query);
+  search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.search, query, options);
   },
   execute(item: LaunchItem): Promise<ExecuteResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.execute, item);
@@ -79,6 +95,15 @@ const api = {
   },
   clearClipItems(): Promise<number> {
     return ipcRenderer.invoke(IPC_CHANNELS.clearClipItems);
+  },
+  reportErrorLog(input: AppErrorLogInput): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.reportErrorLog, input);
+  },
+  getErrorLogs(limit?: number): Promise<AppErrorLogEntry[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getErrorLogs, limit);
+  },
+  clearErrorLogs(): Promise<number> {
+    return ipcRenderer.invoke(IPC_CHANNELS.clearErrorLogs);
   },
   onFocusInput(handler: () => void): Cleanup {
     return on(IPC_CHANNELS.focusInput, handler);

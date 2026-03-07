@@ -51,7 +51,8 @@ const VISIBLE_PLUGIN_IDS = new Set<string>([
   "webtools-password",
   "webtools-cron",
   "webtools-json",
-  "webtools-crypto"
+  "webtools-crypto",
+  "webtools-jwt"
 ]);
 
 const VISIBLE_PLUGINS: LauncherPlugin[] = ALL_PLUGINS.filter((plugin) =>

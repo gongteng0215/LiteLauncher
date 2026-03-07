@@ -268,6 +268,57 @@ interface SearchDisplayConfig {
   searchLimit: number;
 }
 
+type SearchScope =
+  | "all"
+  | "application"
+  | "folder"
+  | "file"
+  | "web"
+  | "command"
+  | "plugin";
+
+interface SearchRequestOptions {
+  limit?: number;
+  scope?: SearchScope;
+}
+
+interface CatalogScanConfig {
+  scanProgramFiles: boolean;
+  customScanDirs: string[];
+  excludeScanDirs: string[];
+  resultIncludeDirs: string[];
+  resultExcludeDirs: string[];
+}
+
+interface CatalogRebuildResult {
+  ok: boolean;
+  message: string;
+  totalItems: number;
+  applicationItems: number;
+  durationMs: number;
+}
+
+type AppErrorLogScope = "main" | "renderer" | "ipc" | "execute" | "system";
+type AppErrorLogLevel = "error" | "warn";
+
+interface AppErrorLogInput {
+  scope: AppErrorLogScope;
+  message: string;
+  level?: AppErrorLogLevel;
+  context?: string;
+  detail?: string;
+}
+
+interface AppErrorLogEntry {
+  id: number;
+  scope: AppErrorLogScope;
+  level: AppErrorLogLevel;
+  message: string;
+  context?: string;
+  detail?: string;
+  createdAt: number;
+}
+
 interface LaunchAtLoginStatus {
   enabled: boolean;
   supported: boolean;
@@ -298,10 +349,15 @@ interface LauncherApi {
   setSearchDisplayConfig(
     config: Partial<SearchDisplayConfig>
   ): Promise<SearchDisplayConfig>;
+  getCatalogScanConfig(): Promise<CatalogScanConfig>;
+  setCatalogScanConfig(
+    config: Partial<CatalogScanConfig>
+  ): Promise<CatalogScanConfig>;
+  rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
   setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
-  search(query: string): Promise<LaunchItem[]>;
+  search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
   execute(item: LaunchItem): Promise<ExecuteResult>;
   setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
   hide(): Promise<boolean>;
@@ -309,6 +365,9 @@ interface LauncherApi {
   copyClipItem(itemId: string): Promise<boolean>;
   deleteClipItem(itemId: string): Promise<boolean>;
   clearClipItems(): Promise<number>;
+  reportErrorLog(input: AppErrorLogInput): Promise<boolean>;
+  getErrorLogs(limit?: number): Promise<AppErrorLogEntry[]>;
+  clearErrorLogs(): Promise<number>;
   onFocusInput(handler: () => void): () => void;
   onClearInput(handler: () => void): () => void;
   onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
@@ -325,14 +384,24 @@ interface SearchSection {
   displayLimit: number;
   indexes: number[];
   emptyText: string;
+  totalCount: number;
+  page: number;
+  pageCount: number;
 }
 
 const inputElement = document.getElementById(
   "search-input"
 ) as HTMLInputElement | null;
+const resultsElement = document.querySelector(".results") as HTMLElement | null;
 const listElement = document.getElementById(
   "result-list"
 ) as HTMLUListElement | null;
+const resultsLoadingElement = document.getElementById(
+  "results-loading"
+) as HTMLDivElement | null;
+const resultsLoadingTextElement = document.getElementById(
+  "results-loading-text"
+) as HTMLSpanElement | null;
 const statusElement = document.getElementById(
   "status-text"
 ) as HTMLDivElement | null;
@@ -343,7 +412,10 @@ const settingsShortcutButtonElement = document.getElementById(
 
 if (
   !inputElement ||
+  !resultsElement ||
   !listElement ||
+  !resultsLoadingElement ||
+  !resultsLoadingTextElement ||
   !statusElement ||
   !hintElement ||
   !settingsShortcutButtonElement
@@ -352,7 +424,10 @@ if (
 }
 
 const input = inputElement;
+const results = resultsElement;
 const list = listElement;
+const resultsLoading = resultsLoadingElement;
+const resultsLoadingText = resultsLoadingTextElement;
 const statusText = statusElement;
 const hintText = hintElement;
 const settingsShortcutButton = settingsShortcutButtonElement;
@@ -361,9 +436,13 @@ let entries: ResultEntry[] = [];
 let searchSections: SearchSection[] = [];
 let selectedIndex = 0;
 let currentQuery = "";
+let pagedSearchQueryKey = "";
+let searchResultPage = 0;
 let latestSearchToken = 0;
 let mode: PanelMode = "search";
 let debugMode = false;
+let isResultsLoading = false;
+let resultsLoadingTimer: number | null = null;
 const handledEvents = new WeakSet<KeyboardEvent>();
 let passwordPanelOptions: PasswordGeneratorOptions = {
   length: 16,
@@ -444,8 +523,15 @@ let webtoolsJwtToken = "";
 let webtoolsJwtHeader = "";
 let webtoolsJwtPayload = "";
 let webtoolsJwtSecret = "your-256-bit-secret";
+let webtoolsJwtMode: "jws" | "jwe" = "jws";
+let webtoolsJwtAlgorithm: "HS256" | "RS256" = "HS256";
+let webtoolsJwtJweAlg: "dir" | "A256KW" = "dir";
+let webtoolsJwtJweEnc: "A256GCM" | "A128GCM" = "A256GCM";
 let webtoolsJwtVerified: boolean | null = null;
 let webtoolsJwtInfo = "";
+let webtoolsJwtAutoTimer: number | null = null;
+let webtoolsJwtSignTimer: number | null = null;
+let webtoolsJwtRequestToken = 0;
 let webtoolsStringsInput = "hello_world_variable";
 let webtoolsStringsCaseType = "camel";
 let webtoolsStringsOutput = "";
@@ -502,7 +588,13 @@ let webtoolsApiResponseHeaders: Record<string, string> = {};
 
 const DEBUG_LOG_LIMIT = 22;
 const SETTINGS_LIMIT_MIN = 5;
-const SETTINGS_LIMIT_MAX = 50;
+const SETTINGS_LIMIT_MAX = 100;
+const CATALOG_SCAN_CUSTOM_DIRS_MAX = 50;
+const CATALOG_SCAN_EXCLUDE_DIRS_MAX = 50;
+const CATALOG_RESULT_INCLUDE_DIRS_MAX = 50;
+const CATALOG_RESULT_EXCLUDE_DIRS_MAX = 50;
+const SEARCH_PAGE_FETCH_MULTIPLIER = 5;
+const SEARCH_PAGE_FETCH_MAX = 500;
 const PASSWORD_LENGTH_MIN = 4;
 const PASSWORD_LENGTH_MAX = 64;
 const PASSWORD_COUNT_MIN = 1;
@@ -529,6 +621,20 @@ const WEBTOOLS_MARKDOWN_PLUGIN_ID = "webtools-markdown";
 const WEBTOOLS_UA_PLUGIN_ID = "webtools-ua";
 const WEBTOOLS_API_PLUGIN_ID = "webtools-api-client";
 const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#$%^&*";
+const WEBTOOLS_JWT_DEFAULT_SECRET = "your-256-bit-secret";
+const WEBTOOLS_JWT_SAMPLE_TOKEN =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+  "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ." +
+  "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+const WEBTOOLS_JWT_SAMPLE_HEADER = `{
+  "alg": "HS256",
+  "typ": "JWT"
+}`;
+const WEBTOOLS_JWT_SAMPLE_PAYLOAD = `{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "iat": 1516239022
+}`;
 const CURRENCY_FORMATTER = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "CNY",
@@ -536,20 +642,81 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat("zh-CN", {
 });
 const debugLogs: string[] = [];
 const debugPanel = document.createElement("div");
+const SEARCH_SCOPE_PREFIX_RULES: Array<{
+  scope: SearchScope;
+  label: string;
+  prefixes: string[];
+}> = [
+  {
+    scope: "application",
+    label: "应用",
+    prefixes: ["app:", "app：", "应用:", "应用：", "程序:", "程序："]
+  },
+  {
+    scope: "command",
+    label: "命令",
+    prefixes: ["cmd:", "cmd：", "command:", "command：", "命令:", "命令："]
+  },
+  {
+    scope: "web",
+    label: "网页",
+    prefixes: ["web:", "web：", "url:", "url：", "网页:", "网页："]
+  },
+  {
+    scope: "plugin",
+    label: "插件",
+    prefixes: ["plugin:", "plugin：", "插件:", "插件："]
+  },
+  {
+    scope: "file",
+    label: "文件",
+    prefixes: ["file:", "file：", "文件:", "文件："]
+  },
+  {
+    scope: "folder",
+    label: "文件夹",
+    prefixes: [
+      "folder:",
+      "folder：",
+      "dir:",
+      "dir：",
+      "目录:",
+      "目录：",
+      "文件夹:",
+      "文件夹："
+    ]
+  }
+];
+
+type ParsedSearchQuery = {
+  rawQuery: string;
+  query: string;
+  scope: SearchScope;
+  scopeLabel: string;
+  explicitScope: boolean;
+};
 let currentWindowSizePreset: "compact" | "cashflow" = "compact";
 let pendingWindowSizePreset: "compact" | "cashflow" = "compact";
 let searchDisplayConfig: SearchDisplayConfig = {
   recentLimit: 20,
   pinnedLimit: 20,
   pluginLimit: 20,
-  searchLimit: 20
+  searchLimit: 50
+};
+let catalogScanConfig: CatalogScanConfig = {
+  scanProgramFiles: false,
+  customScanDirs: [],
+  excludeScanDirs: [],
+  resultIncludeDirs: [],
+  resultExcludeDirs: []
 };
 let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
   supported: false,
-  reason: "閸旂姾娴囨稉?.."
+  reason: "状态未知"
 };
-let appVersion = "閸旂姾娴囨稉?..";
+let appVersion = "未知版本";
+let errorLogEntries: AppErrorLogEntry[] = [];
 let activeSearchContextMenu: HTMLDivElement | null = null;
 
 function getLauncherApi(): LauncherApi | null {
@@ -648,8 +815,177 @@ function setHint(message: string): void {
   hintText.textContent = message;
 }
 
+function clearResultsLoadingTimer(): void {
+  if (resultsLoadingTimer !== null) {
+    window.clearTimeout(resultsLoadingTimer);
+    resultsLoadingTimer = null;
+  }
+}
+
+function setResultsLoading(active: boolean, message = "正在加载..."): void {
+  if (!active) {
+    clearResultsLoadingTimer();
+  }
+  isResultsLoading = active;
+  results.toggleAttribute("data-loading", active);
+  resultsLoading.hidden = !active;
+  resultsLoadingText.textContent = message;
+}
+
+function scheduleResultsLoading(message: string, delayMs = 120): void {
+  clearResultsLoadingTimer();
+  resultsLoadingTimer = window.setTimeout(() => {
+    setResultsLoading(true, message);
+    resultsLoadingTimer = null;
+  }, delayMs);
+}
+
+function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
+  const trimmed = rawQuery.trim();
+  const lower = trimmed.toLowerCase();
+
+  for (const rule of SEARCH_SCOPE_PREFIX_RULES) {
+    for (const prefix of rule.prefixes) {
+      if (!lower.startsWith(prefix.toLowerCase())) {
+        continue;
+      }
+
+      return {
+        rawQuery,
+        query: trimmed.slice(prefix.length).trim(),
+        scope: rule.scope,
+        scopeLabel: rule.label,
+        explicitScope: true
+      };
+    }
+  }
+
+  return {
+    rawQuery,
+    query: trimmed,
+    scope: "all",
+    scopeLabel: "全部",
+    explicitScope: false
+  };
+}
+
+function getLoadingMessage(nextMode: PanelMode, query: string): string {
+  if (nextMode === "search") {
+    const parsed = parseSearchQuery(query);
+    if (!query.trim()) {
+      return "正在加载首页...";
+    }
+    if (parsed.explicitScope) {
+      return `正在检索${parsed.scopeLabel}...`;
+    }
+    return "正在检索...";
+  }
+
+  if (nextMode === "clip") {
+    return "正在加载剪贴板...";
+  }
+
+  return "正在加载...";
+}
+
+function formatErrorDetail(input: unknown): string | undefined {
+  if (input === null || input === undefined) {
+    return undefined;
+  }
+
+  if (input instanceof Error) {
+    return `${input.message}${input.stack ? `\n${input.stack}` : ""}`;
+  }
+
+  const text = String(input);
+  return text.trim() ? text : undefined;
+}
+
+function formatErrorLogDate(value: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "无效时间";
+  }
+  return date.toLocaleString();
+}
+
+function formatErrorLogs(entries: AppErrorLogEntry[]): string {
+  if (entries.length === 0) {
+    return "暂无错误日志";
+  }
+
+  return entries
+    .map((entry) => {
+      const head = `[${formatErrorLogDate(entry.createdAt)}] [${
+        entry.level
+      }] [${entry.scope}] ${entry.message}`;
+      const context = entry.context ? `上下文: ${entry.context}` : "";
+      const detail = entry.detail ? `详情: ${entry.detail}` : "";
+      return [head, context, detail].filter(Boolean).join("\n");
+    })
+    .join("\n\n");
+}
+
+async function reportErrorLog(input: AppErrorLogInput): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher || !launcher.reportErrorLog) {
+    return;
+  }
+
+  const message = String(input.message ?? "").trim();
+  if (!message) {
+    return;
+  }
+
+  const payload: AppErrorLogInput = {
+    scope: input.scope,
+    level: input.level === "warn" ? "warn" : "error",
+    message,
+    context: input.context ? String(input.context) : undefined,
+    detail: input.detail ? String(input.detail) : undefined
+  };
+
+  try {
+    await launcher.reportErrorLog(payload);
+  } catch {
+    // Ignore logging failures to avoid recursive errors.
+  }
+}
+
+async function refreshErrorLogs(limit = 40): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher || !launcher.getErrorLogs) {
+    errorLogEntries = [];
+    return;
+  }
+
+  try {
+    errorLogEntries = await launcher.getErrorLogs(limit);
+  } catch {
+    errorLogEntries = [];
+  }
+}
+
+async function clearErrorLogsFromSettings(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher || !launcher.clearErrorLogs) {
+    setStatus("桥接层未加载，无法清空错误日志");
+    return;
+  }
+
+  try {
+    const cleared = await launcher.clearErrorLogs();
+    errorLogEntries = [];
+    setStatus(`已清空错误日志（${cleared} 条）`);
+    renderList();
+  } catch {
+    setStatus("清空错误日志失败");
+  }
+}
+
 function applyModeClass(nextMode: PanelMode): void {
   document.body.classList.toggle("mode-cashflow", nextMode === "cashflow");
+  document.body.classList.toggle("mode-plugin", nextMode === "plugin");
 }
 
 function requestWindowSizePreset(
@@ -703,6 +1039,9 @@ function setMode(nextMode: PanelMode): void {
   mode = nextMode;
   syncWindowSizePreset(nextMode);
   applyModeClass(nextMode);
+  if (nextMode !== "search" && nextMode !== "clip") {
+    setResultsLoading(false);
+  }
   input.value = "";
   currentQuery = "";
   input.readOnly =
@@ -712,8 +1051,11 @@ function setMode(nextMode: PanelMode): void {
     mode === "plugin";
 
   if (mode === "search") {
-    input.placeholder = "\u641c\u7d22\u5e94\u7528\uff08\u56fe\u6807\u7f51\u683c\uff09";
-    setHint("Enter \u6267\u884c - Esc \u6e05\u7a7a/\u9690\u85cf - \u65b9\u5411\u952e\u79fb\u52a8 - \u53f3\u952e\u7f6e\u9876");
+    input.placeholder =
+      "搜索应用，支持 app:/cmd:/web:/plugin: 范围前缀";
+    setHint(
+      "Enter 执行 - Esc 清空/隐藏 - 方向键移动 - PageUp/PageDown 翻页 - 支持 app:/cmd:/web:/plugin:"
+    );
   } else if (mode === "clip") {
     input.placeholder = "\u641c\u7d22\u526a\u8d34\u677f\u5386\u53f2";
     setHint("Enter \u590d\u5236 - Delete \u5220\u9664 - Ctrl+Shift+Delete \u6e05\u7a7a - Esc \u8fd4\u56de");
@@ -761,6 +1103,118 @@ function normalizeSettingsInput(
     ),
     pluginLimit: clampSettingsValue(inputConfig.pluginLimit ?? base.pluginLimit, base.pluginLimit),
     searchLimit: clampSettingsValue(inputConfig.searchLimit ?? base.searchLimit, base.searchLimit)
+  };
+}
+
+function parseCustomScanDirsText(value: string): string[] {
+  const tokens = value
+    .split(/\r?\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(token);
+    if (result.length >= CATALOG_SCAN_CUSTOM_DIRS_MAX) {
+      break;
+    }
+  }
+  return result;
+}
+
+function parseExcludeScanDirsText(value: string): string[] {
+  const tokens = value
+    .split(/\r?\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(token);
+    if (result.length >= CATALOG_SCAN_EXCLUDE_DIRS_MAX) {
+      break;
+    }
+  }
+  return result;
+}
+
+function parseResultIncludeDirsText(value: string): string[] {
+  const tokens = value
+    .split(/\r?\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(token);
+    if (result.length >= CATALOG_RESULT_INCLUDE_DIRS_MAX) {
+      break;
+    }
+  }
+  return result;
+}
+
+function parseResultExcludeDirsText(value: string): string[] {
+  const tokens = value
+    .split(/\r?\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(token);
+    if (result.length >= CATALOG_RESULT_EXCLUDE_DIRS_MAX) {
+      break;
+    }
+  }
+  return result;
+}
+
+function normalizeCatalogScanConfigInput(
+  inputConfig: Partial<CatalogScanConfig>,
+  base: CatalogScanConfig = catalogScanConfig
+): CatalogScanConfig {
+  return {
+    scanProgramFiles:
+      typeof inputConfig.scanProgramFiles === "boolean"
+        ? inputConfig.scanProgramFiles
+        : base.scanProgramFiles,
+    customScanDirs: Array.isArray(inputConfig.customScanDirs)
+      ? parseCustomScanDirsText(inputConfig.customScanDirs.join("\n"))
+      : base.customScanDirs.slice(0, CATALOG_SCAN_CUSTOM_DIRS_MAX),
+    excludeScanDirs: Array.isArray(inputConfig.excludeScanDirs)
+      ? parseExcludeScanDirsText(inputConfig.excludeScanDirs.join("\n"))
+      : base.excludeScanDirs.slice(0, CATALOG_SCAN_EXCLUDE_DIRS_MAX),
+    resultIncludeDirs: Array.isArray(inputConfig.resultIncludeDirs)
+      ? parseResultIncludeDirsText(inputConfig.resultIncludeDirs.join("\n"))
+      : base.resultIncludeDirs.slice(0, CATALOG_RESULT_INCLUDE_DIRS_MAX),
+    resultExcludeDirs: Array.isArray(inputConfig.resultExcludeDirs)
+      ? parseResultExcludeDirsText(inputConfig.resultExcludeDirs.join("\n"))
+      : base.resultExcludeDirs.slice(0, CATALOG_RESULT_EXCLUDE_DIRS_MAX)
   };
 }
 
@@ -1674,6 +2128,15 @@ function resetSearchSections(): void {
   searchSections = [];
 }
 
+function getSearchResultSection(): SearchSection | null {
+  for (const section of searchSections) {
+    if (section.id === "search") {
+      return section;
+    }
+  }
+  return null;
+}
+
 function isStandaloneToolbarCommand(item: LaunchItem): boolean {
   return item.target.trim().toLowerCase() === "command:settings";
 }
@@ -1683,7 +2146,12 @@ function addSearchSection(
   title: string,
   items: LaunchItem[],
   displayLimit: number,
-  emptyText: string
+  emptyText: string,
+  options?: {
+    totalCount?: number;
+    page?: number;
+    pageCount?: number;
+  }
 ): void {
   const indexes: number[] = [];
   const filteredItems =
@@ -1695,7 +2163,28 @@ function addSearchSection(
     entries.push({ kind: "launch", item });
   }
 
-  searchSections.push({ id, title, displayLimit, indexes, emptyText });
+  const totalCount = Math.max(
+    0,
+    Math.round(options?.totalCount ?? filteredItems.length)
+  );
+  const pageCountRaw =
+    options?.pageCount ?? Math.ceil(Math.max(1, totalCount) / Math.max(1, displayLimit));
+  const pageCount = Math.max(1, Math.round(pageCountRaw));
+  const page = Math.min(
+    Math.max(0, Math.round(options?.page ?? 0)),
+    pageCount - 1
+  );
+
+  searchSections.push({
+    id,
+    title,
+    displayLimit,
+    indexes,
+    emptyText,
+    totalCount,
+    page,
+    pageCount
+  });
 }
 
 function updatePinnedState(itemId: string, pinned: boolean): void {
@@ -1944,6 +2433,32 @@ function bindResultInteractions(
   });
 }
 
+function changeSearchResultPage(delta: number): void {
+  if (mode !== "search") {
+    return;
+  }
+
+  if (!currentQuery.trim()) {
+    return;
+  }
+
+  const section = getSearchResultSection();
+  if (!section || section.pageCount <= 1) {
+    return;
+  }
+
+  const nextPage = Math.min(
+    Math.max(0, searchResultPage + delta),
+    section.pageCount - 1
+  );
+  if (nextPage === searchResultPage) {
+    return;
+  }
+
+  searchResultPage = nextPage;
+  void refreshEntries(currentQuery);
+}
+
 function createSearchTile(entry: ResultEntry, index: number): HTMLLIElement {
   const tile = document.createElement("li");
   tile.className = "result-item result-tile";
@@ -1983,8 +2498,60 @@ function renderSearchSections(): void {
     block.className = "section-block";
 
     const heading = document.createElement("div");
-    heading.className = "section-title";
-    heading.textContent = `${section.title} (${section.indexes.length}/${section.displayLimit})`;
+    heading.className = "section-title-row";
+
+    const title = document.createElement("div");
+    title.className = "section-title";
+    if (section.id === "search" && section.pageCount > 1) {
+      const start =
+        section.totalCount === 0 ? 0 : section.page * section.displayLimit + 1;
+      const end =
+        section.totalCount === 0
+          ? 0
+          : Math.min(
+              section.totalCount,
+              section.page * section.displayLimit + section.indexes.length
+            );
+      title.textContent = `${section.title} (${start}-${end}/${section.totalCount})`;
+    } else {
+      const total = section.totalCount > 0 ? section.totalCount : section.displayLimit;
+      title.textContent = `${section.title} (${section.indexes.length}/${total})`;
+    }
+    heading.appendChild(title);
+
+    if (section.id === "search" && section.pageCount > 1) {
+      const pager = document.createElement("div");
+      pager.className = "section-pager";
+
+      const prevButton = document.createElement("button");
+      prevButton.type = "button";
+      prevButton.className = "section-page-btn";
+      prevButton.textContent = "上一页";
+      prevButton.disabled = section.page <= 0;
+      prevButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        changeSearchResultPage(-1);
+      });
+
+      const pageInfo = document.createElement("span");
+      pageInfo.className = "section-page-info";
+      pageInfo.textContent = `${section.page + 1}/${section.pageCount}`;
+
+      const nextButton = document.createElement("button");
+      nextButton.type = "button";
+      nextButton.className = "section-page-btn";
+      nextButton.textContent = "下一页";
+      nextButton.disabled = section.page >= section.pageCount - 1;
+      nextButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        changeSearchResultPage(1);
+      });
+
+      pager.append(prevButton, pageInfo, nextButton);
+      heading.appendChild(pager);
+    }
 
     block.appendChild(heading);
 
@@ -2117,6 +2684,33 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
     pluginLimit: readNumber("pluginLimit"),
     searchLimit: readNumber("searchLimit")
   };
+  const scanProgramFilesNode = form.elements.namedItem("scanProgramFiles");
+  const customScanDirsNode = form.elements.namedItem("customScanDirs");
+  const excludeScanDirsNode = form.elements.namedItem("excludeScanDirs");
+  const resultIncludeDirsNode = form.elements.namedItem("resultIncludeDirs");
+  const resultExcludeDirsNode = form.elements.namedItem("resultExcludeDirs");
+  const catalogInputConfig: Partial<CatalogScanConfig> = {
+    scanProgramFiles:
+      scanProgramFilesNode instanceof HTMLInputElement
+        ? scanProgramFilesNode.checked
+        : catalogScanConfig.scanProgramFiles,
+    customScanDirs:
+      customScanDirsNode instanceof HTMLTextAreaElement
+        ? parseCustomScanDirsText(customScanDirsNode.value)
+        : catalogScanConfig.customScanDirs,
+    excludeScanDirs:
+      excludeScanDirsNode instanceof HTMLTextAreaElement
+        ? parseExcludeScanDirsText(excludeScanDirsNode.value)
+        : catalogScanConfig.excludeScanDirs,
+    resultIncludeDirs:
+      resultIncludeDirsNode instanceof HTMLTextAreaElement
+        ? parseResultIncludeDirsText(resultIncludeDirsNode.value)
+        : catalogScanConfig.resultIncludeDirs,
+    resultExcludeDirs:
+      resultExcludeDirsNode instanceof HTMLTextAreaElement
+        ? parseResultExcludeDirsText(resultExcludeDirsNode.value)
+        : catalogScanConfig.resultExcludeDirs
+  };
 
   const launchAtLoginNode = form.elements.namedItem("launchAtLogin");
   const nextLaunchAtLoginEnabled =
@@ -2126,11 +2720,13 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
 
   try {
     const normalized = normalizeSettingsInput(inputConfig);
+    const normalizedCatalog = normalizeCatalogScanConfigInput(catalogInputConfig);
     searchDisplayConfig = await launcher.setSearchDisplayConfig(normalized);
+    catalogScanConfig = await launcher.setCatalogScanConfig(normalizedCatalog);
     launchAtLoginStatus = await launcher.setLaunchAtLoginEnabled(
       nextLaunchAtLoginEnabled
     );
-    setStatus("\u8bbe\u7f6e\u5df2\u4fdd\u5b58");
+    setStatus("\u8bbe\u7f6e\u5df2\u4fdd\u5b58（索引源改动需重建索引后生效）");
   } catch {
     setStatus("\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25");
   }
@@ -2138,28 +2734,104 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
   renderList();
 }
 
+async function rebuildCatalogFromSettings(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u65e0\u6cd5\u91cd\u5efa\u7d22\u5f15");
+    return;
+  }
+
+  setStatus("\u6b63\u5728\u91cd\u5efa\u7d22\u5f15...");
+  try {
+    const result = await launcher.rebuildCatalog();
+    const durationText = `${Math.max(0, Math.round(result.durationMs))}ms`;
+    setStatus(`${result.message}（${durationText}）`);
+    await refreshEntries(currentQuery);
+  } catch {
+    setStatus("\u91cd\u5efa\u7d22\u5f15\u5931\u8d25");
+  }
+}
+
 function renderSettingsPanel(): void {
   const panelItem = document.createElement("li");
   panelItem.className = "settings-panel-item";
 
   const panel = document.createElement("section");
-  panel.className = "settings-panel";
+  panel.className = "settings-panel settings-panel-structured";
 
   const title = document.createElement("h3");
   title.className = "settings-title";
-  title.textContent = "\u641c\u7d22\u663e\u793a\u6570\u91cf";
+  title.textContent = "LiteLauncher 设置";
 
   const description = document.createElement("p");
   description.className = "settings-description";
   description.textContent =
-    "\u53ef\u4ee5\u8c03\u6574\u641c\u7d22\u6761\u76ee\u6570\u91cf\uff0c\u5e76\u914d\u7f6e\u662f\u5426\u5f00\u673a\u81ea\u542f\u3002";
+    "统一管理搜索展示、索引扫描、系统行为和错误日志。索引源变更后需要手动重建索引。";
 
   const form = document.createElement("form");
-  form.className = "settings-form";
+  form.className = "settings-form settings-form-grouped";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void saveSettingsFromForm(form);
   });
+
+  const createGroup = (
+    groupTitle: string,
+    groupDescription: string
+  ): {
+    section: HTMLElement;
+    body: HTMLDivElement;
+  } => {
+    const section = document.createElement("section");
+    section.className = "settings-group";
+
+    const head = document.createElement("div");
+    head.className = "settings-group-head";
+
+    const titleNode = document.createElement("h4");
+    titleNode.className = "settings-group-title";
+    titleNode.textContent = groupTitle;
+
+    const descriptionNode = document.createElement("p");
+    descriptionNode.className = "settings-group-description";
+    descriptionNode.textContent = groupDescription;
+
+    const body = document.createElement("div");
+    body.className = "settings-group-body";
+
+    head.append(titleNode, descriptionNode);
+    section.append(head, body);
+    return { section, body };
+  };
+
+  const createRow = (
+    rowLabel: string,
+    rowHint: string,
+    options?: { textarea?: boolean }
+  ): {
+    row: HTMLDivElement;
+    control: HTMLDivElement;
+    hint: HTMLSpanElement;
+  } => {
+    const row = document.createElement("div");
+    row.className = options?.textarea
+      ? "settings-row settings-row-textarea"
+      : "settings-row";
+
+    const labelNode = document.createElement("span");
+    labelNode.className = "settings-row-label";
+    labelNode.textContent = rowLabel;
+
+    const control = document.createElement("div");
+    control.className = "settings-control";
+
+    const hintNode = document.createElement("span");
+    hintNode.className = "settings-row-hint";
+    hintNode.textContent = rowHint;
+
+    row.append(labelNode, control, hintNode);
+    return { row, control, hint: hintNode };
+  };
 
   type FieldItem = {
     key: keyof SearchDisplayConfig;
@@ -2174,13 +2846,15 @@ function renderSettingsPanel(): void {
     { key: "searchLimit", label: "\u641c\u7d22\u7ed3\u679c", hint: "\u8f93\u5165\u540e\u5206\u533a" }
   ];
 
+  const displayGroup = createGroup(
+    "搜索展示",
+    "控制主界面各分区默认显示数量。"
+  );
   for (const field of fields) {
-    const row = document.createElement("label");
-    row.className = "settings-row";
-
-    const label = document.createElement("span");
-    label.className = "settings-row-label";
-    label.textContent = field.label;
+    const { row, control, hint } = createRow(
+      field.label,
+      `${field.hint} 范围 ${SETTINGS_LIMIT_MIN}-${SETTINGS_LIMIT_MAX}`
+    );
 
     const inputNode = document.createElement("input");
     inputNode.className = "settings-number";
@@ -2191,20 +2865,146 @@ function renderSettingsPanel(): void {
     inputNode.step = "1";
     inputNode.value = String(searchDisplayConfig[field.key]);
 
-    const hint = document.createElement("span");
-    hint.className = "settings-row-hint";
-    hint.textContent = `${field.hint} \u8303\u56f4 ${SETTINGS_LIMIT_MIN}-${SETTINGS_LIMIT_MAX}`;
-
-    row.append(label, inputNode, hint);
-    form.appendChild(row);
+    control.appendChild(inputNode);
+    hint.dataset.compact = "true";
+    displayGroup.body.appendChild(row);
   }
+  form.appendChild(displayGroup.section);
 
-  const launchAtLoginRow = document.createElement("label");
-  launchAtLoginRow.className = "settings-row";
+  const scanGroup = createGroup(
+    "索引扫描",
+    "配置扫描目录与结果过滤规则，减少无关结果；扫描源改动后可立即重建索引。"
+  );
+  const {
+    row: scanProgramRow,
+    control: scanProgramControl,
+    hint: scanProgramHint
+  } = createRow(
+    "\u626b\u63cf Program Files",
+    "Windows 下扫描 Program Files / Program Files (x86) / LocalAppData\\\\Programs"
+  );
 
-  const launchAtLoginLabel = document.createElement("span");
-  launchAtLoginLabel.className = "settings-row-label";
-  launchAtLoginLabel.textContent = "\u5f00\u673a\u542f\u52a8";
+  const scanProgramWrap = document.createElement("div");
+  scanProgramWrap.className = "password-checkbox-wrap";
+
+  const scanProgramInput = document.createElement("input");
+  scanProgramInput.type = "checkbox";
+  scanProgramInput.name = "scanProgramFiles";
+  scanProgramInput.className = "password-checkbox";
+  scanProgramInput.checked = catalogScanConfig.scanProgramFiles;
+
+  const scanProgramText = document.createElement("span");
+  scanProgramText.className = "settings-row-hint";
+  scanProgramText.textContent = catalogScanConfig.scanProgramFiles
+    ? "\u5df2\u5f00\u542f"
+    : "\u672a\u5f00\u542f";
+  scanProgramInput.addEventListener("change", () => {
+    scanProgramText.textContent = scanProgramInput.checked
+      ? "\u5df2\u5f00\u542f"
+      : "\u672a\u5f00\u542f";
+  });
+  scanProgramWrap.append(scanProgramInput, scanProgramText);
+  scanProgramControl.appendChild(scanProgramWrap);
+  scanProgramHint.dataset.compact = "true";
+  scanGroup.body.appendChild(scanProgramRow);
+
+  const {
+    row: customDirsRow,
+    control: customDirsControl
+  } = createRow(
+    "\u81ea\u5b9a\u4e49\u626b\u63cf\u76ee\u5f55",
+    `可填 ${CATALOG_SCAN_CUSTOM_DIRS_MAX} 个，一行一个目录`,
+    { textarea: true }
+  );
+
+  const customDirsInput = document.createElement("textarea");
+  customDirsInput.name = "customScanDirs";
+  customDirsInput.className = "settings-value settings-textarea";
+  customDirsInput.placeholder =
+    "一行一个目录，例如：\nC:\\\\Tools\nD:\\\\Apps\n按填写顺序优先扫描";
+  customDirsInput.value = catalogScanConfig.customScanDirs.join("\n");
+  customDirsControl.appendChild(customDirsInput);
+  scanGroup.body.appendChild(customDirsRow);
+
+  const {
+    row: excludeDirsRow,
+    control: excludeDirsControl
+  } = createRow(
+    "排除扫描目录",
+    `可填 ${CATALOG_SCAN_EXCLUDE_DIRS_MAX} 个，命中目录及其子目录会跳过`,
+    { textarea: true }
+  );
+
+  const excludeDirsInput = document.createElement("textarea");
+  excludeDirsInput.name = "excludeScanDirs";
+  excludeDirsInput.className = "settings-value settings-textarea";
+  excludeDirsInput.placeholder =
+    "一行一个目录，例如：\nC:\\\\Program Files\\\\WindowsApps\nD:\\\\Games";
+  excludeDirsInput.value = catalogScanConfig.excludeScanDirs.join("\n");
+  excludeDirsControl.appendChild(excludeDirsInput);
+  scanGroup.body.appendChild(excludeDirsRow);
+
+  const {
+    row: resultIncludeRow,
+    control: resultIncludeControl
+  } = createRow(
+    "结果白名单目录",
+    `可填 ${CATALOG_RESULT_INCLUDE_DIRS_MAX} 个；填写后仅显示命中目录内的应用/文件/文件夹`,
+    { textarea: true }
+  );
+
+  const resultIncludeInput = document.createElement("textarea");
+  resultIncludeInput.name = "resultIncludeDirs";
+  resultIncludeInput.className = "settings-value settings-textarea";
+  resultIncludeInput.placeholder = "一行一个目录，可留空表示不过滤";
+  resultIncludeInput.value = catalogScanConfig.resultIncludeDirs.join("\n");
+  resultIncludeControl.appendChild(resultIncludeInput);
+  scanGroup.body.appendChild(resultIncludeRow);
+
+  const {
+    row: resultExcludeRow,
+    control: resultExcludeControl
+  } = createRow(
+    "结果黑名单目录",
+    `可填 ${CATALOG_RESULT_EXCLUDE_DIRS_MAX} 个；命中目录会从搜索结果中剔除`,
+    { textarea: true }
+  );
+
+  const resultExcludeInput = document.createElement("textarea");
+  resultExcludeInput.name = "resultExcludeDirs";
+  resultExcludeInput.className = "settings-value settings-textarea";
+  resultExcludeInput.placeholder = "一行一个目录，建议用来屏蔽噪声目录";
+  resultExcludeInput.value = catalogScanConfig.resultExcludeDirs.join("\n");
+  resultExcludeControl.appendChild(resultExcludeInput);
+  scanGroup.body.appendChild(resultExcludeRow);
+
+  const scanActions = document.createElement("div");
+  scanActions.className = "settings-group-actions";
+
+  const rebuildButton = document.createElement("button");
+  rebuildButton.type = "button";
+  rebuildButton.className = "settings-btn settings-btn-secondary";
+  rebuildButton.textContent = "\u91cd\u5efa\u7d22\u5f15";
+  rebuildButton.addEventListener("click", () => {
+    void rebuildCatalogFromSettings();
+  });
+  scanActions.appendChild(rebuildButton);
+  scanGroup.section.appendChild(scanActions);
+  form.appendChild(scanGroup.section);
+
+  const systemGroup = createGroup(
+    "系统",
+    "管理应用的启动行为与当前版本信息。"
+  );
+  const {
+    row: launchAtLoginRow,
+    control: launchAtLoginControl
+  } = createRow(
+    "\u5f00\u673a\u542f\u52a8",
+    launchAtLoginStatus.supported
+      ? "Windows 登录后自动启动 LiteLauncher"
+      : launchAtLoginStatus.reason ?? "当前环境暂不支持"
+  );
 
   const launchAtLoginWrap = document.createElement("div");
   launchAtLoginWrap.className = "password-checkbox-wrap";
@@ -2227,22 +3027,76 @@ function renderSettingsPanel(): void {
       : "\u672a\u542f\u7528";
   });
   launchAtLoginWrap.append(launchAtLoginInput, launchAtLoginText);
+  launchAtLoginControl.appendChild(launchAtLoginWrap);
+  systemGroup.body.appendChild(launchAtLoginRow);
 
-  const launchAtLoginHint = document.createElement("span");
-  launchAtLoginHint.className = "settings-row-hint";
-  launchAtLoginHint.textContent = launchAtLoginStatus.supported
-    ? "Windows \u767b\u5f55\u540e\u81ea\u52a8\u542f\u52a8 LiteLauncher"
-    : launchAtLoginStatus.reason ?? "\u5f53\u524d\u73af\u5883\u6682\u4e0d\u652f\u6301";
-
-  launchAtLoginRow.append(
-    launchAtLoginLabel,
-    launchAtLoginWrap,
-    launchAtLoginHint
+  const { row: versionRow, control: versionControl, hint: versionHint } = createRow(
+    "应用版本",
+    "当前运行中的桌面端版本"
   );
-  form.appendChild(launchAtLoginRow);
+  const versionValue = document.createElement("div");
+  versionValue.className = "settings-static-value";
+  versionValue.textContent = /^\d/.test(appVersion) ? `v${appVersion}` : appVersion;
+  versionControl.appendChild(versionValue);
+  versionHint.dataset.compact = "true";
+  systemGroup.body.appendChild(versionRow);
+  form.appendChild(systemGroup.section);
+
+  const logGroup = createGroup(
+    "错误日志",
+    "显示最近 40 条运行异常记录，便于定位使用中的问题。"
+  );
+
+  const errorLogContainer = document.createElement("div");
+  errorLogContainer.className = "settings-error-log";
+
+  const errorLogActions = document.createElement("div");
+  errorLogActions.className = "settings-inline-actions";
+
+  const refreshErrorLogButton = document.createElement("button");
+  refreshErrorLogButton.type = "button";
+  refreshErrorLogButton.className = "settings-btn settings-btn-secondary";
+  refreshErrorLogButton.textContent = "刷新日志";
+  refreshErrorLogButton.addEventListener("click", () => {
+    void refreshErrorLogs(40).then(() => {
+      setStatus(`错误日志已刷新（${errorLogEntries.length} 条）`);
+      renderList();
+    });
+  });
+
+  const clearErrorLogButton = document.createElement("button");
+  clearErrorLogButton.type = "button";
+  clearErrorLogButton.className = "settings-btn settings-btn-secondary";
+  clearErrorLogButton.textContent = "清空日志";
+  clearErrorLogButton.addEventListener("click", () => {
+    void clearErrorLogsFromSettings();
+  });
+
+  errorLogActions.append(refreshErrorLogButton, clearErrorLogButton);
+
+  const errorLogOutput = document.createElement("textarea");
+  errorLogOutput.className = "settings-value settings-textarea settings-log-output";
+  errorLogOutput.readOnly = true;
+  errorLogOutput.value = formatErrorLogs(errorLogEntries);
+
+  const errorLogHint = document.createElement("span");
+  errorLogHint.className = "settings-row-hint";
+  errorLogHint.textContent = "显示最近 40 条，按时间倒序";
+
+  errorLogContainer.append(errorLogActions, errorLogOutput, errorLogHint);
+  logGroup.body.appendChild(errorLogContainer);
+  form.appendChild(logGroup.section);
+
+  const footer = document.createElement("div");
+  footer.className = "settings-panel-footer";
+
+  const footerMeta = document.createElement("div");
+  footerMeta.className = "settings-footer-meta";
+  footerMeta.textContent =
+    "保存后立即生效；扫描源或扫描排除目录变更后建议重建索引。";
 
   const actions = document.createElement("div");
-  actions.className = "settings-actions";
+  actions.className = "settings-actions settings-panel-actions";
 
   const resetButton = document.createElement("button");
   resetButton.type = "button";
@@ -2259,12 +3113,22 @@ function renderSettingsPanel(): void {
       recentLimit: 20,
       pinnedLimit: 20,
       pluginLimit: 20,
-      searchLimit: 20
+      searchLimit: 50
     };
-    void launcher
-      .setSearchDisplayConfig(searchDisplayConfig)
-      .then((saved) => {
-        searchDisplayConfig = saved;
+    catalogScanConfig = {
+      scanProgramFiles: false,
+      customScanDirs: [],
+      excludeScanDirs: [],
+      resultIncludeDirs: [],
+      resultExcludeDirs: []
+    };
+    void Promise.all([
+      launcher.setSearchDisplayConfig(searchDisplayConfig),
+      launcher.setCatalogScanConfig(catalogScanConfig)
+    ])
+      .then(([savedSearchConfig, savedCatalogScanConfig]) => {
+        searchDisplayConfig = savedSearchConfig;
+        catalogScanConfig = savedCatalogScanConfig;
         setStatus("\u5df2\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e");
         renderList();
       })
@@ -2279,21 +3143,8 @@ function renderSettingsPanel(): void {
   saveButton.textContent = "\u4fdd\u5b58";
 
   actions.append(resetButton, saveButton);
-  form.appendChild(actions);
-
-  const versionRow = document.createElement("div");
-  versionRow.className = "settings-version";
-
-  const versionLabel = document.createElement("span");
-  versionLabel.className = "settings-version-label";
-  versionLabel.textContent = "瑜版挸澧犻悧鍫熸拱";
-
-  const versionValue = document.createElement("span");
-  versionValue.className = "settings-version-value";
-  versionValue.textContent = /^\d/.test(appVersion) ? `v${appVersion}` : appVersion;
-
-  versionRow.append(versionLabel, versionValue);
-  form.appendChild(versionRow);
+  footer.append(footerMeta, actions);
+  form.appendChild(footer);
 
   panel.append(title, description, form);
   panelItem.appendChild(panel);
@@ -5194,6 +6045,32 @@ function applyWebtoolsJwtPanelPayload(panel: ActivePluginPanelState): void {
   if (data && typeof data.secret === "string") {
     webtoolsJwtSecret = data.secret;
   }
+  if (data && typeof data.mode === "string") {
+    webtoolsJwtMode = data.mode === "jwe" ? "jwe" : "jws";
+  }
+  if (data && typeof data.algorithm === "string") {
+    webtoolsJwtAlgorithm = data.algorithm === "RS256" ? "RS256" : "HS256";
+  }
+  if (data && typeof data.jweAlg === "string") {
+    webtoolsJwtJweAlg = data.jweAlg === "A256KW" ? "A256KW" : "dir";
+  }
+  if (data && typeof data.jweEnc === "string") {
+    webtoolsJwtJweEnc = data.jweEnc === "A128GCM" ? "A128GCM" : "A256GCM";
+  }
+  if (!webtoolsJwtSecret.trim()) {
+    webtoolsJwtSecret = WEBTOOLS_JWT_DEFAULT_SECRET;
+  }
+  if (
+    !webtoolsJwtToken.trim() &&
+    !webtoolsJwtHeader.trim() &&
+      !webtoolsJwtPayload.trim()
+  ) {
+    webtoolsJwtToken = WEBTOOLS_JWT_SAMPLE_TOKEN;
+    webtoolsJwtHeader = WEBTOOLS_JWT_SAMPLE_HEADER;
+    webtoolsJwtPayload = WEBTOOLS_JWT_SAMPLE_PAYLOAD;
+    webtoolsJwtMode = "jws";
+    webtoolsJwtAlgorithm = "HS256";
+  }
   webtoolsJwtVerified = null;
   webtoolsJwtInfo = "";
 }
@@ -5201,6 +6078,10 @@ function applyWebtoolsJwtPanelPayload(panel: ActivePluginPanelState): void {
 function buildWebtoolsJwtTarget(action: "parse" | "sign" | "verify"): string {
   const params = new URLSearchParams();
   params.set("action", action);
+  params.set("mode", webtoolsJwtMode);
+  params.set("algorithm", webtoolsJwtAlgorithm);
+  params.set("jweAlg", webtoolsJwtJweAlg);
+  params.set("jweEnc", webtoolsJwtJweEnc);
   params.set("token", webtoolsJwtToken);
   params.set("header", webtoolsJwtHeader);
   params.set("payload", webtoolsJwtPayload);
@@ -5208,20 +6089,166 @@ function buildWebtoolsJwtTarget(action: "parse" | "sign" | "verify"): string {
   return `command:plugin:${WEBTOOLS_JWT_PLUGIN_ID}?${params.toString()}`;
 }
 
+function refreshWebtoolsJwtModeUi(form: HTMLFormElement): void {
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const mode = modeNode instanceof HTMLInputElement && modeNode.value === "jwe" ? "jwe" : "jws";
+
+  const jwsBtn = form.querySelector('.webtools-jwt-mode-btn[data-mode=\"jws\"]');
+  const jweBtn = form.querySelector('.webtools-jwt-mode-btn[data-mode=\"jwe\"]');
+  if (jwsBtn instanceof HTMLButtonElement) {
+    jwsBtn.classList.toggle("active", mode === "jws");
+  }
+  if (jweBtn instanceof HTMLButtonElement) {
+    jweBtn.classList.toggle("active", mode === "jwe");
+  }
+
+  const jwsControls = form.querySelector(".webtools-jwt-jws-controls");
+  const jweControls = form.querySelector(".webtools-jwt-jwe-controls");
+  if (jwsControls instanceof HTMLDivElement) {
+    jwsControls.style.display = mode === "jws" ? "" : "none";
+  }
+  if (jweControls instanceof HTMLDivElement) {
+    jweControls.style.display = mode === "jwe" ? "" : "none";
+  }
+}
+
+function refreshWebtoolsJwtResultInForm(form: HTMLFormElement): void {
+  const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+  const headerNode = form.elements.namedItem("webtoolsJwtHeader");
+  const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
+  const secretNode = form.elements.namedItem("webtoolsJwtSecret");
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const algorithmNode = form.elements.namedItem("webtoolsJwtAlgorithm");
+  const jweAlgNode = form.elements.namedItem("webtoolsJwtJweAlg");
+  const jweEncNode = form.elements.namedItem("webtoolsJwtJweEnc");
+
+  if (tokenNode instanceof HTMLTextAreaElement) {
+    tokenNode.value = webtoolsJwtToken;
+  }
+  if (headerNode instanceof HTMLTextAreaElement) {
+    headerNode.value = webtoolsJwtHeader;
+  }
+  if (payloadNode instanceof HTMLTextAreaElement) {
+    payloadNode.value = webtoolsJwtPayload;
+  }
+  if (secretNode instanceof HTMLInputElement) {
+    secretNode.value = webtoolsJwtSecret;
+  }
+  if (modeNode instanceof HTMLInputElement) {
+    modeNode.value = webtoolsJwtMode;
+  }
+  if (algorithmNode instanceof HTMLSelectElement) {
+    algorithmNode.value = webtoolsJwtAlgorithm;
+  }
+  if (jweAlgNode instanceof HTMLSelectElement) {
+    jweAlgNode.value = webtoolsJwtJweAlg;
+  }
+  if (jweEncNode instanceof HTMLSelectElement) {
+    jweEncNode.value = webtoolsJwtJweEnc;
+  }
+  refreshWebtoolsJwtModeUi(form);
+
+  const hintNode = form.querySelector(".webtools-jwt-hint");
+  if (hintNode instanceof HTMLSpanElement) {
+    if (webtoolsJwtVerified === true) {
+      hintNode.textContent = "签名已验证";
+      hintNode.dataset.state = "ok";
+    } else if (webtoolsJwtVerified === false) {
+      hintNode.textContent = "签名校验失败";
+      hintNode.dataset.state = "error";
+    } else if (webtoolsJwtInfo) {
+      hintNode.textContent = webtoolsJwtInfo;
+      hintNode.dataset.state = "idle";
+    } else {
+      hintNode.textContent = "就绪";
+      hintNode.dataset.state = "idle";
+    }
+  }
+
+  const infoNode = form.querySelector(".webtools-jwt-info");
+  if (infoNode instanceof HTMLDivElement) {
+    infoNode.textContent = webtoolsJwtInfo;
+    infoNode.style.display = webtoolsJwtInfo ? "" : "none";
+  }
+}
+
+function scheduleWebtoolsJwtAutoParse(form: HTMLFormElement, immediate = false): void {
+  if (webtoolsJwtAutoTimer !== null) {
+    window.clearTimeout(webtoolsJwtAutoTimer);
+  }
+
+  webtoolsJwtAutoTimer = window.setTimeout(() => {
+    webtoolsJwtAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+    if (!(tokenNode instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (tokenNode.value.trim().length === 0) {
+      webtoolsJwtToken = "";
+      webtoolsJwtVerified = null;
+      webtoolsJwtInfo = "";
+      refreshWebtoolsJwtResultInForm(form);
+      setStatus("就绪");
+      return;
+    }
+
+    void executeWebtoolsJwtAction("parse", form, { render: false });
+  }, immediate ? 0 : 260);
+}
+
+function scheduleWebtoolsJwtAutoSign(form: HTMLFormElement, immediate = false): void {
+  if (webtoolsJwtSignTimer !== null) {
+    window.clearTimeout(webtoolsJwtSignTimer);
+  }
+
+  webtoolsJwtSignTimer = window.setTimeout(() => {
+    webtoolsJwtSignTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const headerNode = form.elements.namedItem("webtoolsJwtHeader");
+    const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
+    const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+
+    const hasHeader = headerNode instanceof HTMLTextAreaElement && headerNode.value.trim().length > 0;
+    const hasPayload =
+      payloadNode instanceof HTMLTextAreaElement && payloadNode.value.trim().length > 0;
+    const hasToken = tokenNode instanceof HTMLTextAreaElement && tokenNode.value.trim().length > 0;
+
+    if (!hasHeader && !hasPayload && !hasToken) {
+      return;
+    }
+
+    void executeWebtoolsJwtAction("sign", form, { render: false });
+  }, immediate ? 0 : 280);
+}
+
 async function executeWebtoolsJwtAction(
   action: "parse" | "sign" | "verify",
-  form: HTMLFormElement
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
     setStatus("桥接层未加载，无法执行 JWT 工具");
     return;
   }
+  const shouldRender = options.render ?? true;
 
   const tokenNode = form.elements.namedItem("webtoolsJwtToken");
   const headerNode = form.elements.namedItem("webtoolsJwtHeader");
   const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
   const secretNode = form.elements.namedItem("webtoolsJwtSecret");
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const algorithmNode = form.elements.namedItem("webtoolsJwtAlgorithm");
+  const jweAlgNode = form.elements.namedItem("webtoolsJwtJweAlg");
+  const jweEncNode = form.elements.namedItem("webtoolsJwtJweEnc");
 
   webtoolsJwtToken = tokenNode instanceof HTMLTextAreaElement ? tokenNode.value : "";
   webtoolsJwtHeader =
@@ -5229,6 +6256,23 @@ async function executeWebtoolsJwtAction(
   webtoolsJwtPayload =
     payloadNode instanceof HTMLTextAreaElement ? payloadNode.value : "";
   webtoolsJwtSecret = secretNode instanceof HTMLInputElement ? secretNode.value : "";
+  webtoolsJwtMode = modeNode instanceof HTMLInputElement && modeNode.value === "jwe" ? "jwe" : "jws";
+  webtoolsJwtAlgorithm =
+    algorithmNode instanceof HTMLSelectElement && algorithmNode.value === "RS256"
+      ? "RS256"
+      : "HS256";
+  webtoolsJwtJweAlg =
+    jweAlgNode instanceof HTMLSelectElement && jweAlgNode.value === "A256KW"
+      ? "A256KW"
+      : "dir";
+  webtoolsJwtJweEnc =
+    jweEncNode instanceof HTMLSelectElement && jweEncNode.value === "A128GCM"
+      ? "A128GCM"
+      : "A256GCM";
+  if (!webtoolsJwtSecret.trim()) {
+    webtoolsJwtSecret = WEBTOOLS_JWT_DEFAULT_SECRET;
+  }
+  const requestToken = ++webtoolsJwtRequestToken;
 
   const item: LaunchItem = {
     id: `plugin:${WEBTOOLS_JWT_PLUGIN_ID}:${action}`,
@@ -5240,6 +6284,9 @@ async function executeWebtoolsJwtAction(
   };
 
   const result = await launcher.execute(item);
+  if (requestToken !== webtoolsJwtRequestToken) {
+    return;
+  }
   const data = toRecord(result.data);
 
   if (data && typeof data.token === "string") {
@@ -5251,13 +6298,29 @@ async function executeWebtoolsJwtAction(
   if (data && typeof data.payload === "string") {
     webtoolsJwtPayload = data.payload;
   }
+  if (data && typeof data.mode === "string") {
+    webtoolsJwtMode = data.mode === "jwe" ? "jwe" : "jws";
+  }
+  if (data && typeof data.algorithm === "string") {
+    webtoolsJwtAlgorithm = data.algorithm === "RS256" ? "RS256" : "HS256";
+  }
+  if (data && typeof data.jweAlg === "string") {
+    webtoolsJwtJweAlg = data.jweAlg === "A256KW" ? "A256KW" : "dir";
+  }
+  if (data && typeof data.jweEnc === "string") {
+    webtoolsJwtJweEnc = data.jweEnc === "A128GCM" ? "A128GCM" : "A256GCM";
+  }
   webtoolsJwtVerified =
     data && typeof data.verified === "boolean" ? data.verified : null;
   webtoolsJwtInfo =
     data && typeof data.info === "string" ? data.info : "";
 
   setStatus(result.message ?? (result.ok ? "执行完成" : "执行失败"));
-  renderList();
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsJwtResultInForm(form);
 }
 
 function renderWebtoolsJwtPanel(): void {
@@ -5265,7 +6328,7 @@ function renderWebtoolsJwtPanel(): void {
   panelItem.className = "settings-panel-item";
 
   const panel = document.createElement("section");
-  panel.className = "settings-panel";
+  panel.className = "settings-panel webtools-jwt-panel";
 
   const title = document.createElement("h3");
   title.className = "settings-title";
@@ -5274,43 +6337,147 @@ function renderWebtoolsJwtPanel(): void {
   const description = document.createElement("p");
   description.className = "settings-description";
   description.textContent =
-    activePluginPanel?.subtitle || "Token 解析、签名与校验（HS256）。";
+    activePluginPanel?.subtitle || "支持 JWS/JWE 解析与生成（HS256/RS256）。";
 
   const form = document.createElement("form");
   form.className = "settings-form webtools-jwt-form";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void executeWebtoolsJwtAction("parse", form);
+    void executeWebtoolsJwtAction("parse", form, { render: false });
   });
 
-  const tokenRow = document.createElement("label");
-  tokenRow.className = "settings-row webtools-row-full";
-  const tokenLabel = document.createElement("span");
-  tokenLabel.className = "settings-row-label";
-  tokenLabel.textContent = "Token";
+  const modeInput = document.createElement("input");
+  modeInput.type = "hidden";
+  modeInput.name = "webtoolsJwtMode";
+  modeInput.value = webtoolsJwtMode;
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "webtools-jwt-toolbar";
+
+  const modeTabs = document.createElement("div");
+  modeTabs.className = "webtools-jwt-mode-tabs";
+  const jwsModeBtn = document.createElement("button");
+  jwsModeBtn.type = "button";
+  jwsModeBtn.className = "webtools-jwt-mode-btn";
+  jwsModeBtn.dataset.mode = "jws";
+  jwsModeBtn.textContent = "JWS (Sign)";
+  const jweModeBtn = document.createElement("button");
+  jweModeBtn.type = "button";
+  jweModeBtn.className = "webtools-jwt-mode-btn";
+  jweModeBtn.dataset.mode = "jwe";
+  jweModeBtn.textContent = "JWE (Encrypt)";
+  modeTabs.append(jwsModeBtn, jweModeBtn);
+
+  const jwsControls = document.createElement("div");
+  jwsControls.className = "webtools-jwt-jws-controls";
+  const algorithmSelect = document.createElement("select");
+  algorithmSelect.className = "settings-number";
+  algorithmSelect.name = "webtoolsJwtAlgorithm";
+  [
+    { value: "HS256", label: "HS256 (HMAC + SHA256)" },
+    { value: "RS256", label: "RS256 (RSA + SHA256)" }
+  ].forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.value;
+    option.textContent = entry.label;
+    option.selected = webtoolsJwtAlgorithm === entry.value;
+    algorithmSelect.appendChild(option);
+  });
+  jwsControls.appendChild(algorithmSelect);
+
+  const jweControls = document.createElement("div");
+  jweControls.className = "webtools-jwt-jwe-controls";
+  const jweAlgSelect = document.createElement("select");
+  jweAlgSelect.className = "settings-number";
+  jweAlgSelect.name = "webtoolsJwtJweAlg";
+  [
+    { value: "dir", label: "dir (Direct)" },
+    { value: "A256KW", label: "A256KW" }
+  ].forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.value;
+    option.textContent = entry.label;
+    option.selected = webtoolsJwtJweAlg === entry.value;
+    jweAlgSelect.appendChild(option);
+  });
+  const jweEncSelect = document.createElement("select");
+  jweEncSelect.className = "settings-number";
+  jweEncSelect.name = "webtoolsJwtJweEnc";
+  [
+    { value: "A256GCM", label: "A256GCM" },
+    { value: "A128GCM", label: "A128GCM" }
+  ].forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.value;
+    option.textContent = entry.label;
+    option.selected = webtoolsJwtJweEnc === entry.value;
+    jweEncSelect.appendChild(option);
+  });
+  jweControls.append(jweAlgSelect, jweEncSelect);
+
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "settings-btn settings-btn-secondary";
+  clearButton.textContent = "清空";
+  clearButton.addEventListener("click", () => {
+    webtoolsJwtToken = "";
+    webtoolsJwtHeader = "";
+    webtoolsJwtPayload = "";
+    webtoolsJwtVerified = null;
+    webtoolsJwtInfo = "";
+    refreshWebtoolsJwtResultInForm(form);
+    setStatus("已清空");
+  });
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-primary";
+  copyButton.textContent = "复制";
+  copyButton.addEventListener("click", () => {
+    void (async () => {
+      const copied = await copyTextToClipboard(webtoolsJwtToken);
+      setStatus(copied ? "已复制 Token" : "复制失败");
+    })();
+  });
+
+  toolbar.append(modeTabs, jwsControls, jweControls, clearButton, copyButton);
+
+  const body = document.createElement("div");
+  body.className = "webtools-jwt-layout";
+
+  const tokenPane = document.createElement("section");
+  tokenPane.className = "webtools-jwt-pane";
+  const tokenLabel = document.createElement("div");
+  tokenLabel.className = "webtools-jwt-pane-label";
+  tokenLabel.textContent = "编码后的 TOKEN";
   const tokenArea = document.createElement("textarea");
-  tokenArea.className = "settings-value webtools-textarea";
+  tokenArea.className = "settings-value webtools-textarea webtools-jwt-token-area";
   tokenArea.name = "webtoolsJwtToken";
   tokenArea.value = webtoolsJwtToken;
   tokenArea.placeholder = "粘贴 JWT/JWE";
-  tokenRow.append(tokenLabel, tokenArea);
+  tokenPane.append(tokenLabel, tokenArea);
+
+  const decodedPane = document.createElement("section");
+  decodedPane.className = "webtools-jwt-pane webtools-jwt-decoded";
 
   const secretRow = document.createElement("label");
-  secretRow.className = "settings-row";
+  secretRow.className = "settings-row webtools-row-full";
   const secretLabel = document.createElement("span");
-  secretLabel.className = "settings-row-label";
-  secretLabel.textContent = "Secret";
+  secretLabel.className = "settings-row-label webtools-jwt-secret-label";
+  secretLabel.textContent = "密钥 / 私钥";
   const secretInput = document.createElement("input");
   secretInput.className = "settings-value";
   secretInput.name = "webtoolsJwtSecret";
   secretInput.value = webtoolsJwtSecret;
   secretInput.placeholder = "HS256 Secret";
   const secretHint = document.createElement("span");
-  secretHint.className = "settings-row-hint";
+  secretHint.className = "settings-row-hint webtools-jwt-hint";
   if (webtoolsJwtVerified === null) {
-    secretHint.textContent = webtoolsJwtInfo || "-";
+    secretHint.textContent = webtoolsJwtInfo || "就绪";
+    secretHint.dataset.state = "idle";
   } else {
     secretHint.textContent = webtoolsJwtVerified ? "签名已验证" : "签名校验失败";
+    secretHint.dataset.state = webtoolsJwtVerified ? "ok" : "error";
   }
   secretRow.append(secretLabel, secretInput, secretHint);
 
@@ -5318,7 +6485,7 @@ function renderWebtoolsJwtPanel(): void {
   headerRow.className = "settings-row webtools-row-full";
   const headerLabel = document.createElement("span");
   headerLabel.className = "settings-row-label";
-  headerLabel.textContent = "Header";
+  headerLabel.textContent = "标头 (Header)";
   const headerArea = document.createElement("textarea");
   headerArea.className = "settings-value webtools-textarea";
   headerArea.name = "webtoolsJwtHeader";
@@ -5330,7 +6497,7 @@ function renderWebtoolsJwtPanel(): void {
   payloadRow.className = "settings-row webtools-row-full";
   const payloadLabel = document.createElement("span");
   payloadLabel.className = "settings-row-label";
-  payloadLabel.textContent = "Payload";
+  payloadLabel.textContent = "载荷 (Payload)";
   const payloadArea = document.createElement("textarea");
   payloadArea.className = "settings-value webtools-textarea";
   payloadArea.name = "webtoolsJwtPayload";
@@ -5338,35 +6505,70 @@ function renderWebtoolsJwtPanel(): void {
   payloadArea.placeholder = '{"sub":"123","name":"John Doe"}';
   payloadRow.append(payloadLabel, payloadArea);
 
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
+  const info = document.createElement("div");
+  info.className = "webtools-jwt-info";
+  info.textContent = webtoolsJwtInfo;
+  info.style.display = webtoolsJwtInfo ? "" : "none";
 
-  const parseButton = document.createElement("button");
-  parseButton.type = "submit";
-  parseButton.className = "settings-btn settings-btn-secondary";
-  parseButton.textContent = "解析";
+  const changeMode = (mode: "jws" | "jwe"): void => {
+    modeInput.value = mode;
+    webtoolsJwtMode = mode;
+    refreshWebtoolsJwtModeUi(form);
+    scheduleWebtoolsJwtAutoSign(form, true);
+  };
 
-  const signButton = document.createElement("button");
-  signButton.type = "button";
-  signButton.className = "settings-btn settings-btn-secondary";
-  signButton.textContent = "签名";
-  signButton.addEventListener("click", () => {
-    void executeWebtoolsJwtAction("sign", form);
+  jwsModeBtn.addEventListener("click", () => {
+    changeMode("jws");
+  });
+  jweModeBtn.addEventListener("click", () => {
+    changeMode("jwe");
+  });
+  algorithmSelect.addEventListener("change", () => {
+    webtoolsJwtAlgorithm = algorithmSelect.value === "RS256" ? "RS256" : "HS256";
+    scheduleWebtoolsJwtAutoSign(form, true);
+  });
+  jweAlgSelect.addEventListener("change", () => {
+    webtoolsJwtJweAlg = jweAlgSelect.value === "A256KW" ? "A256KW" : "dir";
+    scheduleWebtoolsJwtAutoSign(form, true);
+  });
+  jweEncSelect.addEventListener("change", () => {
+    webtoolsJwtJweEnc = jweEncSelect.value === "A128GCM" ? "A128GCM" : "A256GCM";
+    scheduleWebtoolsJwtAutoSign(form, true);
+  });
+  tokenArea.addEventListener("input", () => {
+    scheduleWebtoolsJwtAutoParse(form);
+  });
+  tokenArea.addEventListener("blur", () => {
+    scheduleWebtoolsJwtAutoParse(form, true);
+  });
+  headerArea.addEventListener("input", () => {
+    scheduleWebtoolsJwtAutoSign(form);
+  });
+  payloadArea.addEventListener("input", () => {
+    scheduleWebtoolsJwtAutoSign(form);
+  });
+  secretInput.addEventListener("input", () => {
+    webtoolsJwtVerified = null;
+    refreshWebtoolsJwtResultInForm(form);
+    const tokenValue = tokenArea.value.trim();
+    if (tokenValue) {
+      scheduleWebtoolsJwtAutoParse(form, true);
+      return;
+    }
+    scheduleWebtoolsJwtAutoSign(form);
   });
 
-  const verifyButton = document.createElement("button");
-  verifyButton.type = "button";
-  verifyButton.className = "settings-btn settings-btn-primary";
-  verifyButton.textContent = "校验";
-  verifyButton.addEventListener("click", () => {
-    void executeWebtoolsJwtAction("verify", form);
-  });
-
-  actions.append(parseButton, signButton, verifyButton);
-  form.append(tokenRow, secretRow, headerRow, payloadRow, actions);
+  decodedPane.append(headerRow, payloadRow, secretRow, info);
+  body.append(tokenPane, decodedPane);
+  form.append(modeInput, toolbar, body);
   panel.append(title, description, form);
   panelItem.appendChild(panel);
   list.appendChild(panelItem);
+
+  refreshWebtoolsJwtModeUi(form);
+  if (tokenArea.value.trim().length > 0) {
+    scheduleWebtoolsJwtAutoParse(form, true);
+  }
 }
 
 function applyWebtoolsStringsPanelPayload(panel: ActivePluginPanelState): void {
@@ -7443,7 +8645,7 @@ function getPluginPanelHandler(pluginId: string): PluginPanelHandler | null {
       onEnter: () => {
         const form = list.querySelector("form.webtools-jwt-form");
         if (form instanceof HTMLFormElement) {
-          void executeWebtoolsJwtAction("parse", form);
+          void executeWebtoolsJwtAction("parse", form, { render: false });
         }
       }
     };
@@ -7664,7 +8866,7 @@ function createCashflowReportList(
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "cashflow-empty";
-    empty.textContent = "閺嗗倹妫ら弫鐗堝祦";
+    empty.textContent = "暂无条目";
     block.appendChild(empty);
     return block;
   }
@@ -8319,6 +9521,15 @@ function moveSelection(delta: number): void {
 
 async function refreshEntries(query: string): Promise<void> {
   const token = ++latestSearchToken;
+  const shouldShowLoading =
+    mode === "clip" || (mode === "search" && Boolean(query.trim()));
+  if (shouldShowLoading) {
+    const loadingMessage = getLoadingMessage(mode, query);
+    scheduleResultsLoading(loadingMessage);
+    setStatus(loadingMessage);
+  } else {
+    setResultsLoading(false);
+  }
 
   try {
     const launcher = getLauncherApi();
@@ -8330,18 +9541,28 @@ async function refreshEntries(query: string): Promise<void> {
     }
 
     if (mode === "settings") {
-      const [nextSearchConfig, nextLaunchAtLoginStatus, nextAppVersion] =
+      const [
+        nextSearchConfig,
+        nextCatalogScanConfig,
+        nextLaunchAtLoginStatus,
+        nextAppVersion,
+        nextErrorLogs
+      ] =
         await Promise.all([
           launcher.getSearchDisplayConfig(),
+          launcher.getCatalogScanConfig(),
           launcher.getLaunchAtLoginStatus(),
-          launcher.getAppVersion().catch(() => "")
+          launcher.getAppVersion().catch(() => ""),
+          launcher.getErrorLogs(40).catch(() => [])
         ]);
       searchDisplayConfig = nextSearchConfig;
+      catalogScanConfig = nextCatalogScanConfig;
       launchAtLoginStatus = nextLaunchAtLoginStatus;
+      errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];
       appVersion =
         typeof nextAppVersion === "string" && nextAppVersion.trim()
           ? nextAppVersion.trim()
-          : "閺堫亞鐓￠悧鍫熸拱";
+          : "未知版本";
       if (token !== latestSearchToken) {
         return;
       }
@@ -8393,56 +9614,102 @@ async function refreshEntries(query: string): Promise<void> {
     }
 
     if (mode === "search") {
+      const parsedQuery = parseSearchQuery(query);
       const trimmed = query.trim();
 
       if (trimmed) {
+        const pageSize = Math.max(1, searchDisplayConfig.searchLimit);
+        const fetchLimit = Math.min(
+          SEARCH_PAGE_FETCH_MAX,
+          Math.max(pageSize, pageSize * SEARCH_PAGE_FETCH_MULTIPLIER)
+        );
+        const queryKey = `${parsedQuery.scope}:${parsedQuery.query.toLowerCase()}`;
+        if (queryKey !== pagedSearchQueryKey) {
+          pagedSearchQueryKey = queryKey;
+          searchResultPage = 0;
+        }
+
         const [launchItems, pinnedItems, pluginItems] = await Promise.all([
-          launcher.search(query),
-          launcher.getPinnedItems(),
-          launcher.getPluginItems()
+          launcher.search(parsedQuery.query, {
+            limit: fetchLimit,
+            scope: parsedQuery.scope
+          }),
+          parsedQuery.explicitScope ? Promise.resolve([]) : launcher.getPinnedItems(),
+          parsedQuery.explicitScope ? Promise.resolve([]) : launcher.getPluginItems()
         ]);
         if (token !== latestSearchToken) {
           return;
         }
 
+        const totalSearchCount = launchItems.length;
+        const searchPageCount = Math.max(
+          1,
+          Math.ceil(Math.max(1, totalSearchCount) / pageSize)
+        );
+        if (searchResultPage >= searchPageCount) {
+          searchResultPage = searchPageCount - 1;
+        }
+
+        const searchStart = searchResultPage * pageSize;
+        const pagedSearchItems = launchItems.slice(searchStart, searchStart + pageSize);
+
         resetSearchSections();
         addSearchSection(
           "search",
-          "\u641c\u7d22\u7ed3\u679c",
-          launchItems,
-          searchDisplayConfig.searchLimit,
-          "\u6ca1\u6709\u5339\u914d\u7ed3\u679c"
+          parsedQuery.explicitScope ? `${parsedQuery.scopeLabel}结果` : "\u641c\u7d22\u7ed3\u679c",
+          pagedSearchItems,
+          pageSize,
+          parsedQuery.explicitScope
+            ? `没有匹配的${parsedQuery.scopeLabel}结果`
+            : "\u6ca1\u6709\u5339\u914d\u7ed3\u679c",
+          {
+            totalCount: totalSearchCount,
+            page: searchResultPage,
+            pageCount: searchPageCount
+          }
         );
-        addSearchSection(
-          "pinned",
-          "\u7f6e\u9876",
-          pinnedItems,
-          searchDisplayConfig.pinnedLimit,
-          "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
-        );
-        addSearchSection(
-          "plugin",
-          "\u63d2\u4ef6",
-          pluginItems,
-          searchDisplayConfig.pluginLimit,
-          "\u6682\u65e0\u63d2\u4ef6"
-        );
+        if (!parsedQuery.explicitScope) {
+          addSearchSection(
+            "pinned",
+            "\u7f6e\u9876",
+            pinnedItems,
+            searchDisplayConfig.pinnedLimit,
+            "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
+          );
+          addSearchSection(
+            "plugin",
+            "\u63d2\u4ef6",
+            pluginItems,
+            searchDisplayConfig.pluginLimit,
+            "\u6682\u65e0\u63d2\u4ef6"
+          );
+        }
         selectedIndex = entries.length ? 0 : 0;
         renderList();
-        setStatus(
-          `\u641c\u7d22\u7ed3\u679c ${Math.min(
-            launchItems.length,
-            searchDisplayConfig.searchLimit
-          )} \u00b7 \u7f6e\u9876 ${Math.min(
-            pinnedItems.length,
-            searchDisplayConfig.pinnedLimit
-          )} \u00b7 \u63d2\u4ef6 ${Math.min(
-            pluginItems.length,
-            searchDisplayConfig.pluginLimit
-          )}`
-        );
+        const shownStart = totalSearchCount === 0 ? 0 : searchStart + 1;
+        const shownEnd = totalSearchCount === 0 ? 0 : searchStart + pagedSearchItems.length;
+        const totalSearchText =
+          totalSearchCount >= fetchLimit ? `${totalSearchCount}+` : `${totalSearchCount}`;
+        if (parsedQuery.explicitScope) {
+          setStatus(
+            `${parsedQuery.scopeLabel}搜索 ${shownStart}-${shownEnd}/${totalSearchText}`
+          );
+        } else {
+          setStatus(
+            `\u641c\u7d22 ${shownStart}-${shownEnd}/${totalSearchText} \u00b7 \u7f6e\u9876 ${Math.min(
+              pinnedItems.length,
+              searchDisplayConfig.pinnedLimit
+            )} \u00b7 \u63d2\u4ef6 ${Math.min(
+              pluginItems.length,
+              searchDisplayConfig.pluginLimit
+            )}`
+          );
+        }
         return;
       }
+
+      pagedSearchQueryKey = "";
+      searchResultPage = 0;
 
       const [recentItems, pinnedItems, pluginItems] = await Promise.all([
         launcher.getInitialItems(),
@@ -8498,6 +9765,10 @@ async function refreshEntries(query: string): Promise<void> {
     setStatus(`\u526a\u8d34\u677f\u6761\u76ee\uff1a${entries.length}`);
   } catch {
     setStatus("\u52a0\u8f7d\u6570\u636e\u5931\u8d25");
+  } finally {
+    if (token === latestSearchToken) {
+      setResultsLoading(false);
+    }
   }
 }
 
@@ -8652,6 +9923,8 @@ function handleKeydown(event: KeyboardEvent): void {
   const isArrowRight = key === "ArrowRight" || key === "Right";
   const isArrowDown = key === "ArrowDown" || key === "Down";
   const isArrowUp = key === "ArrowUp" || key === "Up";
+  const isPageDown = key === "PageDown";
+  const isPageUp = key === "PageUp";
   const isEnter =
     key === "Enter" ||
     key === "Return" ||
@@ -8733,6 +10006,21 @@ function handleKeydown(event: KeyboardEvent): void {
     }
 
     return;
+  }
+
+  if (mode === "search" && currentQuery.trim()) {
+    if (isPageDown) {
+      event.preventDefault();
+      pushDebugLog("renderer action: search page +1");
+      changeSearchResultPage(1);
+      return;
+    }
+    if (isPageUp) {
+      event.preventDefault();
+      pushDebugLog("renderer action: search page -1");
+      changeSearchResultPage(-1);
+      return;
+    }
   }
 
   if (isArrowLeft) {
@@ -8955,6 +10243,26 @@ function bootstrap(): void {
     debugMode = true;
     pushDebugLog(`renderer error: ${event.message}`);
     setStatus(`\u6e32\u67d3\u5c42\u9519\u8bef\uff1a${event.message}`);
+    void reportErrorLog({
+      scope: "renderer",
+      level: "error",
+      message: event.message || "渲染层错误",
+      context: `${event.filename}:${event.lineno}:${event.colno}`,
+      detail: formatErrorDetail(event.error)
+    });
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    debugMode = true;
+    const detail = formatErrorDetail(event.reason);
+    pushDebugLog(`renderer unhandledrejection: ${detail ?? "unknown"}`);
+    setStatus("\u6e32\u67d3\u5c42 Promise \u5f02\u5e38");
+    void reportErrorLog({
+      scope: "renderer",
+      level: "error",
+      message: "渲染层未处理 Promise 异常",
+      detail
+    });
   });
 
   setMode("search");

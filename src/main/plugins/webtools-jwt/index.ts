@@ -1,4 +1,4 @@
-﻿import { createHmac, timingSafeEqual } from "node:crypto";
+﻿import { TextDecoder, TextEncoder } from "node:util";
 
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
@@ -6,23 +6,66 @@ import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
 
 type JwtAction = "open" | "parse" | "sign" | "verify";
+type JwtMode = "jws" | "jwe";
+type JwtAlgorithm = "HS256" | "RS256";
+type JwtJweAlg = "dir" | "A256KW";
+type JwtJweEnc = "A256GCM" | "A128GCM";
 
 interface JwtCommand {
   action: JwtAction;
+  mode: JwtMode;
+  algorithm: JwtAlgorithm;
+  jweAlg: JwtJweAlg;
+  jweEnc: JwtJweEnc;
   token: string;
   header: string;
   payload: string;
   secret: string;
 }
 
+type JoseModule = typeof import("jose");
+
 const PLUGIN_ID = "webtools-jwt";
 const ACTION_OPEN: JwtAction = "open";
 const QUERY_ALIASES = ["wt-jwt", "jwt-tool", "jwt", "token", "鉴权"];
 const DEFAULT_SECRET = "your-256-bit-secret";
+const DEFAULT_MODE: JwtMode = "jws";
+const DEFAULT_ALGORITHM: JwtAlgorithm = "HS256";
+const DEFAULT_JWE_ALG: JwtJweAlg = "dir";
+const DEFAULT_JWE_ENC: JwtJweEnc = "A256GCM";
+
+let joseModulePromise: Promise<JoseModule> | null = null;
+
+function getJose(): Promise<JoseModule> {
+  if (!joseModulePromise) {
+    joseModulePromise = import("jose");
+  }
+  return joseModulePromise;
+}
+
+function normalizeMode(value: string | null): JwtMode {
+  return value === "jwe" ? "jwe" : "jws";
+}
+
+function normalizeAlgorithm(value: string | null): JwtAlgorithm {
+  return value === "RS256" ? "RS256" : "HS256";
+}
+
+function normalizeJweAlg(value: string | null): JwtJweAlg {
+  return value === "A256KW" ? "A256KW" : "dir";
+}
+
+function normalizeJweEnc(value: string | null): JwtJweEnc {
+  return value === "A128GCM" ? "A128GCM" : "A256GCM";
+}
 
 function buildTarget(command: JwtCommand): string {
   const params = new URLSearchParams();
   params.set("action", command.action);
+  params.set("mode", command.mode);
+  params.set("algorithm", command.algorithm);
+  params.set("jweAlg", command.jweAlg);
+  params.set("jweEnc", command.jweEnc);
   params.set("token", command.token);
   params.set("header", command.header);
   params.set("payload", command.payload);
@@ -34,6 +77,10 @@ function parseCommand(optionsText: string | undefined): JwtCommand {
   if (!optionsText) {
     return {
       action: ACTION_OPEN,
+      mode: DEFAULT_MODE,
+      algorithm: DEFAULT_ALGORITHM,
+      jweAlg: DEFAULT_JWE_ALG,
+      jweEnc: DEFAULT_JWE_ENC,
       token: "",
       header: "",
       payload: "",
@@ -50,6 +97,10 @@ function parseCommand(optionsText: string | undefined): JwtCommand {
 
   return {
     action,
+    mode: normalizeMode(params.get("mode")),
+    algorithm: normalizeAlgorithm(params.get("algorithm")),
+    jweAlg: normalizeJweAlg(params.get("jweAlg")),
+    jweEnc: normalizeJweEnc(params.get("jweEnc")),
     token: params.get("token") ?? "",
     header: params.get("header") ?? "",
     payload: params.get("payload") ?? "",
@@ -73,26 +124,22 @@ function createCatalogItem(): LaunchItem {
   return {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
-    title: "JWT 工具",
-    subtitle: "Token 解析、签名与校验（HS256）",
+    title: "JWT 调试器",
+    subtitle: "JWS/JWE 解析与生成（HS256/RS256）",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
     target: buildTarget({
       action: ACTION_OPEN,
+      mode: DEFAULT_MODE,
+      algorithm: DEFAULT_ALGORITHM,
+      jweAlg: DEFAULT_JWE_ALG,
+      jweEnc: DEFAULT_JWE_ENC,
       token: "",
       header: "",
       payload: "",
       secret: DEFAULT_SECRET
     }),
-    keywords: ["plugin", "webtools", "jwt", "token", "鉴权", "hs256"]
+    keywords: ["plugin", "webtools", "jwt", "jws", "jwe", "token", "鉴权", "hs256", "rs256"]
   };
-}
-
-function base64UrlEncode(value: string): string {
-  return Buffer.from(value, "utf8")
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
 }
 
 function base64UrlDecode(value: string): string {
@@ -102,212 +149,353 @@ function base64UrlDecode(value: string): string {
   return Buffer.from(padded, "base64").toString("utf8");
 }
 
-function signHs256(data: string, secret: string): string {
-  const hmac = createHmac("sha256", secret);
-  hmac.update(data);
-  return hmac
-    .digest("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+function safePrettyJson(input: string): string {
+  return JSON.stringify(JSON.parse(input), null, 2);
 }
 
-function parseToken(token: string): { header: string; payload: string; signature: string } {
-  const parts = token.trim().split(".");
-  if (parts.length !== 3) {
-    throw new Error("JWT 必须是 3 段格式");
+function pickStringValue(source: Record<string, unknown>, key: string): string | null {
+  const value = source[key];
+  return typeof value === "string" ? value : null;
+}
+
+function deriveJweKey(secret: string, enc: JwtJweEnc): Uint8Array {
+  const bytes = new TextEncoder().encode(secret);
+  const required = enc === "A128GCM" ? 16 : 32;
+  const key = new Uint8Array(required);
+  key.set(bytes.subarray(0, required));
+  return key;
+}
+
+function parseJsonObject(value: string, fallback: Record<string, unknown>): Record<string, unknown> {
+  if (!value.trim()) {
+    return { ...fallback };
   }
+  const parsed = JSON.parse(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("JSON 必须是对象格式");
+  }
+  return parsed as Record<string, unknown>;
+}
 
-  const headerPart = parts[0] ?? "";
-  const payloadPart = parts[1] ?? "";
-  const signaturePart = parts[2] ?? "";
-
-  const header = base64UrlDecode(headerPart);
-  const payload = base64UrlDecode(payloadPart);
-
+function withData(
+  command: JwtCommand,
+  data: Partial<{
+    token: string;
+    header: string;
+    payload: string;
+    secret: string;
+    mode: JwtMode;
+    algorithm: JwtAlgorithm;
+    jweAlg: JwtJweAlg;
+    jweEnc: JwtJweEnc;
+    verified: boolean | null;
+    info: string;
+  }>
+): Record<string, unknown> {
   return {
-    header,
-    payload,
-    signature: signaturePart
+    token: command.token,
+    header: command.header,
+    payload: command.payload,
+    secret: command.secret,
+    mode: command.mode,
+    algorithm: command.algorithm,
+    jweAlg: command.jweAlg,
+    jweEnc: command.jweEnc,
+    verified: null,
+    info: "",
+    ...data
   };
 }
 
-function safePrettyJson(input: string): string {
-  const parsed = JSON.parse(input);
-  return JSON.stringify(parsed, null, 2);
+async function parseJwsToken(command: JwtCommand): Promise<ExecuteResult> {
+  const parts = command.token.trim().split(".");
+  if (parts.length !== 3) {
+    throw new Error("JWS 必须是 3 段格式");
+  }
+
+  const headerText = safePrettyJson(base64UrlDecode(parts[0] ?? ""));
+  const payloadText = safePrettyJson(base64UrlDecode(parts[1] ?? ""));
+  const headerObject = JSON.parse(headerText) as Record<string, unknown>;
+  const algorithm = normalizeAlgorithm(pickStringValue(headerObject, "alg"));
+  const jose = await getJose();
+
+  let verified: boolean | null = null;
+  let info = "已解析 Header/Payload";
+  if (command.secret.trim()) {
+    try {
+      if (algorithm === "HS256") {
+        const secretBytes = new TextEncoder().encode(command.secret);
+        await jose.jwtVerify(command.token, secretBytes, { algorithms: ["HS256"] });
+      } else {
+        const publicKey = await jose.importSPKI(command.secret, "RS256");
+        await jose.jwtVerify(command.token, publicKey, { algorithms: ["RS256"] });
+      }
+      verified = true;
+      info = `${algorithm} 验签通过`;
+    } catch {
+      verified = false;
+      info = `${algorithm} 验签失败`;
+    }
+  }
+
+  return {
+    ok: true,
+    keepOpen: true,
+    message: "JWS 解析完成",
+    data: withData(command, {
+      token: command.token,
+      header: headerText,
+      payload: payloadText,
+      mode: "jws",
+      algorithm,
+      verified,
+      info
+    })
+  };
 }
 
-function executeParse(command: JwtCommand): ExecuteResult {
-  try {
-    if (!command.token.trim()) {
-      throw new Error("请输入 JWT Token");
-    }
+async function parseJweToken(command: JwtCommand): Promise<ExecuteResult> {
+  const parts = command.token.trim().split(".");
+  if (parts.length !== 5) {
+    throw new Error("JWE 必须是 5 段格式");
+  }
 
-    const parts = command.token.trim().split(".");
-    if (parts.length === 5) {
-      return {
-        ok: true,
-        keepOpen: true,
-        message: "已识别为 JWE（当前仅支持显示头部）",
-        data: {
-          token: command.token,
-          header: safePrettyJson(base64UrlDecode(parts[0] ?? "")),
-          payload: "",
-          verified: false,
-          info: "JWE 解密暂不支持，请先使用 JWS/HS256"
-        }
-      };
-    }
+  const headerText = safePrettyJson(base64UrlDecode(parts[0] ?? ""));
+  const headerObject = JSON.parse(headerText) as Record<string, unknown>;
+  const jweAlg = normalizeJweAlg(pickStringValue(headerObject, "alg"));
+  const jweEnc = normalizeJweEnc(pickStringValue(headerObject, "enc"));
 
-    const parsed = parseToken(command.token);
-
+  if (!command.secret.trim()) {
     return {
       ok: true,
       keepOpen: true,
-      message: "JWT 解析完成",
-      data: {
+      message: "已识别为 JWE",
+      data: withData(command, {
         token: command.token,
-        header: safePrettyJson(parsed.header),
-        payload: safePrettyJson(parsed.payload),
+        header: headerText,
+        payload: "",
+        mode: "jwe",
+        jweAlg,
+        jweEnc,
         verified: null,
-        info: "已解析 Header/Payload"
-      }
-    };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "解析失败";
-    return {
-      ok: false,
-      keepOpen: true,
-      message: reason,
-      data: {
-        token: command.token,
-        header: command.header,
-        payload: command.payload,
-        verified: false
-      }
+        info: `已识别为 JWE（${jweAlg}/${jweEnc}），输入密钥后可解密`
+      })
     };
   }
+
+  if (jweAlg !== "dir") {
+    throw new Error("当前仅支持 JWE dir 模式");
+  }
+
+  const jose = await getJose();
+  const key = deriveJweKey(command.secret, jweEnc);
+  const { plaintext } = await jose.compactDecrypt(command.token, key);
+  const payloadText = safePrettyJson(new TextDecoder().decode(plaintext));
+
+  return {
+    ok: true,
+    keepOpen: true,
+    message: "JWE 解密完成",
+    data: withData(command, {
+      token: command.token,
+      header: headerText,
+      payload: payloadText,
+      mode: "jwe",
+      jweAlg,
+      jweEnc,
+      verified: true,
+      info: `JWE 解密成功（${jweAlg}/${jweEnc}）`
+    })
+  };
 }
 
-function executeSign(command: JwtCommand): ExecuteResult {
-  try {
-    if (!command.secret.trim()) {
-      throw new Error("签名需要 Secret");
+async function executeParse(command: JwtCommand): Promise<ExecuteResult> {
+  if (!command.token.trim()) {
+    return {
+      ok: true,
+      keepOpen: true,
+      message: "输入为空",
+      data: withData(command, {
+        token: "",
+        header: command.header,
+        payload: command.payload,
+        verified: null,
+        info: ""
+      })
+    };
+  }
+
+  const parts = command.token.trim().split(".");
+  if (parts.length === 5 || command.mode === "jwe") {
+    return parseJweToken(command);
+  }
+  return parseJwsToken(command);
+}
+
+async function executeSign(command: JwtCommand): Promise<ExecuteResult> {
+  if (!command.secret.trim()) {
+    throw new Error("签名/加密需要密钥");
+  }
+
+  const headerObject = parseJsonObject(command.header, { typ: "JWT" });
+  const payloadObject = parseJsonObject(command.payload, {});
+  const jose = await getJose();
+
+  if (command.mode === "jwe") {
+    if (command.jweAlg !== "dir") {
+      throw new Error("当前仅支持 JWE dir 模式");
     }
-
-    const headerObject = command.header.trim()
-      ? JSON.parse(command.header)
-      : { alg: "HS256", typ: "JWT" };
-    const payloadObject = command.payload.trim() ? JSON.parse(command.payload) : {};
-
-    if ((headerObject.alg ?? "HS256") !== "HS256") {
-      throw new Error("当前只支持 HS256 算法");
-    }
-
-    headerObject.alg = "HS256";
-    headerObject.typ = headerObject.typ ?? "JWT";
-
-    const headerJson = JSON.stringify(headerObject);
-    const payloadJson = JSON.stringify(payloadObject);
-
-    const headerPart = base64UrlEncode(headerJson);
-    const payloadPart = base64UrlEncode(payloadJson);
-    const signingInput = `${headerPart}.${payloadPart}`;
-    const signature = signHs256(signingInput, command.secret);
-    const token = `${signingInput}.${signature}`;
+    const mergedHeader: Record<string, unknown> = {
+      ...headerObject,
+      typ: pickStringValue(headerObject, "typ") ?? "JWT",
+      alg: command.jweAlg,
+      enc: command.jweEnc
+    };
+    const key = deriveJweKey(command.secret, command.jweEnc);
+    const token = await new jose.EncryptJWT(payloadObject)
+      .setProtectedHeader(mergedHeader as any)
+      .encrypt(key);
 
     return {
       ok: true,
       keepOpen: true,
-      message: "JWT 签名完成",
-      data: {
+      message: "JWE 生成完成",
+      data: withData(command, {
         token,
-        header: JSON.stringify(headerObject, null, 2),
+        header: JSON.stringify(mergedHeader, null, 2),
         payload: JSON.stringify(payloadObject, null, 2),
+        mode: "jwe",
         verified: true,
-        info: "HS256 签名成功"
-      }
-    };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "签名失败";
-    return {
-      ok: false,
-      keepOpen: true,
-      message: reason,
-      data: {
-        token: command.token,
-        header: command.header,
-        payload: command.payload,
-        verified: false
-      }
+        info: `JWE 生成成功（${command.jweAlg}/${command.jweEnc}）`
+      })
     };
   }
+
+  const mergedHeader: Record<string, unknown> = {
+    ...headerObject,
+    typ: pickStringValue(headerObject, "typ") ?? "JWT",
+    alg: command.algorithm
+  };
+
+  const signingInput = new jose.SignJWT(payloadObject).setProtectedHeader(
+    mergedHeader as any
+  );
+
+  const token =
+    command.algorithm === "HS256"
+      ? await signingInput.sign(new TextEncoder().encode(command.secret))
+      : await signingInput.sign(await jose.importPKCS8(command.secret, "RS256"));
+
+  return {
+    ok: true,
+    keepOpen: true,
+    message: "JWS 签名完成",
+    data: withData(command, {
+      token,
+      header: JSON.stringify(mergedHeader, null, 2),
+      payload: JSON.stringify(payloadObject, null, 2),
+      mode: "jws",
+      verified: true,
+      info: `${command.algorithm} 签名成功`
+    })
+  };
 }
 
-function executeVerify(command: JwtCommand): ExecuteResult {
+async function executeVerify(command: JwtCommand): Promise<ExecuteResult> {
+  if (!command.secret.trim()) {
+    throw new Error("校验/解密需要密钥");
+  }
+  if (!command.token.trim()) {
+    throw new Error("请输入 Token");
+  }
+
+  const jose = await getJose();
+  const parts = command.token.trim().split(".");
+
+  if (parts.length === 5 || command.mode === "jwe") {
+    const parsed = await parseJweToken(command);
+    const data = (parsed.data ?? {}) as Record<string, unknown>;
+    return {
+      ...parsed,
+      ok: true,
+      message: "JWE 校验通过",
+      data: { ...data, verified: true }
+    };
+  }
+
+  if (parts.length !== 3) {
+    throw new Error("JWS 必须是 3 段格式");
+  }
+
+  const headerText = safePrettyJson(base64UrlDecode(parts[0] ?? ""));
+  const payloadText = safePrettyJson(base64UrlDecode(parts[1] ?? ""));
+  const headerObject = JSON.parse(headerText) as Record<string, unknown>;
+  const algorithm = normalizeAlgorithm(pickStringValue(headerObject, "alg") ?? command.algorithm);
+
   try {
-    if (!command.secret.trim()) {
-      throw new Error("校验需要 Secret");
+    if (algorithm === "HS256") {
+      await jose.jwtVerify(command.token, new TextEncoder().encode(command.secret), {
+        algorithms: ["HS256"]
+      });
+    } else {
+      const publicKey = await jose.importSPKI(command.secret, "RS256");
+      await jose.jwtVerify(command.token, publicKey, { algorithms: ["RS256"] });
     }
-    if (!command.token.trim()) {
-      throw new Error("请输入 JWT Token");
-    }
-
-    const parts = command.token.trim().split(".");
-    if (parts.length !== 3) {
-      throw new Error("仅支持 JWS 三段 Token 校验");
-    }
-
-    const signingInput = `${parts[0] ?? ""}.${parts[1] ?? ""}`;
-    const expected = signHs256(signingInput, command.secret);
-    const actual = parts[2] ?? "";
-
-    const expectedBuffer = Buffer.from(expected, "utf8");
-    const actualBuffer = Buffer.from(actual, "utf8");
-    const verified =
-      expectedBuffer.length === actualBuffer.length &&
-      timingSafeEqual(expectedBuffer, actualBuffer);
-
-    const parsed = parseToken(command.token);
 
     return {
-      ok: verified,
+      ok: true,
       keepOpen: true,
-      message: verified ? "JWT 签名校验通过" : "JWT 签名校验失败",
-      data: {
+      message: "JWS 验签通过",
+      data: withData(command, {
         token: command.token,
-        header: safePrettyJson(parsed.header),
-        payload: safePrettyJson(parsed.payload),
-        verified,
-        info: verified ? "HS256 验签通过" : "签名与 Secret 不匹配"
-      }
+        header: headerText,
+        payload: payloadText,
+        mode: "jws",
+        algorithm,
+        verified: true,
+        info: `${algorithm} 验签通过`
+      })
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "校验失败";
+    const reason = error instanceof Error ? error.message : "验签失败";
     return {
       ok: false,
       keepOpen: true,
-      message: reason,
-      data: {
+      message: "JWS 验签失败",
+      data: withData(command, {
         token: command.token,
-        header: command.header,
-        payload: command.payload,
-        verified: false
-      }
+        header: headerText,
+        payload: payloadText,
+        mode: "jws",
+        algorithm,
+        verified: false,
+        info: reason
+      })
     };
   }
 }
 
-function executeCommand(command: JwtCommand): ExecuteResult {
-  if (command.action === "parse") {
-    return executeParse(command);
+async function executeCommand(command: JwtCommand): Promise<ExecuteResult> {
+  try {
+    if (command.action === "parse") {
+      return await executeParse(command);
+    }
+    if (command.action === "sign") {
+      return await executeSign(command);
+    }
+    return await executeVerify(command);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "JWT 执行失败";
+    return {
+      ok: false,
+      keepOpen: true,
+      message: reason,
+      data: withData(command, {
+        verified: false,
+        info: reason
+      })
+    };
   }
-
-  if (command.action === "sign") {
-    return executeSign(command);
-  }
-
-  return executeVerify(command);
 }
 
 export const webtoolsJwtPlugin: LauncherPlugin = {
@@ -322,26 +510,30 @@ export const webtoolsJwtPlugin: LauncherPlugin = {
     }
     return [createCatalogItem()];
   },
-  execute(optionsText, context): ExecuteResult {
+  async execute(optionsText, context): Promise<ExecuteResult> {
     const command = parseCommand(optionsText);
 
     if (command.action === ACTION_OPEN) {
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
-        title: "JWT 工具",
-        subtitle: "Token 解析、签名与校验（HS256）",
+        title: "JWT 调试器",
+        subtitle: "支持 JWS/JWE 解析与生成（HS256/RS256）",
         data: {
           token: command.token,
           header: command.header,
           payload: command.payload,
-          secret: command.secret || DEFAULT_SECRET
+          secret: command.secret || DEFAULT_SECRET,
+          mode: command.mode,
+          algorithm: command.algorithm,
+          jweAlg: command.jweAlg,
+          jweEnc: command.jweEnc
         }
       });
       return {
         ok: true,
         keepOpen: true,
-        message: "已打开 JWT 工具"
+        message: "已打开 JWT 调试器"
       };
     }
 

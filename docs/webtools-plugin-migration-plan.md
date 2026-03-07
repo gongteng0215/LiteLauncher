@@ -1,139 +1,107 @@
-# WebTools 功能插件化迁移规划（LiteLauncher）
+﻿# WebTools 插件迁移计划（LiteLauncher）
 
-更新时间：2026-03-04  
-状态：规划中
-
-## 当前进展（2026-03-04）
-
-1. 已在 `src/main/plugins/` 下创建 19 个 WebTools 插件独立目录（与 `cashflow-game`、`password-generator` 同级）。
-2. 已完成主进程统一插件工厂 `src/main/plugins/webtools-shared/index.ts`，并注册到插件索引。
-3. 已打通 `openPanel -> panel=plugin` 通用渲染面板链路，并支持按 `pluginId` 分发渲染与 `Enter` 行为。
-4. 已完成首个真实可视化插件：`webtools-password`（长度/数量/符号配置，生成并复制）。
+更新时间：2026-03-08
+状态：进行中
 
 ## 1. 背景
 
-当前 `webtools` 是独立前端工程，直接整包嵌入 LiteLauncher 会带来以下问题：
+`webTools` 原项目功能完整，但与 LiteLauncher 在架构、交互和视觉上不一致。
+迁移策略不是“整包搬运”，而是按 LiteLauncher 插件规范逐个落地。
 
-1. UI 与交互风格不一致（与现有搜索页/插件面板割裂）。
-2. 技术栈不一致（额外构建链路、运行时依赖和调试复杂度上升）。
-3. 与现有插件机制兼容性差（`openPanel`、IPC、统一状态管理无法复用）。
+## 2. 目标
 
-结论：不走“整包复制 + 外挂窗口”路线，改为“按 LiteLauncher 插件规范逐个迁移 19 个工具”。
+1. 19 个工具全部以 LiteLauncher 插件形式实现。
+2. 每个工具独立目录、独立执行逻辑、独立面板处理。
+3. 统一走 `command:plugin:*` 协议和 `openPanel(panel=plugin)`。
+4. 保持主界面搜索与插件体验一致。
 
-## 2. 目标与边界
+## 3. 当前进展
 
-### 2.1 目标
+### 3.1 架构进展
 
-1. 19 个工具全部以 LiteLauncher 原生插件风格实现。
-2. 每个工具独立模块，可单独开发、测试、开关与迭代。
-3. 复用现有插件执行链路：`command:plugin:*` + `openPanel`。
-4. 保持现有 UI 视觉与交互一致（输入框、网格、状态栏、键盘行为）。
+- 已创建 19 个 `webtools-*` 插件目录（主进程层）。
+- 已接入统一插件索引与执行分发。
+- 已启用插件面板模式 `panel=plugin`。
+- 已接入统一状态提示与错误日志基线。
 
-### 2.2 非目标
+### 3.2 可见插件（已对外开放）
 
-1. 不直接嵌入 `webtools` 的 Vue 页面与路由系统。
-2. 不在 LiteLauncher 内引入第二套前端框架运行时。
-3. 本阶段不做插件市场，只做内置插件模块化。
+1. `webtools-password`
+2. `webtools-cron`
+3. `webtools-json`
+4. `webtools-crypto`
+5. `webtools-jwt`
 
-## 3. 统一风格约束（必须满足）
+### 3.3 隐藏插件（暂不对外）
 
-1. 目录规范：每个插件一个目录，禁止把 19 个工具写进同一个巨型文件。
-2. 主进程规范：每个插件暴露 `LauncherPlugin`，支持 `createCatalogItems/getQueryItems/execute`。
-3. 渲染层规范：走现有面板机制，新增插件面板注册，不再新增独立 BrowserWindow。
-4. 数据规范：需要持久化的配置放 SQLite `settings`，临时态只留在内存。
-5. 交互规范：`Enter` 执行主动作，`Esc` 返回搜索页，状态栏给出明确反馈。
-6. 文案规范：中文优先，命令关键词支持中英混合搜索。
+1. `webtools-timestamp`
+2. `webtools-regex`
+3. `webtools-strings`
+4. `webtools-colors`
+5. `webtools-diff`
+6. `webtools-image-base64`
+7. `webtools-config-convert`
+8. `webtools-sql-format`
+9. `webtools-unit-convert`
+10. `webtools-url-parse`
+11. `webtools-qrcode`
+12. `webtools-markdown`
+13. `webtools-ua`
+14. `webtools-api-client`
 
-## 4. 目标目录结构
+## 4. 迁移原则
 
-```text
-src/main/plugins/
-  webtools-password/
-  webtools-cron/
-  webtools-json/
-  ...
-src/renderer/plugins/
-  webtools-password/
-  webtools-cron/
-  webtools-json/
-  ...
-src/shared/plugins/
-  webtools-password.ts
-  webtools-cron.ts
-  webtools-json.ts
-  ...
-```
+1. 先保证功能闭环，再开放可见。
+2. 先统一交互和样式，再做高级能力。
+3. 小步提交，每个插件都可独立回归。
+4. 不引入第二套前端框架运行时。
 
-## 5. 19 个工具迁移清单
+## 5. 分阶段任务
 
-1. 密码生成器（password）
-2. Cron 生成器（cron）
-3. JSON/CSV（json）
-4. 加密助手（crypto）
-5. JWT 调试（jwt）
-6. 时间戳转换（timestamp）
-7. 正则测试（regex）
-8. 字符串工具（strings）
-9. 颜色工具（colors）
-10. 文本 Diff（diff）
-11. 图片/Base64（image-base64）
-12. 配置转换（config-convert）
-13. SQL 格式化（sql-format）
-14. 单位换算（unit-convert）
-15. URL 解析（url-parse）
-16. 二维码生成（qrcode）
-17. Markdown 预览（markdown）
-18. UA 解析（ua）
-19. API Client（api-client）
+### 阶段 A：基础设施（进行中）
 
-## 6. 分阶段任务（建议顺序）
+- `WTM-001` 插件面板注册器继续收敛（减少 renderer 硬编码）
+- `WTM-002` 插件 UI 公共样式与组件抽取
+- `WTM-003` 插件配置持久化约定统一
+- `WTM-004` 插件 Enter/Esc 行为一致性校验
 
-### 阶段 A：插件底座改造（先做）
+### 阶段 B：已开放插件完善（持续优化）
 
-1. WTM-001：渲染层插件面板注册器（替代 `renderer.ts` 内硬编码分支）。
-2. WTM-002：插件 UI 公共组件（表单区、结果区、状态提示、复制按钮）。
-3. WTM-003：插件配置存取接口（读写 `settings`，支持默认值合并）。
-4. WTM-004：插件动作协议统一（主动作/次动作/键盘映射）。
+- `WTM-101` 密码工具：基础闭环已完成，继续补齐旧版剩余体验细节
+- `WTM-102` Cron 工具：默认示例与自动解析已落地，补小屏回归
+- `WTM-103` JSON 工具：自动转换与默认示例已落地，继续收敛布局
+- `WTM-104` 加密工具：主要能力已完成，继续补交互细节与回归
+- `WTM-105` JWT 工具：JWS/JWE 基础闭环已完成（当前 JWE 仅 `dir`）
 
-### 阶段 B：高频与低风险工具（先拿结果）
+### 阶段 C：隐藏插件逐批开放（待办）
 
-1. WTM-101：密码生成器
-2. WTM-102：时间戳转换
-3. WTM-103：正则测试
-4. WTM-104：字符串工具
-5. WTM-105：URL 解析
-6. WTM-106：二维码生成
+- C1（高频）：`timestamp`、`regex`、`url-parse`、`qrcode`
+- C2（中频）：`diff`、`strings`、`sql-format`、`unit-convert`
+- C3（进阶）：`markdown`、`ua`、`api-client`、`config-convert`、`image-base64`、`colors`
 
-### 阶段 C：中复杂度工具
+### 阶段 D：质量与发布（待办）
 
-1. WTM-201：JSON/CSV
-2. WTM-202：文本 Diff
-3. WTM-203：单位换算
-4. WTM-204：配置转换
-5. WTM-205：SQL 格式化
-6. WTM-206：颜色工具
-7. WTM-207：图片/Base64
+- `WTM-401` 6 个已开放插件自动回归脚本
+- `WTM-402` 小屏与高 DPI 布局专项回归
+- `WTM-403` 插件性能基线（打开耗时、执行耗时）
+- `WTM-404` 文档与截图统一更新
 
-### 阶段 D：高复杂度工具
+## 6. 验收标准
 
-1. WTM-301：加密助手
-2. WTM-302：JWT 调试
-3. WTM-303：API Client（含请求历史与错误处理）
-4. WTM-304：Markdown 预览（安全渲染）
-5. WTM-305：UA 解析
-6. WTM-306：Cron 生成器
+1. 插件可通过搜索命中并打开。
+2. Enter/Esc 行为符合统一规范。
+3. 状态提示完整，错误可解释，并接入统一错误日志。
+4. 小屏与常规窗口无关键布局错乱。
+5. `pnpm run build` 和基础回归通过。
 
-### 阶段 E：收尾与质量
+## 7. 当前风险
 
-1. WTM-401：19 工具统一交互走查（键盘、焦点、Esc 返回）。
-2. WTM-402：搜索关键词补齐（中文/拼音/英文别名）。
-3. WTM-403：性能与体积基线（面板首开、切换耗时、包体变化）。
-4. WTM-404：文档与 README 更新（用法、命令、截图）。
+1. 渲染层单文件体量较大，后续维护成本高。
+2. 少量历史字符串存在编码风险，需要持续巡检。
+3. 小屏场景的插件布局稳定性仍需加强。
 
-## 7. 验收标准
+## 8. 下一步（建议执行顺序）
 
-1. 不依赖外部 `webtools` 工程即可构建和运行 LiteLauncher。
-2. 每个工具都能通过命令搜索命中并打开对应面板。
-3. 所有工具满足 `Enter/Esc` 基本行为，不破坏现有搜索体验。
-4. 不新增不必要的全局依赖，不引入第二套主 UI 框架。
-5. 新增代码通过 `pnpm run build`，关键工具有最小测试覆盖。
+1. 优先推进 C1：开放 `timestamp`、`regex`、`url-parse`、`qrcode`。
+2. 补 `WTM-401` + `WTM-402`：先把当前已开放插件与小屏场景回归跑通。
+3. 完成 `WTM-001`：继续拆分 renderer 插件面板逻辑。

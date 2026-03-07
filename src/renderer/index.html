@@ -18,7 +18,7 @@
             id="search-input"
             class="search-input"
             type="text"
-            placeholder="搜索应用（图标网格）"
+            placeholder="搜索应用，支持 app:/cmd:/web:/plugin: 范围前缀"
             autocomplete="off"
             spellcheck="false"
           />
@@ -34,11 +34,15 @@
         </div>
       </header>
       <section class="results">
+        <div id="results-loading" class="results-loading" hidden>
+          <span class="results-loading-spinner" aria-hidden="true"></span>
+          <span id="results-loading-text" class="results-loading-text">正在检索...</span>
+        </div>
         <ul id="result-list" class="result-list"></ul>
       </section>
       <footer class="footer">
         <div id="status-text" class="status-text">启动中...</div>
-        <div id="hint-text" class="hint-text">Enter 执行 - Esc 清空/隐藏 - 方向键移动</div>
+        <div id="hint-text" class="hint-text">Enter 执行 - Esc 清空/隐藏 - 方向键移动 - 支持 app:/cmd:/web:/plugin:</div>
       </footer>
     </main>
     <script nonce="litelauncher-probe">
