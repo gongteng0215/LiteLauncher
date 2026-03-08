@@ -1,7 +1,7 @@
 ﻿# LiteLauncher
 
 Last updated: 2026-03-08
-Version baseline: `v1.0.8`
+Version baseline: `v1.0.9`
 
 LiteLauncher is a lightweight desktop launcher built with `Electron + TypeScript + SQLite`.
 It focuses on one fast loop: **invoke -> search -> run**.
