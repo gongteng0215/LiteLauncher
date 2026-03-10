@@ -1,7 +1,7 @@
 ﻿# Cashflow Lite 插件产品需求文档（PRD）
 
-更新时间：2026-03-08
-适用版本：LiteLauncher `v1.0.9`
+更新时间：2026-03-10
+适用版本：LiteLauncher `v1.0.10`
 
 ## 1. 产品定位
 

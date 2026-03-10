@@ -58,6 +58,10 @@ const APP_TITLE_ALIAS_RULES: ReadonlyArray<{
   aliases: readonly string[];
 }> = [
   {
+    pattern: /计算器|calculator|calc/i,
+    aliases: ["calculator", "calc", "jisuanqi"]
+  },
+  {
     pattern: /钉钉|dingtalk/i,
     aliases: ["ding", "dingtalk", "dd"]
   },
@@ -492,6 +496,12 @@ function commandItem(
 
 function createBuiltinItems(): LaunchItem[] {
   return [
+    commandItem(
+      "command:calculator",
+      "calculator",
+      "\u6253\u5f00\u7cfb\u7edf\u8ba1\u7b97\u5668",
+      "command:calculator"
+    ),
     commandItem(
       "command:clip",
       "clip",

@@ -353,6 +353,8 @@ interface LauncherApi {
   setCatalogScanConfig(
     config: Partial<CatalogScanConfig>
   ): Promise<CatalogScanConfig>;
+  getVisiblePluginIds(): Promise<string[]>;
+  setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
@@ -443,6 +445,7 @@ let mode: PanelMode = "search";
 let debugMode = false;
 let isResultsLoading = false;
 let resultsLoadingTimer: number | null = null;
+let searchInputDebounceTimer: number | null = null;
 const handledEvents = new WeakSet<KeyboardEvent>();
 let passwordPanelOptions: PasswordGeneratorOptions = {
   length: 16,
@@ -488,9 +491,16 @@ let webtoolsDiffIgnoreWhitespace = false;
 let webtoolsDiffRows: WebtoolsDiffRow[] = [];
 let webtoolsDiffSummary: WebtoolsDiffSummary | null = null;
 let webtoolsDiffTruncated = false;
-let webtoolsTimestampInput = "";
-let webtoolsTimestampOutput = "";
+let webtoolsTimestampUnixInput = "";
+let webtoolsTimestampDateInput = "";
+let webtoolsTimestampDateOutput = "";
+let webtoolsTimestampTimestampOutput = "";
+let webtoolsTimestampUnit: "s" | "ms" = "s";
 let webtoolsTimestampInfo = "";
+let webtoolsTimestampAutoTimer: number | null = null;
+let webtoolsTimestampClockTimer: number | null = null;
+let webtoolsTimestampToDateRequestToken = 0;
+let webtoolsTimestampToTimestampRequestToken = 0;
 let webtoolsRegexPattern = "";
 let webtoolsRegexFlags = "g";
 let webtoolsRegexInput = "";
@@ -593,8 +603,10 @@ const CATALOG_SCAN_CUSTOM_DIRS_MAX = 50;
 const CATALOG_SCAN_EXCLUDE_DIRS_MAX = 50;
 const CATALOG_RESULT_INCLUDE_DIRS_MAX = 50;
 const CATALOG_RESULT_EXCLUDE_DIRS_MAX = 50;
+const VISIBLE_PLUGIN_IDS_MAX = 50;
 const SEARCH_PAGE_FETCH_MULTIPLIER = 5;
 const SEARCH_PAGE_FETCH_MAX = 500;
+const SEARCH_INPUT_DEBOUNCE_MS = 1200;
 const PASSWORD_LENGTH_MIN = 4;
 const PASSWORD_LENGTH_MAX = 64;
 const PASSWORD_COUNT_MIN = 1;
@@ -620,6 +632,15 @@ const WEBTOOLS_QRCODE_PLUGIN_ID = "webtools-qrcode";
 const WEBTOOLS_MARKDOWN_PLUGIN_ID = "webtools-markdown";
 const WEBTOOLS_UA_PLUGIN_ID = "webtools-ua";
 const WEBTOOLS_API_PLUGIN_ID = "webtools-api-client";
+const DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp"
+];
 const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#$%^&*";
 const WEBTOOLS_JWT_DEFAULT_SECRET = "your-256-bit-secret";
 const WEBTOOLS_JWT_SAMPLE_TOKEN =
@@ -710,6 +731,7 @@ let catalogScanConfig: CatalogScanConfig = {
   resultIncludeDirs: [],
   resultExcludeDirs: []
 };
+let visiblePluginIds: string[] = [...DEFAULT_VISIBLE_PLUGIN_IDS];
 let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
   supported: false,
@@ -838,6 +860,46 @@ function scheduleResultsLoading(message: string, delayMs = 120): void {
     setResultsLoading(true, message);
     resultsLoadingTimer = null;
   }, delayMs);
+}
+
+function clearSearchInputDebounceTimer(): void {
+  if (searchInputDebounceTimer !== null) {
+    window.clearTimeout(searchInputDebounceTimer);
+    searchInputDebounceTimer = null;
+  }
+}
+
+function hasPendingSearchInputDebounce(): boolean {
+  return searchInputDebounceTimer !== null;
+}
+
+function flushSearchInputDebounce(): void {
+  if (!hasPendingSearchInputDebounce()) {
+    return;
+  }
+
+  clearSearchInputDebounceTimer();
+  void refreshEntries(currentQuery);
+}
+
+function scheduleSearchRefreshFromInput(nextQuery: string): void {
+  closeSearchContextMenu();
+  currentQuery = nextQuery;
+
+  const shouldDebounce = mode === "search" && Boolean(nextQuery.trim());
+  if (!shouldDebounce) {
+    clearSearchInputDebounceTimer();
+    void refreshEntries(currentQuery);
+    return;
+  }
+
+  clearSearchInputDebounceTimer();
+  setResultsLoading(true, "输入中，暂停检索...");
+  setStatus("输入中，暂停检索...");
+  searchInputDebounceTimer = window.setTimeout(() => {
+    searchInputDebounceTimer = null;
+    void refreshEntries(currentQuery);
+  }, SEARCH_INPUT_DEBOUNCE_MS);
 }
 
 function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
@@ -1022,8 +1084,9 @@ function requestWindowSizePreset(
 }
 
 function syncWindowSizePreset(nextMode: PanelMode, force = false): void {
-  const preset: "compact" | "cashflow" =
-    nextMode === "cashflow" ? "cashflow" : "compact";
+  const useExpandedPreset =
+    nextMode === "cashflow" || nextMode === "plugin" || nextMode === "settings";
+  const preset: "compact" | "cashflow" = useExpandedPreset ? "cashflow" : "compact";
   if (
     !force &&
     preset === currentWindowSizePreset &&
@@ -1036,6 +1099,11 @@ function syncWindowSizePreset(nextMode: PanelMode, force = false): void {
 }
 
 function setMode(nextMode: PanelMode): void {
+  clearSearchInputDebounceTimer();
+  if (nextMode !== "plugin") {
+    clearWebtoolsTimestampAutoTimer();
+    clearWebtoolsTimestampClockTimer();
+  }
   mode = nextMode;
   syncWindowSizePreset(nextMode);
   applyModeClass(nextMode);
@@ -1054,7 +1122,7 @@ function setMode(nextMode: PanelMode): void {
     input.placeholder =
       "搜索应用，支持 app:/cmd:/web:/plugin: 范围前缀";
     setHint(
-      "Enter 执行 - Esc 清空/隐藏 - 方向键移动 - PageUp/PageDown 翻页 - 支持 app:/cmd:/web:/plugin:"
+      "输入停顿约 1 秒后检索 - Enter 执行 - Esc 清空/隐藏 - 方向键移动 - PageUp/PageDown 翻页 - 支持 app:/cmd:/web:/plugin:"
     );
   } else if (mode === "clip") {
     input.placeholder = "\u641c\u7d22\u526a\u8d34\u677f\u5386\u53f2";
@@ -1188,6 +1256,27 @@ function parseResultExcludeDirsText(value: string): string[] {
     seen.add(key);
     result.push(token);
     if (result.length >= CATALOG_RESULT_EXCLUDE_DIRS_MAX) {
+      break;
+    }
+  }
+  return result;
+}
+
+function parseVisiblePluginIdsText(value: string): string[] {
+  const tokens = value
+    .split(/\r?\n|;/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    if (seen.has(token)) {
+      continue;
+    }
+
+    seen.add(token);
+    result.push(token);
+    if (result.length >= VISIBLE_PLUGIN_IDS_MAX) {
       break;
     }
   }
@@ -2689,6 +2778,7 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
   const excludeScanDirsNode = form.elements.namedItem("excludeScanDirs");
   const resultIncludeDirsNode = form.elements.namedItem("resultIncludeDirs");
   const resultExcludeDirsNode = form.elements.namedItem("resultExcludeDirs");
+  const visiblePluginIdsNode = form.elements.namedItem("visiblePluginIds");
   const catalogInputConfig: Partial<CatalogScanConfig> = {
     scanProgramFiles:
       scanProgramFilesNode instanceof HTMLInputElement
@@ -2711,6 +2801,10 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
         ? parseResultExcludeDirsText(resultExcludeDirsNode.value)
         : catalogScanConfig.resultExcludeDirs
   };
+  const nextVisiblePluginIds =
+    visiblePluginIdsNode instanceof HTMLTextAreaElement
+      ? parseVisiblePluginIdsText(visiblePluginIdsNode.value)
+      : visiblePluginIds;
 
   const launchAtLoginNode = form.elements.namedItem("launchAtLogin");
   const nextLaunchAtLoginEnabled =
@@ -2721,12 +2815,24 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
   try {
     const normalized = normalizeSettingsInput(inputConfig);
     const normalizedCatalog = normalizeCatalogScanConfigInput(catalogInputConfig);
-    searchDisplayConfig = await launcher.setSearchDisplayConfig(normalized);
-    catalogScanConfig = await launcher.setCatalogScanConfig(normalizedCatalog);
-    launchAtLoginStatus = await launcher.setLaunchAtLoginEnabled(
-      nextLaunchAtLoginEnabled
+    const [
+      nextSearchDisplayConfig,
+      nextCatalogScanConfig,
+      nextAppliedVisiblePluginIds,
+      nextLaunchAtLoginStatus
+    ] = await Promise.all([
+      launcher.setSearchDisplayConfig(normalized),
+      launcher.setCatalogScanConfig(normalizedCatalog),
+      launcher.setVisiblePluginIds(nextVisiblePluginIds),
+      launcher.setLaunchAtLoginEnabled(nextLaunchAtLoginEnabled)
+    ]);
+    searchDisplayConfig = nextSearchDisplayConfig;
+    catalogScanConfig = nextCatalogScanConfig;
+    visiblePluginIds = nextAppliedVisiblePluginIds;
+    launchAtLoginStatus = nextLaunchAtLoginStatus;
+    setStatus(
+      `\u8bbe\u7f6e\u5df2\u4fdd\u5b58（可见插件 ${visiblePluginIds.length} 个；索引源改动需重建索引后生效）`
     );
-    setStatus("\u8bbe\u7f6e\u5df2\u4fdd\u5b58（索引源改动需重建索引后生效）");
   } catch {
     setStatus("\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25");
   }
@@ -2992,6 +3098,28 @@ function renderSettingsPanel(): void {
   scanGroup.section.appendChild(scanActions);
   form.appendChild(scanGroup.section);
 
+  const pluginGroup = createGroup(
+    "插件可见性",
+    "按插件 ID 控制主界面插件分区显示项，一行一个，留空表示隐藏全部插件。"
+  );
+  const {
+    row: visiblePluginIdsRow,
+    control: visiblePluginIdsControl
+  } = createRow(
+    "可见插件 ID",
+    `最多 ${VISIBLE_PLUGIN_IDS_MAX} 个，可写插件完整 ID（如 webtools-json）`,
+    { textarea: true }
+  );
+  const visiblePluginIdsInput = document.createElement("textarea");
+  visiblePluginIdsInput.name = "visiblePluginIds";
+  visiblePluginIdsInput.className = "settings-value settings-textarea";
+  visiblePluginIdsInput.placeholder =
+    "一行一个插件 ID，例如：\ncashflow-game\nwebtools-password\nwebtools-json";
+  visiblePluginIdsInput.value = visiblePluginIds.join("\n");
+  visiblePluginIdsControl.appendChild(visiblePluginIdsInput);
+  pluginGroup.body.appendChild(visiblePluginIdsRow);
+  form.appendChild(pluginGroup.section);
+
   const systemGroup = createGroup(
     "系统",
     "管理应用的启动行为与当前版本信息。"
@@ -3122,16 +3250,27 @@ function renderSettingsPanel(): void {
       resultIncludeDirs: [],
       resultExcludeDirs: []
     };
+    visiblePluginIds = [...DEFAULT_VISIBLE_PLUGIN_IDS];
     void Promise.all([
       launcher.setSearchDisplayConfig(searchDisplayConfig),
-      launcher.setCatalogScanConfig(catalogScanConfig)
+      launcher.setCatalogScanConfig(catalogScanConfig),
+      launcher.setVisiblePluginIds(visiblePluginIds)
     ])
-      .then(([savedSearchConfig, savedCatalogScanConfig]) => {
+      .then(
+        ([
+          savedSearchConfig,
+          savedCatalogScanConfig,
+          savedVisiblePluginIds
+        ]) => {
         searchDisplayConfig = savedSearchConfig;
         catalogScanConfig = savedCatalogScanConfig;
-        setStatus("\u5df2\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e");
+        visiblePluginIds = savedVisiblePluginIds;
+        setStatus(
+          `\u5df2\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e（可见插件 ${visiblePluginIds.length} 个）`
+        );
         renderList();
-      })
+        }
+      )
       .catch(() => {
         setStatus("\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e\u5931\u8d25");
       });
@@ -4759,14 +4898,74 @@ function renderWebtoolsDiffPanel(): void {
   list.appendChild(panelItem);
 }
 
-function applyWebtoolsTimestampPanelPayload(panel: ActivePluginPanelState): void {
-  const input =
-    panel.data && typeof panel.data.input === "string"
-      ? panel.data.input
-      : webtoolsTimestampInput;
+function normalizeWebtoolsTimestampUnit(value: unknown): "s" | "ms" {
+  return value === "ms" ? "ms" : "s";
+}
 
-  webtoolsTimestampInput = input;
-  webtoolsTimestampOutput = "";
+function formatWebtoolsTimestampDate(value: Date): string {
+  const yyyy = String(value.getFullYear());
+  const mm = String(value.getMonth() + 1).padStart(2, "0");
+  const dd = String(value.getDate()).padStart(2, "0");
+  const hh = String(value.getHours()).padStart(2, "0");
+  const mi = String(value.getMinutes()).padStart(2, "0");
+  const ss = String(value.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function getWebtoolsTimestampNowUnix(unit: "s" | "ms"): string {
+  const nowMs = Date.now();
+  if (unit === "ms") {
+    return String(nowMs);
+  }
+  return String(Math.floor(nowMs / 1000));
+}
+
+function clearWebtoolsTimestampAutoTimer(): void {
+  if (webtoolsTimestampAutoTimer !== null) {
+    window.clearTimeout(webtoolsTimestampAutoTimer);
+    webtoolsTimestampAutoTimer = null;
+  }
+}
+
+function clearWebtoolsTimestampClockTimer(): void {
+  if (webtoolsTimestampClockTimer !== null) {
+    window.clearInterval(webtoolsTimestampClockTimer);
+    webtoolsTimestampClockTimer = null;
+  }
+}
+
+function ensureWebtoolsTimestampDefaults(): void {
+  if (!webtoolsTimestampDateInput.trim()) {
+    webtoolsTimestampDateInput = formatWebtoolsTimestampDate(new Date());
+  }
+  if (!webtoolsTimestampUnixInput.trim()) {
+    webtoolsTimestampUnixInput = getWebtoolsTimestampNowUnix(webtoolsTimestampUnit);
+  }
+}
+
+function applyWebtoolsTimestampPanelPayload(panel: ActivePluginPanelState): void {
+  const payloadUnit =
+    panel.data && typeof panel.data.unit === "string"
+      ? normalizeWebtoolsTimestampUnit(panel.data.unit)
+      : webtoolsTimestampUnit;
+  webtoolsTimestampUnit = payloadUnit;
+
+  const input =
+    panel.data && typeof panel.data.input === "string" ? panel.data.input.trim() : "";
+  if (input) {
+    if (/^[+-]?\d+$/.test(input)) {
+      webtoolsTimestampUnixInput = input;
+      if (!(panel.data && typeof panel.data.unit === "string")) {
+        webtoolsTimestampUnit = input.length > 10 ? "ms" : "s";
+      }
+    } else {
+      webtoolsTimestampDateInput = input;
+    }
+  }
+
+  ensureWebtoolsTimestampDefaults();
+  webtoolsTimestampDateOutput = "";
+  webtoolsTimestampTimestampOutput = "";
   webtoolsTimestampInfo = "";
 }
 
@@ -4777,20 +4976,84 @@ function buildWebtoolsTimestampTarget(
   const params = new URLSearchParams();
   params.set("action", action);
   params.set("input", input);
+  params.set("unit", webtoolsTimestampUnit);
   return `command:plugin:${WEBTOOLS_TIMESTAMP_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsTimestampResultInForm(form: HTMLFormElement): void {
+  const dateOutputNode = form.elements.namedItem("webtoolsTimestampDateOutput");
+  if (dateOutputNode instanceof HTMLInputElement) {
+    dateOutputNode.value = webtoolsTimestampDateOutput;
+  }
+
+  const tsOutputNode = form.elements.namedItem("webtoolsTimestampTimestampOutput");
+  if (tsOutputNode instanceof HTMLInputElement) {
+    tsOutputNode.value = webtoolsTimestampTimestampOutput;
+  }
+
+  const infoNode = form.querySelector(".webtools-timestamp-info-value");
+  if (infoNode instanceof HTMLSpanElement) {
+    infoNode.textContent = webtoolsTimestampInfo || "-";
+  }
+
+  const tsUnitNode = form.querySelector("[data-webtools-timestamp-unit-label]");
+  if (tsUnitNode instanceof HTMLSpanElement) {
+    tsUnitNode.textContent = webtoolsTimestampUnit === "s" ? "秒 (s)" : "毫秒 (ms)";
+  }
+}
+
+function scheduleWebtoolsTimestampAutoConvert(
+  form: HTMLFormElement,
+  action: "toDate" | "toTimestamp",
+  immediate = false
+): void {
+  clearWebtoolsTimestampAutoTimer();
+
+  webtoolsTimestampAutoTimer = window.setTimeout(() => {
+    webtoolsTimestampAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const input =
+      action === "toDate" ? webtoolsTimestampUnixInput : webtoolsTimestampDateInput;
+    if (!input.trim()) {
+      if (action === "toDate") {
+        webtoolsTimestampDateOutput = "";
+      } else {
+        webtoolsTimestampTimestampOutput = "";
+      }
+      webtoolsTimestampInfo = "等待输入";
+      refreshWebtoolsTimestampResultInForm(form);
+      return;
+    }
+
+    void executeWebtoolsTimestampAction(action, input, { render: false, form });
+  }, immediate ? 0 : 220);
 }
 
 async function executeWebtoolsTimestampAction(
   action: "toDate" | "toTimestamp",
-  input: string
+  input: string,
+  options: { render?: boolean; form?: HTMLFormElement } = {}
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
     setStatus("桥接层未加载，无法执行时间戳工具");
     return;
   }
+  const shouldRender = options.render ?? true;
 
-  webtoolsTimestampInput = input;
+  if (action === "toDate") {
+    webtoolsTimestampUnixInput = input;
+  } else {
+    webtoolsTimestampDateInput = input;
+  }
+
+  const requestToken =
+    action === "toDate"
+      ? ++webtoolsTimestampToDateRequestToken
+      : ++webtoolsTimestampToTimestampRequestToken;
 
   const item: LaunchItem = {
     id: `plugin:${WEBTOOLS_TIMESTAMP_PLUGIN_ID}:${action}`,
@@ -4802,21 +5065,59 @@ async function executeWebtoolsTimestampAction(
   };
 
   const result = await launcher.execute(item);
+  if (
+    (action === "toDate" && requestToken !== webtoolsTimestampToDateRequestToken) ||
+    (action === "toTimestamp" &&
+      requestToken !== webtoolsTimestampToTimestampRequestToken)
+  ) {
+    return;
+  }
+
   const data = toRecord(result.data);
-  webtoolsTimestampOutput =
-    data && typeof data.output === "string" ? data.output : "";
-  webtoolsTimestampInfo = data && typeof data.info === "string" ? data.info : "";
+  if (data && typeof data.unit === "string") {
+    webtoolsTimestampUnit = normalizeWebtoolsTimestampUnit(data.unit);
+  }
+
+  if (action === "toDate") {
+    webtoolsTimestampDateOutput =
+      (data && typeof data.date === "string" && data.date) ||
+      (data && typeof data.output === "string" && data.output) ||
+      "";
+    if (!result.ok) {
+      webtoolsTimestampDateOutput = "";
+    }
+  } else {
+    webtoolsTimestampTimestampOutput =
+      (data && typeof data.timestamp === "string" && data.timestamp) ||
+      (data && typeof data.output === "string" && data.output) ||
+      "";
+    if (!result.ok) {
+      webtoolsTimestampTimestampOutput = "";
+    }
+  }
+
+  webtoolsTimestampInfo =
+    (data && typeof data.info === "string" && data.info) || result.message || "";
 
   setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
-  renderList();
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  if (options.form) {
+    refreshWebtoolsTimestampResultInForm(options.form);
+  }
 }
 
 function renderWebtoolsTimestampPanel(): void {
+  clearWebtoolsTimestampClockTimer();
+  ensureWebtoolsTimestampDefaults();
+
   const panelItem = document.createElement("li");
   panelItem.className = "settings-panel-item";
 
   const panel = document.createElement("section");
-  panel.className = "settings-panel";
+  panel.className = "settings-panel webtools-timestamp-panel";
 
   const title = document.createElement("h3");
   title.className = "settings-title";
@@ -4828,69 +5129,226 @@ function renderWebtoolsTimestampPanel(): void {
     activePluginPanel?.subtitle || "支持时间戳与日期时间双向转换。";
 
   const form = document.createElement("form");
-  form.className = "settings-form webtools-timestamp-form";
+  form.className = "settings-form webtools-timestamp-form webtools-timestamp-lab";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const inputNode = form.elements.namedItem("webtoolsTimestampInput");
-    const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
-    void executeWebtoolsTimestampAction("toDate", input);
+    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
+      render: false,
+      form
+    });
   });
 
-  const inputRow = document.createElement("label");
-  inputRow.className = "settings-row webtools-row-full";
-  const inputLabel = document.createElement("span");
-  inputLabel.className = "settings-row-label";
-  inputLabel.textContent = "输入";
-  const inputArea = document.createElement("textarea");
-  inputArea.className = "settings-value webtools-textarea";
-  inputArea.name = "webtoolsTimestampInput";
-  inputArea.placeholder =
-    "输入时间戳或日期时间，例如 1712345678 或 2026-03-06 10:00:00";
-  inputArea.value = webtoolsTimestampInput;
-  const inputHint = document.createElement("span");
-  inputHint.className = "settings-row-hint";
-  inputHint.textContent = "时间戳支持秒或毫秒";
-  inputRow.append(inputLabel, inputArea, inputHint);
+  const currentLine = document.createElement("div");
+  currentLine.className = "webtools-timestamp-current";
+  const currentLocalLabel = document.createElement("span");
+  currentLocalLabel.className = "webtools-timestamp-current-label";
+  currentLocalLabel.textContent = "当前本地时间:";
+  const currentLocalValue = document.createElement("span");
+  currentLocalValue.className = "webtools-timestamp-current-value";
+  const currentUnixLabel = document.createElement("span");
+  currentUnixLabel.className = "webtools-timestamp-current-label";
+  currentUnixLabel.textContent = "Unix 时间戳:";
+  const currentUnixValue = document.createElement("span");
+  currentUnixValue.className = "webtools-timestamp-current-value";
+  currentLine.append(
+    currentLocalLabel,
+    currentLocalValue,
+    currentUnixLabel,
+    currentUnixValue
+  );
 
-  const outputRow = document.createElement("div");
-  outputRow.className = "settings-row webtools-row-full";
-  const outputLabel = document.createElement("span");
-  outputLabel.className = "settings-row-label";
-  outputLabel.textContent = "输出";
-  const outputArea = document.createElement("textarea");
-  outputArea.className = "settings-value webtools-textarea";
-  outputArea.readOnly = true;
-  outputArea.placeholder = "转换后结果";
-  outputArea.value = webtoolsTimestampOutput;
-  const outputHint = document.createElement("span");
-  outputHint.className = "settings-row-hint";
-  outputHint.textContent = webtoolsTimestampInfo || "-";
-  outputRow.append(outputLabel, outputArea, outputHint);
+  const updateCurrentClock = (): void => {
+    if (
+      !form.isConnected ||
+      mode !== "plugin" ||
+      activePluginPanel?.pluginId !== WEBTOOLS_TIMESTAMP_PLUGIN_ID
+    ) {
+      clearWebtoolsTimestampClockTimer();
+      return;
+    }
+    const now = new Date();
+    currentLocalValue.textContent = formatWebtoolsTimestampDate(now);
+    currentUnixValue.textContent =
+      webtoolsTimestampUnit === "s"
+        ? String(Math.floor(now.getTime() / 1000))
+        : String(now.getTime());
+  };
+  updateCurrentClock();
+  webtoolsTimestampClockTimer = window.setInterval(updateCurrentClock, 1000);
 
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
+  const toDateSection = document.createElement("section");
+  toDateSection.className = "webtools-timestamp-section";
+  const toDateTitle = document.createElement("h4");
+  toDateTitle.className = "webtools-timestamp-section-title";
+  toDateTitle.textContent = "Unix 时间戳 → 日期字符串";
 
-  const toTimestampButton = document.createElement("button");
-  toTimestampButton.type = "button";
-  toTimestampButton.className = "settings-btn settings-btn-secondary";
-  toTimestampButton.textContent = "转时间戳";
-  toTimestampButton.addEventListener("click", () => {
-    const inputNode = form.elements.namedItem("webtoolsTimestampInput");
-    const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
-    void executeWebtoolsTimestampAction("toTimestamp", input);
+  const toDateControls = document.createElement("div");
+  toDateControls.className = "webtools-timestamp-controls";
+  const unixInput = document.createElement("input");
+  unixInput.type = "text";
+  unixInput.className = "settings-number webtools-timestamp-input";
+  unixInput.name = "webtoolsTimestampUnixInput";
+  unixInput.placeholder = "例如：1773132180";
+  unixInput.value = webtoolsTimestampUnixInput;
+
+  const unitSelect = document.createElement("select");
+  unitSelect.className = "settings-number webtools-timestamp-select";
+  unitSelect.name = "webtoolsTimestampUnit";
+  (
+    [
+      ["s", "秒 (s)"],
+      ["ms", "毫秒 (ms)"]
+    ] as const
+  ).forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = webtoolsTimestampUnit === value;
+    unitSelect.appendChild(option);
   });
 
   const toDateButton = document.createElement("button");
-  toDateButton.type = "submit";
+  toDateButton.type = "button";
   toDateButton.className = "settings-btn settings-btn-primary";
-  toDateButton.textContent = "转日期";
+  toDateButton.textContent = "转换为日期";
+  toDateButton.addEventListener("click", () => {
+    webtoolsTimestampUnixInput = unixInput.value;
+    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
+      render: false,
+      form
+    });
+  });
 
-  actions.append(toTimestampButton, toDateButton);
+  const nowButton = document.createElement("button");
+  nowButton.type = "button";
+  nowButton.className = "settings-btn settings-btn-secondary";
+  nowButton.textContent = "获取当前";
+  nowButton.addEventListener("click", () => {
+    webtoolsTimestampUnixInput = getWebtoolsTimestampNowUnix(webtoolsTimestampUnit);
+    unixInput.value = webtoolsTimestampUnixInput;
+    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
+      render: false,
+      form
+    });
+    updateCurrentClock();
+  });
 
-  form.append(inputRow, outputRow, actions);
+  toDateControls.append(unixInput, unitSelect, toDateButton, nowButton);
+
+  const toDateResult = document.createElement("div");
+  toDateResult.className = "webtools-timestamp-result";
+  const toDateResultLabel = document.createElement("label");
+  toDateResultLabel.className = "webtools-timestamp-result-label";
+  toDateResultLabel.textContent = "日期字符串:";
+  const toDateResultValue = document.createElement("input");
+  toDateResultValue.type = "text";
+  toDateResultValue.readOnly = true;
+  toDateResultValue.className = "settings-number webtools-timestamp-result-input";
+  toDateResultValue.name = "webtoolsTimestampDateOutput";
+  toDateResultValue.value = webtoolsTimestampDateOutput;
+  toDateResult.append(toDateResultLabel, toDateResultValue);
+
+  toDateSection.append(toDateTitle, toDateControls, toDateResult);
+
+  const divider = document.createElement("div");
+  divider.className = "webtools-timestamp-divider";
+
+  const toTimestampSection = document.createElement("section");
+  toTimestampSection.className = "webtools-timestamp-section";
+  const toTimestampTitle = document.createElement("h4");
+  toTimestampTitle.className = "webtools-timestamp-section-title";
+  toTimestampTitle.textContent = "日期字符串 → Unix 时间戳";
+
+  const toTimestampControls = document.createElement("div");
+  toTimestampControls.className = "webtools-timestamp-controls";
+  const dateInput = document.createElement("input");
+  dateInput.type = "text";
+  dateInput.className = "settings-number webtools-timestamp-input";
+  dateInput.name = "webtoolsTimestampDateInput";
+  dateInput.placeholder = "YYYY-MM-DD HH:mm:ss";
+  dateInput.value = webtoolsTimestampDateInput;
+
+  const toTimestampButton = document.createElement("button");
+  toTimestampButton.type = "button";
+  toTimestampButton.className = "settings-btn settings-btn-primary";
+  toTimestampButton.textContent = "转换为时间戳";
+  toTimestampButton.addEventListener("click", () => {
+    webtoolsTimestampDateInput = dateInput.value;
+    void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
+      render: false,
+      form
+    });
+  });
+
+  toTimestampControls.append(dateInput, toTimestampButton);
+
+  const toTimestampResult = document.createElement("div");
+  toTimestampResult.className = "webtools-timestamp-result";
+  const toTimestampResultLabel = document.createElement("label");
+  toTimestampResultLabel.className = "webtools-timestamp-result-label";
+  toTimestampResultLabel.textContent = "Unix 时间戳 (";
+  const unitLabel = document.createElement("span");
+  unitLabel.dataset.webtoolsTimestampUnitLabel = "1";
+  unitLabel.textContent = webtoolsTimestampUnit === "s" ? "秒 (s)" : "毫秒 (ms)";
+  toTimestampResultLabel.append(unitLabel, "):");
+
+  const toTimestampResultValue = document.createElement("input");
+  toTimestampResultValue.type = "text";
+  toTimestampResultValue.readOnly = true;
+  toTimestampResultValue.className = "settings-number webtools-timestamp-result-input";
+  toTimestampResultValue.name = "webtoolsTimestampTimestampOutput";
+  toTimestampResultValue.value = webtoolsTimestampTimestampOutput;
+  toTimestampResult.append(toTimestampResultLabel, toTimestampResultValue);
+
+  toTimestampSection.append(toTimestampTitle, toTimestampControls, toTimestampResult);
+
+  const infoLine = document.createElement("div");
+  infoLine.className = "webtools-timestamp-info";
+  const infoLabel = document.createElement("span");
+  infoLabel.className = "webtools-timestamp-info-label";
+  infoLabel.textContent = "结果说明:";
+  const infoValue = document.createElement("span");
+  infoValue.className = "webtools-timestamp-info-value";
+  infoValue.textContent = webtoolsTimestampInfo || "-";
+  infoLine.append(infoLabel, infoValue);
+
+  unixInput.addEventListener("input", () => {
+    webtoolsTimestampUnixInput = unixInput.value;
+    scheduleWebtoolsTimestampAutoConvert(form, "toDate");
+  });
+
+  dateInput.addEventListener("input", () => {
+    webtoolsTimestampDateInput = dateInput.value;
+    scheduleWebtoolsTimestampAutoConvert(form, "toTimestamp");
+  });
+
+  unitSelect.addEventListener("change", () => {
+    webtoolsTimestampUnit = normalizeWebtoolsTimestampUnit(unitSelect.value);
+    updateCurrentClock();
+    refreshWebtoolsTimestampResultInForm(form);
+    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
+      render: false,
+      form
+    });
+    void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
+      render: false,
+      form
+    });
+  });
+
+  form.append(currentLine, toDateSection, divider, toTimestampSection, infoLine);
   panel.append(title, description, form);
   panelItem.appendChild(panel);
   list.appendChild(panelItem);
+
+  void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
+    render: false,
+    form
+  });
+  void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
+    render: false,
+    form
+  });
 }
 
 function applyWebtoolsRegexPanelPayload(panel: ActivePluginPanelState): void {
@@ -8519,285 +8977,181 @@ function renderPluginPanel(): void {
   list.appendChild(panelItem);
 }
 
+function runWithPluginForm(
+  selector: string,
+  action: (form: HTMLFormElement) => void
+): () => void {
+  return () => {
+    const form = list.querySelector(selector);
+    if (form instanceof HTMLFormElement) {
+      action(form);
+    }
+  };
+}
+
+const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
+  [WEBTOOLS_PASSWORD_PLUGIN_ID]: {
+    render: renderWebtoolsPasswordPanel,
+    onOpen: applyWebtoolsPasswordPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-password-form", (form) => {
+      void generateFromWebtoolsPasswordPanel(form, { render: false });
+    })
+  },
+  [WEBTOOLS_JSON_PLUGIN_ID]: {
+    render: renderWebtoolsJsonPanel,
+    onOpen: applyWebtoolsJsonPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-json-form", (form) => {
+      void executeWebtoolsJsonConvert(form, { render: false });
+    })
+  },
+  [WEBTOOLS_URL_PLUGIN_ID]: {
+    render: renderWebtoolsUrlPanel,
+    onOpen: applyWebtoolsUrlPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-url-form", (form) => {
+      const inputNode = form.elements.namedItem("webtoolsUrlInput");
+      const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
+      void executeWebtoolsUrlAction("parse", input);
+    })
+  },
+  [WEBTOOLS_DIFF_PLUGIN_ID]: {
+    render: renderWebtoolsDiffPanel,
+    onOpen: applyWebtoolsDiffPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-diff-form", (form) => {
+      void executeWebtoolsDiffCompare(form);
+    })
+  },
+  [WEBTOOLS_TIMESTAMP_PLUGIN_ID]: {
+    render: renderWebtoolsTimestampPanel,
+    onOpen: applyWebtoolsTimestampPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-timestamp-form", (form) => {
+      const inputNode = form.elements.namedItem("webtoolsTimestampUnixInput");
+      const input = inputNode instanceof HTMLInputElement ? inputNode.value : "";
+      void executeWebtoolsTimestampAction("toDate", input, { render: false, form });
+    })
+  },
+  [WEBTOOLS_REGEX_PLUGIN_ID]: {
+    render: renderWebtoolsRegexPanel,
+    onOpen: applyWebtoolsRegexPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-regex-form", (form) => {
+      void executeWebtoolsRegexAction("test", form);
+    })
+  },
+  [WEBTOOLS_CRON_PLUGIN_ID]: {
+    render: renderWebtoolsCronPanel,
+    onOpen: applyWebtoolsCronPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-cron-form", (form) => {
+      const node = form.elements.namedItem("webtoolsCronExpression");
+      const expression = node instanceof HTMLInputElement ? node.value : "";
+      void executeWebtoolsCronAction("parse", expression, {
+        render: false,
+        form
+      });
+    })
+  },
+  [WEBTOOLS_CRYPTO_PLUGIN_ID]: {
+    render: renderWebtoolsCryptoPanel,
+    onOpen: applyWebtoolsCryptoPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-crypto-form", (form) => {
+      void executeWebtoolsCryptoProcess(form, { render: false });
+    })
+  },
+  [WEBTOOLS_JWT_PLUGIN_ID]: {
+    render: renderWebtoolsJwtPanel,
+    onOpen: applyWebtoolsJwtPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-jwt-form", (form) => {
+      void executeWebtoolsJwtAction("parse", form, { render: false });
+    })
+  },
+  [WEBTOOLS_STRINGS_PLUGIN_ID]: {
+    render: renderWebtoolsStringsPanel,
+    onOpen: applyWebtoolsStringsPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-strings-form", (form) => {
+      void executeWebtoolsStringsAction("convert", form);
+    })
+  },
+  [WEBTOOLS_COLORS_PLUGIN_ID]: {
+    render: renderWebtoolsColorsPanel,
+    onOpen: applyWebtoolsColorsPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-colors-form", (form) => {
+      const node = form.elements.namedItem("webtoolsColorsInput");
+      const color = node instanceof HTMLInputElement ? node.value : "";
+      void executeWebtoolsColorsConvert(color);
+    })
+  },
+  [WEBTOOLS_IMAGE_BASE64_PLUGIN_ID]: {
+    render: renderWebtoolsImageBase64Panel,
+    onOpen: applyWebtoolsImageBase64PanelPayload,
+    onEnter: runWithPluginForm("form.webtools-image-base64-form", (form) => {
+      const node = form.elements.namedItem("webtoolsImageBase64Input");
+      const inputValue = node instanceof HTMLTextAreaElement ? node.value : "";
+      void executeWebtoolsImageBase64Normalize(inputValue);
+    })
+  },
+  [WEBTOOLS_CONFIG_PLUGIN_ID]: {
+    render: renderWebtoolsConfigPanel,
+    onOpen: applyWebtoolsConfigPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-config-form", (form) => {
+      void executeWebtoolsConfigConvert(form);
+    })
+  },
+  [WEBTOOLS_SQL_PLUGIN_ID]: {
+    render: renderWebtoolsSqlPanel,
+    onOpen: applyWebtoolsSqlPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-sql-form", (form) => {
+      void executeWebtoolsSqlFormat(form);
+    })
+  },
+  [WEBTOOLS_UNIT_PLUGIN_ID]: {
+    render: renderWebtoolsUnitPanel,
+    onOpen: applyWebtoolsUnitPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-unit-form", (form) => {
+      void executeWebtoolsUnitStorage(form);
+    })
+  },
+  [WEBTOOLS_QRCODE_PLUGIN_ID]: {
+    render: renderWebtoolsQrcodePanel,
+    onOpen: applyWebtoolsQrcodePanelPayload,
+    onEnter: runWithPluginForm("form.webtools-qrcode-form", (form) => {
+      void executeWebtoolsQrcodeGenerate(form);
+    })
+  },
+  [WEBTOOLS_MARKDOWN_PLUGIN_ID]: {
+    render: renderWebtoolsMarkdownPanel,
+    onOpen: applyWebtoolsMarkdownPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-markdown-form", (form) => {
+      const node = form.elements.namedItem("webtoolsMarkdownInput");
+      const inputValue = node instanceof HTMLTextAreaElement ? node.value : "";
+      void executeWebtoolsMarkdownRender(inputValue);
+    })
+  },
+  [WEBTOOLS_UA_PLUGIN_ID]: {
+    render: renderWebtoolsUaPanel,
+    onOpen: applyWebtoolsUaPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-ua-form", (form) => {
+      const node = form.elements.namedItem("webtoolsUaInput");
+      const ua = node instanceof HTMLTextAreaElement ? node.value : "";
+      void executeWebtoolsUaParse(ua);
+    })
+  },
+  [WEBTOOLS_API_PLUGIN_ID]: {
+    render: renderWebtoolsApiPanel,
+    onOpen: applyWebtoolsApiPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-api-form", (form) => {
+      void executeWebtoolsApiRequest(form);
+    })
+  }
+};
+
 function getPluginPanelHandler(pluginId: string): PluginPanelHandler | null {
-  if (pluginId === WEBTOOLS_PASSWORD_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsPasswordPanel,
-      onOpen: applyWebtoolsPasswordPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-password-form");
-        if (form instanceof HTMLFormElement) {
-          void generateFromWebtoolsPasswordPanel(form, { render: false });
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_JSON_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsJsonPanel,
-      onOpen: applyWebtoolsJsonPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-json-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsJsonConvert(form, { render: false });
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_URL_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsUrlPanel,
-      onOpen: applyWebtoolsUrlPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-url-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-
-        const inputNode = form.elements.namedItem("webtoolsUrlInput");
-        const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
-        void executeWebtoolsUrlAction("parse", input);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_DIFF_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsDiffPanel,
-      onOpen: applyWebtoolsDiffPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-diff-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsDiffCompare(form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_TIMESTAMP_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsTimestampPanel,
-      onOpen: applyWebtoolsTimestampPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-timestamp-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-
-        const inputNode = form.elements.namedItem("webtoolsTimestampInput");
-        const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
-        void executeWebtoolsTimestampAction("toDate", input);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_REGEX_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsRegexPanel,
-      onOpen: applyWebtoolsRegexPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-regex-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsRegexAction("test", form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_CRON_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsCronPanel,
-      onOpen: applyWebtoolsCronPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-cron-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-        const node = form.elements.namedItem("webtoolsCronExpression");
-        const expression = node instanceof HTMLInputElement ? node.value : "";
-        void executeWebtoolsCronAction("parse", expression, {
-          render: false,
-          form
-        });
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_CRYPTO_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsCryptoPanel,
-      onOpen: applyWebtoolsCryptoPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-crypto-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsCryptoProcess(form, { render: false });
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_JWT_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsJwtPanel,
-      onOpen: applyWebtoolsJwtPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-jwt-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsJwtAction("parse", form, { render: false });
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_STRINGS_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsStringsPanel,
-      onOpen: applyWebtoolsStringsPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-strings-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsStringsAction("convert", form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_COLORS_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsColorsPanel,
-      onOpen: applyWebtoolsColorsPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-colors-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-        const node = form.elements.namedItem("webtoolsColorsInput");
-        const color = node instanceof HTMLInputElement ? node.value : "";
-        void executeWebtoolsColorsConvert(color);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_IMAGE_BASE64_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsImageBase64Panel,
-      onOpen: applyWebtoolsImageBase64PanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-image-base64-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-        const node = form.elements.namedItem("webtoolsImageBase64Input");
-        const inputValue = node instanceof HTMLTextAreaElement ? node.value : "";
-        void executeWebtoolsImageBase64Normalize(inputValue);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_CONFIG_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsConfigPanel,
-      onOpen: applyWebtoolsConfigPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-config-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsConfigConvert(form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_SQL_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsSqlPanel,
-      onOpen: applyWebtoolsSqlPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-sql-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsSqlFormat(form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_UNIT_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsUnitPanel,
-      onOpen: applyWebtoolsUnitPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-unit-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsUnitStorage(form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_QRCODE_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsQrcodePanel,
-      onOpen: applyWebtoolsQrcodePanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-qrcode-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsQrcodeGenerate(form);
-        }
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_MARKDOWN_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsMarkdownPanel,
-      onOpen: applyWebtoolsMarkdownPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-markdown-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-        const node = form.elements.namedItem("webtoolsMarkdownInput");
-        const inputValue = node instanceof HTMLTextAreaElement ? node.value : "";
-        void executeWebtoolsMarkdownRender(inputValue);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_UA_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsUaPanel,
-      onOpen: applyWebtoolsUaPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-ua-form");
-        if (!(form instanceof HTMLFormElement)) {
-          return;
-        }
-        const node = form.elements.namedItem("webtoolsUaInput");
-        const ua = node instanceof HTMLTextAreaElement ? node.value : "";
-        void executeWebtoolsUaParse(ua);
-      }
-    };
-  }
-
-  if (pluginId === WEBTOOLS_API_PLUGIN_ID) {
-    return {
-      render: renderWebtoolsApiPanel,
-      onOpen: applyWebtoolsApiPanelPayload,
-      onEnter: () => {
-        const form = list.querySelector("form.webtools-api-form");
-        if (form instanceof HTMLFormElement) {
-          void executeWebtoolsApiRequest(form);
-        }
-      }
-    };
-  }
-
-  return null;
+  return pluginPanelHandlers[pluginId] ?? null;
 }
 
 function renderActivePluginPanel(): void {
   const plugin = activePluginPanel;
+  if (!plugin || plugin.pluginId !== WEBTOOLS_TIMESTAMP_PLUGIN_ID) {
+    clearWebtoolsTimestampAutoTimer();
+    clearWebtoolsTimestampClockTimer();
+  }
   if (!plugin) {
     renderPluginPanel();
     return;
@@ -9544,6 +9898,7 @@ async function refreshEntries(query: string): Promise<void> {
       const [
         nextSearchConfig,
         nextCatalogScanConfig,
+        nextVisiblePluginIds,
         nextLaunchAtLoginStatus,
         nextAppVersion,
         nextErrorLogs
@@ -9551,12 +9906,16 @@ async function refreshEntries(query: string): Promise<void> {
         await Promise.all([
           launcher.getSearchDisplayConfig(),
           launcher.getCatalogScanConfig(),
+          launcher.getVisiblePluginIds(),
           launcher.getLaunchAtLoginStatus(),
           launcher.getAppVersion().catch(() => ""),
           launcher.getErrorLogs(40).catch(() => [])
         ]);
       searchDisplayConfig = nextSearchConfig;
       catalogScanConfig = nextCatalogScanConfig;
+      visiblePluginIds = Array.isArray(nextVisiblePluginIds)
+        ? parseVisiblePluginIdsText(nextVisiblePluginIds.join("\n"))
+        : [];
       launchAtLoginStatus = nextLaunchAtLoginStatus;
       errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];
       appVersion =
@@ -9893,6 +10252,7 @@ async function openCashflowPanel(reset = false): Promise<void> {
 }
 
 function backToSearch(): void {
+  clearSearchInputDebounceTimer();
   if (mode !== "search") {
     setMode("search");
     syncWindowSizePreset("search", true);
@@ -10055,6 +10415,11 @@ function handleKeydown(event: KeyboardEvent): void {
 
   if (isEnter) {
     event.preventDefault();
+    if (mode === "search" && hasPendingSearchInputDebounce()) {
+      pushDebugLog("renderer action: flush search debounce");
+      flushSearchInputDebounce();
+      return;
+    }
     if (!entries[selectedIndex]) {
       setStatus("\u5f53\u524d\u6ca1\u6709\u53ef\u6267\u884c\u9879");
       pushDebugLog("renderer action: executeSelected skipped (no entry)");
@@ -10088,6 +10453,7 @@ function handleKeydown(event: KeyboardEvent): void {
       return;
     }
     if (input.value.trim()) {
+      clearSearchInputDebounceTimer();
       input.value = "";
       currentQuery = "";
       pushDebugLog("renderer action: clear query");
@@ -10108,9 +10474,7 @@ function registerEvents(): void {
   });
 
   input.addEventListener("input", () => {
-    closeSearchContextMenu();
-    currentQuery = input.value;
-    void refreshEntries(currentQuery);
+    scheduleSearchRefreshFromInput(input.value);
   });
 
   input.addEventListener("keydown", handleKeydown, true);
@@ -10155,6 +10519,7 @@ function registerEvents(): void {
       input.value = "";
       currentQuery = "";
       pushDebugLog("renderer clearInput received");
+      clearSearchInputDebounceTimer();
 
       if (mode === "search" || mode === "clip") {
         void refreshEntries("");

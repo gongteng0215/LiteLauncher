@@ -7,6 +7,8 @@ export const IPC_CHANNELS = {
   setSearchDisplayConfig: "launcher:set-search-display-config",
   getCatalogScanConfig: "launcher:get-catalog-scan-config",
   setCatalogScanConfig: "launcher:set-catalog-scan-config",
+  getVisiblePluginIds: "launcher:get-visible-plugin-ids",
+  setVisiblePluginIds: "launcher:set-visible-plugin-ids",
   rebuildCatalog: "launcher:rebuild-catalog",
   reportErrorLog: "launcher:report-error-log",
   getErrorLogs: "launcher:get-error-logs",

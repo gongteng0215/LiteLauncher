@@ -22,11 +22,18 @@ import { buildCatalogWithOptions } from "./catalog";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
+import { filterItemsByPathRules } from "./path-rule-filter";
 import {
   CashflowDatabasePersistence,
   setCashflowGamePersistence
 } from "./plugins/cashflow-game";
-import { getPluginQueryItems, isPluginCatalogItem } from "./plugins";
+import {
+  getDefaultVisiblePluginIds,
+  getPluginCatalogItems,
+  getPluginQueryItems,
+  isPluginCatalogItem,
+  setVisiblePluginIds
+} from "./plugins";
 import { getInitialItems, searchItems } from "./search";
 import { SearchWorkerClient } from "./search-worker";
 import { destroyAppTray, setupAppTray } from "./tray";
@@ -44,8 +51,10 @@ const DEBUG_KEYS_ENABLED = process.env.LITELAUNCHER_DEBUG_KEYS === "1";
 const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
+const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
 const PINNED_ITEMS_KEY = "pinnedItemIds";
 const PINNED_ITEMS_MAX = 200;
+const VISIBLE_PLUGIN_IDS_MAX = 50;
 
 let database: LiteDatabase | null = null;
 let usageStore: UsageStore | null = null;
@@ -62,6 +71,7 @@ let searchDisplayConfig: SearchDisplayConfig = {
 let catalogScanConfig: CatalogScanConfig = {
   ...DEFAULT_CATALOG_SCAN_CONFIG
 };
+let visiblePluginIds: string[] = getDefaultVisiblePluginIds();
 let pinnedItemIds: string[] = [];
 let processErrorHooksRegistered = false;
 
@@ -472,6 +482,41 @@ async function saveCatalogScanConfig(
   return next;
 }
 
+function normalizeVisiblePluginIdsInput(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+
+    const value = raw.trim().toLowerCase();
+    if (!value || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    result.push(value);
+    if (result.length >= VISIBLE_PLUGIN_IDS_MAX) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
 function normalizePinnedItemIds(
   input: unknown,
   catalogIds?: Set<string>
@@ -526,25 +571,78 @@ async function persistPinnedItemIds(db: LiteDatabase): Promise<void> {
   await db.setSetting(PINNED_ITEMS_KEY, JSON.stringify(pinnedItemIds));
 }
 
+async function persistCatalogSnapshot(
+  db: LiteDatabase,
+  nextCatalog: LaunchItem[]
+): Promise<void> {
+  await db.saveItems(nextCatalog);
+  catalog = await db.getItems();
+  catalogInitialized = true;
+
+  const catalogIdSet = new Set(catalog.map((item) => item.id));
+  const normalizedPinned = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+  const pinnedChanged = !areStringArraysEqual(normalizedPinned, pinnedItemIds);
+  if (pinnedChanged) {
+    pinnedItemIds = normalizedPinned;
+    await persistPinnedItemIds(db);
+  }
+}
+
+function replaceCatalogPluginItems(items: LaunchItem[]): LaunchItem[] {
+  const nonPluginItems = items.filter(
+    (item) => !(item.type === "command" && isPluginCatalogItem(item))
+  );
+  return [...nonPluginItems, ...getPluginCatalogItems()];
+}
+
+async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
+  const fallback = setVisiblePluginIds(getDefaultVisiblePluginIds());
+  const raw = await db.getSetting(VISIBLE_PLUGIN_IDS_KEY);
+  if (!raw) {
+    await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(fallback));
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const requested = normalizeVisiblePluginIdsInput(parsed);
+    const applied = setVisiblePluginIds(requested);
+    const shouldFallback = requested.length > 0 && applied.length === 0;
+    const next = shouldFallback ? fallback : applied;
+    if (
+      shouldFallback ||
+      !areStringArraysEqual(next, requested)
+    ) {
+      await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(next));
+    }
+    return next;
+  } catch {
+    await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(fallback));
+    return fallback;
+  }
+}
+
+async function saveVisiblePluginIds(
+  db: LiteDatabase,
+  pluginIds: unknown
+): Promise<string[]> {
+  const requested = normalizeVisiblePluginIdsInput(pluginIds);
+  const applied = setVisiblePluginIds(requested);
+  visiblePluginIds = applied;
+  await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(applied));
+
+  const nextCatalog = replaceCatalogPluginItems(catalog);
+  await persistCatalogSnapshot(db, nextCatalog);
+  return applied;
+}
+
 async function rebuildCatalogIndex(
   db: LiteDatabase
 ): Promise<CatalogRebuildResult> {
   const startedAt = Date.now();
   try {
     const nextCatalog = buildCatalogWithOptions(catalogScanConfig);
-    await db.saveItems(nextCatalog);
-    catalog = await db.getItems();
-    catalogInitialized = true;
-
-    const catalogIdSet = new Set(catalog.map((item) => item.id));
-    const normalizedPinned = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
-    const pinnedChanged =
-      normalizedPinned.length !== pinnedItemIds.length ||
-      normalizedPinned.some((itemId, index) => itemId !== pinnedItemIds[index]);
-    if (pinnedChanged) {
-      pinnedItemIds = normalizedPinned;
-      await persistPinnedItemIds(db);
-    }
+    await persistCatalogSnapshot(db, nextCatalog);
 
     return {
       ok: true,
@@ -655,76 +753,10 @@ function matchesSearchScope(item: LaunchItem, scope: SearchScope): boolean {
   return item.type === scope;
 }
 
-const PATH_FILTER_ITEM_TYPES = new Set<LaunchItem["type"]>([
-  "application",
-  "folder",
-  "file"
-]);
-
-function normalizePathRule(pathValue: string): string {
-  let normalized = pathValue.trim().replace(/[\\/]+$/, "");
-  if (!normalized) {
-    return "";
-  }
-
-  if (process.platform === "win32") {
-    normalized = normalized.replace(/\//g, "\\").toLowerCase();
-  } else {
-    normalized = normalized.replace(/\\/g, "/");
-  }
-
-  return normalized;
-}
-
-function isPathRuleMatch(targetPath: string, pathRule: string): boolean {
-  if (targetPath === pathRule) {
-    return true;
-  }
-
-  if (process.platform === "win32") {
-    return targetPath.startsWith(`${pathRule}\\`);
-  }
-
-  return targetPath.startsWith(`${pathRule}/`);
-}
-
 function filterItemsByResultPathRules(items: LaunchItem[]): LaunchItem[] {
-  const includeRules = (catalogScanConfig.resultIncludeDirs ?? [])
-    .map(normalizePathRule)
-    .filter(Boolean);
-  const excludeRules = (catalogScanConfig.resultExcludeDirs ?? [])
-    .map(normalizePathRule)
-    .filter(Boolean);
-
-  if (includeRules.length === 0 && excludeRules.length === 0) {
-    return items;
-  }
-
-  return items.filter((item) => {
-    if (!PATH_FILTER_ITEM_TYPES.has(item.type)) {
-      return true;
-    }
-
-    const target = normalizePathRule(item.target);
-    if (!target) {
-      return true;
-    }
-
-    if (includeRules.length > 0) {
-      const included = includeRules.some((rule) => isPathRuleMatch(target, rule));
-      if (!included) {
-        return false;
-      }
-    }
-
-    if (excludeRules.length > 0) {
-      const excluded = excludeRules.some((rule) => isPathRuleMatch(target, rule));
-      if (excluded) {
-        return false;
-      }
-    }
-
-    return true;
+  return filterItemsByPathRules(items, {
+    includeDirs: catalogScanConfig.resultIncludeDirs ?? [],
+    excludeDirs: catalogScanConfig.resultExcludeDirs ?? []
   });
 }
 
@@ -776,6 +808,11 @@ async function bootstrap(): Promise<void> {
 
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
   catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
+  visiblePluginIds = await loadVisiblePluginIds(activeDatabase);
+  await persistCatalogSnapshot(
+    activeDatabase,
+    replaceCatalogPluginItems(catalog)
+  );
   setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
   const catalogIdSet = new Set(catalog.map((item) => item.id));
   pinnedItemIds = await loadPinnedItemIds(activeDatabase, catalogIdSet);
@@ -902,6 +939,9 @@ async function bootstrap(): Promise<void> {
       getCatalogScanConfig: () => ({ ...catalogScanConfig }),
       setCatalogScanConfig: (config) =>
         saveCatalogScanConfig(activeDatabase, config),
+      getVisiblePluginIds: () => [...visiblePluginIds],
+      setVisiblePluginIds: (pluginIds) =>
+        saveVisiblePluginIds(activeDatabase, pluginIds),
       getLaunchAtLoginStatus: () => getLaunchAtLoginStatus(),
       setLaunchAtLoginEnabled: (enabled) =>
         setLaunchAtLoginEnabled(enabled)
@@ -1008,6 +1048,8 @@ app.on("will-quit", () => {
   catalog = [];
   catalogInitialized = false;
   catalogScanConfig = { ...DEFAULT_CATALOG_SCAN_CONFIG };
+  visiblePluginIds = getDefaultVisiblePluginIds();
+  setVisiblePluginIds(visiblePluginIds);
   shortcutRegistered = false;
   activeShortcut = null;
 });

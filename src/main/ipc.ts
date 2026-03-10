@@ -48,6 +48,8 @@ type SettingsProvider = {
   setCatalogScanConfig: (
     config: Partial<CatalogScanConfig>
   ) => Promise<CatalogScanConfig>;
+  getVisiblePluginIds: () => string[];
+  setVisiblePluginIds: (pluginIds: string[]) => Promise<string[]>;
   getLaunchAtLoginStatus: () => LaunchAtLoginStatus;
   setLaunchAtLoginEnabled: (
     enabled: boolean
@@ -88,6 +90,8 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.setSearchDisplayConfig,
   IPC_CHANNELS.getCatalogScanConfig,
   IPC_CHANNELS.setCatalogScanConfig,
+  IPC_CHANNELS.getVisiblePluginIds,
+  IPC_CHANNELS.setVisiblePluginIds,
   IPC_CHANNELS.rebuildCatalog,
   IPC_CHANNELS.reportErrorLog,
   IPC_CHANNELS.getErrorLogs,
@@ -1017,6 +1021,10 @@ export function registerIpcHandlers(
     return options.settingsProvider.getCatalogScanConfig();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getVisiblePluginIds, () => {
+    return options.settingsProvider.getVisiblePluginIds();
+  });
+
   ipcMain.handle(IPC_CHANNELS.getLaunchAtLoginStatus, () => {
     return options.settingsProvider.getLaunchAtLoginStatus();
   });
@@ -1034,6 +1042,19 @@ export function registerIpcHandlers(
     async (_, configInput: Partial<CatalogScanConfig> | null) => {
       const input = configInput ?? {};
       return options.settingsProvider.setCatalogScanConfig(input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setVisiblePluginIds,
+    async (_, pluginIdsInput: unknown) => {
+      const ids = Array.isArray(pluginIdsInput)
+        ? pluginIdsInput
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : [];
+      return options.settingsProvider.setVisiblePluginIds(ids);
     }
   );
 

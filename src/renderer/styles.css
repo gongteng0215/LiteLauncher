@@ -3,6 +3,13 @@
   font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -14,8 +21,8 @@ body {
 }
 
 .shell {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: grid;
   grid-template-rows: auto 1fr auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -117,12 +124,13 @@ body {
 }
 
 .mode-plugin .results {
-  padding: 5px 6px;
+  padding: 8px 10px;
 }
 
 .results {
   position: relative;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px 8px;
 }
 
@@ -500,6 +508,7 @@ body {
   padding: 14px;
   background: rgba(255, 255, 255, 0.04);
   min-width: 0;
+  max-width: 100%;
 }
 
 .settings-panel-structured {
@@ -524,6 +533,7 @@ body {
 .settings-form {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .settings-form-grouped {
@@ -668,13 +678,15 @@ body {
 
 .settings-error-log {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   min-width: 0;
 }
 
 .settings-log-output {
   width: 100%;
-  min-height: 180px;
+  min-height: clamp(120px, 24vh, 180px);
   resize: vertical;
   font-family: Consolas, "Cascadia Code", "Courier New", monospace;
   line-height: 1.35;
@@ -819,7 +831,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
-  max-height: 280px;
+  max-height: min(280px, 36vh);
   overflow: auto;
 }
 
@@ -1110,7 +1122,7 @@ body {
 }
 
 .webtools-json-textarea {
-  min-height: 240px;
+  min-height: clamp(160px, 34vh, 240px);
 }
 
 .webtools-json-actions {
@@ -1133,6 +1145,119 @@ body {
 
 .webtools-json-info[data-state="idle"] {
   color: rgba(233, 242, 255, 0.74);
+}
+
+.webtools-timestamp-panel {
+  overflow: hidden;
+}
+
+.webtools-timestamp-lab {
+  gap: 12px;
+}
+
+.webtools-timestamp-current {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 10px;
+  background: rgba(125, 211, 252, 0.06);
+}
+
+.webtools-timestamp-current-label {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.72);
+}
+
+.webtools-timestamp-current-value {
+  font-size: 12px;
+  color: #8de0ff;
+  font-weight: 700;
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+  margin-right: 12px;
+}
+
+.webtools-timestamp-section {
+  display: grid;
+  gap: 10px;
+}
+
+.webtools-timestamp-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #eaf7ff;
+}
+
+.webtools-timestamp-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.webtools-timestamp-input {
+  flex: 1 1 320px;
+  min-width: 220px;
+}
+
+.webtools-timestamp-select {
+  width: 120px;
+  min-width: 120px;
+  flex: 0 0 auto;
+}
+
+.webtools-timestamp-controls .settings-btn {
+  white-space: nowrap;
+}
+
+.webtools-timestamp-result {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.webtools-timestamp-result-label {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.82);
+  font-weight: 600;
+}
+
+.webtools-timestamp-result-input {
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+}
+
+.webtools-timestamp-info {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 6px 2px 0;
+}
+
+.webtools-timestamp-info-label {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.72);
+}
+
+.webtools-timestamp-info-value {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.84);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.webtools-timestamp-divider {
+  height: 1px;
+  background: rgba(125, 211, 252, 0.2);
+  margin: 2px 0;
 }
 
 .webtools-crypto-panel {
@@ -1243,7 +1368,7 @@ body {
 .webtools-crypto-editors {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 360px;
+  min-height: clamp(220px, 44vh, 360px);
 }
 
 .webtools-crypto-pane {
@@ -1266,7 +1391,7 @@ body {
 }
 
 .webtools-crypto-pane-area {
-  min-height: 360px;
+  min-height: clamp(220px, 44vh, 360px);
   height: 100%;
   border: 0;
   border-radius: 0;
@@ -1371,7 +1496,7 @@ body {
 .webtools-jwt-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 430px;
+  min-height: clamp(260px, 52vh, 430px);
 }
 
 .webtools-jwt-pane {
@@ -1393,7 +1518,7 @@ body {
 }
 
 .webtools-jwt-token-area {
-  min-height: 392px;
+  min-height: clamp(220px, 48vh, 392px);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -1431,7 +1556,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
-  max-height: 260px;
+  max-height: min(260px, 34vh);
   overflow: auto;
 }
 
@@ -2023,6 +2148,99 @@ body {
   }
 }
 
+@media (max-width: 1120px) {
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+  }
+
+  .settings-row .settings-row-hint {
+    grid-column: auto;
+  }
+
+  .settings-row.settings-row-textarea {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-row.settings-row-textarea .settings-row-hint {
+    grid-column: auto;
+  }
+
+  .settings-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .settings-panel-footer {
+    flex-wrap: wrap;
+  }
+
+  .webtools-crypto-header {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .webtools-crypto-title {
+    display: none;
+  }
+
+  .webtools-crypto-toolbar {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .webtools-crypto-select {
+    width: min(220px, 100%);
+    min-width: 0;
+  }
+
+  .webtools-jwt-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .webtools-jwt-jws-controls,
+  .webtools-jwt-jwe-controls {
+    width: 100%;
+  }
+
+  .webtools-jwt-jws-controls .settings-number,
+  .webtools-jwt-jwe-controls .settings-number {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .webtools-json-converter {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .webtools-json-converter-group {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .webtools-json-route {
+    text-align: left;
+    margin-top: -2px;
+  }
+
+  .webtools-timestamp-select {
+    width: min(220px, 100%);
+    min-width: 0;
+  }
+
+  .webtools-timestamp-result {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .webtools-timestamp-info {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
 @media (min-width: 960px) {
   .cashflow-panel {
     gap: 10px;
@@ -2267,6 +2485,20 @@ body {
 
   .webtools-json-textarea {
     min-height: 176px;
+  }
+
+  .webtools-timestamp-controls {
+    gap: 6px;
+  }
+
+  .webtools-timestamp-input {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .webtools-timestamp-controls .settings-btn {
+    flex: 0 0 auto;
   }
 
   .cashflow-board {

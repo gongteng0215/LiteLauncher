@@ -1,7 +1,7 @@
 ﻿# LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-03-08
-适用版本：LiteLauncher `v1.0.9`
+更新时间：2026-03-10
+适用版本：LiteLauncher `v1.0.10`
 
 ## 1. 产品目标
 
@@ -27,6 +27,7 @@
 4. `clip` 搜索并复用剪贴板内容。
 5. `cash` 打开现金流游戏继续当前对局。
 6. `wt-jwt` 打开 JWT 调试器进行解析/签名。
+7. `wt-time` 打开时间戳工具进行日期互转。
 
 ## 3. 功能范围
 
@@ -58,13 +59,14 @@
 #### 3.1.3 内置与插件
 
 - 内置命令：`clip`、`settings`、`exit`
-- 可见插件（6 个）：
+- 可见插件（7 个）：
   - `cashflow-game`
   - `webtools-password`
   - `webtools-cron`
   - `webtools-json`
   - `webtools-crypto`
   - `webtools-jwt`
+  - `webtools-timestamp`
 - WebTools 迁移现状：19 个插件目录已建，未完成插件默认隐藏
 
 #### 3.1.4 WebTools 插件能力（当前）
@@ -74,6 +76,7 @@
 - JSON 工具：JSON/CSV/Text/Escaped 转换、格式化、压缩、校验
 - 加密工具：MD5/SHA、AES/DES、RSA、Base64/URL
 - JWT 工具：JWS/JWE 解析与生成，HS256/RS256，JWE `dir` 模式
+- 时间戳工具：双区块互转（Unix/日期）、秒/毫秒切换、当前时间实时显示、获取当前、输入自动转换
 
 #### 3.1.5 剪贴板历史
 
@@ -87,6 +90,7 @@
 - 可配置索引扫描源：Program Files / 自定义目录
 - 可配置索引排除目录（扫描黑名单）
 - 可配置结果目录白名单 / 黑名单（搜索、最近、置顶统一过滤）
+- 可配置插件可见白名单（按插件 ID 配置，保存后热更新）
 - 提供重建索引入口
 - 开机启动开关（Windows/macOS）
 - 错误日志查看与清空（最近 40 条）
@@ -187,7 +191,7 @@ score = matchScore * 0.7 + usageScore * 0.2 + recencyScore * 0.1
 - 剪贴板历史管理可用
 - 设置项可保存并生效
 - 设置页索引扫描与错误日志能力可用
-- 可见插件 6 个可正常打开和执行主流程
+- 可见插件 7 个可正常打开和执行主流程
 - Windows 可产出安装包和便携包
 
 ## 8. 版本路线

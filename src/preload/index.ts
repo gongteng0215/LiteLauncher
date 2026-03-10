@@ -60,6 +60,12 @@ const api = {
   ): Promise<CatalogScanConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.setCatalogScanConfig, config);
   },
+  getVisiblePluginIds(): Promise<string[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getVisiblePluginIds);
+  },
+  setVisiblePluginIds(pluginIds: string[]): Promise<string[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setVisiblePluginIds, pluginIds);
+  },
   rebuildCatalog(): Promise<CatalogRebuildResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.rebuildCatalog);
   },

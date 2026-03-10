@@ -28,6 +28,8 @@ declare global {
       setCatalogScanConfig(
         config: Partial<CatalogScanConfig>
       ): Promise<CatalogScanConfig>;
+      getVisiblePluginIds(): Promise<string[]>;
+      setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;

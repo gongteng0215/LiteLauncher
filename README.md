@@ -1,7 +1,7 @@
 ﻿# LiteLauncher
 
-Last updated: 2026-03-08
-Version baseline: `v1.0.9`
+Last updated: 2026-03-10
+Version baseline: `v1.0.10`
 
 LiteLauncher is a lightweight desktop launcher built with `Electron + TypeScript + SQLite`.
 It focuses on one fast loop: **invoke -> search -> run**.
@@ -19,6 +19,7 @@ It focuses on one fast loop: **invoke -> search -> run**.
 - Search scope prefixes: `app:`, `cmd:`, `web:`, `plugin:`
 - Keyboard-first flow (`Enter` run, `Esc` clear/hide, arrow navigation)
 - Grouped settings page: `Search Display`, `Index Scan`, `System`, `Error Logs`
+- Plugin visibility allowlist in Settings (one plugin ID per line, hot-applied)
 - Context menu on result cards:
   - Pin / Unpin
   - Run as administrator (Windows UAC, with popup/cancel/failure feedback)
@@ -45,6 +46,11 @@ It focuses on one fast loop: **invoke -> search -> run**.
 - Plugin panel framework (`command:plugin:*` routing)
 - Unified error log viewer in Settings
 - Error capture from Main / Renderer / IPC / execute flow
+- Timestamp tool upgraded with:
+  - `Unix -> Date` and `Date -> Unix` split sections
+  - seconds/milliseconds unit switch
+  - live local time + live Unix timestamp display
+  - `Now` action and auto-convert input behavior
 
 ### Plugins Currently Visible
 
@@ -54,16 +60,17 @@ It focuses on one fast loop: **invoke -> search -> run**.
 4. `webtools-json` (JSON 工具)
 5. `webtools-crypto` (加密工具)
 6. `webtools-jwt` (JWT 调试器)
+7. `webtools-timestamp` (时间戳工具)
 
 ### Plugin Migration Status
 
 - 19 WebTools plugin folders already exist under `src/main/plugins/`.
-- Only the 6 plugins above are exposed in the launcher UI.
+- Only the 7 plugins above are exposed in the launcher UI.
 - Remaining plugins are hidden by design until parity and UI quality checks are complete.
 
 ### Next Focus
 
-1. Finish the first hidden WebTools batch: `timestamp`, `regex`, `url-parse`, `qrcode`
+1. Finish the next hidden WebTools batch: `regex`, `url-parse`, `qrcode`, `markdown`
 2. Add automated regression for search, settings, and visible plugins
 3. Continue splitting plugin panel logic out of `renderer.ts`
 4. Implement Cashflow review (`cash review`)
@@ -71,6 +78,7 @@ It focuses on one fast loop: **invoke -> search -> run**.
 ### Common Commands
 
 - `calc 1+2*3` Calculate and copy
+- `calculator` Open system calculator
 - `g keyword` Web search
 - `clip` Open clipboard panel
 - `settings` Open settings panel
@@ -83,6 +91,7 @@ It focuses on one fast loop: **invoke -> search -> run**.
 - `wt-json` Open JSON tool
 - `wt-crypto` Open crypto tool
 - `wt-jwt` Open JWT tool
+- `wt-time` Open timestamp tool
 - `exit` Quit app
 
 ### Requirements
@@ -110,6 +119,30 @@ Cashflow tests:
 
 ```bash
 pnpm run test:cashflow
+```
+
+Search and settings regression:
+
+```bash
+pnpm run test:search-settings
+```
+
+Result path rule regression:
+
+```bash
+pnpm run test:path-rules
+```
+
+Visible plugin regression:
+
+```bash
+pnpm run test:plugins-visible
+```
+
+Plugin visibility regression:
+
+```bash
+pnpm run test:plugin-visibility
 ```
 
 ### Packaging
@@ -160,11 +193,17 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
   - 索引扫描源（Program Files / 自定义目录）
   - 排除扫描目录
   - 结果白名单目录 / 黑名单目录
+  - 插件可见性白名单（按插件 ID 配置，保存后热更新）
   - 重建索引
   - 开机启动
   - 错误日志查看/清空
 - 统一错误日志：Main / Renderer / IPC / 执行链路异常都会记录
 - 托盘菜单（显示主窗口、退出）
+- 时间戳工具增强：
+  - 双区块互转（`Unix -> 日期`、`日期 -> Unix`）
+  - 秒/毫秒单位切换
+  - 当前本地时间与 Unix 时间戳实时显示
+  - “获取当前”与输入自动转换
 
 ### 当前对外可见插件
 
@@ -174,16 +213,17 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
 4. JSON 工具（`webtools-json`）
 5. 加密工具（`webtools-crypto`）
 6. JWT 调试器（`webtools-jwt`）
+7. 时间戳工具（`webtools-timestamp`）
 
 ### WebTools 迁移现状
 
 - `src/main/plugins/` 下已创建 19 个 WebTools 插件目录。
-- 为保证质量，当前仅开放 6 个插件入口。
+- 为保证质量，当前仅开放 7 个插件入口。
 - 未完成插件保持隐藏，避免影响主界面稳定性与体验一致性。
 
 ### 下一步重点
 
-1. 优先补齐第一批高频隐藏插件：`timestamp`、`regex`、`url-parse`、`qrcode`
+1. 优先补齐下一批高频隐藏插件：`regex`、`url-parse`、`qrcode`、`markdown`
 2. 建立搜索、设置页、可见插件自动回归
 3. 继续拆分 `renderer.ts` 中的插件面板逻辑
 4. 落地 Cashflow `cash review` 复盘模块
@@ -191,6 +231,7 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
 ### 常用输入命令
 
 - `calc 1+2*3`：计算并复制
+- `calculator`：打开系统计算器
 - `g 关键词`：网页搜索
 - `clip`：打开剪贴板历史
 - `settings`：打开设置
@@ -203,6 +244,7 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
 - `wt-json`：打开 JSON 工具
 - `wt-crypto`：打开加密工具
 - `wt-jwt`：打开 JWT 工具
+- `wt-time`：打开时间戳工具
 - `exit`：退出程序
 
 ### 开发命令
@@ -218,6 +260,30 @@ Cashflow 回归测试：
 
 ```bash
 pnpm run test:cashflow
+```
+
+搜索与设置回归测试：
+
+```bash
+pnpm run test:search-settings
+```
+
+结果路径规则回归测试：
+
+```bash
+pnpm run test:path-rules
+```
+
+可见插件回归测试：
+
+```bash
+pnpm run test:plugins-visible
+```
+
+插件可见性回归测试：
+
+```bash
+pnpm run test:plugin-visibility
 ```
 
 ### 打包命令
@@ -262,6 +328,7 @@ docs/
 - `docs/plugin-development-spec.md`
 - `docs/webtools-plugin-migration-plan.md`
 - `docs/work.md`
+- `docs/releases/v1.0.10.md`
 - `docs/cashflow-game/cashflow-prd.md`
 - `docs/cashflow-game/cashflow-tasks.md`
 - `docs/cashflow-game/cashflow-mvp-regression.md`

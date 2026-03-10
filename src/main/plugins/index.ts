@@ -46,24 +46,60 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsApiClientPlugin
 ];
 
-const VISIBLE_PLUGIN_IDS = new Set<string>([
+const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
   "webtools-crypto",
-  "webtools-jwt"
-]);
-
-const VISIBLE_PLUGINS: LauncherPlugin[] = ALL_PLUGINS.filter((plugin) =>
-  VISIBLE_PLUGIN_IDS.has(plugin.id)
-);
+  "webtools-jwt",
+  "webtools-timestamp"
+] as const;
 
 const PLUGIN_ID_PREFIX = "plugin:";
 
 const pluginsById = new Map<string, LauncherPlugin>(
   ALL_PLUGINS.map((plugin) => [plugin.id, plugin])
 );
+let visiblePluginIdSet = new Set<string>(DEFAULT_VISIBLE_PLUGIN_IDS);
+
+export function getAllPluginIds(): string[] {
+  return ALL_PLUGINS.map((plugin) => plugin.id);
+}
+
+export function getDefaultVisiblePluginIds(): string[] {
+  return [...DEFAULT_VISIBLE_PLUGIN_IDS];
+}
+
+export function getVisiblePluginIds(): string[] {
+  return getVisiblePlugins().map((plugin) => plugin.id);
+}
+
+function getVisiblePlugins(): LauncherPlugin[] {
+  return ALL_PLUGINS.filter((plugin) => visiblePluginIdSet.has(plugin.id));
+}
+
+function normalizeVisiblePluginIds(pluginIds: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of pluginIds) {
+    const pluginId = normalizePluginId(raw);
+    if (!pluginId || seen.has(pluginId) || !pluginsById.has(pluginId)) {
+      continue;
+    }
+
+    seen.add(pluginId);
+    result.push(pluginId);
+  }
+
+  return result;
+}
+
+export function setVisiblePluginIds(pluginIds: string[]): string[] {
+  const normalized = normalizeVisiblePluginIds(pluginIds);
+  visiblePluginIdSet = new Set<string>(normalized);
+  return normalized;
+}
 
 function normalizePluginId(value: string): string {
   return value.trim().toLowerCase();
@@ -112,7 +148,9 @@ function parsePluginArg(
 }
 
 export function getPluginCatalogItems(): LaunchItem[] {
-  return dedupeItems(VISIBLE_PLUGINS.flatMap((plugin) => plugin.createCatalogItems()));
+  return dedupeItems(
+    getVisiblePlugins().flatMap((plugin) => plugin.createCatalogItems())
+  );
 }
 
 export function getPluginQueryItems(query: string): LaunchItem[] {
@@ -122,7 +160,7 @@ export function getPluginQueryItems(query: string): LaunchItem[] {
   }
 
   return dedupeItems(
-    VISIBLE_PLUGINS.flatMap((plugin) => plugin.getQueryItems?.(normalized) ?? [])
+    getVisiblePlugins().flatMap((plugin) => plugin.getQueryItems?.(normalized) ?? [])
   );
 }
 

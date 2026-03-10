@@ -1,6 +1,6 @@
 ﻿# WebTools 插件迁移计划（LiteLauncher）
 
-更新时间：2026-03-08
+更新时间：2026-03-10
 状态：进行中
 
 ## 1. 背景
@@ -31,23 +31,27 @@
 3. `webtools-json`
 4. `webtools-crypto`
 5. `webtools-jwt`
+6. `webtools-timestamp`
+
+已开放插件最新补齐项：
+
+- `webtools-timestamp` 已升级为双区块互转交互（Unix/日期）、秒/毫秒切换、实时时钟、获取当前、输入自动转换。
 
 ### 3.3 隐藏插件（暂不对外）
 
-1. `webtools-timestamp`
-2. `webtools-regex`
-3. `webtools-strings`
-4. `webtools-colors`
-5. `webtools-diff`
-6. `webtools-image-base64`
-7. `webtools-config-convert`
-8. `webtools-sql-format`
-9. `webtools-unit-convert`
-10. `webtools-url-parse`
-11. `webtools-qrcode`
-12. `webtools-markdown`
-13. `webtools-ua`
-14. `webtools-api-client`
+1. `webtools-regex`
+2. `webtools-strings`
+3. `webtools-colors`
+4. `webtools-diff`
+5. `webtools-image-base64`
+6. `webtools-config-convert`
+7. `webtools-sql-format`
+8. `webtools-unit-convert`
+9. `webtools-url-parse`
+10. `webtools-qrcode`
+11. `webtools-markdown`
+12. `webtools-ua`
+13. `webtools-api-client`
 
 ## 4. 迁移原则
 
@@ -75,13 +79,13 @@
 
 ### 阶段 C：隐藏插件逐批开放（待办）
 
-- C1（高频）：`timestamp`、`regex`、`url-parse`、`qrcode`
+- C1（高频）：`regex`、`url-parse`、`qrcode`、`markdown`
 - C2（中频）：`diff`、`strings`、`sql-format`、`unit-convert`
 - C3（进阶）：`markdown`、`ua`、`api-client`、`config-convert`、`image-base64`、`colors`
 
 ### 阶段 D：质量与发布（待办）
 
-- `WTM-401` 6 个已开放插件自动回归脚本
+- `WTM-401` 7 个已开放插件自动回归脚本
 - `WTM-402` 小屏与高 DPI 布局专项回归
 - `WTM-403` 插件性能基线（打开耗时、执行耗时）
 - `WTM-404` 文档与截图统一更新
@@ -102,6 +106,6 @@
 
 ## 8. 下一步（建议执行顺序）
 
-1. 优先推进 C1：开放 `timestamp`、`regex`、`url-parse`、`qrcode`。
+1. 优先推进 C1：开放 `regex`、`url-parse`、`qrcode`、`markdown`。
 2. 补 `WTM-401` + `WTM-402`：先把当前已开放插件与小屏场景回归跑通。
 3. 完成 `WTM-001`：继续拆分 renderer 插件面板逻辑。

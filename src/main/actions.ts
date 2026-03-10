@@ -18,6 +18,45 @@ async function openWithSystem(target: string): Promise<ExecuteResult> {
   return { ok: true };
 }
 
+async function openSystemCalculator(): Promise<ExecuteResult> {
+  if (process.platform !== "win32") {
+    return { ok: false, message: "系统计算器仅支持 Windows" };
+  }
+
+  const windowsDir = process.env.WINDIR ?? "C:\\Windows";
+  const candidates = [
+    path.join(windowsDir, "System32", "calc.exe"),
+    path.join(windowsDir, "SysWOW64", "calc.exe")
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    const result = await openWithSystem(candidate);
+    if (result.ok) {
+      return result;
+    }
+  }
+
+  try {
+    await shell.openExternal("ms-calculator:");
+    return { ok: true };
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.message ? error.message : "未知错误";
+    return {
+      ok: false,
+      message: `打开系统计算器失败：${reason}`
+    };
+  }
+}
+
 function escapeForPowerShellSingleQuote(value: string): string {
   return value.replace(/'/g, "''");
 }
@@ -162,7 +201,7 @@ function revealInFolder(target: string): ExecuteResult {
 
 function evaluateCalcExpression(expression: string): ExecuteResult {
   if (!expression || !SAFE_CALC_EXPRESSION.test(expression)) {
-    return { ok: false, message: "Invalid expression" };
+    return { ok: false, message: "表达式不合法" };
   }
 
   let result: unknown;
@@ -170,15 +209,15 @@ function evaluateCalcExpression(expression: string): ExecuteResult {
     // The regex above limits expression characters to arithmetic symbols.
     result = Function(`"use strict"; return (${expression});`)();
   } catch {
-    return { ok: false, message: "Failed to evaluate expression" };
+    return { ok: false, message: "表达式计算失败" };
   }
 
   if (typeof result !== "number" || !Number.isFinite(result)) {
-    return { ok: false, message: "Invalid result" };
+    return { ok: false, message: "计算结果无效" };
   }
 
   clipboard.writeText(String(result));
-  return { ok: true, message: `Copied result: ${result}` };
+  return { ok: true, message: `已复制结果：${result}` };
 }
 
 function parseCommandTarget(target: string): { command: string; arg?: string } {
@@ -202,6 +241,10 @@ async function handleCommand(
 
   if (command === "calc") {
     return evaluateCalcExpression(arg ?? "");
+  }
+
+  if (command === "calculator") {
+    return openSystemCalculator();
   }
 
   if (command === "clip") {
@@ -245,7 +288,7 @@ async function handleCommand(
     return revealInFolder(decodedTarget);
   }
 
-  return { ok: false, message: `Unknown command: ${command}` };
+  return { ok: false, message: `未知命令：${command}` };
 }
 
 export async function executeItem(
@@ -269,5 +312,5 @@ export async function executeItem(
     return handleCommand(item.target, window, item);
   }
 
-  return { ok: false, message: `Unsupported item type: ${item.type}` };
+  return { ok: false, message: `不支持的项目类型：${item.type}` };
 }
