@@ -12,9 +12,11 @@ interface UrlCommand {
 
 const PLUGIN_ID = "webtools-url-parse";
 const ACTION_OPEN: UrlAction = "open";
+const DEFAULT_INPUT =
+  "https://www.example.com:8080/path/to/page?name=test&id=123#section-1";
 const QUERY_ALIASES = ["wt-url", "url-tool", "url", "url解析", "链接解析"];
 
-function buildTarget(action: UrlAction, input = ""): string {
+function buildTarget(action: UrlAction, input = DEFAULT_INPUT): string {
   const params = new URLSearchParams();
   params.set("action", action);
   if (input) {
@@ -25,12 +27,12 @@ function buildTarget(action: UrlAction, input = ""): string {
 
 function parseCommand(optionsText: string | undefined): UrlCommand {
   if (!optionsText) {
-    return { action: ACTION_OPEN, input: "" };
+    return { action: ACTION_OPEN, input: DEFAULT_INPUT };
   }
 
   const params = new URLSearchParams(optionsText);
   const actionRaw = (params.get("action") ?? ACTION_OPEN).trim();
-  const input = params.get("input") ?? "";
+  const input = params.get("input") ?? DEFAULT_INPUT;
 
   if (actionRaw === "parse" || actionRaw === "encode" || actionRaw === "decode") {
     return { action: actionRaw, input };
@@ -63,19 +65,10 @@ function createCatalogItem(): LaunchItem {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: "URL 解析",
-    subtitle: "URL 拆解 / 编码 / 解码",
+    subtitle: "URL 拆解与查询参数编辑",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
     target: buildTarget(ACTION_OPEN),
-    keywords: [
-      "plugin",
-      "webtools",
-      "url",
-      "query",
-      "参数",
-      "解析",
-      "encode",
-      "decode"
-    ]
+    keywords: ["plugin", "webtools", "url", "query", "参数", "解析", "encode", "decode"]
   };
 }
 
@@ -128,9 +121,10 @@ function executeUrlAction(command: UrlCommand): ExecuteResult {
 
     if (command.action === "parse") {
       const parsed = safeParseUrl(command.input);
-      const queryRows = Array.from(parsed.searchParams.entries()).map(
-        ([key, value]) => ({ key, value })
-      );
+      const queryRows = Array.from(parsed.searchParams.entries()).map(([key, value]) => ({
+        key,
+        value
+      }));
       const output = [
         `href: ${parsed.href}`,
         `protocol: ${parsed.protocol}`,
@@ -146,7 +140,7 @@ function executeUrlAction(command: UrlCommand): ExecuteResult {
       return {
         ok: true,
         keepOpen: true,
-        message: "解析完成",
+        message: "URL 解析完成",
         data: {
           action: command.action,
           output,
@@ -156,8 +150,7 @@ function executeUrlAction(command: UrlCommand): ExecuteResult {
       };
     }
   } catch (error) {
-    const reason =
-      error instanceof Error && error.message ? error.message : "处理失败";
+    const reason = error instanceof Error && error.message ? error.message : "处理失败";
     return {
       ok: false,
       keepOpen: true,
@@ -191,7 +184,7 @@ export const webtoolsUrlParsePlugin: LauncherPlugin = {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "URL 解析",
-        subtitle: "URL 拆解 / 编码 / 解码",
+        subtitle: "URL 拆解与查询参数编辑",
         data: {
           input: command.input
         }

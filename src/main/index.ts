@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { app, BrowserWindow, globalShortcut } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
@@ -34,7 +35,7 @@ import {
   isPluginCatalogItem,
   setVisiblePluginIds
 } from "./plugins";
-import { getInitialItems, searchItems } from "./search";
+import { getDynamicSearchItems, getInitialItems, searchItems } from "./search";
 import { SearchWorkerClient } from "./search-worker";
 import { destroyAppTray, setupAppTray } from "./tray";
 import { UsageStore } from "./usage-store";
@@ -44,17 +45,74 @@ import {
   showLauncherWindow,
   toggleLauncherWindow
 } from "./window";
+import { isWindowAutoHideSuspended } from "./window-auto-hide";
 
 const DEFAULT_SHORTCUT = "Alt+Space";
 const FALLBACK_SHORTCUTS = ["Ctrl+Space", "Alt+Shift+Space", "Ctrl+Alt+Space"];
 const DEBUG_KEYS_ENABLED = process.env.LITELAUNCHER_DEBUG_KEYS === "1";
+const DEV_MODE = !app.isPackaged && process.env.LITELAUNCHER_DEV === "1";
+const E2E_MODE = process.env.LITELAUNCHER_E2E === "1";
+const E2E_USER_DATA_DIR = (process.env.LITELAUNCHER_E2E_USER_DATA_DIR ?? "").trim();
+const REPLACE_INSTANCE_FLAG = "--replace-instance";
 const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
 const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
+const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-colors",
+  "webtools-image-base64"
+] as const;
+const LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp"
+] as const;
+const PREVIOUS_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown"
+] as const;
+const OLDER_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-regex",
+  "webtools-url-parse"
+] as const;
 const PINNED_ITEMS_KEY = "pinnedItemIds";
 const PINNED_ITEMS_MAX = 200;
 const VISIBLE_PLUGIN_IDS_MAX = 50;
+
+if (E2E_USER_DATA_DIR) {
+  app.setPath("userData", E2E_USER_DATA_DIR);
+}
 
 let database: LiteDatabase | null = null;
 let usageStore: UsageStore | null = null;
@@ -74,6 +132,9 @@ let catalogScanConfig: CatalogScanConfig = {
 let visiblePluginIds: string[] = getDefaultVisiblePluginIds();
 let pinnedItemIds: string[] = [];
 let processErrorHooksRegistered = false;
+let devRendererWatcher: fs.FSWatcher | null = null;
+let devAssetsWatcher: fs.FSWatcher | null = null;
+let devReloadTimer: NodeJS.Timeout | null = null;
 
 function formatErrorDetail(error: unknown): string {
   if (error instanceof Error) {
@@ -115,6 +176,86 @@ function registerProcessErrorHooks(): void {
       detail: formatErrorDetail(reason)
     });
   });
+}
+
+function scheduleDevRendererReload(reason: string): void {
+  if (!DEV_MODE) {
+    return;
+  }
+
+  if (devReloadTimer !== null) {
+    clearTimeout(devReloadTimer);
+  }
+
+  devReloadTimer = setTimeout(() => {
+    devReloadTimer = null;
+    const windows = BrowserWindow.getAllWindows().filter(
+      (window) => !window.isDestroyed() && !window.webContents.isDestroyed()
+    );
+    if (windows.length === 0) {
+      return;
+    }
+
+    console.info(`[dev] renderer changed: ${reason}, reloading ${windows.length} window(s)`);
+    for (const window of windows) {
+      window.webContents.reloadIgnoringCache();
+    }
+  }, 80);
+}
+
+function closeDevRendererWatchers(): void {
+  if (devReloadTimer !== null) {
+    clearTimeout(devReloadTimer);
+    devReloadTimer = null;
+  }
+  if (devRendererWatcher) {
+    devRendererWatcher.close();
+    devRendererWatcher = null;
+  }
+  if (devAssetsWatcher) {
+    devAssetsWatcher.close();
+    devAssetsWatcher = null;
+  }
+}
+
+function setupDevRendererAutoReload(): void {
+  if (!DEV_MODE || devRendererWatcher || devAssetsWatcher) {
+    return;
+  }
+
+  const rendererDir = path.join(__dirname, "../renderer");
+  const assetsDir = path.join(__dirname, "../assets");
+
+  const onChange =
+    (scope: string) =>
+    (_eventType: string, filename: string | null): void => {
+      const name = typeof filename === "string" ? filename : "";
+      if (!name) {
+        return;
+      }
+      scheduleDevRendererReload(`${scope}/${name.replace(/\\/g, "/")}`);
+    };
+
+  try {
+    if (fs.existsSync(rendererDir)) {
+      devRendererWatcher = fs.watch(
+        rendererDir,
+        { recursive: true, encoding: "utf8" },
+        onChange("renderer")
+      );
+    }
+    if (fs.existsSync(assetsDir)) {
+      devAssetsWatcher = fs.watch(
+        assetsDir,
+        { recursive: true, encoding: "utf8" },
+        onChange("assets")
+      );
+    }
+    console.info("[dev] renderer auto reload enabled");
+  } catch (error) {
+    console.warn("[dev] failed to watch renderer output", error);
+    closeDevRendererWatchers();
+  }
 }
 
 function resolveLoginItemPathAndArgs(): { path: string; args: string[] } {
@@ -608,9 +749,36 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
     const requested = normalizeVisiblePluginIdsInput(parsed);
     const applied = setVisiblePluginIds(requested);
     const shouldFallback = requested.length > 0 && applied.length === 0;
-    const next = shouldFallback ? fallback : applied;
+    const shouldUpgradeCurrentDefault = areStringArraysEqual(
+      applied,
+      [...CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
+    const shouldUpgradeLegacyDefault = areStringArraysEqual(
+      applied,
+      [...LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
+    const shouldUpgradePreviousDefault = areStringArraysEqual(
+      applied,
+      [...PREVIOUS_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
+    const shouldUpgradeOlderDefault = areStringArraysEqual(
+      applied,
+      [...OLDER_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
+    const next =
+      shouldFallback ||
+      shouldUpgradeCurrentDefault ||
+      shouldUpgradeLegacyDefault ||
+      shouldUpgradePreviousDefault ||
+      shouldUpgradeOlderDefault
+        ? fallback
+        : applied;
     if (
       shouldFallback ||
+      shouldUpgradeCurrentDefault ||
+      shouldUpgradeLegacyDefault ||
+      shouldUpgradePreviousDefault ||
+      shouldUpgradeOlderDefault ||
       !areStringArraysEqual(next, requested)
     ) {
       await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(next));
@@ -792,6 +960,7 @@ async function setItemPinned(
 async function bootstrap(): Promise<void> {
   await ensureDataLayer();
   registerProcessErrorHooks();
+  setupDevRendererAutoReload();
 
   const activeUsageStore = usageStore;
   const activeClipService = clipService;
@@ -830,7 +999,13 @@ async function bootstrap(): Promise<void> {
     launcherWindow.hide();
   });
   launcherWindow.on("blur", () => {
-    if (appQuitting || launcherWindow.isDestroyed() || !launcherWindow.isVisible()) {
+    if (
+      E2E_MODE ||
+      appQuitting ||
+      launcherWindow.isDestroyed() ||
+      !launcherWindow.isVisible() ||
+      isWindowAutoHideSuspended(launcherWindow)
+    ) {
       return;
     }
     applyLauncherWindowSizePreset(launcherWindow, "compact");
@@ -851,7 +1026,9 @@ async function bootstrap(): Promise<void> {
   setupRendererDiagnostics(launcherWindow, (input) => {
     queueErrorLog(input);
   });
-  await setupAppTray(launcherWindow);
+  if (!E2E_MODE) {
+    await setupAppTray(launcherWindow);
+  }
 
   registerIpcHandlers(launcherWindow, {
     usageStore: activeUsageStore,
@@ -919,10 +1096,22 @@ async function bootstrap(): Promise<void> {
           );
         }
 
+        const dynamicItems = getDynamicSearchItems(query, scope).filter((item) => {
+          return !baseItems?.some(
+            (existing) =>
+              existing.id === item.id ||
+              existing.target.trim().toLowerCase() === item.target.trim().toLowerCase()
+          );
+        });
+        const rankedBaseItems =
+          dynamicItems.length > 0
+            ? mergeSearchItems(dynamicItems, baseItems, limit)
+            : baseItems.slice(0, limit);
+
         const mergedItems =
           pluginItems.length > 0
-            ? mergeSearchItems(pluginItems, baseItems, limit)
-            : baseItems.slice(0, limit);
+            ? mergeSearchItems(pluginItems, rankedBaseItems, limit)
+            : rankedBaseItems.slice(0, limit);
         return withPinnedState(mergedItems);
       }
     },
@@ -964,21 +1153,35 @@ async function bootstrap(): Promise<void> {
   });
 
   activeClipService.start();
-  registerGlobalShortcut(
-    () => toggleLauncherWindow(launcherWindow),
-    (shortcut) => {
-      emitDebugKey(launcherWindow, {
-        source: "main",
-        phase: "global-shortcut",
-        key: shortcut,
-        ts: Date.now(),
-        note: "shortcut callback fired"
+  if (!E2E_MODE) {
+    registerGlobalShortcut(
+      () => toggleLauncherWindow(launcherWindow),
+      (shortcut) => {
+        emitDebugKey(launcherWindow, {
+          source: "main",
+          phase: "global-shortcut",
+          key: shortcut,
+          ts: Date.now(),
+          note: "shortcut callback fired"
+        });
+      }
+    );
+  }
+
+  if (E2E_MODE) {
+    if (launcherWindow.webContents.isLoadingMainFrame()) {
+      launcherWindow.webContents.once("did-finish-load", () => {
+        if (!launcherWindow.isDestroyed()) {
+          showLauncherWindow(launcherWindow);
+        }
       });
+    } else {
+      showLauncherWindow(launcherWindow);
     }
-  );
+  }
 }
 
-const singleInstanceLock = app.requestSingleInstanceLock();
+const singleInstanceLock = E2E_MODE ? true : app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
   app.quit();
 }
@@ -996,7 +1199,18 @@ app.on("before-quit", () => {
   appQuitting = true;
 });
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, argv) => {
+  const replaceRequested = argv.some((value) => value === REPLACE_INSTANCE_FLAG);
+  if (replaceRequested) {
+    const relaunchArgs = process.argv
+      .slice(1)
+      .filter((value) => value !== REPLACE_INSTANCE_FLAG);
+    console.info("[startup] replace-instance requested, relaunching running process");
+    app.relaunch({ args: relaunchArgs });
+    app.quit();
+    return;
+  }
+
   const windows = BrowserWindow.getAllWindows();
   const first = windows[0];
   if (first) {
@@ -1029,6 +1243,7 @@ app.on("activate", () => {
 
 app.on("will-quit", () => {
   appQuitting = true;
+  closeDevRendererWatchers();
   globalShortcut.unregisterAll();
   destroyAppTray();
   if (clipService) {

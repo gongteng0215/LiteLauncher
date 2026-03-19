@@ -1,7 +1,7 @@
-﻿# LiteLauncher
+# LiteLauncher
 
-Last updated: 2026-03-10
-Version baseline: `v1.0.10`
+Last updated: 2026-03-19
+Version baseline: `v1.0.11`
 
 LiteLauncher is a lightweight desktop launcher built with `Electron + TypeScript + SQLite`.
 It focuses on one fast loop: **invoke -> search -> run**.
@@ -10,34 +10,38 @@ It focuses on one fast loop: **invoke -> search -> run**.
 
 ### What It Does
 
-- Global invoke shortcut (`Alt+Space`, with auto fallback if occupied)
-- Unified search for apps, files, folders, web actions, and command entries
+- Global invoke shortcut (`Alt+Space`, with automatic fallback if occupied)
+- Unified search for apps, files, folders, web actions, command entries, and plugins
 - Result sections:
   - Empty input: `Recent`, `Pinned`, `Plugins`
   - With input: `Search`, `Pinned`, `Plugins`
-- Search loading feedback and result paging for non-empty queries
+- Search loading feedback and paging for non-empty queries
 - Search scope prefixes: `app:`, `cmd:`, `web:`, `plugin:`
 - Keyboard-first flow (`Enter` run, `Esc` clear/hide, arrow navigation)
-- Grouped settings page: `Search Display`, `Index Scan`, `System`, `Error Logs`
+- Settings page groups: `Search Display`, `Index Scan`, `System`, `Error Logs`
 - Plugin visibility allowlist in Settings (one plugin ID per line, hot-applied)
 - Context menu on result cards:
   - Pin / Unpin
-  - Run as administrator (Windows UAC, with popup/cancel/failure feedback)
+  - Run as administrator
   - Open containing folder
 
 ### Search Features
 
-- Prefix, substring, and fuzzy matching
+- Prefix, substring, and constrained fuzzy matching
 - Chinese support with initials and pinyin fragment matching
   - Example: `b` -> `百度`
   - Example: `bai` -> `百度`
-- Noisy long random input suppression to reduce irrelevant hits
+- Long noisy random input suppression
 - Search source expansion:
   - Optional `Program Files` scanning
   - Custom scan directories
   - Excluded scan directories
   - Result include/exclude path filters
   - Rebuild index from Settings without restart
+- Windows command and app alias support:
+  - PATH command aliases
+  - StartApps / WindowsApps activation
+  - Example: `codex`
 
 ### Built-in Panels
 
@@ -46,11 +50,8 @@ It focuses on one fast loop: **invoke -> search -> run**.
 - Plugin panel framework (`command:plugin:*` routing)
 - Unified error log viewer in Settings
 - Error capture from Main / Renderer / IPC / execute flow
-- Timestamp tool upgraded with:
-  - `Unix -> Date` and `Date -> Unix` split sections
-  - seconds/milliseconds unit switch
-  - live local time + live Unix timestamp display
-  - `Now` action and auto-convert input behavior
+- Search result loading state and input debounce
+- Native file dialog / download auto-hide suspension for plugin operations
 
 ### Plugins Currently Visible
 
@@ -61,19 +62,25 @@ It focuses on one fast loop: **invoke -> search -> run**.
 5. `webtools-crypto` (加密工具)
 6. `webtools-jwt` (JWT 调试器)
 7. `webtools-timestamp` (时间戳工具)
+8. `webtools-strings` (字符串工具)
+9. `webtools-colors` (颜色工具)
+10. `webtools-diff` (文本对比)
+11. `webtools-image-base64` (图片 Base64)
+12. `webtools-config-convert` (配置转换)
+13. `webtools-sql-format` (SQL 格式化)
+14. `webtools-unit-convert` (单位换算)
+15. `webtools-regex` (正则工具)
+16. `webtools-url-parse` (URL 解析)
+17. `webtools-qrcode` (二维码生成)
+18. `webtools-markdown` (Markdown 预览)
+19. `webtools-ua` (UA 解析)
+20. `webtools-api-client` (API 调试)
 
 ### Plugin Migration Status
 
-- 19 WebTools plugin folders already exist under `src/main/plugins/`.
-- Only the 7 plugins above are exposed in the launcher UI.
-- Remaining plugins are hidden by design until parity and UI quality checks are complete.
-
-### Next Focus
-
-1. Finish the next hidden WebTools batch: `regex`, `url-parse`, `qrcode`, `markdown`
-2. Add automated regression for search, settings, and visible plugins
-3. Continue splitting plugin panel logic out of `renderer.ts`
-4. Implement Cashflow review (`cash review`)
+- All 19 WebTools plugin folders exist under `src/main/plugins/`.
+- All 19 WebTools plugins are exposed in the launcher UI.
+- Current focus is no longer migration count, but parity, layout consistency, small-window stability, and regression coverage.
 
 ### Common Commands
 
@@ -83,15 +90,19 @@ It focuses on one fast loop: **invoke -> search -> run**.
 - `clip` Open clipboard panel
 - `settings` Open settings panel
 - `cashflow` / `cash` / `cf` / `现金流` Open Cashflow Lite
-- `cash stat` Show game stats
-- `cash ai` Enable AI mode
-- `cash review` Review entry (placeholder)
 - `wt-pass` Open password tool
 - `wt-cron` Open cron tool
 - `wt-json` Open JSON tool
 - `wt-crypto` Open crypto tool
 - `wt-jwt` Open JWT tool
 - `wt-time` Open timestamp tool
+- `wt-regex` Open regex tool
+- `wt-url` Open URL parser
+- `wt-qr` Open QR code tool
+- `wt-md` Open Markdown preview
+- `wt-colors` Open color tool
+- `wt-image` / `wt-base64` Open image Base64 tool
+- `codex` Open Codex on Windows if installed as a Windows app alias
 - `exit` Quit app
 
 ### Requirements
@@ -103,10 +114,18 @@ It focuses on one fast loop: **invoke -> search -> run**.
 
 ### Development
 
+Standard build-and-run:
+
 ```bash
 pnpm install
 pnpm run build
 pnpm start
+```
+
+Watch mode with auto compile, main-process restart, and renderer reload:
+
+```bash
+pnpm dev
 ```
 
 Type check:
@@ -115,34 +134,20 @@ Type check:
 pnpm run typecheck
 ```
 
-Cashflow tests:
+Regression checks:
 
 ```bash
+pnpm run test:regression
+pnpm run test:regression:full
+pnpm run test:e2e:smoke
 pnpm run test:cashflow
-```
-
-Search and settings regression:
-
-```bash
 pnpm run test:search-settings
-```
-
-Result path rule regression:
-
-```bash
+pnpm run test:main-flow
+pnpm run test:windows-alias
 pnpm run test:path-rules
-```
-
-Visible plugin regression:
-
-```bash
 pnpm run test:plugins-visible
-```
-
-Plugin visibility regression:
-
-```bash
 pnpm run test:plugin-visibility
+pnpm run check:encoding
 ```
 
 ### Packaging
@@ -164,7 +169,7 @@ pnpm run dist:mac:x64
 Outputs: `release/`
 
 Windows package icon source: `src/assets/icon.ico`
-Note: Desktop shortcut icon changes take effect after rebuilding and reinstalling.
+Note: desktop shortcut icon changes take effect after rebuilding and reinstalling.
 
 ## 中文
 
@@ -175,17 +180,21 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
 ### 当前已实现
 
 - 全局快捷键唤起（默认 `Alt+Space`，冲突自动回退）
-- 统一搜索执行（应用、文件、文件夹、网页、命令）
+- 统一搜索执行（应用、文件、文件夹、网页、命令、插件）
 - 分区展示：`最近访问`、`置顶`、`插件`
-- 搜索状态分区保留：`搜索结果` + `置顶` + `插件`
+- 搜索状态分区：`搜索结果` + `置顶` + `插件`
 - 输入检索时显示加载反馈，并支持搜索结果分页
 - 支持范围前缀过滤：`app:`、`cmd:`、`web:`、`plugin:`
 - 图标网格、键盘导航、鼠标点击执行
 - 结果卡右键菜单：
   - 置顶/取消置顶
-  - 管理员运行（Windows UAC，可区分授权弹出/取消/失败）
+  - 管理员运行
   - 打开所在位置
 - 中文搜索增强（首字母 + 拼音片段）
+- Windows 命令/应用别名支持：
+  - PATH 命令别名
+  - StartApps / WindowsApps 应用激活
+  - 典型示例：`codex`
 - 剪贴板历史面板（搜索、复制、删除、清空）
 - 设置面板：
   - 分组布局：搜索展示 / 索引扫描 / 系统 / 错误日志
@@ -198,14 +207,10 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
   - 开机启动
   - 错误日志查看/清空
 - 统一错误日志：Main / Renderer / IPC / 执行链路异常都会记录
+- 原生操作防隐藏：插件里打开文件选择框、下载文件时不会因为失焦直接消失
 - 托盘菜单（显示主窗口、退出）
-- 时间戳工具增强：
-  - 双区块互转（`Unix -> 日期`、`日期 -> Unix`）
-  - 秒/毫秒单位切换
-  - 当前本地时间与 Unix 时间戳实时显示
-  - “获取当前”与输入自动转换
 
-### 当前对外可见插件
+### 当前可见插件
 
 1. 富爸爸现金流（`cashflow-game`）
 2. 密码工具（`webtools-password`）
@@ -214,79 +219,90 @@ LiteLauncher 是基于 `Electron + TypeScript + SQLite` 的轻量桌面启动器
 5. 加密工具（`webtools-crypto`）
 6. JWT 调试器（`webtools-jwt`）
 7. 时间戳工具（`webtools-timestamp`）
+8. 字符串工具（`webtools-strings`）
+9. 颜色工具（`webtools-colors`）
+10. 文本对比（`webtools-diff`）
+11. 图片 Base64（`webtools-image-base64`）
+12. 配置转换（`webtools-config-convert`）
+13. SQL 格式化（`webtools-sql-format`）
+14. 单位换算（`webtools-unit-convert`）
+15. 正则工具（`webtools-regex`）
+16. URL 解析（`webtools-url-parse`）
+17. 二维码生成（`webtools-qrcode`）
+18. Markdown 预览（`webtools-markdown`）
+19. UA 解析（`webtools-ua`）
+20. API 调试（`webtools-api-client`）
 
 ### WebTools 迁移现状
 
-- `src/main/plugins/` 下已创建 19 个 WebTools 插件目录。
-- 为保证质量，当前仅开放 7 个插件入口。
-- 未完成插件保持隐藏，避免影响主界面稳定性与体验一致性。
+- `src/main/plugins/` 下 19 个 WebTools 插件目录已全部接入。
+- 当前 19 个 WebTools 插件已全部开放到主界面。
+- 当前重点不再是“迁移数量”，而是“功能齐平、交互一致、小屏适配、自动回归”。
 
-### 下一步重点
+### 常用命令
 
-1. 优先补齐下一批高频隐藏插件：`regex`、`url-parse`、`qrcode`、`markdown`
-2. 建立搜索、设置页、可见插件自动回归
-3. 继续拆分 `renderer.ts` 中的插件面板逻辑
-4. 落地 Cashflow `cash review` 复盘模块
-
-### 常用输入命令
-
-- `calc 1+2*3`：计算并复制
+- `calc 1+2*3`：快速计算并复制
 - `calculator`：打开系统计算器
 - `g 关键词`：网页搜索
 - `clip`：打开剪贴板历史
-- `settings`：打开设置
+- `settings`：打开设置页
 - `cashflow` / `cash` / `cf` / `现金流`：打开现金流游戏
-- `cash stat`：查看统计
-- `cash ai`：开启 AI 对战
-- `cash review`：复盘入口（占位）
 - `wt-pass`：打开密码工具
 - `wt-cron`：打开 Cron 工具
 - `wt-json`：打开 JSON 工具
 - `wt-crypto`：打开加密工具
 - `wt-jwt`：打开 JWT 工具
 - `wt-time`：打开时间戳工具
-- `exit`：退出程序
+- `wt-regex`：打开正则工具
+- `wt-url`：打开 URL 解析
+- `wt-qr`：打开二维码生成
+- `wt-md`：打开 Markdown 预览
+- `wt-colors`：打开颜色工具
+- `wt-image` / `wt-base64`：打开图片 Base64 工具
+- `codex`：在 Windows 下启动 Codex（系统已安装时）
+- `exit`：退出应用
 
-### 开发命令
+### 开发方式
+
+常规构建启动：
 
 ```bash
 pnpm install
 pnpm run build
 pnpm start
+```
+
+开发模式：
+
+```bash
+pnpm dev
+```
+
+开发模式支持：
+
+- 监听 `src/main` / `src/preload` / `src/shared`
+- 主进程改动自动重启 Electron
+- 监听 `src/renderer` / `src/assets`
+- 渲染层改动自动刷新窗口
+
+类型检查：
+
+```bash
 pnpm run typecheck
 ```
 
-Cashflow 回归测试：
+回归检查：
 
 ```bash
 pnpm run test:cashflow
-```
-
-搜索与设置回归测试：
-
-```bash
 pnpm run test:search-settings
-```
-
-结果路径规则回归测试：
-
-```bash
 pnpm run test:path-rules
-```
-
-可见插件回归测试：
-
-```bash
 pnpm run test:plugins-visible
-```
-
-插件可见性回归测试：
-
-```bash
 pnpm run test:plugin-visibility
+pnpm run check:encoding
 ```
 
-### 打包命令
+### 打包
 
 ```powershell
 pnpm.cmd run pack
@@ -294,45 +310,5 @@ pnpm.cmd run dist:win
 pnpm.cmd run dist:win:portable
 ```
 
-macOS（需在 macOS 主机执行）：
-
-```bash
-pnpm run dist:mac
-pnpm run dist:mac:arm64
-pnpm run dist:mac:x64
-```
-
-产物目录：`release/`
-
-Windows 安装图标来源：`src/assets/icon.ico`
-说明：桌面快捷方式图标更新需要重新打包并重新安装后生效。
-
-## Project Structure
-
-```text
-src/
-  main/       # 主进程（窗口、IPC、数据库、插件）
-  preload/    # 桥接层
-  renderer/   # UI 层
-  shared/     # 类型与通道
-scripts/
-  copy-assets.cjs
-docs/
-  cashflow-game/
-```
-
-## 文档索引
-
-- `PRD_LiteLauncher.md`
-- `TASKS_LiteLauncher.md`
-- `docs/plugin-development-spec.md`
-- `docs/webtools-plugin-migration-plan.md`
-- `docs/work.md`
-- `docs/releases/v1.0.10.md`
-- `docs/cashflow-game/cashflow-prd.md`
-- `docs/cashflow-game/cashflow-tasks.md`
-- `docs/cashflow-game/cashflow-mvp-regression.md`
-
-## License
-
-ISC
+Windows 图标源：`src/assets/icon.ico`
+说明：桌面快捷方式图标的变化需要重新构建并重新安装后才能完全生效。

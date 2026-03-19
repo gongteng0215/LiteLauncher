@@ -53,7 +53,20 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-json",
   "webtools-crypto",
   "webtools-jwt",
-  "webtools-timestamp"
+  "webtools-timestamp",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-image-base64",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-ua",
+  "webtools-api-client"
 ] as const;
 
 const PLUGIN_ID_PREFIX = "plugin:";

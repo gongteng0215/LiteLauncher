@@ -168,6 +168,7 @@ function formatSize(bytes: number): string {
 }
 
 async function executeRequest(command: ApiCommand): Promise<ExecuteResult> {
+  let timeout: NodeJS.Timeout | null = null;
   try {
     if (!command.url.trim()) {
       throw new Error("请输入请求 URL");
@@ -177,7 +178,6 @@ async function executeRequest(command: ApiCommand): Promise<ExecuteResult> {
     for (const row of filterEnabledRows(command.params)) {
       requestUrl.searchParams.set(row.key, row.value);
     }
-
     const method = command.method.toUpperCase();
     const headers = new Headers();
     for (const row of filterEnabledRows(command.headers)) {
@@ -200,7 +200,7 @@ async function executeRequest(command: ApiCommand): Promise<ExecuteResult> {
         headers.set("Content-Type", "text/plain");
         init.body = command.bodyContent;
       } else if (command.bodyType === "formdata") {
-        const form = new URLSearchParams();
+        const form = new FormData();
         for (const row of filterEnabledRows(command.formRows)) {
           form.append(row.key, row.value);
         }
@@ -210,14 +210,18 @@ async function executeRequest(command: ApiCommand): Promise<ExecuteResult> {
 
     const controller = new AbortController();
     init.signal = controller.signal;
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    timeout = setTimeout(() => controller.abort(), 30_000);
 
     const start = Date.now();
     const response = await fetch(requestUrl.toString(), init);
     const duration = Date.now() - start;
-    clearTimeout(timeout);
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
 
     const text = await response.text();
+    const size = Buffer.byteLength(text, "utf8");
     const formattedBody = formatBodyText(text);
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
@@ -232,14 +236,17 @@ async function executeRequest(command: ApiCommand): Promise<ExecuteResult> {
         status: response.status,
         statusText: response.statusText,
         timeMs: duration,
-        size: text.length,
-        sizeText: formatSize(text.length),
+        size,
+        sizeText: formatSize(size),
         headers: responseHeaders,
         body: formattedBody,
         fullUrl: requestUrl.toString()
       }
     };
   } catch (error) {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
     const reason = error instanceof Error ? error.message : "请求失败";
     return {
       ok: false,

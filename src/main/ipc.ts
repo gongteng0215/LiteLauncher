@@ -18,7 +18,9 @@ import {
 } from "../shared/types";
 import { normalizeSearchDisplayConfig } from "../shared/settings";
 import { executeItem } from "./actions";
+import { getDynamicSearchItems } from "./search";
 import { UsageStore } from "./usage-store";
+import { setWindowAutoHideSuspended } from "./window-auto-hide";
 import { applyLauncherWindowSizePreset } from "./window";
 
 type SearchProvider = {
@@ -100,8 +102,10 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.setLaunchAtLoginEnabled,
   IPC_CHANNELS.setItemPinned,
   IPC_CHANNELS.search,
+  IPC_CHANNELS.resolveCommandQuery,
   IPC_CHANNELS.execute,
   IPC_CHANNELS.setWindowSizePreset,
+  IPC_CHANNELS.setAutoHideSuspended,
   IPC_CHANNELS.hide,
   IPC_CHANNELS.getClipItems,
   IPC_CHANNELS.copyClipItem,
@@ -832,6 +836,42 @@ function tryReadImageFileAsDataUrl(iconSource: string): string | null {
     return icnsData;
   }
 
+  const ext = path.extname(iconSource).toLowerCase();
+  const staticMimeType =
+    ext === ".png"
+      ? "image/png"
+      : ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : ext === ".webp"
+          ? "image/webp"
+          : ext === ".gif"
+            ? "image/gif"
+            : ext === ".bmp"
+              ? "image/bmp"
+              : ext === ".ico"
+                ? "image/x-icon"
+                : ext === ".svg"
+                  ? "image/svg+xml"
+                  : null;
+
+  if (staticMimeType) {
+    try {
+      const fileBuffer = fs.readFileSync(iconSource);
+      if (fileBuffer.length > 0) {
+        if (staticMimeType === "image/svg+xml") {
+          const svgText = fileBuffer.toString("utf8").trim();
+          if (svgText) {
+            return `data:${staticMimeType};charset=utf-8,${encodeURIComponent(svgText)}`;
+          }
+        } else {
+          return `data:${staticMimeType};base64,${fileBuffer.toString("base64")}`;
+        }
+      }
+    } catch {
+      // Fall through to Electron image decoding below.
+    }
+  }
+
   try {
     const image = nativeImage.createFromPath(iconSource);
     if (image.isEmpty()) {
@@ -1177,6 +1217,24 @@ export function registerIpcHandlers(
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.resolveCommandQuery, async (_, query: string) => {
+    try {
+      const items = getDynamicSearchItems(query ?? "", "all");
+      return attachIcons(items);
+    } catch (error) {
+      const detail =
+        error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+      await persistErrorLog({
+        scope: "ipc",
+        level: "error",
+        message: "命令解析失败",
+        detail,
+        context: `query=${String(query ?? "").slice(0, 120)}`
+      });
+      return [];
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.execute, async (_, itemInput: LaunchItem) => {
     try {
       const selected = itemInput;
@@ -1260,6 +1318,10 @@ export function registerIpcHandlers(
 
     applyLauncherWindowSizePreset(window, preset);
     return true;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setAutoHideSuspended, (_, suspendedInput: unknown) => {
+    return setWindowAutoHideSuspended(window, suspendedInput === true);
   });
 
   ipcMain.handle(IPC_CHANNELS.hide, () => {

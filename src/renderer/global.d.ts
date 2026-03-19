@@ -35,8 +35,10 @@ declare global {
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
       setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
       search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
+      resolveCommandQuery(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;
       setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
+      setAutoHideSuspended(suspended: boolean): Promise<boolean>;
       hide(): Promise<boolean>;
       getClipItems(query: string): Promise<ClipItem[]>;
       copyClipItem(itemId: string): Promise<boolean>;

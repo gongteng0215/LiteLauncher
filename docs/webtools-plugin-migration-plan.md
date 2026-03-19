@@ -1,7 +1,7 @@
-﻿# WebTools 插件迁移计划（LiteLauncher）
+# WebTools 插件迁移计划（LiteLauncher）
 
-更新时间：2026-03-10
-状态：进行中
+更新时间：2026-03-19
+状态：迁移完成，进入功能齐平与收敛阶段
 
 ## 1. 背景
 
@@ -23,6 +23,7 @@
 - 已接入统一插件索引与执行分发。
 - 已启用插件面板模式 `panel=plugin`。
 - 已接入统一状态提示与错误日志基线。
+- 已接入插件原生交互防隐藏链路。
 
 ### 3.2 可见插件（已对外开放）
 
@@ -32,26 +33,26 @@
 4. `webtools-crypto`
 5. `webtools-jwt`
 6. `webtools-timestamp`
+7. `webtools-strings`
+8. `webtools-colors`
+9. `webtools-diff`
+10. `webtools-image-base64`
+11. `webtools-config-convert`
+12. `webtools-sql-format`
+13. `webtools-unit-convert`
+14. `webtools-regex`
+15. `webtools-url-parse`
+16. `webtools-qrcode`
+17. `webtools-markdown`
+18. `webtools-ua`
+19. `webtools-api-client`
 
-已开放插件最新补齐项：
+### 3.3 当前判断
 
-- `webtools-timestamp` 已升级为双区块互转交互（Unix/日期）、秒/毫秒切换、实时时钟、获取当前、输入自动转换。
-
-### 3.3 隐藏插件（暂不对外）
-
-1. `webtools-regex`
-2. `webtools-strings`
-3. `webtools-colors`
-4. `webtools-diff`
-5. `webtools-image-base64`
-6. `webtools-config-convert`
-7. `webtools-sql-format`
-8. `webtools-unit-convert`
-9. `webtools-url-parse`
-10. `webtools-qrcode`
-11. `webtools-markdown`
-12. `webtools-ua`
-13. `webtools-api-client`
+- 迁移接入：已完成
+- 默认可见：已完成
+- 功能齐平：进行中
+- 当前真正的重点：交互一致性、小屏适配、自动回归、主渲染文件拆分
 
 ## 4. 迁移原则
 
@@ -68,24 +69,24 @@
 - `WTM-002` 插件 UI 公共样式与组件抽取
 - `WTM-003` 插件配置持久化约定统一
 - `WTM-004` 插件 Enter/Esc 行为一致性校验
+- `WTM-005` 插件原生交互防隐藏规则统一
 
 ### 阶段 B：已开放插件完善（持续优化）
 
-- `WTM-101` 密码工具：基础闭环已完成，继续补齐旧版剩余体验细节
-- `WTM-102` Cron 工具：默认示例与自动解析已落地，补小屏回归
-- `WTM-103` JSON 工具：自动转换与默认示例已落地，继续收敛布局
-- `WTM-104` 加密工具：主要能力已完成，继续补交互细节与回归
-- `WTM-105` JWT 工具：JWS/JWE 基础闭环已完成（当前 JWE 仅 `dir`）
+- `WTM-101` 密码工具：继续补齐旧版剩余体验细节
+- `WTM-102` Cron 工具：补小屏与边界输入回归
+- `WTM-103` JSON 工具：继续收敛布局与状态提示
+- `WTM-104` 加密工具：继续补交互细节与回归
+- `WTM-105` JWT 工具：继续核对 JWS/JWE 细节与反馈
+- `WTM-106` API 调试：继续收尾结构化交互和状态反馈
 
-### 阶段 C：隐藏插件逐批开放（待办）
+### 阶段 C：全量插件开放（已完成）
 
-- C1（高频）：`regex`、`url-parse`、`qrcode`、`markdown`
-- C2（中频）：`diff`、`strings`、`sql-format`、`unit-convert`
-- C3（进阶）：`markdown`、`ua`、`api-client`、`config-convert`、`image-base64`、`colors`
+- `strings`、`diff`、`config-convert`、`sql-format`、`unit-convert`、`ua`、`api-client` 已全部进入默认可见列表。
 
 ### 阶段 D：质量与发布（待办）
 
-- `WTM-401` 7 个已开放插件自动回归脚本
+- `WTM-401` 已开放插件自动回归脚本继续扩展
 - `WTM-402` 小屏与高 DPI 布局专项回归
 - `WTM-403` 插件性能基线（打开耗时、执行耗时）
 - `WTM-404` 文档与截图统一更新
@@ -103,9 +104,11 @@
 1. 渲染层单文件体量较大，后续维护成本高。
 2. 少量历史字符串存在编码风险，需要持续巡检。
 3. 小屏场景的插件布局稳定性仍需加强。
+4. 功能齐平不能再用“已开放”替代“已完成”。
 
 ## 8. 下一步（建议执行顺序）
 
-1. 优先推进 C1：开放 `regex`、`url-parse`、`qrcode`、`markdown`。
-2. 补 `WTM-401` + `WTM-402`：先把当前已开放插件与小屏场景回归跑通。
-3. 完成 `WTM-001`：继续拆分 renderer 插件面板逻辑。
+1. 补 `WTM-401` + `WTM-402`：把当前 19 个插件与小屏场景回归跑通。
+2. 完成 `WTM-001`：继续拆分 renderer 插件面板逻辑。
+3. 推进 `WTM-404`：统一文档、截图与插件说明。
+4. 逐个收敛 `docs/webtools-parity-checklist.md` 里的差异项。

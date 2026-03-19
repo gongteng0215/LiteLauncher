@@ -1,18 +1,24 @@
 {
   "name": "litelauncher",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc && node scripts/copy-assets.cjs",
-    "start": "pnpm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron .",
+    "dev": "node scripts/dev.cjs",
+    "start": "pnpm run build && set ELECTRON_DISABLE_CRASH_REPORTER=1&& set ELECTRON_RUN_AS_NODE=&& electron . --replace-instance",
     "start:debug-keys": "set LITELAUNCHER_DEBUG_KEYS=1&& pnpm start",
     "typecheck": "tsc --noEmit",
     "test:cashflow": "pnpm run build && node dist/test/cashflow-state-machine.test.js && node dist/test/cashflow-persistence.test.js && node dist/test/cashflow-plugin-contract.test.js && node dist/test/cashflow-performance.test.js",
     "test:search-settings": "pnpm run build && node dist/test/search-settings-regression.test.js",
+    "test:main-flow": "pnpm run build && node dist/test/launcher-main-flow-regression.test.js",
+    "test:windows-alias": "pnpm run build && node dist/test/windows-app-alias-regression.test.js",
+    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js",
+    "test:regression:full": "pnpm run test:regression && pnpm run test:e2e:smoke",
     "test:path-rules": "pnpm run build && node dist/test/result-path-filter.test.js",
     "test:plugins-visible": "pnpm run build && node dist/test/visible-plugins-regression.test.js",
     "test:plugin-visibility": "pnpm run build && node dist/test/plugin-visibility-config.test.js",
+    "test:regression": "pnpm run build && node dist/test/search-settings-regression.test.js && node dist/test/launcher-main-flow-regression.test.js && node dist/test/windows-app-alias-regression.test.js && node dist/test/result-path-filter.test.js && node dist/test/visible-plugins-regression.test.js && node dist/test/plugin-visibility-config.test.js",
     "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
     "check:encoding": "node scripts/check-encoding.cjs",
     "pack": "pnpm run build && electron-builder --dir --publish never",
@@ -33,13 +39,24 @@
   },
   "type": "commonjs",
   "dependencies": {
+    "diff-match-patch": "^1.0.5",
+    "dot-properties": "^1.1.1",
     "jose": "^6.2.0",
-    "sqlite3": "^5.1.7"
+    "js-yaml": "^4.1.1",
+    "marked": "^17.0.4",
+    "qrcode": "^1.5.4",
+    "sql-formatter": "^15.7.2",
+    "sqlite3": "^5.1.7",
+    "ua-parser-js": "^2.0.9"
   },
   "devDependencies": {
+    "@types/diff-match-patch": "^1.0.36",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.2.2",
+    "@types/qrcode": "^1.5.6",
     "electron": "^40.2.1",
     "electron-builder": "^26.7.0",
+    "playwright": "^1.58.2",
     "typescript": "^5.9.3"
   },
   "build": {

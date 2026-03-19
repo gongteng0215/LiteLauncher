@@ -149,6 +149,14 @@ function base64UrlDecode(value: string): string {
   return Buffer.from(padded, "base64").toString("utf8");
 }
 
+function base64UrlEncode(value: Uint8Array): string {
+  return Buffer.from(value)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
 function safePrettyJson(input: string): string {
   return JSON.stringify(JSON.parse(input), null, 2);
 }
@@ -158,12 +166,25 @@ function pickStringValue(source: Record<string, unknown>, key: string): string |
   return typeof value === "string" ? value : null;
 }
 
-function deriveJweKey(secret: string, enc: JwtJweEnc): Uint8Array {
-  const bytes = new TextEncoder().encode(secret);
+function normalizeSecretText(secret: string, length: number): string {
+  return secret.padEnd(length, "0").slice(0, length);
+}
+
+function deriveJweDirKey(secret: string, enc: JwtJweEnc): Uint8Array {
   const required = enc === "A128GCM" ? 16 : 32;
-  const key = new Uint8Array(required);
-  key.set(bytes.subarray(0, required));
-  return key;
+  return new TextEncoder().encode(normalizeSecretText(secret, required));
+}
+
+async function deriveJweKwKey(secret: string): Promise<CryptoKey | Uint8Array> {
+  const jose = await getJose();
+  return jose.importJWK(
+    {
+      kty: "oct",
+      alg: "A256KW",
+      k: base64UrlEncode(new TextEncoder().encode(normalizeSecretText(secret, 32)))
+    },
+    "A256KW"
+  );
 }
 
 function parseJsonObject(value: string, fallback: Record<string, unknown>): Record<string, unknown> {
@@ -283,12 +304,11 @@ async function parseJweToken(command: JwtCommand): Promise<ExecuteResult> {
     };
   }
 
-  if (jweAlg !== "dir") {
-    throw new Error("当前仅支持 JWE dir 模式");
-  }
-
   const jose = await getJose();
-  const key = deriveJweKey(command.secret, jweEnc);
+  const key =
+    jweAlg === "A256KW"
+      ? await deriveJweKwKey(command.secret)
+      : deriveJweDirKey(command.secret, jweEnc);
   const { plaintext } = await jose.compactDecrypt(command.token, key);
   const payloadText = safePrettyJson(new TextDecoder().decode(plaintext));
 
@@ -342,16 +362,16 @@ async function executeSign(command: JwtCommand): Promise<ExecuteResult> {
   const jose = await getJose();
 
   if (command.mode === "jwe") {
-    if (command.jweAlg !== "dir") {
-      throw new Error("当前仅支持 JWE dir 模式");
-    }
     const mergedHeader: Record<string, unknown> = {
       ...headerObject,
       typ: pickStringValue(headerObject, "typ") ?? "JWT",
       alg: command.jweAlg,
       enc: command.jweEnc
     };
-    const key = deriveJweKey(command.secret, command.jweEnc);
+    const key =
+      command.jweAlg === "A256KW"
+        ? await deriveJweKwKey(command.secret)
+        : deriveJweDirKey(command.secret, command.jweEnc);
     const token = await new jose.EncryptJWT(payloadObject)
       .setProtectedHeader(mergedHeader as any)
       .encrypt(key);

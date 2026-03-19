@@ -1,3 +1,5 @@
+import DiffMatchPatch from "diff-match-patch";
+
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { getWebtoolsIconDataUrl } from "../webtools-shared";
@@ -13,19 +15,14 @@ interface DiffCommand {
   ignoreWhitespace: boolean;
 }
 
-type DiffRowType = "same" | "added" | "removed" | "changed";
-
-interface DiffRow {
-  index: number;
-  type: DiffRowType;
-  left: string;
-  right: string;
-}
-
 const PLUGIN_ID = "webtools-diff";
 const ACTION_OPEN: DiffAction = "open";
-const ROW_LIMIT = 400;
 const QUERY_ALIASES = ["wt-diff", "diff-tool", "diff", "文本对比", "差异比较"];
+const DEFAULT_LEFT =
+  "Hello World\nThis is a test of the diff utility.\nSome lines stay the same.";
+const DEFAULT_RIGHT =
+  "Hello Everyone\nThis is a test of the diff engine.\nSome lines stay the same.\nAdded a new line here!";
+const dmp = new DiffMatchPatch();
 
 function buildTarget(command: DiffCommand): string {
   const params = new URLSearchParams();
@@ -55,8 +52,8 @@ function parseCommand(optionsText: string | undefined): DiffCommand {
   if (!optionsText) {
     return {
       action: ACTION_OPEN,
-      left: "",
-      right: "",
+      left: DEFAULT_LEFT,
+      right: DEFAULT_RIGHT,
       ignoreCase: false,
       ignoreWhitespace: false
     };
@@ -67,8 +64,8 @@ function parseCommand(optionsText: string | undefined): DiffCommand {
 
   return {
     action: actionRaw === "compare" ? "compare" : ACTION_OPEN,
-    left: params.get("left") ?? "",
-    right: params.get("right") ?? "",
+    left: params.get("left") ?? DEFAULT_LEFT,
+    right: params.get("right") ?? DEFAULT_RIGHT,
     ignoreCase: parseBoolean(params.get("ignoreCase"), false),
     ignoreWhitespace: parseBoolean(params.get("ignoreWhitespace"), false)
   };
@@ -96,8 +93,8 @@ function matchesAlias(query: string): boolean {
 function createCatalogItem(): LaunchItem {
   const command: DiffCommand = {
     action: ACTION_OPEN,
-    left: "",
-    right: "",
+    left: DEFAULT_LEFT,
+    right: DEFAULT_RIGHT,
     ignoreCase: false,
     ignoreWhitespace: false
   };
@@ -106,18 +103,10 @@ function createCatalogItem(): LaunchItem {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: "文本对比",
-    subtitle: "逐行差异比较",
+    subtitle: "可视化查看两段文本的差异",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
     target: buildTarget(command),
-    keywords: [
-      "plugin",
-      "webtools",
-      "diff",
-      "compare",
-      "文本",
-      "对比",
-      "差异"
-    ]
+    keywords: ["plugin", "webtools", "diff", "compare", "文本", "对比", "差异"]
   };
 }
 
@@ -135,69 +124,103 @@ function normalizeLine(
   return output;
 }
 
+function buildComparableText(
+  value: string,
+  options: Pick<DiffCommand, "ignoreCase" | "ignoreWhitespace">
+): string {
+  return value
+    .split(/\r?\n/)
+    .map((line) => normalizeLine(line, options))
+    .join("\n");
+}
+
 function executeCompare(command: DiffCommand): ExecuteResult {
-  const leftLines = command.left.split(/\r?\n/);
-  const rightLines = command.right.split(/\r?\n/);
-  const maxLines = Math.max(leftLines.length, rightLines.length);
+  try {
+    const left = command.left ?? "";
+    const right = command.right ?? "";
 
-  const rows: DiffRow[] = [];
-  let same = 0;
-  let added = 0;
-  let removed = 0;
-  let changed = 0;
+    const leftComparable = buildComparableText(left, command);
+    const rightComparable = buildComparableText(right, command);
+    const diffs = dmp.diff_main(leftComparable, rightComparable);
+    dmp.diff_cleanupSemantic(diffs);
 
-  for (let index = 0; index < maxLines; index += 1) {
-    const left = leftLines[index] ?? "";
-    const right = rightLines[index] ?? "";
+    let equalCount = 0;
+    let insertCount = 0;
+    let deleteCount = 0;
+    let changedCount = 0;
+    const rawIdentical = left === right;
+    const identical = leftComparable === rightComparable;
+    const leftLines = left === "" ? 0 : left.split(/\r?\n/).length;
+    const rightLines = right === "" ? 0 : right.split(/\r?\n/).length;
 
-    if (index >= ROW_LIMIT) {
-      break;
+    for (const [operation, text] of diffs) {
+      if (!text) {
+        continue;
+      }
+      if (operation === DiffMatchPatch.DIFF_EQUAL) {
+        equalCount += 1;
+        continue;
+      }
+      if (operation === DiffMatchPatch.DIFF_INSERT) {
+        insertCount += 1;
+        changedCount += 1;
+        continue;
+      }
+      if (operation === DiffMatchPatch.DIFF_DELETE) {
+        deleteCount += 1;
+        changedCount += 1;
+      }
     }
 
-    let type: DiffRowType = "same";
-    if (index >= leftLines.length) {
-      type = "added";
-      added += 1;
-    } else if (index >= rightLines.length) {
-      type = "removed";
-      removed += 1;
-    } else if (
-      normalizeLine(left, command) === normalizeLine(right, command)
-    ) {
-      type = "same";
-      same += 1;
-    } else {
-      type = "changed";
-      changed += 1;
-    }
+    const prettyHtml = identical
+      ? dmp.diff_prettyHtml([[DiffMatchPatch.DIFF_EQUAL, left]])
+      : dmp.diff_prettyHtml(diffs);
 
-    rows.push({
-      index: index + 1,
-      type,
-      left,
-      right
-    });
+    return {
+      ok: true,
+      keepOpen: true,
+      message:
+        identical && !rawIdentical && (command.ignoreCase || command.ignoreWhitespace)
+          ? "按当前忽略规则，两侧文本一致"
+          : identical
+            ? "两侧文本一致"
+            : "文本对比完成",
+      data: {
+        action: "compare",
+        prettyHtml,
+        left,
+        right,
+        summary: {
+          same: equalCount,
+          added: insertCount,
+          removed: deleteCount,
+          changed: changedCount,
+          total: Math.max(leftComparable.length, rightComparable.length),
+          shown: equalCount + insertCount + deleteCount,
+          levenshtein: dmp.diff_levenshtein(diffs),
+          identical,
+          rawIdentical,
+          leftLength: left.length,
+          rightLength: right.length,
+          leftLines,
+          rightLines
+        }
+      }
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "文本对比失败";
+    return {
+      ok: false,
+      keepOpen: true,
+      message: reason,
+      data: {
+        action: "compare",
+        prettyHtml: "",
+        left: command.left,
+        right: command.right
+      }
+    };
   }
-
-  const truncated = maxLines > ROW_LIMIT;
-  return {
-    ok: true,
-    keepOpen: true,
-    message: "对比完成",
-    data: {
-      action: "compare",
-      rows,
-      summary: {
-        same,
-        added,
-        removed,
-        changed,
-        total: maxLines,
-        shown: rows.length
-      },
-      truncated
-    }
-  };
 }
 
 export const webtoolsDiffPlugin: LauncherPlugin = {
@@ -219,7 +242,7 @@ export const webtoolsDiffPlugin: LauncherPlugin = {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "文本对比",
-        subtitle: "逐行差异比较",
+        subtitle: "可视化查看两段文本的差异",
         data: {
           left: command.left,
           right: command.right,

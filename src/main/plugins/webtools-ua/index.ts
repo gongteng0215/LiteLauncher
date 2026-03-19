@@ -1,4 +1,6 @@
-﻿import { IPC_CHANNELS } from "../../../shared/channels";
+import UAParser from "ua-parser-js";
+
+import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
@@ -13,16 +15,52 @@ interface UaCommand {
 interface UaParseResult {
   browser: string;
   browserVersion: string;
+  browserMajor: string;
   os: string;
   osVersion: string;
   device: string;
+  deviceVendor: string;
+  deviceModel: string;
+  deviceType: string;
   engine: string;
+  engineVersion: string;
   cpu: string;
 }
 
 const PLUGIN_ID = "webtools-ua";
-const ACTION_OPEN: UaAction = "open";
-const QUERY_ALIASES = ["wt-ua", "ua-tool", "ua", "user-agent", "浏览器"];
+const DEFAULT_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+const QUERY_ALIASES = [
+  "wt-ua",
+  "ua-tool",
+  "ua",
+  "user-agent",
+  "浏览器",
+  "系统",
+  "设备解析"
+];
+
+function formatCpuArchitecture(value: string | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "amd64":
+    case "x86_64":
+      return "x64";
+    case "ia32":
+    case "i386":
+    case "x86":
+      return "x86";
+    case "arm64":
+    case "aarch64":
+      return "ARM64";
+    case "armhf":
+      return "ARMHF";
+    case "arm":
+      return "ARM";
+    default:
+      return value && value.trim() ? value : "Unknown";
+  }
+}
 
 function buildTarget(action: UaAction, ua = ""): string {
   const params = new URLSearchParams();
@@ -35,15 +73,15 @@ function buildTarget(action: UaAction, ua = ""): string {
 
 function parseCommand(optionsText: string | undefined): UaCommand {
   if (!optionsText) {
-    return { action: ACTION_OPEN, ua: "" };
+    return { action: "open", ua: DEFAULT_UA };
   }
 
   const params = new URLSearchParams(optionsText);
-  const actionRaw = (params.get("action") ?? ACTION_OPEN).trim().toLowerCase();
+  const actionRaw = (params.get("action") ?? "open").trim().toLowerCase();
 
   return {
-    action: actionRaw === "parse" ? "parse" : ACTION_OPEN,
-    ua: params.get("ua") ?? ""
+    action: actionRaw === "parse" ? "parse" : "open",
+    ua: params.get("ua") ?? DEFAULT_UA
   };
 }
 
@@ -66,85 +104,62 @@ function createCatalogItem(): LaunchItem {
     title: "UA 解析",
     subtitle: "解析浏览器、系统、设备信息",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
-    target: buildTarget(ACTION_OPEN),
-    keywords: ["plugin", "webtools", "ua", "user-agent", "浏览器", "系统"]
-  };
-}
-
-function matchFirst(text: string, patterns: Array<{ regex: RegExp; name: string }>): { name: string; version: string } {
-  for (const pattern of patterns) {
-    const matched = text.match(pattern.regex);
-    if (matched) {
-      return {
-        name: pattern.name,
-        version: matched[1] ?? "-"
-      };
-    }
-  }
-
-  return {
-    name: "Unknown",
-    version: "-"
+    target: buildTarget("open"),
+    keywords: ["plugin", "webtools", "ua", "user-agent", "浏览器", "系统", "设备"]
   };
 }
 
 function parseUa(ua: string): UaParseResult {
-  const browser = matchFirst(ua, [
-    { regex: /Edg\/([\d.]+)/, name: "Edge" },
-    { regex: /Chrome\/([\d.]+)/, name: "Chrome" },
-    { regex: /Firefox\/([\d.]+)/, name: "Firefox" },
-    { regex: /Version\/([\d.]+).*Safari/, name: "Safari" },
-    { regex: /OPR\/([\d.]+)/, name: "Opera" },
-    { regex: /MSIE\s([\d.]+)/, name: "Internet Explorer" }
-  ]);
+  const parser = new UAParser.UAParser(ua);
+  const result = parser.getResult();
 
-  const os = matchFirst(ua, [
-    { regex: /Windows NT ([\d.]+)/, name: "Windows" },
-    { regex: /Android ([\d.]+)/, name: "Android" },
-    { regex: /iPhone OS ([\d_]+)/, name: "iOS" },
-    { regex: /iPad; CPU OS ([\d_]+)/, name: "iPadOS" },
-    { regex: /Mac OS X ([\d_]+)/, name: "macOS" },
-    { regex: /Linux ([\w.-]+)/, name: "Linux" }
-  ]);
-
-  const engine = matchFirst(ua, [
-    { regex: /AppleWebKit\/([\d.]+)/, name: "WebKit" },
-    { regex: /Gecko\/([\d.]+)/, name: "Gecko" },
-    { regex: /Trident\/([\d.]+)/, name: "Trident" }
-  ]);
-
-  let device = "Desktop";
-  if (/Mobile|iPhone|Android/i.test(ua)) {
-    device = "Mobile";
-  } else if (/iPad|Tablet/i.test(ua)) {
-    device = "Tablet";
-  }
-
-  const cpu = /arm|aarch64/i.test(ua)
-    ? "ARM"
-    : /x86_64|Win64|x64|amd64/i.test(ua)
-    ? "x64"
-    : /i686|i386|x86/i.test(ua)
-    ? "x86"
-    : "Unknown";
+  const browser = result.browser.name ?? "Unknown";
+  const browserVersion = result.browser.version ?? "-";
+  const browserMajor = result.browser.major ?? "-";
+  const os = result.os.name ?? "Unknown";
+  const osVersion = result.os.version ?? "-";
+  const deviceVendor = result.device.vendor ?? "-";
+  const deviceModel = result.device.model ?? "-";
+  const deviceType = result.device.type ?? "desktop";
+  const engine = result.engine.name ?? "Unknown";
+  const engineVersion = result.engine.version ?? "-";
+  const cpu = formatCpuArchitecture(result.cpu.architecture);
+  const device =
+    deviceVendor !== "-" || deviceModel !== "-"
+      ? `${deviceVendor} ${deviceModel}`.trim()
+      : deviceType;
 
   return {
-    browser: browser.name,
-    browserVersion: browser.version,
-    os: os.name,
-    osVersion: os.version.replace(/_/g, "."),
+    browser,
+    browserVersion,
+    browserMajor,
+    os,
+    osVersion,
     device,
-    engine: `${engine.name} ${engine.version}`.trim(),
+    deviceVendor,
+    deviceModel,
+    deviceType,
+    engine,
+    engineVersion,
     cpu
   };
 }
 
 function executeParse(command: UaCommand): ExecuteResult {
-  try {
-    if (!command.ua.trim()) {
-      throw new Error("请输入 UA 字符串");
-    }
+  if (!command.ua.trim()) {
+    return {
+      ok: true,
+      keepOpen: true,
+      message: "请输入 UA 字符串",
+      data: {
+        ua: "",
+        error: "",
+        info: "等待输入 UA"
+      }
+    };
+  }
 
+  try {
     const result = parseUa(command.ua);
 
     return {
@@ -153,17 +168,21 @@ function executeParse(command: UaCommand): ExecuteResult {
       message: "UA 解析完成",
       data: {
         ua: command.ua,
+        info: "已解析当前 UA",
+        error: "",
         ...result
       }
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "解析失败";
+    const reason = error instanceof Error ? error.message : "UA 解析失败";
     return {
       ok: false,
       keepOpen: true,
       message: reason,
       data: {
-        ua: command.ua
+        ua: command.ua,
+        info: "解析失败",
+        error: reason
       }
     };
   }
@@ -184,14 +203,14 @@ export const webtoolsUaPlugin: LauncherPlugin = {
   execute(optionsText, context): ExecuteResult {
     const command = parseCommand(optionsText);
 
-    if (command.action === ACTION_OPEN) {
+    if (command.action === "open") {
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "UA 解析",
         subtitle: "解析浏览器、系统、设备信息",
         data: {
-          ua: command.ua
+          ua: command.ua || DEFAULT_UA
         }
       });
       return {

@@ -81,11 +81,17 @@ const api = {
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.search, query, options);
   },
+  resolveCommandQuery(query: string): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.resolveCommandQuery, query);
+  },
   execute(item: LaunchItem): Promise<ExecuteResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.execute, item);
   },
   setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.setWindowSizePreset, preset);
+  },
+  setAutoHideSuspended(suspended: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setAutoHideSuspended, suspended);
   },
   hide(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.hide);

@@ -236,8 +236,8 @@ function executeConvert(command: ColorsCommand): ExecuteResult {
       data: {
         input: command.color,
         hex,
-        rgb: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
-        hsl: `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`,
+        rgb: `${rgb.r}, ${rgb.g}, ${rgb.b}`,
+        hsl: `${hsl.h}, ${hsl.s}%, ${hsl.l}%`,
         shades: buildShades(rgb)
       }
     };

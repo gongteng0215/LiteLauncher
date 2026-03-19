@@ -23,6 +23,9 @@ const PLUGIN_ID = "webtools-regex";
 const ACTION_OPEN: RegexAction = "open";
 const QUERY_ALIASES = ["wt-regex", "regex-tool", "regex", "正则", "正则测试"];
 const SAFE_FLAGS = "gimsuyd";
+const DEFAULT_PATTERN = "([a-z0-9_.-]+)@([a-z0-9.-]+)\\.([a-z.]{2,6})";
+const DEFAULT_INPUT =
+  "My emails are test@example.com and dev.ops-123@google.co.uk. Please feel free to match them!";
 
 function buildTarget(command: RegexCommand): string {
   const params = new URLSearchParams();
@@ -40,9 +43,9 @@ function parseCommand(optionsText: string | undefined): RegexCommand {
   if (!optionsText) {
     return {
       action: ACTION_OPEN,
-      pattern: "",
+      pattern: DEFAULT_PATTERN,
       flags: "g",
-      input: "",
+      input: DEFAULT_INPUT,
       replacement: ""
     };
   }
@@ -52,9 +55,9 @@ function parseCommand(optionsText: string | undefined): RegexCommand {
   const action = actionRaw === "test" || actionRaw === "replace" ? actionRaw : ACTION_OPEN;
   return {
     action,
-    pattern: params.get("pattern") ?? "",
+    pattern: params.get("pattern") ?? DEFAULT_PATTERN,
     flags: params.get("flags") ?? "g",
-    input: params.get("input") ?? "",
+    input: params.get("input") ?? DEFAULT_INPUT,
     replacement: params.get("replacement") ?? ""
   };
 }
@@ -89,30 +92,16 @@ function matchesAlias(query: string): boolean {
 }
 
 function createCatalogItem(): LaunchItem {
-  const openCommand: RegexCommand = {
-    action: ACTION_OPEN,
-    pattern: "",
-    flags: "g",
-    input: "",
-    replacement: ""
-  };
+  const openCommand = parseCommand(undefined);
 
   return {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: "正则工具",
-    subtitle: "匹配测试 / 文本替换",
+    subtitle: "实时匹配高亮与常用模板",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
     target: buildTarget(openCommand),
-    keywords: [
-      "plugin",
-      "webtools",
-      "regex",
-      "regexp",
-      "正则",
-      "匹配",
-      "替换"
-    ]
+    keywords: ["plugin", "webtools", "regex", "regexp", "正则", "匹配", "模板"]
   };
 }
 
@@ -224,8 +213,8 @@ export const webtoolsRegexPlugin: LauncherPlugin = {
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
-        title: "正则工具",
-        subtitle: "匹配测试 / 文本替换",
+        title: "正则测试",
+        subtitle: "实时匹配高亮，内置常用正则模板",
         data: {
           pattern: command.pattern,
           flags: command.flags,

@@ -1,10 +1,24 @@
-﻿import { IPC_CHANNELS } from "../../../shared/channels";
+import dotProperties from "dot-properties";
+import yaml from "js-yaml";
+
+import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
 
 type ConfigAction = "open" | "convert";
 type ConfigFormat = "json" | "yaml" | "properties";
+type ConfigValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ConfigObject
+  | ConfigValue[];
+
+interface ConfigObject {
+  [key: string]: ConfigValue;
+}
 
 interface ConfigCommand {
   action: ConfigAction;
@@ -14,9 +28,21 @@ interface ConfigCommand {
 }
 
 const PLUGIN_ID = "webtools-config-convert";
-const ACTION_OPEN: ConfigAction = "open";
-const QUERY_ALIASES = ["wt-config", "config-tool", "配置转换", "yaml", "properties"];
-const DEFAULT_INPUT = `server:\n  port: 8080\n  host: localhost`;
+const DEFAULT_INPUT = `server:
+  port: 8080
+  servlet:
+    context-path: /api
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/db`;
+const QUERY_ALIASES = [
+  "wt-config",
+  "config-tool",
+  "配置转换",
+  "yaml",
+  "properties",
+  "json配置"
+];
 
 function buildTarget(command: ConfigCommand): string {
   const params = new URLSearchParams();
@@ -38,7 +64,7 @@ function parseFormat(value: string | null, fallback: ConfigFormat): ConfigFormat
 function parseCommand(optionsText: string | undefined): ConfigCommand {
   if (!optionsText) {
     return {
-      action: ACTION_OPEN,
+      action: "open",
       source: "yaml",
       target: "properties",
       input: DEFAULT_INPUT
@@ -46,13 +72,13 @@ function parseCommand(optionsText: string | undefined): ConfigCommand {
   }
 
   const params = new URLSearchParams(optionsText);
-  const actionRaw = (params.get("action") ?? ACTION_OPEN).trim().toLowerCase();
+  const actionRaw = (params.get("action") ?? "open").trim().toLowerCase();
 
   return {
-    action: actionRaw === "convert" ? "convert" : ACTION_OPEN,
+    action: actionRaw === "convert" ? "convert" : "open",
     source: parseFormat(params.get("source"), "yaml"),
     target: parseFormat(params.get("target"), "properties"),
-    input: params.get("input") ?? ""
+    input: params.get("input") ?? DEFAULT_INPUT
   };
 }
 
@@ -75,18 +101,21 @@ function createCatalogItem(): LaunchItem {
     title: "配置转换",
     subtitle: "YAML / JSON / Properties 双向转换",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
-    target: buildTarget({
-      action: ACTION_OPEN,
-      source: "yaml",
-      target: "properties",
-      input: DEFAULT_INPUT
-    }),
-    keywords: ["plugin", "webtools", "config", "yaml", "json", "properties", "转换"]
+    target: buildTarget(parseCommand(undefined)),
+    keywords: [
+      "plugin",
+      "webtools",
+      "config",
+      "yaml",
+      "json",
+      "properties",
+      "配置转换"
+    ]
   };
 }
 
-function setDeepValue(target: Record<string, unknown>, path: string[], value: unknown): void {
-  let cursor: Record<string, unknown> = target;
+function setDeepValue(target: ConfigObject, path: string[], value: ConfigValue): void {
+  let cursor: ConfigObject = target;
   for (let i = 0; i < path.length; i += 1) {
     const key = path[i] ?? "";
     if (!key) {
@@ -102,11 +131,11 @@ function setDeepValue(target: Record<string, unknown>, path: string[], value: un
     if (!next || typeof next !== "object" || Array.isArray(next)) {
       cursor[key] = {};
     }
-    cursor = cursor[key] as Record<string, unknown>;
+    cursor = cursor[key] as ConfigObject;
   }
 }
 
-function parseScalar(raw: string): unknown {
+function parseScalar(raw: string): ConfigValue {
   const value = raw.trim();
   if (value === "true") {
     return true;
@@ -121,187 +150,114 @@ function parseScalar(raw: string): unknown {
     return "";
   }
 
-  const num = Number(value);
-  if (Number.isFinite(num)) {
-    return num;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && /^-?\d+(\.\d+)?$/.test(value)) {
+    return numeric;
   }
 
   return value;
 }
 
-function parseProperties(input: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  const lines = input.split(/\r?\n/);
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-      continue;
+function parseProperties(input: string): ConfigObject {
+  const parsed = dotProperties.parse(input) as Record<string, string>;
+  const result: ConfigObject = {};
+  Object.entries(parsed).forEach(([key, value]) => {
+    const path = key
+      .split(".")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (path.length === 0) {
+      return;
     }
-
-    const sepIndex = Math.max(trimmed.indexOf("="), trimmed.indexOf(":"));
-    if (sepIndex === -1) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, sepIndex).trim();
-    const value = trimmed.slice(sepIndex + 1).trim();
-    if (!key) {
-      continue;
-    }
-
-    const path = key.split(".").map((item) => item.trim()).filter(Boolean);
     setDeepValue(result, path, parseScalar(value));
-  }
-
+  });
   return result;
 }
 
-function parseYaml(input: string): Record<string, unknown> {
-  const lines = input
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\t/g, "    "));
-
-  const root: Record<string, unknown> = {};
-  const stack: Array<{ indent: number; value: Record<string, unknown> }> = [
-    { indent: -1, value: root }
-  ];
-
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const indent = rawLine.match(/^\s*/)?.[0].length ?? 0;
-    const sep = trimmed.indexOf(":");
-    if (sep === -1) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, sep).trim();
-    const rawValue = trimmed.slice(sep + 1).trim();
-
-    while (stack.length > 1 && indent <= (stack[stack.length - 1]?.indent ?? -1)) {
-      stack.pop();
-    }
-
-    const parent = stack[stack.length - 1]?.value ?? root;
-
-    if (!rawValue) {
-      const next: Record<string, unknown> = {};
-      parent[key] = next;
-      stack.push({ indent, value: next });
-    } else {
-      parent[key] = parseScalar(rawValue);
-    }
-  }
-
-  return root;
-}
-
-function parseInputByFormat(format: ConfigFormat, input: string): Record<string, unknown> {
+function parseInputByFormat(format: ConfigFormat, input: string): ConfigValue {
   if (format === "json") {
-    const parsed = JSON.parse(input);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("JSON 顶层必须是对象");
-    }
-    return parsed as Record<string, unknown>;
+    return JSON.parse(input) as ConfigValue;
   }
 
   if (format === "yaml") {
-    return parseYaml(input);
+    return yaml.load(input) as ConfigValue;
   }
 
   return parseProperties(input);
 }
 
-function toYaml(value: unknown, indent = 0): string {
-  if (value === null || typeof value !== "object") {
-    return `${value}`;
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => `${" ".repeat(indent)}- ${toYaml(item, indent + 2).trimStart()}`)
-      .join("\n");
-  }
-
-  const obj = value as Record<string, unknown>;
-  return Object.entries(obj)
-    .map(([key, next]) => {
-      if (next && typeof next === "object") {
-        const body = toYaml(next, indent + 2);
-        return `${" ".repeat(indent)}${key}:\n${body}`;
-      }
-      return `${" ".repeat(indent)}${key}: ${next}`;
-    })
-    .join("\n");
-}
-
 function flattenProperties(
-  value: Record<string, unknown>,
+  value: ConfigValue,
   prefix = "",
-  output: Record<string, unknown> = {}
-): Record<string, unknown> {
+  output: Record<string, string> = {}
+): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (prefix) {
+      output[prefix] = value == null ? "" : String(value);
+    }
+    return output;
+  }
+
   for (const [key, next] of Object.entries(value)) {
     const prop = prefix ? `${prefix}.${key}` : key;
     if (next && typeof next === "object" && !Array.isArray(next)) {
-      flattenProperties(next as Record<string, unknown>, prop, output);
+      flattenProperties(next as ConfigObject, prop, output);
     } else {
-      output[prop] = next;
+      output[prop] = next == null ? "" : String(next);
     }
   }
   return output;
 }
 
-function stringifyByFormat(format: ConfigFormat, value: Record<string, unknown>): string {
+function stringifyByFormat(format: ConfigFormat, value: ConfigValue): string {
   if (format === "json") {
     return JSON.stringify(value, null, 2);
   }
 
   if (format === "yaml") {
-    return toYaml(value);
+    return yaml.dump(value, {
+      noRefs: true,
+      lineWidth: -1
+    });
   }
 
-  const flat = flattenProperties(value);
-  return Object.entries(flat)
-    .map(([key, next]) => `${key}=${next ?? ""}`)
-    .join("\n");
+  return dotProperties.stringify(flattenProperties(value)).trim();
 }
 
 function executeConvert(command: ConfigCommand): ExecuteResult {
-  try {
-    if (!command.input.trim()) {
-      return {
-        ok: true,
-        keepOpen: true,
-        message: "输入为空",
-        data: {
-          output: "",
-          source: command.source,
-          target: command.target,
-          info: "请输入待转换内容"
-        }
-      };
-    }
+  if (!command.input.trim()) {
+    return {
+      ok: true,
+      keepOpen: true,
+      message: "请输入待转换内容",
+      data: {
+        source: command.source,
+        target: command.target,
+        output: "",
+        info: "等待输入待转换内容",
+        error: ""
+      }
+    };
+  }
 
+  try {
     const parsed = parseInputByFormat(command.source, command.input);
     const output = stringifyByFormat(command.target, parsed);
 
     return {
       ok: true,
       keepOpen: true,
-      message: "转换完成",
+      message: "配置转换完成",
       data: {
         source: command.source,
         target: command.target,
         output,
-        info: `${command.source.toUpperCase()} -> ${command.target.toUpperCase()}`
+        info: `${command.source.toUpperCase()} -> ${command.target.toUpperCase()}`,
+        error: ""
       }
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "转换失败";
+    const reason = error instanceof Error ? error.message : "配置转换失败";
     return {
       ok: false,
       keepOpen: true,
@@ -309,7 +265,9 @@ function executeConvert(command: ConfigCommand): ExecuteResult {
       data: {
         output: "",
         source: command.source,
-        target: command.target
+        target: command.target,
+        info: "转换失败",
+        error: reason
       }
     };
   }
@@ -330,7 +288,7 @@ export const webtoolsConfigConvertPlugin: LauncherPlugin = {
   execute(optionsText, context): ExecuteResult {
     const command = parseCommand(optionsText);
 
-    if (command.action === ACTION_OPEN) {
+    if (command.action === "open") {
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
@@ -339,7 +297,9 @@ export const webtoolsConfigConvertPlugin: LauncherPlugin = {
         data: {
           source: command.source,
           target: command.target,
-          input: command.input || DEFAULT_INPUT
+          input: command.input || DEFAULT_INPUT,
+          info: "输入内容后自动转换",
+          error: ""
         }
       });
       return {

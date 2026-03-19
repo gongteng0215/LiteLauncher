@@ -1,7 +1,7 @@
-﻿# LiteLauncher 产品需求文档（PRD）
+# LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-03-10
-适用版本：LiteLauncher `v1.0.10`
+更新时间：2026-03-19
+适用版本：LiteLauncher `v1.0.11`
 
 ## 1. 产品目标
 
@@ -28,6 +28,9 @@
 5. `cash` 打开现金流游戏继续当前对局。
 6. `wt-jwt` 打开 JWT 调试器进行解析/签名。
 7. `wt-time` 打开时间戳工具进行日期互转。
+8. `wt-qr` 打开二维码生成面板。
+9. `wt-md` 打开 Markdown 预览面板。
+10. 输入 `codex` 命中并启动 Windows 应用别名。
 
 ## 3. 功能范围
 
@@ -40,10 +43,11 @@
 - 二次触发可显示/隐藏主窗口
 - 主窗口：无边框、置顶、居中、任务栏隐藏
 - 托盘菜单：显示主窗口、退出
+- 开发模式支持单实例替换，避免旧主进程残留
 
 #### 3.1.2 搜索与执行
 
-- 统一搜索：应用、文件夹、文件、网页、命令
+- 统一搜索：应用、文件夹、文件、网页、命令、插件
 - 分区展示：
   - 空输入：最近访问 / 置顶 / 插件
   - 非空输入：搜索结果 / 置顶 / 插件
@@ -55,11 +59,16 @@
 - 支持范围前缀过滤：`app:` / `cmd:` / `web:` / `plugin:`
 - 中文检索增强：首字母、拼音片段、别名映射
 - 长串无意义输入噪声抑制
+- Windows 命令与应用别名支持：
+  - PATH 命令别名搜索
+  - StartApps / WindowsApps 应用激活
+  - 典型条目：`codex`
+- 命中同一目标时进行结果去重，优先保留图标/信息更完整的条目
 
 #### 3.1.3 内置与插件
 
 - 内置命令：`clip`、`settings`、`exit`
-- 可见插件（7 个）：
+- 可见插件（20 个）：
   - `cashflow-game`
   - `webtools-password`
   - `webtools-cron`
@@ -67,7 +76,20 @@
   - `webtools-crypto`
   - `webtools-jwt`
   - `webtools-timestamp`
-- WebTools 迁移现状：19 个插件目录已建，未完成插件默认隐藏
+  - `webtools-strings`
+  - `webtools-colors`
+  - `webtools-diff`
+  - `webtools-image-base64`
+  - `webtools-config-convert`
+  - `webtools-sql-format`
+  - `webtools-unit-convert`
+  - `webtools-regex`
+  - `webtools-url-parse`
+  - `webtools-qrcode`
+  - `webtools-markdown`
+  - `webtools-ua`
+  - `webtools-api-client`
+- WebTools 迁移现状：19 个插件目录已全部接入并默认开放
 
 #### 3.1.4 WebTools 插件能力（当前）
 
@@ -77,6 +99,19 @@
 - 加密工具：MD5/SHA、AES/DES、RSA、Base64/URL
 - JWT 工具：JWS/JWE 解析与生成，HS256/RS256，JWE `dir` 模式
 - 时间戳工具：双区块互转（Unix/日期）、秒/毫秒切换、当前时间实时显示、获取当前、输入自动转换
+- 正则工具：默认示例、自动匹配、替换预览
+- 字符串工具：大小写转换、UUID 批量生成与复制
+- 文本对比：双栏输入、自动差异对比、统计摘要
+- 配置转换：YAML/JSON/Properties 自动互转
+- SQL 格式化：方言切换、缩进配置、自动格式化
+- 单位换算：容量换算与 px/rem 联动
+- URL 解析：默认示例、自动解析、结构化展示
+- 二维码工具：文本/链接实时生成二维码、颜色配置、Logo 叠加、PNG 下载
+- Markdown 工具：实时预览、HTML 输出、复制 HTML
+- 颜色工具：色板、系统取色器、HEX/RGB/HSL 自动转换、色阶点击回填
+- 图片 Base64：拖拽/上传图片、Base64/DataURL 自动规范化、预览、下载、复制
+- UA 解析：自动解析浏览器、系统、设备、引擎、CPU 架构信息
+- API 调试：结构化请求参数、Body/FormData 编辑与响应查看
 
 #### 3.1.5 剪贴板历史
 
@@ -95,7 +130,15 @@
 - 开机启动开关（Windows/macOS）
 - 错误日志查看与清空（最近 40 条）
 
-#### 3.1.7 打包发布（基础）
+#### 3.1.7 开发体验
+
+- `pnpm dev` 提供增量开发模式
+- 监听 `src/main` / `src/preload` / `src/shared`
+- 主进程变更自动重启 Electron
+- 监听 `src/renderer` / `src/assets`
+- 渲染层变更自动刷新窗口
+
+#### 3.1.8 打包发布（基础）
 
 - `electron-builder`：Windows（NSIS/Portable/zip）、macOS（dmg/zip）
 - Windows 图标已接入主窗口、托盘和安装包快捷方式配置
@@ -111,11 +154,11 @@
 - 插件管理页（启用/禁用/排序）
 - 搜索源扫描规则进一步细化（黑名单/白名单/目录优先级）
 
-#### 3.2.2 WebTools 迁移后续
+#### 3.2.2 WebTools 后续优化
 
-- 补齐其余 13 个隐藏插件功能
 - 插件面板 UI 一致性收敛（小屏/缩放适配）
 - 插件自动化回归（输入联动、Esc/Enter、状态提示）
+- 插件面板渲染逻辑继续拆分出 `renderer.ts`
 
 #### 3.2.3 Cashflow 后续
 
@@ -132,6 +175,7 @@
 - 受限模糊匹配（降低噪声）
 - 中文拼音首字母/片段
 - 常见别名映射
+- Windows 命令 / StartApp / WindowsApps 目标补充
 
 ### 4.2 排序公式
 
@@ -153,6 +197,7 @@ score = matchScore * 0.7 + usageScore * 0.2 + recencyScore * 0.1
 - 插件异常不应导致主搜索不可用
 - 窗口尺寸在插件模式和搜索模式可稳定切换
 - 运行异常需可追踪并在设置页查看错误日志
+- 原生文件选择与下载动作期间，窗口不应因失焦直接隐藏
 
 ### 5.3 安全
 
@@ -188,14 +233,16 @@ score = matchScore * 0.7 + usageScore * 0.2 + recencyScore * 0.1
 - 搜索态保留置顶与插件分区
 - 右键菜单动作可用
 - 中文搜索满足 `b/bai -> 百度` 典型场景
+- Windows 应用别名满足 `codex` 典型场景
 - 剪贴板历史管理可用
 - 设置项可保存并生效
 - 设置页索引扫描与错误日志能力可用
-- 可见插件 7 个可正常打开和执行主流程
+- 可见插件 20 个可正常打开和执行主流程
+- `pnpm dev` 能提供自动编译、自动重启、自动刷新
 - Windows 可产出安装包和便携包
 
 ## 8. 版本路线
 
-1. `v1.1`：补齐 WebTools 隐藏插件中的高频项，完善插件注册器与回归测试。
+1. `v1.1`：继续完善插件注册器、插件面板小屏适配与自动化回归。
 2. `v1.2`：Cashflow 复盘与 AI 差异化策略。
 3. `v2.x`：插件生态、签名公证、自动更新闭环。

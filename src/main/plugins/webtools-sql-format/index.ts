@@ -1,45 +1,42 @@
-﻿import { IPC_CHANNELS } from "../../../shared/channels";
+import { format as formatSqlText } from "sql-formatter";
+
+import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
 
 type SqlAction = "open" | "format";
+type SqlDialect = "sql" | "mysql" | "postgresql" | "sqlite" | "tsql";
 
 interface SqlCommand {
   action: SqlAction;
   input: string;
-  dialect: string;
+  dialect: SqlDialect;
   uppercase: boolean;
   indent: number;
 }
 
 const PLUGIN_ID = "webtools-sql-format";
-const ACTION_OPEN: SqlAction = "open";
-const QUERY_ALIASES = ["wt-sql", "sql-tool", "sql", "格式化", "数据库"];
-const KEYWORDS = [
-  "select",
-  "from",
-  "where",
-  "group by",
-  "having",
-  "order by",
-  "limit",
-  "offset",
-  "join",
-  "left join",
-  "right join",
-  "inner join",
-  "outer join",
-  "on",
-  "and",
-  "or",
-  "union",
-  "insert into",
-  "values",
-  "update",
-  "set",
-  "delete"
+const DEFAULT_INPUT =
+  "SELECT a,b,c FROM table_test JOIN other_table ON table_test.id = other_table.id WHERE a > 10 AND b LIKE '%test%' ORDER BY c DESC LIMIT 10";
+const DEFAULT_DIALECT: SqlDialect = "sql";
+const DEFAULT_INDENT = 2;
+const QUERY_ALIASES = [
+  "wt-sql",
+  "sql-tool",
+  "sql",
+  "sql格式化",
+  "sql整理",
+  "数据库sql"
 ];
+
+const DIALECT_LABELS: Record<SqlDialect, string> = {
+  sql: "SQL",
+  mysql: "MySQL",
+  postgresql: "PostgreSQL",
+  sqlite: "SQLite",
+  tsql: "T-SQL"
+};
 
 function buildTarget(command: SqlCommand): string {
   const params = new URLSearchParams();
@@ -62,39 +59,46 @@ function parseBoolean(value: string | null, fallback: boolean): boolean {
 }
 
 function parseIndent(value: string | null): number {
-  const input = Number(value ?? "2");
-  if (!Number.isFinite(input)) {
-    return 2;
+  const parsed = Number(value ?? String(DEFAULT_INDENT));
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_INDENT;
   }
-  const rounded = Math.round(input);
-  if (rounded < 1) {
-    return 1;
-  }
-  if (rounded > 8) {
-    return 8;
-  }
+  const rounded = Math.max(1, Math.min(8, Math.round(parsed)));
   return rounded;
+}
+
+function normalizeDialect(value: string | null | undefined): SqlDialect {
+  const normalized = (value ?? DEFAULT_DIALECT).trim().toLowerCase();
+  switch (normalized) {
+    case "mysql":
+    case "postgresql":
+    case "sqlite":
+    case "tsql":
+      return normalized;
+    case "sql":
+    default:
+      return DEFAULT_DIALECT;
+  }
 }
 
 function parseCommand(optionsText: string | undefined): SqlCommand {
   if (!optionsText) {
     return {
-      action: ACTION_OPEN,
-      input:
-        "SELECT a,b,c FROM table_test JOIN other_table ON table_test.id = other_table.id WHERE a > 10 AND b LIKE '%test%' ORDER BY c DESC LIMIT 10",
-      dialect: "sql",
+      action: "open",
+      input: DEFAULT_INPUT,
+      dialect: DEFAULT_DIALECT,
       uppercase: true,
-      indent: 2
+      indent: DEFAULT_INDENT
     };
   }
 
   const params = new URLSearchParams(optionsText);
-  const actionRaw = (params.get("action") ?? ACTION_OPEN).trim().toLowerCase();
+  const actionRaw = (params.get("action") ?? "open").trim().toLowerCase();
 
   return {
-    action: actionRaw === "format" ? "format" : ACTION_OPEN,
-    input: params.get("input") ?? "",
-    dialect: (params.get("dialect") ?? "sql").trim() || "sql",
+    action: actionRaw === "format" ? "format" : "open",
+    input: params.get("input") ?? DEFAULT_INPUT,
+    dialect: normalizeDialect(params.get("dialect")),
     uppercase: parseBoolean(params.get("uppercase"), true),
     indent: parseIndent(params.get("indent"))
   };
@@ -112,119 +116,58 @@ function matchesAlias(query: string): boolean {
   });
 }
 
+function buildInfo(command: SqlCommand): string {
+  const dialectLabel = DIALECT_LABELS[command.dialect];
+  const indentLabel = `${command.indent} 空格缩进`;
+  const keywordLabel = command.uppercase ? "关键字大写" : "保持原始大小写";
+  return `${dialectLabel} | ${indentLabel} | ${keywordLabel}`;
+}
+
 function createCatalogItem(): LaunchItem {
+  const defaultCommand = parseCommand(undefined);
   return {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: "SQL 格式化",
-    subtitle: "SQL 语句格式整理与关键字规范",
+    subtitle: "整理 SQL 语句排版与关键字样式",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
-    target: buildTarget(parseCommand(undefined)),
-    keywords: ["plugin", "webtools", "sql", "format", "格式化", "query"]
+    target: buildTarget(defaultCommand),
+    keywords: [
+      "plugin",
+      "webtools",
+      "sql",
+      "format",
+      "sql格式化",
+      "sql整理",
+      "数据库"
+    ]
   };
 }
 
-function normalizeWhitespace(sql: string): string {
-  return sql
-    .replace(/\r\n/g, "\n")
-    .replace(/\s+/g, " ")
-    .replace(/\s*,\s*/g, ", ")
-    .trim();
-}
-
-function applyKeywordCase(input: string, uppercase: boolean): string {
-  let output = input;
-
-  for (const keyword of KEYWORDS.sort((a, b) => b.length - a.length)) {
-    const pattern = new RegExp(`\\b${keyword.replace(/\s+/g, "\\s+")}\\b`, "gi");
-    output = output.replace(pattern, uppercase ? keyword.toUpperCase() : keyword.toLowerCase());
-  }
-
-  return output;
-}
-
-function insertLineBreaks(input: string): string {
-  const breakKeywords = [
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "GROUP BY",
-    "HAVING",
-    "ORDER BY",
-    "LIMIT",
-    "OFFSET",
-    "JOIN",
-    "LEFT JOIN",
-    "RIGHT JOIN",
-    "INNER JOIN",
-    "OUTER JOIN",
-    "UNION",
-    "INSERT INTO",
-    "VALUES",
-    "UPDATE",
-    "SET",
-    "DELETE"
-  ];
-
-  let output = input;
-  for (const keyword of breakKeywords.sort((a, b) => b.length - a.length)) {
-    const escaped = keyword.replace(/\s+/g, "\\s+");
-    output = output.replace(new RegExp(`\\s+${escaped}\\b`, "g"), `\n${keyword}`);
-    output = output.replace(new RegExp(`\\s+${escaped.toLowerCase()}\\b`, "g"), `\n${keyword.toLowerCase()}`);
-  }
-
-  output = output.replace(/,\s*/g, ",\n  ");
-  output = output.replace(/\s+AND\s+/g, "\n  AND ");
-  output = output.replace(/\s+OR\s+/g, "\n  OR ");
-  output = output.replace(/\n{2,}/g, "\n");
-  return output.trim();
-}
-
-function indentSql(input: string, indent: number): string {
-  const indentText = " ".repeat(indent);
-  return input
-    .split("\n")
-    .map((line, index) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return "";
-      }
-
-      if (index === 0) {
-        return trimmed;
-      }
-
-      if (/^(SELECT|FROM|WHERE|GROUP BY|HAVING|ORDER BY|LIMIT|OFFSET|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|OUTER JOIN|UNION|INSERT INTO|VALUES|UPDATE|SET|DELETE)\b/i.test(trimmed)) {
-        return trimmed;
-      }
-
-      return `${indentText}${trimmed}`;
-    })
-    .join("\n");
-}
-
-function formatSql(input: string, uppercase: boolean, indent: number): string {
-  const normalized = normalizeWhitespace(input);
-  const cased = applyKeywordCase(normalized, uppercase);
-  const withBreaks = insertLineBreaks(cased);
-  return indentSql(withBreaks, indent);
-}
-
 function executeFormat(command: SqlCommand): ExecuteResult {
-  try {
-    if (!command.input.trim()) {
-      return {
-        ok: true,
-        keepOpen: true,
-        message: "输入为空",
-        data: {
-          output: "",
-          info: "请输入 SQL"
-        }
-      };
-    }
+  if (!command.input.trim()) {
+    return {
+      ok: true,
+      keepOpen: true,
+      message: "请输入 SQL",
+      data: {
+        output: "",
+        info: "等待输入 SQL",
+        error: "",
+        dialect: command.dialect,
+        uppercase: command.uppercase,
+        indent: command.indent
+      }
+    };
+  }
 
-    const output = formatSql(command.input, command.uppercase, command.indent);
+  try {
+    const output = formatSqlText(command.input, {
+      language: command.dialect,
+      tabWidth: command.indent,
+      useTabs: false,
+      keywordCase: command.uppercase ? "upper" : "preserve"
+    });
 
     return {
       ok: true,
@@ -232,20 +175,26 @@ function executeFormat(command: SqlCommand): ExecuteResult {
       message: "SQL 格式化完成",
       data: {
         output,
-        info: `${command.dialect.toUpperCase()} | 缩进 ${command.indent}`,
+        info: buildInfo(command),
+        error: "",
         dialect: command.dialect,
         uppercase: command.uppercase,
         indent: command.indent
       }
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "格式化失败";
+    const reason = error instanceof Error ? error.message : "SQL 格式化失败";
     return {
       ok: false,
       keepOpen: true,
       message: reason,
       data: {
-        output: ""
+        output: "",
+        info: "格式化失败",
+        error: reason,
+        dialect: command.dialect,
+        uppercase: command.uppercase,
+        indent: command.indent
       }
     };
   }
@@ -266,17 +215,19 @@ export const webtoolsSqlFormatPlugin: LauncherPlugin = {
   execute(optionsText, context): ExecuteResult {
     const command = parseCommand(optionsText);
 
-    if (command.action === ACTION_OPEN) {
+    if (command.action === "open") {
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "SQL 格式化",
-        subtitle: "SQL 语句格式整理与关键字规范",
+        subtitle: "整理 SQL 语句排版与关键字样式",
         data: {
-          input: command.input,
+          input: command.input || DEFAULT_INPUT,
           dialect: command.dialect,
           uppercase: command.uppercase,
-          indent: command.indent
+          indent: command.indent,
+          info: "输入 SQL 后自动格式化",
+          error: ""
         }
       });
 

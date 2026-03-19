@@ -151,6 +151,13 @@ const WINDOWS_SKIP_EXE_NAME_PATTERNS: readonly RegExp[] = [
   /^uninstall/i,
   /^vc_redist/i
 ];
+const WINDOWS_PATH_ALIAS_CANDIDATES = ["codex"] as const;
+
+type WindowsStartAppEntry = {
+  name: string;
+  appId: string;
+  installLocation?: string;
+};
 
 function getStartMenuDirs(): string[] {
   const dirs: string[] = [];
@@ -494,6 +501,298 @@ function commandItem(
   };
 }
 
+function getWindowsWhereExecutable(): string {
+  const windowsDir = process.env.WINDIR ?? "C:\\Windows";
+  return path.join(windowsDir, "System32", "where.exe");
+}
+
+function getWindowsPowerShellExecutable(): string {
+  const windowsDir = process.env.WINDIR ?? "C:\\Windows";
+  return path.join(
+    windowsDir,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe"
+  );
+}
+
+function resolveWindowsCommandPathViaPowerShell(commandName: string): string | null {
+  try {
+    const result = spawnSync(
+      getWindowsPowerShellExecutable(),
+      [
+        "-NoProfile",
+        "-Command",
+        `(Get-Command '${commandName.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)`
+      ],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 3000
+      }
+    );
+    if (result.error || result.status !== 0) {
+      return null;
+    }
+
+    const resolved = String(result.stdout ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    return resolved ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resolvePathAliasCommand(commandName: string): string | null {
+  const normalized = commandName.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (process.platform === "win32") {
+    try {
+      const result = spawnSync(getWindowsWhereExecutable(), [normalized], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 2000
+      });
+      if (!result.error && result.status === 0) {
+        const candidates = String(result.stdout ?? "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (candidates.length > 0) {
+          return (
+            candidates.find((candidate) => candidate.toLowerCase().endsWith(".exe")) ??
+            candidates[0] ??
+            null
+          );
+        }
+      }
+    } catch {
+      // Fallback to PowerShell below.
+    }
+
+    return resolveWindowsCommandPathViaPowerShell(normalized);
+  }
+
+  try {
+    const result = spawnSync("which", [normalized], {
+      encoding: "utf8",
+      timeout: 2000
+    });
+    if (result.error || result.status !== 0) {
+      return null;
+    }
+
+    const resolved = String(result.stdout ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    return resolved ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function formatResolvedCommandTitle(commandName: string, resolvedPath: string): string {
+  const fallback =
+    path.basename(resolvedPath, path.extname(resolvedPath)) ||
+    path.basename(commandName, path.extname(commandName)) ||
+    commandName.trim();
+  if (!fallback) {
+    return commandName.trim();
+  }
+  if (/^[a-z0-9._-]+$/i.test(fallback)) {
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+  return fallback;
+}
+
+type WindowsAppsMetadata = {
+  appId: string;
+  title: string;
+  iconPath?: string;
+};
+
+function resolveWindowsAppsMetadata(resolvedPath: string): WindowsAppsMetadata | null {
+  if (process.platform !== "win32" || !resolvedPath.toLowerCase().includes("\\windowsapps\\")) {
+    return null;
+  }
+
+  let packageRoot = path.dirname(resolvedPath);
+  while (packageRoot && packageRoot !== path.dirname(packageRoot)) {
+    const manifestPath = path.join(packageRoot, "AppxManifest.xml");
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const xml = fs.readFileSync(manifestPath, "utf8");
+        const identityName = xml.match(/<Identity[^>]*Name="([^"]+)"/i)?.[1]?.trim();
+        const displayName =
+          xml.match(/<Properties>\s*<DisplayName>([^<]+)<\/DisplayName>/i)?.[1]?.trim() ??
+          xml.match(/DisplayName="([^"]+)"/i)?.[1]?.trim();
+        const appEntryId = xml.match(/<Application[^>]*Id="([^"]+)"/i)?.[1]?.trim();
+        const logoRelative =
+          xml.match(/Square44x44Logo="([^"]+)"/i)?.[1]?.trim() ??
+          xml.match(/<Logo>([^<]+)<\/Logo>/i)?.[1]?.trim();
+        const packageFolderName = path.basename(packageRoot);
+        const publisherId = packageFolderName.split("__")[1]?.trim();
+        if (!identityName || !appEntryId || !publisherId) {
+          return null;
+        }
+
+        const logoPath = logoRelative
+          ? path.join(packageRoot, logoRelative.replace(/[\\/]/g, path.sep))
+          : undefined;
+
+        return {
+          appId: `${identityName}_${publisherId}!${appEntryId}`,
+          title: displayName || formatResolvedCommandTitle(identityName, resolvedPath),
+          iconPath: logoPath && fs.existsSync(logoPath) ? logoPath : undefined
+        };
+      } catch {
+        return null;
+      }
+    }
+    packageRoot = path.dirname(packageRoot);
+  }
+
+  return null;
+}
+
+function createPathAliasCommandItems(): LaunchItem[] {
+  const items: LaunchItem[] = [];
+  for (const commandName of WINDOWS_PATH_ALIAS_CANDIDATES) {
+    const resolved = resolvePathAliasCommand(commandName);
+    if (!resolved) {
+      continue;
+    }
+
+    const windowsApps = resolveWindowsAppsMetadata(resolved);
+    if (windowsApps) {
+      items.push({
+        id: `command:apps-folder:${commandName}`,
+        type: "application",
+        title: windowsApps.title,
+        subtitle: resolved,
+        target: `command:apps-folder:${encodeURIComponent(windowsApps.appId)}`,
+        iconPath: windowsApps.iconPath,
+        keywords: toKeywords(
+          `${commandName} ${windowsApps.title} ${resolved} command path alias windowsapps openai`
+        )
+      });
+      continue;
+    }
+
+    items.push({
+      id: `app:path-alias:${commandName}`,
+      type: "application",
+      title: formatResolvedCommandTitle(commandName, resolved),
+      subtitle: resolved,
+      target: resolved,
+      keywords: toKeywords(`${commandName} ${resolved} command path alias openai`)
+    });
+  }
+  return items;
+}
+
+function resolveWindowsStartApp(commandName: string): WindowsStartAppEntry | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const normalized = commandName.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const escaped = normalized.replace(/'/g, "''");
+  const script =
+    `$start = Get-StartApps | Where-Object { $_.Name -ieq '${escaped}' -or $_.AppID -match '(?i)${escaped}' } | Select-Object -First 1 Name,AppID;` +
+    `if (-not $start) { exit 0 }` +
+    `$family = ($start.AppID -split '!')[0];` +
+    `$pkg = Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1 InstallLocation;` +
+    `[pscustomobject]@{ name = $start.Name; appId = $start.AppID; installLocation = $pkg.InstallLocation } | ConvertTo-Json -Compress`;
+
+  try {
+    const result = spawnSync(getWindowsPowerShellExecutable(), ["-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000
+    });
+    if (result.error || result.status !== 0) {
+      return null;
+    }
+
+    const raw = String(result.stdout ?? "").trim();
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as {
+      name?: unknown;
+      appId?: unknown;
+      installLocation?: unknown;
+    };
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+    const appId = typeof parsed.appId === "string" ? parsed.appId.trim() : "";
+    const installLocation =
+      typeof parsed.installLocation === "string" ? parsed.installLocation.trim() : "";
+    if (!name || !appId) {
+      return null;
+    }
+
+    return {
+      name,
+      appId,
+      installLocation: installLocation || undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createWindowsStartAppItems(): LaunchItem[] {
+  const items: LaunchItem[] = [];
+  for (const commandName of WINDOWS_PATH_ALIAS_CANDIDATES) {
+    const entry = resolveWindowsStartApp(commandName);
+    if (!entry) {
+      continue;
+    }
+
+    const aliasResolved = resolvePathAliasCommand(commandName);
+    const aliasMetadata = aliasResolved
+      ? resolveWindowsAppsMetadata(aliasResolved)
+      : null;
+    if (
+      aliasMetadata?.appId &&
+      aliasMetadata.appId.toLowerCase() === entry.appId.toLowerCase()
+    ) {
+      continue;
+    }
+
+    const metadata =
+      entry.installLocation
+        ? resolveWindowsAppsMetadata(path.join(entry.installLocation, "AppxManifest.xml"))
+        : null;
+
+    items.push({
+      id: `app:startapp:${commandName}`,
+      type: "application",
+      title: metadata?.title || entry.name,
+      subtitle: entry.installLocation || entry.appId,
+      target: `command:apps-folder:${encodeURIComponent(entry.appId)}`,
+      iconPath: metadata?.iconPath,
+      keywords: toKeywords(
+        `${commandName} ${entry.name} ${entry.appId} ${entry.installLocation ?? ""} startapps windowsapps`
+      )
+    });
+  }
+  return items;
+}
+
 function createBuiltinItems(): LaunchItem[] {
   return [
     commandItem(
@@ -525,7 +824,8 @@ function createBuiltinItems(): LaunchItem[] {
       "exit",
       "\u9000\u51fa LiteLauncher",
       "command:exit"
-    )
+    ),
+    ...createPathAliasCommandItems()
   ];
 }
 
@@ -742,7 +1042,8 @@ function createApplicationItems(options: CatalogScanConfig): LaunchItem[] {
   if (process.platform === "win32") {
     const fromStartMenu = createAppItemsFromStartMenu();
     const fromExecutableRoots = createAppItemsFromExecutableRoots(options);
-    const merged = [...fromStartMenu, ...fromExecutableRoots];
+    const fromStartApps = createWindowsStartAppItems();
+    const merged = [...fromStartMenu, ...fromExecutableRoots, ...fromStartApps];
     const deduped: LaunchItem[] = [];
     const seen = new Set<string>();
     for (const item of merged) {
