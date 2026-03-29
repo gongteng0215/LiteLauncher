@@ -26,7 +26,7 @@ import { applyLauncherWindowSizePreset } from "./window";
 type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
   getPinnedItems: (limit: number) => Promise<LaunchItem[]>;
-  getPluginItems: (limit: number) => Promise<LaunchItem[]>;
+  getPluginItems: () => Promise<LaunchItem[]>;
   searchItems: (
     query: string,
     limit: number,
@@ -1044,8 +1044,7 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.getPluginItems, async () => {
-    const config = options.settingsProvider.getSearchDisplayConfig();
-    const items = await options.searchProvider.getPluginItems(config.pluginLimit);
+    const items = await options.searchProvider.getPluginItems();
     return attachIcons(items);
   });
 

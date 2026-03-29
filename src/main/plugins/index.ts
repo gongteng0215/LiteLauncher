@@ -9,6 +9,7 @@ import { webtoolsConfigConvertPlugin } from "./webtools-config-convert";
 import { webtoolsCronPlugin } from "./webtools-cron";
 import { webtoolsCryptoPlugin } from "./webtools-crypto";
 import { webtoolsDiffPlugin } from "./webtools-diff";
+import { webtoolsHttpMockPlugin } from "./webtools-http-mock";
 import { webtoolsImageBase64Plugin } from "./webtools-image-base64";
 import { webtoolsJsonPlugin } from "./webtools-json";
 import { webtoolsJwtPlugin } from "./webtools-jwt";
@@ -35,6 +36,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsStringsPlugin,
   webtoolsColorsPlugin,
   webtoolsDiffPlugin,
+  webtoolsHttpMockPlugin,
   webtoolsImageBase64Plugin,
   webtoolsConfigConvertPlugin,
   webtoolsSqlFormatPlugin,
@@ -57,6 +59,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
+  "webtools-http-mock",
   "webtools-image-base64",
   "webtools-config-convert",
   "webtools-sql-format",

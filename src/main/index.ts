@@ -66,12 +66,19 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-crypto",
   "webtools-jwt",
   "webtools-timestamp",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-image-base64",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
   "webtools-regex",
   "webtools-url-parse",
   "webtools-qrcode",
   "webtools-markdown",
-  "webtools-colors",
-  "webtools-image-base64"
+  "webtools-ua",
+  "webtools-api-client"
 ] as const;
 const LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -658,6 +665,25 @@ function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.every((value, index) => value === right[index]);
 }
 
+function areStringArraysSetEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  if (rightSet.size !== right.length) {
+    return false;
+  }
+
+  for (const value of left) {
+    if (!rightSet.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function normalizePinnedItemIds(
   input: unknown,
   catalogIds?: Set<string>
@@ -749,19 +775,19 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
     const requested = normalizeVisiblePluginIdsInput(parsed);
     const applied = setVisiblePluginIds(requested);
     const shouldFallback = requested.length > 0 && applied.length === 0;
-    const shouldUpgradeCurrentDefault = areStringArraysEqual(
+    const shouldUpgradeCurrentDefault = areStringArraysSetEqual(
       applied,
       [...CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
-    const shouldUpgradeLegacyDefault = areStringArraysEqual(
+    const shouldUpgradeLegacyDefault = areStringArraysSetEqual(
       applied,
       [...LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
-    const shouldUpgradePreviousDefault = areStringArraysEqual(
+    const shouldUpgradePreviousDefault = areStringArraysSetEqual(
       applied,
       [...PREVIOUS_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
-    const shouldUpgradeOlderDefault = areStringArraysEqual(
+    const shouldUpgradeOlderDefault = areStringArraysSetEqual(
       applied,
       [...OLDER_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
@@ -1056,9 +1082,9 @@ async function bootstrap(): Promise<void> {
       getPinnedItems: async (limit) => {
         return getPinnedItemsFromCatalog(limit);
       },
-      getPluginItems: async (limit) => {
+      getPluginItems: async () => {
         return withPinnedState(
-          catalog.filter((item) => item.type === "command" && isPluginCatalogItem(item)).slice(0, limit)
+          catalog.filter((item) => item.type === "command" && isPluginCatalogItem(item))
         );
       },
       searchItems: async (query, limit, options) => {

@@ -1,4 +1,4 @@
-﻿type PanelMode =
+type PanelMode =
   | "search"
   | "clip"
   | "settings"
@@ -128,6 +128,7 @@ type WebtoolsUnitTab = "storage" | "screen";
 type WebtoolsUnitStorageKey = "B" | "KB" | "MB" | "GB" | "TB";
 type WebtoolsApiRequestTab = "params" | "headers" | "body";
 type WebtoolsApiResponseTab = "body" | "headers";
+type WebtoolsHttpMockMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 interface PasswordPanelPayload {
   panel: "password";
@@ -464,6 +465,7 @@ let selectedIndex = 0;
 let currentQuery = "";
 let pagedSearchQueryKey = "";
 let searchResultPage = 0;
+let pluginResultPage = 0;
 let latestSearchToken = 0;
 let mode: PanelMode = "search";
 let debugMode = false;
@@ -690,6 +692,18 @@ let webtoolsApiResponseError = "";
 let webtoolsApiRequestToken = 0;
 let webtoolsApiHasResponse = false;
 let webtoolsApiIsLoading = false;
+let webtoolsHttpMockRunning = false;
+let webtoolsHttpMockUrl = "";
+let webtoolsHttpMockPort = 17777;
+let webtoolsHttpMockPath = "/mock";
+let webtoolsHttpMockMethod: WebtoolsHttpMockMethod = "GET";
+let webtoolsHttpMockStatusCode = 200;
+let webtoolsHttpMockContentType = "application/json; charset=utf-8";
+let webtoolsHttpMockBody = '{\n  "ok": true,\n  "source": "LiteLauncher HTTP Mock",\n  "timestamp": "{{now}}"\n}';
+let webtoolsHttpMockRequestCount = 0;
+let webtoolsHttpMockInfo = "";
+let webtoolsHttpMockError = "";
+let webtoolsHttpMockRequestToken = 0;
 
 const DEBUG_LOG_LIMIT = 22;
 const SETTINGS_LIMIT_MIN = 5;
@@ -727,6 +741,7 @@ const WEBTOOLS_QRCODE_PLUGIN_ID = "webtools-qrcode";
 const WEBTOOLS_MARKDOWN_PLUGIN_ID = "webtools-markdown";
 const WEBTOOLS_UA_PLUGIN_ID = "webtools-ua";
 const WEBTOOLS_API_PLUGIN_ID = "webtools-api-client";
+const WEBTOOLS_HTTP_MOCK_PLUGIN_ID = "webtools-http-mock";
 const WEBTOOLS_SQL_DEFAULT_INPUT =
   "SELECT a,b,c FROM table_test JOIN other_table ON table_test.id = other_table.id WHERE a > 10 AND b LIKE '%test%' ORDER BY c DESC LIMIT 10";
 const WEBTOOLS_SQL_DIALECT_OPTIONS = [
@@ -817,6 +832,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
+  "webtools-http-mock",
   "webtools-image-base64",
   "webtools-config-convert",
   "webtools-sql-format",
@@ -829,6 +845,11 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-api-client"
 ];
 const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#$%^&*";
+const panelImpls = window.__LL_PANEL_IMPLS__;
+if (!panelImpls) {
+  throw new Error("renderer plugin panel impls not initialized");
+}
+const panelImplsSafe = panelImpls;
 const WEBTOOLS_JWT_DEFAULT_SECRET = "your-256-bit-secret";
 const WEBTOOLS_JWT_SAMPLE_TOKEN =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
@@ -2941,6 +2962,28 @@ function changeSearchResultPage(delta: number): void {
   void refreshEntries(currentQuery);
 }
 
+function changePluginResultPage(delta: number): void {
+  if (mode !== "search") {
+    return;
+  }
+
+  const section = searchSections.find((item) => item.id === "plugin");
+  if (!section || section.pageCount <= 1) {
+    return;
+  }
+
+  const nextPage = Math.min(
+    Math.max(0, pluginResultPage + delta),
+    section.pageCount - 1
+  );
+  if (nextPage === pluginResultPage) {
+    return;
+  }
+
+  pluginResultPage = nextPage;
+  void refreshEntries(currentQuery);
+}
+
 function createSearchTile(entry: ResultEntry, index: number): HTMLLIElement {
   const tile = document.createElement("li");
   tile.className = "result-item result-tile";
@@ -2984,7 +3027,7 @@ function renderSearchSections(): void {
 
     const title = document.createElement("div");
     title.className = "section-title";
-    if (section.id === "search" && section.pageCount > 1) {
+    if ((section.id === "search" || section.id === "plugin") && section.pageCount > 1) {
       const start =
         section.totalCount === 0 ? 0 : section.page * section.displayLimit + 1;
       const end =
@@ -3001,7 +3044,7 @@ function renderSearchSections(): void {
     }
     heading.appendChild(title);
 
-    if (section.id === "search" && section.pageCount > 1) {
+    if ((section.id === "search" || section.id === "plugin") && section.pageCount > 1) {
       const pager = document.createElement("div");
       pager.className = "section-pager";
 
@@ -3013,7 +3056,11 @@ function renderSearchSections(): void {
       prevButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        changeSearchResultPage(-1);
+        if (section.id === "search") {
+          changeSearchResultPage(-1);
+          return;
+        }
+        changePluginResultPage(-1);
       });
 
       const pageInfo = document.createElement("span");
@@ -3028,7 +3075,11 @@ function renderSearchSections(): void {
       nextButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        changeSearchResultPage(1);
+        if (section.id === "search") {
+          changeSearchResultPage(1);
+          return;
+        }
+        changePluginResultPage(1);
       });
 
       pager.append(prevButton, pageInfo, nextButton);
@@ -4142,13 +4193,7 @@ function refreshWebtoolsPasswordResultInForm(form: HTMLFormElement): void {
 }
 
 function applyWebtoolsPasswordPanelPayload(panel: ActivePluginPanelState): void {
-  const optionsRaw = panel.data?.options;
-  const parsed = extractWebtoolsPasswordOptionsFromUnknown(optionsRaw);
-  webtoolsPasswordOptions = normalizeWebtoolsPasswordOptions(
-    parsed,
-    webtoolsPasswordOptions
-  );
-  webtoolsPasswordRows = [];
+  panelImplsSafe.applyWebtoolsPasswordPanelPayload(panel);
 }
 
 async function generateFromWebtoolsPasswordPanel(
@@ -4236,255 +4281,11 @@ async function generateFromWebtoolsPasswordPanel(
 }
 
 function renderWebtoolsPasswordPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-password-form webtools-password-lab";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void generateFromWebtoolsPasswordPanel(form, { render: false });
-  });
-
-  const hero = document.createElement("h3");
-  hero.className = "webtools-password-hero";
-  hero.textContent = "随机密码";
-
-  const createOptionRow = (labelText: string): {
-    row: HTMLDivElement;
-    main: HTMLDivElement;
-  } => {
-    const row = document.createElement("div");
-    row.className = "webtools-password-option";
-
-    const label = document.createElement("div");
-    label.className = "webtools-password-option-label";
-    label.textContent = labelText;
-
-    const main = document.createElement("div");
-    main.className = "webtools-password-option-main";
-
-    row.append(label, main);
-    return { row, main };
-  };
-
-  const charsRowNodes = createOptionRow("字符选项");
-  const charsWrap = document.createElement("div");
-  charsWrap.className = "webtools-password-flags";
-
-  const lowerWrap = document.createElement("label");
-  lowerWrap.className = "webtools-password-flag";
-  const lowerInput = document.createElement("input");
-  lowerInput.type = "checkbox";
-  lowerInput.name = "webtoolsLowercase";
-  lowerInput.className = "password-checkbox";
-  lowerInput.checked = webtoolsPasswordOptions.includeLowercase;
-  const lowerText = document.createElement("span");
-  lowerText.textContent = "小写字母 (a-z)";
-  lowerWrap.append(lowerInput, lowerText);
-
-  const upperWrap = document.createElement("label");
-  upperWrap.className = "webtools-password-flag";
-  const upperInput = document.createElement("input");
-  upperInput.type = "checkbox";
-  upperInput.name = "webtoolsUppercase";
-  upperInput.className = "password-checkbox";
-  upperInput.checked = webtoolsPasswordOptions.includeUppercase;
-  const upperText = document.createElement("span");
-  upperText.textContent = "大写字母 (A-Z)";
-  upperWrap.append(upperInput, upperText);
-
-  const digitsWrap = document.createElement("label");
-  digitsWrap.className = "webtools-password-flag";
-  const digitsInput = document.createElement("input");
-  digitsInput.type = "checkbox";
-  digitsInput.name = "webtoolsDigits";
-  digitsInput.className = "password-checkbox";
-  digitsInput.checked = webtoolsPasswordOptions.includeDigits;
-  const digitsText = document.createElement("span");
-  digitsText.textContent = "数字 (0-9)";
-  digitsWrap.append(digitsInput, digitsText);
-
-  charsWrap.append(lowerWrap, upperWrap, digitsWrap);
-  charsRowNodes.main.append(charsWrap);
-
-  const symbolsRowNodes = createOptionRow("特殊字符");
-  const symbolsWrap = document.createElement("div");
-  symbolsWrap.className = "webtools-password-symbols";
-
-  const includeSymbolsWrap = document.createElement("label");
-  includeSymbolsWrap.className = "webtools-password-flag";
-  const includeSymbolsInput = document.createElement("input");
-  includeSymbolsInput.type = "checkbox";
-  includeSymbolsInput.name = "webtoolsSymbols";
-  includeSymbolsInput.className = "password-checkbox";
-  includeSymbolsInput.checked = webtoolsPasswordOptions.includeSymbols;
-  const includeSymbolsText = document.createElement("span");
-  includeSymbolsText.textContent = "特殊字符";
-  includeSymbolsWrap.append(includeSymbolsInput, includeSymbolsText);
-
-  const symbolsInput = document.createElement("input");
-  symbolsInput.className = "settings-value webtools-password-symbol-input";
-  symbolsInput.type = "text";
-  symbolsInput.name = "webtoolsSymbolChars";
-  symbolsInput.value = webtoolsPasswordOptions.symbolChars;
-  symbolsInput.placeholder = "!@#$%^&*";
-
-  const excludeSimilarWrap = document.createElement("label");
-  excludeSimilarWrap.className = "webtools-password-flag";
-  const excludeSimilarInput = document.createElement("input");
-  excludeSimilarInput.type = "checkbox";
-  excludeSimilarInput.name = "webtoolsExcludeSimilar";
-  excludeSimilarInput.className = "password-checkbox";
-  excludeSimilarInput.checked = webtoolsPasswordOptions.excludeSimilar;
-  const excludeSimilarText = document.createElement("span");
-  excludeSimilarText.textContent = "排除相似字符";
-  excludeSimilarWrap.append(excludeSimilarInput, excludeSimilarText);
-
-  symbolsWrap.append(includeSymbolsWrap, symbolsInput, excludeSimilarWrap);
-  symbolsRowNodes.main.append(symbolsWrap);
-
-  const lengthRowNodes = createOptionRow("密码长度");
-  const lengthInput = document.createElement("select");
-  lengthInput.className = "settings-number webtools-password-length-select";
-  lengthInput.name = "webtoolsLength";
-  [
-    { value: 8, label: "8 位密码 (低强度)" },
-    { value: 12, label: "12 位密码 (中强度)" },
-    { value: 16, label: "16 位密码 (高强度)" },
-    { value: 20, label: "20 位密码 (高强度)" },
-    { value: 32, label: "32 位密码 (极高强度)" },
-    { value: 64, label: "64 位密码 (极高强度)" }
-  ].forEach((entry) => {
-    const option = document.createElement("option");
-    option.value = String(entry.value);
-    option.textContent = entry.label;
-    option.selected = entry.value === webtoolsPasswordOptions.length;
-    lengthInput.appendChild(option);
-  });
-  if (lengthInput.selectedIndex === -1) {
-    const fallback = document.createElement("option");
-    fallback.value = String(webtoolsPasswordOptions.length);
-    fallback.textContent = `${webtoolsPasswordOptions.length} 位密码 (自定义)`;
-    fallback.selected = true;
-    lengthInput.appendChild(fallback);
-  }
-  const lengthHint = document.createElement("span");
-  lengthHint.className = "webtools-password-safe-hint";
-  lengthHint.textContent = "密码长度很安全";
-  lengthRowNodes.main.append(lengthInput, lengthHint);
-
-  const countRowNodes = createOptionRow("生成数量");
-  const countInput = document.createElement("select");
-  countInput.className = "settings-number webtools-password-count-select";
-  countInput.name = "webtoolsCount";
-  [1, 5, 10, 20, 50].forEach((count) => {
-    const option = document.createElement("option");
-    option.value = String(count);
-    option.textContent = String(count);
-    option.selected = count === webtoolsPasswordOptions.count;
-    countInput.appendChild(option);
-  });
-  if (countInput.selectedIndex === -1) {
-    const fallback = document.createElement("option");
-    fallback.value = String(webtoolsPasswordOptions.count);
-    fallback.textContent = String(webtoolsPasswordOptions.count);
-    fallback.selected = true;
-    countInput.appendChild(fallback);
-  }
-  countRowNodes.main.append(countInput);
-
-  const outputHost = document.createElement("div");
-  outputHost.className = "webtools-password-result-host";
-  outputHost.appendChild(createWebtoolsPasswordResultTable(webtoolsPasswordRows));
-
-  const generateWrap = document.createElement("div");
-  generateWrap.className = "webtools-password-generate-wrap";
-
-  const generateButton = document.createElement("button");
-  generateButton.type = "submit";
-  generateButton.className = "settings-btn settings-btn-primary webtools-password-generate-btn";
-  generateButton.textContent = "生成密码";
-  generateWrap.appendChild(generateButton);
-
-  const actions = document.createElement("div");
-  actions.className = "settings-actions webtools-password-tools-actions";
-
-  const clearButton = document.createElement("button");
-  clearButton.type = "button";
-  clearButton.className = "settings-btn settings-btn-secondary";
-  clearButton.textContent = "清空结果";
-  clearButton.addEventListener("click", () => {
-    webtoolsPasswordRows = [];
-    refreshWebtoolsPasswordResultInForm(form);
-    setStatus("已清空密码结果");
-  });
-
-  const backButton = document.createElement("button");
-  backButton.type = "button";
-  backButton.className = "settings-btn settings-btn-secondary";
-  backButton.textContent = "返回搜索";
-  backButton.addEventListener("click", () => {
-    backToSearch();
-  });
-
-  actions.append(clearButton, backButton);
-
-  form.append(
-    hero,
-    charsRowNodes.row,
-    symbolsRowNodes.row,
-    lengthRowNodes.row,
-    countRowNodes.row,
-    generateWrap,
-    outputHost,
-    actions
-  );
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
+  panelImplsSafe.renderWebtoolsPasswordPanel();
 }
 
 function applyWebtoolsJsonPanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-
-  const input =
-    data && typeof data.input === "string"
-      ? data.input
-      : webtoolsJsonState.input;
-  const sourceFormat =
-    data &&
-    (data.sourceFormat === "json" ||
-      data.sourceFormat === "csv" ||
-      data.sourceFormat === "text" ||
-      data.sourceFormat === "escaped")
-      ? data.sourceFormat
-      : webtoolsJsonState.sourceFormat;
-  const targetFormat =
-    data &&
-    (data.targetFormat === "json" ||
-      data.targetFormat === "csv" ||
-      data.targetFormat === "text" ||
-      data.targetFormat === "escaped")
-      ? data.targetFormat
-      : webtoolsJsonState.targetFormat;
-  const compressed =
-    data && typeof data.compressed === "boolean"
-      ? data.compressed
-      : webtoolsJsonState.compressed;
-
-  webtoolsJsonState = {
-    input,
-    output: "",
-    info: "",
-    valid: null,
-    sourceFormat,
-    targetFormat,
-    compressed
-  };
+  panelImplsSafe.applyWebtoolsJsonPanelPayload(panel);
 }
 
 function buildWebtoolsJsonTarget(): string {
@@ -4636,247 +4437,11 @@ async function executeWebtoolsJsonConvert(
 }
 
 function renderWebtoolsJsonPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel";
-
-  const title = document.createElement("h3");
-  title.className = "settings-title";
-  title.textContent = activePluginPanel?.title || "JSON & CSV 实验室";
-
-  const description = document.createElement("p");
-  description.className = "settings-description";
-  description.textContent =
-    activePluginPanel?.subtitle || "支持 JSON/CSV/纯文本/Escaped 双向转换。";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-json-form webtools-json-lab";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void executeWebtoolsJsonConvert(form, { render: false });
-  });
-
-  const topActions = document.createElement("div");
-  topActions.className = "webtools-json-toolbar";
-  const clearButton = document.createElement("button");
-  clearButton.type = "button";
-  clearButton.className = "settings-btn settings-btn-secondary";
-  clearButton.textContent = "清空";
-  clearButton.addEventListener("click", () => {
-    webtoolsJsonState.input = "";
-    webtoolsJsonState.output = "";
-    webtoolsJsonState.info = "";
-    webtoolsJsonState.valid = null;
-    inputArea.value = "";
-    outputArea.value = "";
-    refreshWebtoolsJsonResultInForm(form);
-    setStatus("已清空输入与输出");
-  });
-  topActions.append(clearButton);
-
-  const converterBar = document.createElement("div");
-  converterBar.className = "webtools-json-converter";
-
-  const sourceGroup = document.createElement("label");
-  sourceGroup.className = "webtools-json-converter-group";
-  const sourceLabel = document.createElement("span");
-  sourceLabel.className = "webtools-json-converter-label";
-  sourceLabel.textContent = "源格式";
-  const sourceSelect = document.createElement("select");
-  sourceSelect.className = "settings-number webtools-json-select";
-  sourceSelect.name = "webtoolsJsonSource";
-  [
-    ["text", "纯文本"],
-    ["json", "JSON"],
-    ["csv", "CSV"],
-    ["escaped", "Escaped"]
-  ].forEach(([value, label]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = webtoolsJsonState.sourceFormat === value;
-    sourceSelect.appendChild(option);
-  });
-  sourceGroup.append(sourceLabel, sourceSelect);
-
-  const swapButton = document.createElement("button");
-  swapButton.type = "button";
-  swapButton.className = "settings-btn settings-btn-secondary webtools-json-swap";
-  swapButton.textContent = "⇅";
-
-  const targetGroup = document.createElement("label");
-  targetGroup.className = "webtools-json-converter-group";
-  const targetLabel = document.createElement("span");
-  targetLabel.className = "webtools-json-converter-label";
-  targetLabel.textContent = "目标格式";
-  const targetSelect = document.createElement("select");
-  targetSelect.className = "settings-number webtools-json-select";
-  targetSelect.name = "webtoolsJsonTarget";
-  [
-    ["json", "JSON"],
-    ["csv", "CSV"],
-    ["text", "纯文本"],
-    ["escaped", "Escaped"]
-  ].forEach(([value, label]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = webtoolsJsonState.targetFormat === value;
-    targetSelect.appendChild(option);
-  });
-  targetGroup.append(targetLabel, targetSelect);
-
-  const formatHint = document.createElement("div");
-  formatHint.className = "webtools-json-route";
-
-  const inputArea = document.createElement("textarea");
-  inputArea.className = "settings-value webtools-textarea webtools-json-textarea";
-  inputArea.name = "webtoolsJsonInput";
-  inputArea.placeholder = "请输入内容";
-  inputArea.value = webtoolsJsonState.input;
-
-  const compressedWrap = document.createElement("label");
-  compressedWrap.className = "webtools-password-flag webtools-json-compressed";
-  const compressedInput = document.createElement("input");
-  compressedInput.type = "checkbox";
-  compressedInput.className = "password-checkbox";
-  compressedInput.name = "webtoolsJsonCompressed";
-  compressedInput.checked = webtoolsJsonState.compressed;
-  const compressedText = document.createElement("span");
-  compressedText.textContent = "压缩输出 (Minify)";
-  compressedWrap.append(compressedInput, compressedText);
-
-  const outputMeta = document.createElement("div");
-  outputMeta.className = "webtools-json-pane-controls";
-  outputMeta.append(compressedWrap);
-
-  const outputArea = document.createElement("textarea");
-  outputArea.className = "settings-value webtools-textarea webtools-json-textarea";
-  outputArea.name = "webtoolsJsonOutput";
-  outputArea.readOnly = true;
-  outputArea.placeholder = "转换后结果";
-  outputArea.value = webtoolsJsonState.output;
-
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className =
-    "settings-btn settings-btn-secondary webtools-json-copy-btn";
-  copyButton.textContent = "复制";
-  copyButton.addEventListener("click", () => {
-    void (async () => {
-      const copied = await copyTextToClipboard(outputArea.value);
-      setStatus(copied ? "已复制输出内容" : "复制失败");
-    })();
-  });
-  outputMeta.append(copyButton);
-
-  const updateJsonFormHead = (): void => {
-    const source = sourceSelect.value.toUpperCase();
-    const target = targetSelect.value.toUpperCase();
-    formatHint.textContent = `${source} -> ${target}`;
-    compressedWrap.style.display = targetSelect.value === "json" ? "" : "none";
-  };
-
-  swapButton.addEventListener("click", () => {
-    const source = sourceSelect.value;
-    sourceSelect.value = (targetSelect.value || "json") as string;
-    targetSelect.value = source as string;
-
-    if (webtoolsJsonState.output.trim()) {
-      inputArea.value = webtoolsJsonState.output;
-      webtoolsJsonState.output = "";
-      outputArea.value = "";
-    }
-    updateJsonFormHead();
-    scheduleWebtoolsJsonAutoConvert(form, true);
-  });
-
-  sourceSelect.addEventListener("change", () => {
-    updateJsonFormHead();
-    scheduleWebtoolsJsonAutoConvert(form, true);
-  });
-  targetSelect.addEventListener("change", () => {
-    updateJsonFormHead();
-    scheduleWebtoolsJsonAutoConvert(form, true);
-  });
-  compressedInput.addEventListener("change", () => {
-    scheduleWebtoolsJsonAutoConvert(form, true);
-  });
-  inputArea.addEventListener("input", () => {
-    scheduleWebtoolsJsonAutoConvert(form);
-  });
-  updateJsonFormHead();
-
-  converterBar.append(sourceGroup, swapButton, targetGroup);
-
-  const editors = document.createElement("div");
-  editors.className = "webtools-json-editors";
-
-  const inputPane = document.createElement("section");
-  inputPane.className = "webtools-json-pane";
-  const inputHead = document.createElement("div");
-  inputHead.className = "webtools-json-pane-head";
-  const inputTitle = document.createElement("span");
-  inputTitle.className = "webtools-json-pane-title";
-  inputTitle.textContent = "输入";
-  const inputMeta = document.createElement("span");
-  inputMeta.className = "webtools-json-pane-meta webtools-json-input-meta";
-  inputMeta.textContent = webtoolsJsonState.sourceFormat.toUpperCase();
-  inputHead.append(inputTitle, inputMeta);
-  const inputError = document.createElement("div");
-  inputError.className = "webtools-json-error";
-  inputError.hidden = true;
-  inputPane.append(inputHead, inputArea, inputError);
-
-  const outputPane = document.createElement("section");
-  outputPane.className = "webtools-json-pane";
-  const outputHead = document.createElement("div");
-  outputHead.className = "webtools-json-pane-head";
-  const outputTitle = document.createElement("span");
-  outputTitle.className = "webtools-json-pane-title";
-  outputTitle.textContent = "输出";
-  const outputTitleWrap = document.createElement("div");
-  outputTitleWrap.className = "webtools-json-pane-title-wrap";
-  const outputMetaText = document.createElement("span");
-  outputMetaText.className = "webtools-json-pane-meta webtools-json-output-meta";
-  outputMetaText.textContent = webtoolsJsonState.targetFormat.toUpperCase();
-  outputTitleWrap.append(outputTitle, outputMetaText);
-  outputHead.append(outputTitleWrap, outputMeta);
-  outputPane.append(outputHead, outputArea);
-
-  editors.append(inputPane, outputPane);
-
-  const info = document.createElement("div");
-  info.className = "webtools-json-info";
-  const infoState = buildWebtoolsJsonInfoState();
-  info.textContent = infoState.text;
-  info.dataset.state = infoState.state;
-
-  form.append(topActions, converterBar, formatHint, editors, info);
-  panel.append(title, description, form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  scheduleWebtoolsJsonAutoConvert(form, true);
+  panelImplsSafe.renderWebtoolsJsonPanel();
 }
 
 function applyWebtoolsUrlPanelPayload(panel: ActivePluginPanelState): void {
-  const input =
-    panel.data && typeof panel.data.input === "string"
-      ? panel.data.input
-      : webtoolsUrlState.input || DEFAULT_WEBTOOLS_URL_INPUT;
-
-  webtoolsUrlState = {
-    input: input.trim() || DEFAULT_WEBTOOLS_URL_INPUT,
-    info: "",
-    valid: null,
-    parts: createEmptyWebtoolsUrlParts(),
-    queryRows: []
-  };
-
-  parseWebtoolsUrlInput(webtoolsUrlState.input);
+  panelImplsSafe.applyWebtoolsUrlPanelPayload(panel);
 }
 
 function tryParseWebtoolsUrl(input: string): URL | null {
@@ -5110,126 +4675,7 @@ function createWebtoolsUrlPartField(
 }
 
 function renderWebtoolsUrlPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-url-form webtools-tool-panel";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const inputNode = form.elements.namedItem("webtoolsUrlInput");
-    const input = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
-    parseWebtoolsUrlInput(input);
-    refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true });
-    setStatus(webtoolsUrlState.valid === false ? webtoolsUrlState.info : "URL 解析完成");
-  });
-
-  const header = document.createElement("div");
-  header.className = "webtools-tool-header";
-  const titleGroup = document.createElement("div");
-  titleGroup.className = "webtools-tool-title-group";
-  const title = document.createElement("h3");
-  title.className = "webtools-tool-title";
-  title.textContent = activePluginPanel?.title || "URL 解析";
-  const description = document.createElement("p");
-  description.className = "webtools-tool-subtitle";
-  description.textContent =
-    activePluginPanel?.subtitle || "输入 URL 后自动拆解，并支持查询参数可视化编辑。";
-  titleGroup.append(title, description);
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "webtools-tool-toolbar";
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className = "settings-btn settings-btn-secondary";
-  copyButton.textContent = "复制 URL";
-  copyButton.addEventListener("click", async () => {
-    const value = webtoolsUrlState.input.trim();
-    if (!value) {
-      setStatus("当前没有可复制的 URL");
-      return;
-    }
-    await navigator.clipboard.writeText(value);
-    setStatus("已复制 URL");
-  });
-  const clearButton = document.createElement("button");
-  clearButton.type = "button";
-  clearButton.className = "settings-btn settings-btn-secondary";
-  clearButton.textContent = "清空";
-  clearButton.addEventListener("click", () => {
-    parseWebtoolsUrlInput("");
-    refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true, syncInput: true });
-    setStatus("已清空 URL 输入");
-  });
-  toolbar.append(copyButton, clearButton);
-  header.append(titleGroup, toolbar);
-
-  const inputPane = document.createElement("label");
-  inputPane.className = "webtools-tool-pane";
-  const inputHead = document.createElement("div");
-  inputHead.className = "webtools-tool-pane-head";
-  const inputLabel = document.createElement("div");
-  inputLabel.className = "webtools-tool-pane-title";
-  inputLabel.textContent = "URL";
-  const inputMeta = document.createElement("div");
-  inputMeta.className = "webtools-tool-pane-meta";
-  inputMeta.textContent = "输入后自动解析";
-  inputHead.append(inputLabel, inputMeta);
-  const inputArea = document.createElement("textarea");
-  inputArea.className = "settings-value webtools-textarea webtools-url-input";
-  inputArea.name = "webtoolsUrlInput";
-  inputArea.value = webtoolsUrlState.input;
-  inputArea.placeholder = "输入 URL";
-  inputArea.spellcheck = false;
-  inputArea.addEventListener("input", () => {
-    parseWebtoolsUrlInput(inputArea.value);
-    refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true });
-    setStatus(webtoolsUrlState.info);
-  });
-  const inputInfo = document.createElement("div");
-  inputInfo.className = "webtools-tool-info webtools-url-info";
-  inputPane.append(inputHead, inputArea, inputInfo);
-
-  const partsGrid = document.createElement("div");
-  partsGrid.className = "webtools-url-parts-grid";
-  partsGrid.append(
-    createWebtoolsUrlPartField("Protocol", "protocol"),
-    createWebtoolsUrlPartField("Host", "host"),
-    createWebtoolsUrlPartField("Port", "port"),
-    createWebtoolsUrlPartField("路径", "pathname", true),
-    createWebtoolsUrlPartField("查询串", "search", true),
-    createWebtoolsUrlPartField("Hash", "hash", true)
-  );
-
-  const querySection = document.createElement("section");
-  querySection.className = "webtools-url-query-section";
-  const queryHead = document.createElement("div");
-  queryHead.className = "webtools-url-query-head";
-  const queryTitle = document.createElement("h4");
-  queryTitle.className = "webtools-url-query-title";
-  queryTitle.textContent = "查询参数";
-  const addButton = document.createElement("button");
-  addButton.type = "button";
-  addButton.className = "settings-btn settings-btn-secondary webtools-url-add-btn";
-  addButton.textContent = "+ 添加";
-  addButton.addEventListener("click", () => {
-    webtoolsUrlState.queryRows.push({ key: "", value: "" });
-    refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true });
-  });
-  queryHead.append(queryTitle, addButton);
-  const queryHost = document.createElement("div");
-  queryHost.className = "webtools-url-query-host";
-  querySection.append(queryHead, queryHost);
-
-  form.append(header, inputPane, partsGrid, querySection);
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true, syncInput: true });
+  panelImplsSafe.renderWebtoolsUrlPanel();
 }
 
 function applyWebtoolsDiffPanelPayload(panel: ActivePluginPanelState): void {
@@ -5643,29 +5089,7 @@ function ensureWebtoolsTimestampDefaults(): void {
 }
 
 function applyWebtoolsTimestampPanelPayload(panel: ActivePluginPanelState): void {
-  const payloadUnit =
-    panel.data && typeof panel.data.unit === "string"
-      ? normalizeWebtoolsTimestampUnit(panel.data.unit)
-      : webtoolsTimestampUnit;
-  webtoolsTimestampUnit = payloadUnit;
-
-  const input =
-    panel.data && typeof panel.data.input === "string" ? panel.data.input.trim() : "";
-  if (input) {
-    if (/^[+-]?\d+$/.test(input)) {
-      webtoolsTimestampUnixInput = input;
-      if (!(panel.data && typeof panel.data.unit === "string")) {
-        webtoolsTimestampUnit = input.length > 10 ? "ms" : "s";
-      }
-    } else {
-      webtoolsTimestampDateInput = input;
-    }
-  }
-
-  ensureWebtoolsTimestampDefaults();
-  webtoolsTimestampDateOutput = "";
-  webtoolsTimestampTimestampOutput = "";
-  webtoolsTimestampInfo = "";
+  panelImplsSafe.applyWebtoolsTimestampPanelPayload(panel);
 }
 
 function buildWebtoolsTimestampTarget(
@@ -5809,245 +5233,7 @@ async function executeWebtoolsTimestampAction(
 }
 
 function renderWebtoolsTimestampPanel(): void {
-  clearWebtoolsTimestampClockTimer();
-  ensureWebtoolsTimestampDefaults();
-
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-timestamp-panel";
-
-  const title = document.createElement("h3");
-  title.className = "settings-title";
-  title.textContent = activePluginPanel?.title || "时间戳工具";
-
-  const description = document.createElement("p");
-  description.className = "settings-description";
-  description.textContent =
-    activePluginPanel?.subtitle || "支持时间戳与日期时间双向转换。";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-timestamp-form webtools-timestamp-lab";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
-      render: false,
-      form
-    });
-  });
-
-  const currentLine = document.createElement("div");
-  currentLine.className = "webtools-timestamp-current";
-  const currentLocalLabel = document.createElement("span");
-  currentLocalLabel.className = "webtools-timestamp-current-label";
-  currentLocalLabel.textContent = "当前本地时间:";
-  const currentLocalValue = document.createElement("span");
-  currentLocalValue.className = "webtools-timestamp-current-value";
-  const currentUnixLabel = document.createElement("span");
-  currentUnixLabel.className = "webtools-timestamp-current-label";
-  currentUnixLabel.textContent = "Unix 时间戳:";
-  const currentUnixValue = document.createElement("span");
-  currentUnixValue.className = "webtools-timestamp-current-value";
-  currentLine.append(
-    currentLocalLabel,
-    currentLocalValue,
-    currentUnixLabel,
-    currentUnixValue
-  );
-
-  const updateCurrentClock = (): void => {
-    if (
-      !form.isConnected ||
-      mode !== "plugin" ||
-      activePluginPanel?.pluginId !== WEBTOOLS_TIMESTAMP_PLUGIN_ID
-    ) {
-      clearWebtoolsTimestampClockTimer();
-      return;
-    }
-    const now = new Date();
-    currentLocalValue.textContent = formatWebtoolsTimestampDate(now);
-    currentUnixValue.textContent =
-      webtoolsTimestampUnit === "s"
-        ? String(Math.floor(now.getTime() / 1000))
-        : String(now.getTime());
-  };
-  updateCurrentClock();
-  webtoolsTimestampClockTimer = window.setInterval(updateCurrentClock, 1000);
-
-  const toDateSection = document.createElement("section");
-  toDateSection.className = "webtools-timestamp-section";
-  const toDateTitle = document.createElement("h4");
-  toDateTitle.className = "webtools-timestamp-section-title";
-  toDateTitle.textContent = "Unix 时间戳 → 日期字符串";
-
-  const toDateControls = document.createElement("div");
-  toDateControls.className = "webtools-timestamp-controls";
-  const unixInput = document.createElement("input");
-  unixInput.type = "text";
-  unixInput.className = "settings-number webtools-timestamp-input";
-  unixInput.name = "webtoolsTimestampUnixInput";
-  unixInput.placeholder = "例如：1773132180";
-  unixInput.value = webtoolsTimestampUnixInput;
-
-  const unitSelect = document.createElement("select");
-  unitSelect.className = "settings-number webtools-timestamp-select";
-  unitSelect.name = "webtoolsTimestampUnit";
-  (
-    [
-      ["s", "秒 (s)"],
-      ["ms", "毫秒 (ms)"]
-    ] as const
-  ).forEach(([value, label]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = webtoolsTimestampUnit === value;
-    unitSelect.appendChild(option);
-  });
-
-  const toDateButton = document.createElement("button");
-  toDateButton.type = "button";
-  toDateButton.className = "settings-btn settings-btn-primary";
-  toDateButton.textContent = "转换为日期";
-  toDateButton.addEventListener("click", () => {
-    webtoolsTimestampUnixInput = unixInput.value;
-    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
-      render: false,
-      form
-    });
-  });
-
-  const nowButton = document.createElement("button");
-  nowButton.type = "button";
-  nowButton.className = "settings-btn settings-btn-secondary";
-  nowButton.textContent = "获取当前";
-  nowButton.addEventListener("click", () => {
-    webtoolsTimestampUnixInput = getWebtoolsTimestampNowUnix(webtoolsTimestampUnit);
-    unixInput.value = webtoolsTimestampUnixInput;
-    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
-      render: false,
-      form
-    });
-    updateCurrentClock();
-  });
-
-  toDateControls.append(unixInput, unitSelect, toDateButton, nowButton);
-
-  const toDateResult = document.createElement("div");
-  toDateResult.className = "webtools-timestamp-result";
-  const toDateResultLabel = document.createElement("label");
-  toDateResultLabel.className = "webtools-timestamp-result-label";
-  toDateResultLabel.textContent = "日期字符串:";
-  const toDateResultValue = document.createElement("input");
-  toDateResultValue.type = "text";
-  toDateResultValue.readOnly = true;
-  toDateResultValue.className = "settings-number webtools-timestamp-result-input";
-  toDateResultValue.name = "webtoolsTimestampDateOutput";
-  toDateResultValue.value = webtoolsTimestampDateOutput;
-  toDateResult.append(toDateResultLabel, toDateResultValue);
-
-  toDateSection.append(toDateTitle, toDateControls, toDateResult);
-
-  const divider = document.createElement("div");
-  divider.className = "webtools-timestamp-divider";
-
-  const toTimestampSection = document.createElement("section");
-  toTimestampSection.className = "webtools-timestamp-section";
-  const toTimestampTitle = document.createElement("h4");
-  toTimestampTitle.className = "webtools-timestamp-section-title";
-  toTimestampTitle.textContent = "日期字符串 → Unix 时间戳";
-
-  const toTimestampControls = document.createElement("div");
-  toTimestampControls.className = "webtools-timestamp-controls";
-  const dateInput = document.createElement("input");
-  dateInput.type = "text";
-  dateInput.className = "settings-number webtools-timestamp-input";
-  dateInput.name = "webtoolsTimestampDateInput";
-  dateInput.placeholder = "YYYY-MM-DD HH:mm:ss";
-  dateInput.value = webtoolsTimestampDateInput;
-
-  const toTimestampButton = document.createElement("button");
-  toTimestampButton.type = "button";
-  toTimestampButton.className = "settings-btn settings-btn-primary";
-  toTimestampButton.textContent = "转换为时间戳";
-  toTimestampButton.addEventListener("click", () => {
-    webtoolsTimestampDateInput = dateInput.value;
-    void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
-      render: false,
-      form
-    });
-  });
-
-  toTimestampControls.append(dateInput, toTimestampButton);
-
-  const toTimestampResult = document.createElement("div");
-  toTimestampResult.className = "webtools-timestamp-result";
-  const toTimestampResultLabel = document.createElement("label");
-  toTimestampResultLabel.className = "webtools-timestamp-result-label";
-  toTimestampResultLabel.textContent = "Unix 时间戳 (";
-  const unitLabel = document.createElement("span");
-  unitLabel.dataset.webtoolsTimestampUnitLabel = "1";
-  unitLabel.textContent = webtoolsTimestampUnit === "s" ? "秒 (s)" : "毫秒 (ms)";
-  toTimestampResultLabel.append(unitLabel, "):");
-
-  const toTimestampResultValue = document.createElement("input");
-  toTimestampResultValue.type = "text";
-  toTimestampResultValue.readOnly = true;
-  toTimestampResultValue.className = "settings-number webtools-timestamp-result-input";
-  toTimestampResultValue.name = "webtoolsTimestampTimestampOutput";
-  toTimestampResultValue.value = webtoolsTimestampTimestampOutput;
-  toTimestampResult.append(toTimestampResultLabel, toTimestampResultValue);
-
-  toTimestampSection.append(toTimestampTitle, toTimestampControls, toTimestampResult);
-
-  const infoLine = document.createElement("div");
-  infoLine.className = "webtools-timestamp-info";
-  const infoLabel = document.createElement("span");
-  infoLabel.className = "webtools-timestamp-info-label";
-  infoLabel.textContent = "结果说明:";
-  const infoValue = document.createElement("span");
-  infoValue.className = "webtools-timestamp-info-value";
-  infoValue.textContent = webtoolsTimestampInfo || "-";
-  infoLine.append(infoLabel, infoValue);
-
-  unixInput.addEventListener("input", () => {
-    webtoolsTimestampUnixInput = unixInput.value;
-    scheduleWebtoolsTimestampAutoConvert(form, "toDate");
-  });
-
-  dateInput.addEventListener("input", () => {
-    webtoolsTimestampDateInput = dateInput.value;
-    scheduleWebtoolsTimestampAutoConvert(form, "toTimestamp");
-  });
-
-  unitSelect.addEventListener("change", () => {
-    webtoolsTimestampUnit = normalizeWebtoolsTimestampUnit(unitSelect.value);
-    updateCurrentClock();
-    refreshWebtoolsTimestampResultInForm(form);
-    void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
-      render: false,
-      form
-    });
-    void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
-      render: false,
-      form
-    });
-  });
-
-  form.append(currentLine, toDateSection, divider, toTimestampSection, infoLine);
-  panel.append(title, description, form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
-    render: false,
-    form
-  });
-  void executeWebtoolsTimestampAction("toTimestamp", webtoolsTimestampDateInput, {
-    render: false,
-    form
-  });
+  panelImplsSafe.renderWebtoolsTimestampPanel();
 }
 
 function applyWebtoolsRegexPanelPayload(panel: ActivePluginPanelState): void {
@@ -6394,12 +5580,7 @@ function renderWebtoolsRegexPanel(): void {
 }
 
 function applyWebtoolsCronPanelPayload(panel: ActivePluginPanelState): void {
-  if (panel.data && typeof panel.data.expression === "string") {
-    webtoolsCronExpression = panel.data.expression;
-  }
-  webtoolsCronReadable = "";
-  webtoolsCronNextRun = "";
-  webtoolsCronUpcoming = [];
+  panelImplsSafe.applyWebtoolsCronPanelPayload(panel);
 }
 
 function buildWebtoolsCronTarget(action: "parse" | "random", expression: string): string {
@@ -6536,165 +5717,7 @@ async function executeWebtoolsCronAction(
 }
 
 function renderWebtoolsCronPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel";
-
-  const title = document.createElement("h3");
-  title.className = "settings-title";
-  title.textContent = activePluginPanel?.title || "Cron 生成器";
-
-  const description = document.createElement("p");
-  description.className = "settings-description";
-  description.textContent =
-    activePluginPanel?.subtitle || "定时表达式解析与执行时间预测。";
-
-  const cronPartValues = getWebtoolsCronPartValues(webtoolsCronExpression);
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-cron-form";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const node = form.elements.namedItem("webtoolsCronExpression");
-    const expression = node instanceof HTMLInputElement ? node.value : "";
-    void executeWebtoolsCronAction("parse", expression, {
-      render: false,
-      form
-    });
-  });
-
-  const expressionRow = document.createElement("label");
-  expressionRow.className = "settings-row webtools-row-full";
-  const expressionLabel = document.createElement("span");
-  expressionLabel.className = "settings-row-label";
-  expressionLabel.textContent = "Cron 表达式";
-  const expressionInput = document.createElement("input");
-  expressionInput.className = "settings-value";
-  expressionInput.name = "webtoolsCronExpression";
-  expressionInput.value = webtoolsCronExpression;
-  expressionInput.placeholder = "例如: 5 4 * * *";
-  expressionInput.addEventListener("input", () => {
-    scheduleWebtoolsCronAutoParse(form);
-  });
-  expressionInput.addEventListener("change", () => {
-    scheduleWebtoolsCronAutoParse(form, true);
-  });
-  const expressionHint = document.createElement("span");
-  expressionHint.className = "settings-row-hint";
-  expressionHint.textContent = "格式: 分 时 日 月 周";
-  expressionRow.append(expressionLabel, expressionInput, expressionHint);
-
-  const readableRow = document.createElement("div");
-  readableRow.className = "settings-row webtools-row-full";
-  const readableLabel = document.createElement("span");
-  readableLabel.className = "settings-row-label";
-  readableLabel.textContent = "可读描述";
-  const readableValue = document.createElement("div");
-  readableValue.className = "settings-value settings-wrap webtools-cron-readable";
-  readableValue.textContent = webtoolsCronReadable || "-";
-  const readableHint = document.createElement("span");
-  readableHint.className = "settings-row-hint webtools-cron-next";
-  readableHint.textContent = webtoolsCronNextRun
-    ? `下一次: ${webtoolsCronNextRun}`
-    : "-";
-  readableRow.append(readableLabel, readableValue, readableHint);
-
-  const partsWrap = document.createElement("div");
-  partsWrap.className = "webtools-mini-table-wrap";
-  const partsTable = document.createElement("table");
-  partsTable.className = "webtools-mini-table";
-  const partsHead = document.createElement("thead");
-  const partsHeadRow = document.createElement("tr");
-  ["分", "时", "日", "月", "周"].forEach((name) => {
-    const th = document.createElement("th");
-    th.textContent = name;
-    partsHeadRow.appendChild(th);
-  });
-  partsHead.appendChild(partsHeadRow);
-  const partsBody = document.createElement("tbody");
-  const partsBodyRow = document.createElement("tr");
-  cronPartValues.forEach((value) => {
-    const td = document.createElement("td");
-    td.className = "webtools-cron-part-cell";
-    td.textContent = value;
-    partsBodyRow.appendChild(td);
-  });
-  partsBody.appendChild(partsBodyRow);
-  partsTable.append(partsHead, partsBody);
-  partsWrap.appendChild(partsTable);
-
-  const syntaxWrap = document.createElement("div");
-  syntaxWrap.className = "webtools-mini-table-wrap";
-  const syntaxTable = document.createElement("table");
-  syntaxTable.className = "webtools-mini-table";
-  const syntaxBody = document.createElement("tbody");
-  [
-    ["*", "任意值"],
-    [",", "列表分隔符"],
-    ["-", "数值范围"],
-    ["/", "步进值"]
-  ].forEach(([symbol, meaning]) => {
-    const row = document.createElement("tr");
-    const symbolCell = document.createElement("td");
-    symbolCell.textContent = symbol;
-    const meaningCell = document.createElement("td");
-    meaningCell.textContent = meaning;
-    row.append(symbolCell, meaningCell);
-    syntaxBody.appendChild(row);
-  });
-  syntaxTable.appendChild(syntaxBody);
-  syntaxWrap.appendChild(syntaxTable);
-
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
-
-  const randomButton = document.createElement("button");
-  randomButton.type = "button";
-  randomButton.className = "settings-btn settings-btn-secondary";
-  randomButton.textContent = "随机生成";
-  randomButton.addEventListener("click", () => {
-    const node = form.elements.namedItem("webtoolsCronExpression");
-    const expression = node instanceof HTMLInputElement ? node.value : "";
-    void executeWebtoolsCronAction("random", expression, {
-      render: false,
-      form
-    });
-  });
-
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className = "settings-btn settings-btn-secondary";
-  copyButton.textContent = "复制";
-  copyButton.addEventListener("click", () => {
-    void (async () => {
-      const copied = await copyTextToClipboard(expressionInput.value);
-      setStatus(copied ? "已复制 Cron 表达式" : "复制失败");
-    })();
-  });
-
-  actions.append(randomButton, copyButton);
-  form.append(expressionRow, readableRow, partsWrap, syntaxWrap, actions);
-
-  const listWrap = document.createElement("div");
-  listWrap.className = "settings-row webtools-row-full";
-  const listLabel = document.createElement("span");
-  listLabel.className = "settings-row-label";
-  listLabel.textContent = "未来 7 次执行";
-  const listValue = document.createElement("div");
-  listValue.className = "settings-value settings-wrap webtools-cron-upcoming-value";
-  listValue.textContent =
-    webtoolsCronUpcoming.length > 0 ? webtoolsCronUpcoming.join("\n") : "-";
-  listValue.style.whiteSpace = "pre-line";
-  listWrap.append(listLabel, listValue);
-  form.appendChild(listWrap);
-
-  panel.append(title, description, form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  scheduleWebtoolsCronAutoParse(form, true);
+  panelImplsSafe.renderWebtoolsCronPanel();
 }
 
 function applyWebtoolsCryptoPanelPayload(panel: ActivePluginPanelState): void {
@@ -8016,18 +7039,7 @@ function renderWebtoolsJwtPanel(): void {
 }
 
 function applyWebtoolsStringsPanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-  if (data && typeof data.input === "string") {
-    webtoolsStringsInput = data.input;
-  }
-  if (data && typeof data.caseType === "string") {
-    webtoolsStringsCaseType = data.caseType;
-  }
-  if (data && typeof data.count === "number") {
-    webtoolsStringsUuidCount = data.count;
-  }
-  webtoolsStringsOutput = "";
-  webtoolsStringsUuidItems = [];
+  panelImplsSafe.applyWebtoolsStringsPanelPayload(panel);
 }
 
 function buildWebtoolsStringsTarget(action: "convert" | "uuid"): string {
@@ -8096,187 +7108,11 @@ async function executeWebtoolsStringsAction(
 }
 
 function renderWebtoolsStringsPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-strings-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-strings-form";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void executeWebtoolsStringsAction("convert", form);
-  });
-
-  const header = document.createElement("div");
-  header.className = "webtools-strings-header";
-  const title = document.createElement("h3");
-  title.className = "webtools-strings-title";
-  title.textContent = activePluginPanel?.title || "字符串工具";
-  const description = document.createElement("p");
-  description.className = "webtools-strings-subtitle";
-  description.textContent =
-    activePluginPanel?.subtitle || "大小写转换与 UUID 批量生成";
-  header.append(title, description);
-
-  const caseEntries = [
-    { value: "camel", label: "camelCase" },
-    { value: "snake", label: "snake_case" },
-    { value: "pascal", label: "PascalCase" },
-    { value: "kebab", label: "kebab-case" },
-    { value: "upper", label: "UPPER" },
-    { value: "lower", label: "lower" }
-  ] as const;
-
-  const caseCard = document.createElement("section");
-  caseCard.className = "webtools-strings-section";
-  const caseTitle = document.createElement("h4");
-  caseTitle.className = "webtools-strings-section-title";
-  caseTitle.textContent = "大小写转换";
-  const caseDescription = document.createElement("p");
-  caseDescription.className = "webtools-strings-section-description";
-  caseDescription.textContent = "输入任意变量名或文本，点击规则按钮直接转换";
-  const caseBox = document.createElement("div");
-  caseBox.className = "webtools-strings-case-box";
-
-  const inputRow = document.createElement("label");
-  inputRow.className = "webtools-strings-field";
-  const inputArea = document.createElement("textarea");
-  inputArea.className = "settings-value webtools-textarea webtools-strings-textarea";
-  inputArea.name = "webtoolsStringsInput";
-  inputArea.value = webtoolsStringsInput;
-  inputArea.placeholder = "请输入字符串";
-  inputArea.spellcheck = false;
-  inputRow.append(inputArea);
-
-  const caseSelect = document.createElement("select");
-  caseSelect.className = "settings-number webtools-strings-case-select";
-  caseSelect.name = "webtoolsStringsCaseType";
-  caseEntries.forEach((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.value;
-    option.textContent = entry.label;
-    option.selected = webtoolsStringsCaseType === entry.value;
-    caseSelect.appendChild(option);
-  });
-  caseSelect.hidden = true;
-
-  const caseButtons = document.createElement("div");
-  caseButtons.className = "webtools-strings-button-grid";
-  caseEntries.forEach(({ value, label }) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className =
-      value === webtoolsStringsCaseType
-        ? "settings-btn settings-btn-primary webtools-strings-case-btn"
-        : "settings-btn settings-btn-secondary webtools-strings-case-btn";
-    button.textContent = label;
-    button.addEventListener("click", () => {
-      caseSelect.value = value;
-      void executeWebtoolsStringsAction("convert", form, { caseType: value });
-    });
-    caseButtons.appendChild(button);
-  });
-
-  caseBox.append(inputRow, caseSelect, caseButtons);
-  caseCard.append(caseTitle, caseDescription, caseBox);
-
-  const divider = document.createElement("div");
-  divider.className = "webtools-strings-divider";
-
-  const uuidCard = document.createElement("section");
-  uuidCard.className = "webtools-strings-section";
-  const uuidTitle = document.createElement("h4");
-  uuidTitle.className = "webtools-strings-section-title";
-  uuidTitle.textContent = "UUID 生成";
-  const uuidDescription = document.createElement("p");
-  uuidDescription.className = "webtools-strings-section-description";
-  uuidDescription.textContent = "按数量批量生成 UUID，每行一个，可逐条复制";
-  const uuidBox = document.createElement("div");
-  uuidBox.className = "webtools-strings-uuid-box";
-
-  const uuidRow = document.createElement("div");
-  uuidRow.className = "webtools-strings-uuid-control";
-  const uuidLabel = document.createElement("label");
-  uuidLabel.className = "webtools-strings-uuid-label";
-  uuidLabel.textContent = "生成数量";
-  const uuidCountInput = document.createElement("input");
-  uuidCountInput.className = "settings-number webtools-strings-uuid-input";
-  uuidCountInput.type = "number";
-  uuidCountInput.name = "webtoolsStringsCount";
-  uuidCountInput.min = "1";
-  uuidCountInput.max = "100";
-  uuidCountInput.step = "1";
-  uuidCountInput.value = String(webtoolsStringsUuidCount);
-  uuidLabel.appendChild(uuidCountInput);
-
-  const uuidButton = document.createElement("button");
-  uuidButton.type = "button";
-  uuidButton.className = "settings-btn settings-btn-primary";
-  uuidButton.textContent = "生成 UUID";
-  uuidButton.addEventListener("click", () => {
-    void executeWebtoolsStringsAction("uuid", form);
-  });
-
-  uuidRow.append(uuidLabel, uuidButton);
-  if (webtoolsStringsUuidItems.length > 0) {
-    const copyAllButton = document.createElement("button");
-    copyAllButton.type = "button";
-    copyAllButton.className = "settings-btn settings-btn-secondary";
-    copyAllButton.textContent = "复制全部";
-    copyAllButton.addEventListener("click", async () => {
-      const copied = await copyTextToClipboard(webtoolsStringsUuidItems.join("\n"));
-      setStatus(copied ? "已复制全部 UUID" : "复制 UUID 失败");
-    });
-    uuidRow.append(copyAllButton);
-  }
-
-  if (webtoolsStringsUuidItems.length > 0) {
-    const resultList = document.createElement("div");
-    resultList.className = "webtools-strings-uuid-results";
-    webtoolsStringsUuidItems.forEach((value, index) => {
-      const row = document.createElement("div");
-      row.className = "webtools-strings-uuid-item";
-      const field = document.createElement("code");
-      field.className = "webtools-strings-uuid-code";
-      field.textContent = `${index + 1}. ${value}`;
-      const copyButton = document.createElement("button");
-      copyButton.type = "button";
-      copyButton.className = "settings-btn settings-btn-secondary";
-      copyButton.textContent = "复制";
-      copyButton.addEventListener("click", async () => {
-        const copied = await copyTextToClipboard(value);
-        setStatus(copied ? "已复制 UUID" : "复制 UUID 失败");
-      });
-      row.append(field, copyButton);
-      resultList.appendChild(row);
-    });
-    uuidBox.append(uuidRow, resultList);
-  } else {
-    const empty = document.createElement("div");
-    empty.className = "webtools-strings-uuid-empty";
-    empty.textContent = "点击“生成 UUID”后，在这里查看结果";
-    uuidBox.append(uuidRow, empty);
-  }
-
-  uuidCard.append(uuidTitle, uuidDescription, uuidBox);
-
-  form.append(header, caseCard, divider, uuidCard);
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
+  panelImplsSafe.renderWebtoolsStringsPanel();
 }
 
 function applyWebtoolsColorsPanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-  if (data && typeof data.color === "string") {
-    webtoolsColorsInput = data.color;
-  }
-  webtoolsColorsHex = webtoolsColorsInput || "#6c5ce7";
-  webtoolsColorsRgb = "";
-  webtoolsColorsHsl = "";
-  webtoolsColorsShades = [];
+  panelImplsSafe.applyWebtoolsColorsPanelPayload(panel);
 }
 
 function buildWebtoolsColorsTarget(color: string): string {
@@ -8432,174 +7268,7 @@ async function executeWebtoolsColorsConvert(
 }
 
 function renderWebtoolsColorsPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-colors-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-colors-form webtools-colors-lab";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const inputNode = form.elements.namedItem("webtoolsColorsInput");
-    const color = inputNode instanceof HTMLInputElement ? inputNode.value : "";
-    void executeWebtoolsColorsConvert(color, { render: false, form });
-  });
-
-  const header = document.createElement("div");
-  header.className = "webtools-colors-header";
-  const title = document.createElement("h3");
-  title.className = "webtools-colors-title";
-  title.textContent = activePluginPanel?.title || "颜色工具";
-  const description = document.createElement("p");
-  description.className = "webtools-colors-description";
-  description.textContent =
-    activePluginPanel?.subtitle || "HEX / RGB / HSL 转换与色阶预览";
-  header.append(title, description);
-
-  const layout = document.createElement("div");
-  layout.className = "webtools-colors-layout";
-
-  const previewColumn = document.createElement("div");
-  previewColumn.className = "webtools-colors-column";
-
-  const preview = document.createElement("div");
-  preview.className = "webtools-colors-preview";
-  preview.dataset.webtoolsColorsPreview = "1";
-  const previewText = document.createElement("span");
-  previewText.className = "webtools-colors-preview-text";
-  previewText.dataset.webtoolsColorsPreviewText = "1";
-  preview.appendChild(previewText);
-
-  const paletteSection = document.createElement("div");
-  paletteSection.className = "webtools-colors-section";
-  const paletteTitle = document.createElement("div");
-  paletteTitle.className = "webtools-colors-section-title";
-  paletteTitle.textContent = "预设色板";
-  const paletteGrid = document.createElement("div");
-  paletteGrid.className = "webtools-colors-palette";
-  WEBTOOLS_COLORS_PRESETS.forEach((color) => {
-    const swatch = document.createElement("button");
-    swatch.type = "button";
-    swatch.className = "webtools-colors-palette-item";
-    swatch.dataset.webtoolsColorsPreset = color;
-    swatch.style.background = color;
-    swatch.title = color;
-    swatch.addEventListener("click", () => {
-      colorInput.value = color;
-      void executeWebtoolsColorsConvert(color, { render: false, form });
-    });
-    paletteGrid.appendChild(swatch);
-  });
-  paletteSection.append(paletteTitle, paletteGrid);
-
-  const pickerSection = document.createElement("div");
-  pickerSection.className = "webtools-colors-section";
-  const pickerTitle = document.createElement("div");
-  pickerTitle.className = "webtools-colors-section-title";
-  pickerTitle.textContent = "取色器";
-  const pickerWrap = document.createElement("label");
-  pickerWrap.className = "webtools-colors-picker";
-  const colorPicker = document.createElement("input");
-  colorPicker.type = "color";
-  colorPicker.name = "webtoolsColorsPicker";
-  colorPicker.className = "webtools-colors-picker-native";
-  colorPicker.addEventListener("input", () => {
-    colorInput.value = colorPicker.value;
-    void executeWebtoolsColorsConvert(colorPicker.value, { render: false, form });
-  });
-  const pickerText = document.createElement("span");
-  pickerText.className = "webtools-colors-picker-text";
-  pickerText.textContent = "点击选择颜色";
-  pickerWrap.append(colorPicker, pickerText);
-  pickerSection.append(pickerTitle, pickerWrap);
-  previewColumn.append(preview, paletteSection, pickerSection);
-
-  const detailColumn = document.createElement("div");
-  detailColumn.className = "webtools-colors-column webtools-colors-details";
-
-  const inputSection = document.createElement("div");
-  inputSection.className = "webtools-colors-section";
-  const inputField = document.createElement("label");
-  inputField.className = "webtools-colors-field";
-  const inputLabel = document.createElement("span");
-  inputLabel.className = "webtools-colors-field-label";
-  inputLabel.textContent = "颜色输入";
-  const colorInput = document.createElement("input");
-  colorInput.className = "settings-value";
-  colorInput.name = "webtoolsColorsInput";
-  colorInput.value = webtoolsColorsInput || webtoolsColorsHex;
-  colorInput.placeholder = "#6c5ce7 / rgb(108,92,231) / hsl(...)";
-  colorInput.spellcheck = false;
-  const colorHint = document.createElement("span");
-  colorHint.className = "webtools-colors-field-hint";
-  colorHint.textContent = "支持 HEX / rgb() / hsl()";
-  inputField.append(inputLabel, colorInput, colorHint);
-  inputSection.appendChild(inputField);
-
-  const outputSection = document.createElement("div");
-  outputSection.className = "webtools-colors-section";
-  const outputTitle = document.createElement("div");
-  outputTitle.className = "webtools-colors-section-title";
-  outputTitle.textContent = "颜色值";
-  const outputList = document.createElement("div");
-  outputList.className = "webtools-colors-output-list";
-  (
-    [
-      { key: "hex", label: "HEX", copyValue: () => webtoolsColorsHex },
-      { key: "rgb", label: "RGB", copyValue: () => `rgb(${webtoolsColorsRgb})` },
-      { key: "hsl", label: "HSL", copyValue: () => `hsl(${webtoolsColorsHsl})` }
-    ] as const
-  ).forEach((entry) => {
-    const block = document.createElement("div");
-    block.className = "webtools-colors-output";
-    const label = document.createElement("div");
-    label.className = "webtools-colors-output-label";
-    label.textContent = entry.label;
-    const row = document.createElement("div");
-    row.className = "webtools-colors-output-row";
-    const value = document.createElement("div");
-    value.className = "settings-value webtools-colors-output-value";
-    value.dataset.webtoolsColorsOutput = entry.key;
-    const copyButton = document.createElement("button");
-    copyButton.type = "button";
-    copyButton.className = "settings-btn settings-btn-secondary";
-    copyButton.textContent = "复制";
-    copyButton.addEventListener("click", async () => {
-      const copied = await copyTextToClipboard(entry.copyValue());
-      setStatus(copied ? `已复制 ${entry.label}` : `复制 ${entry.label} 失败`);
-    });
-    row.append(value, copyButton);
-    block.append(label, row);
-    outputList.appendChild(block);
-  });
-  outputSection.append(outputTitle, outputList);
-
-  const shadesSection = document.createElement("div");
-  shadesSection.className = "webtools-colors-section";
-  const shadesTitle = document.createElement("div");
-  shadesTitle.className = "webtools-colors-section-title";
-  shadesTitle.textContent = "色阶";
-  const shadesWrap = document.createElement("div");
-  shadesWrap.className = "webtools-colors-shades";
-  shadesWrap.dataset.webtoolsColorsShades = "1";
-  shadesSection.append(shadesTitle, shadesWrap);
-
-  detailColumn.append(inputSection, outputSection, shadesSection);
-  layout.append(previewColumn, detailColumn);
-
-  colorInput.addEventListener("input", () => {
-    scheduleWebtoolsColorsAutoConvert(form, colorInput.value);
-  });
-
-  form.append(header, layout);
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  refreshWebtoolsColorsPanelInForm(form);
-  scheduleWebtoolsColorsAutoConvert(form, colorInput.value || webtoolsColorsHex, true);
+  panelImplsSafe.renderWebtoolsColorsPanel();
 }
 
 function applyWebtoolsImageBase64PanelPayload(panel: ActivePluginPanelState): void {
@@ -10126,30 +8795,7 @@ function renderWebtoolsUnitPanel(): void {
 }
 
 function applyWebtoolsQrcodePanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-  webtoolsQrText = data && typeof data.text === "string" ? data.text : "LiteLauncher 本地二维码示例";
-  webtoolsQrSize = data && typeof data.size === "number" ? data.size : 300;
-  webtoolsQrLevel = data && typeof data.level === "string" ? data.level : "M";
-  webtoolsQrDarkColor =
-    data && typeof data.darkColor === "string"
-      ? normalizeWebtoolsQrcodeColor(data.darkColor, "#102136")
-      : "#102136";
-  webtoolsQrLightColor =
-    data && typeof data.lightColor === "string"
-      ? normalizeWebtoolsQrcodeColor(data.lightColor, "#ffffff")
-      : "#ffffff";
-  webtoolsQrLogoMode =
-    data && typeof data.logoMode === "string"
-      ? data.logoMode === "text" || data.logoMode === "image"
-        ? data.logoMode
-        : "none"
-      : "none";
-  webtoolsQrLogoText = data && typeof data.logoText === "string" ? data.logoText : "";
-  webtoolsQrLogoImageDataUrl =
-    data && typeof data.logoImageDataUrl === "string" ? data.logoImageDataUrl : "";
-  webtoolsQrLogoImageName = "";
-  webtoolsQrUrl = "";
-  webtoolsQrInfo = "";
+  panelImplsSafe.applyWebtoolsQrcodePanelPayload(panel);
 }
 
 function normalizeWebtoolsQrcodeColor(value: string, fallback: string): string {
@@ -10446,322 +9092,7 @@ async function executeWebtoolsQrcodeGenerateInForm(
 }
 
 function renderWebtoolsQrcodePanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-qrcode-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-qrcode-form";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void executeWebtoolsQrcodeGenerateInForm(form);
-  });
-
-  const header = document.createElement("div");
-  header.className = "webtools-qrcode-header";
-  const titleGroup = document.createElement("div");
-  const title = document.createElement("h3");
-  title.className = "webtools-qrcode-title";
-  title.textContent = activePluginPanel?.title || "二维码生成";
-  const description = document.createElement("p");
-  description.className = "webtools-qrcode-description";
-  description.textContent =
-    activePluginPanel?.subtitle || "本地文本/链接转二维码图片";
-  titleGroup.append(title, description);
-  const info = document.createElement("div");
-  info.className = "webtools-qrcode-info";
-  header.append(titleGroup, info);
-
-  const layout = document.createElement("div");
-  layout.className = "webtools-qrcode-layout";
-
-  const setupPane = document.createElement("div");
-  setupPane.className = "webtools-qrcode-setup";
-
-  const textField = document.createElement("label");
-  textField.className = "webtools-qrcode-field";
-  const textLabel = document.createElement("span");
-  textLabel.className = "webtools-qrcode-field-label";
-  textLabel.textContent = "二维码内容";
-  const textArea = document.createElement("textarea");
-  textArea.className = "settings-value webtools-textarea webtools-qrcode-textarea";
-  textArea.name = "webtoolsQrText";
-  textArea.value = webtoolsQrText;
-  textArea.placeholder = "输入文本或链接";
-  textArea.spellcheck = false;
-  textArea.addEventListener("input", () => {
-    scheduleWebtoolsQrcodeAutoGenerate(form);
-  });
-  textField.append(textLabel, textArea);
-
-  const configGrid = document.createElement("div");
-  configGrid.className = "webtools-qrcode-config-grid";
-
-  const sizeField = document.createElement("label");
-  sizeField.className = "webtools-qrcode-field";
-  const sizeLabel = document.createElement("span");
-  sizeLabel.className = "webtools-qrcode-field-label";
-  sizeLabel.textContent = "尺寸大小 (PX)";
-  const sizeInput = document.createElement("input");
-  sizeInput.className = "settings-value webtools-tool-input";
-  sizeInput.type = "number";
-  sizeInput.name = "webtoolsQrSize";
-  sizeInput.min = "100";
-  sizeInput.max = "1000";
-  sizeInput.step = "50";
-  sizeInput.value = String(webtoolsQrSize);
-  sizeInput.addEventListener("input", () => {
-    scheduleWebtoolsQrcodeAutoGenerate(form);
-  });
-
-  const levelField = document.createElement("label");
-  levelField.className = "webtools-qrcode-field";
-  const levelLabel = document.createElement("span");
-  levelLabel.className = "webtools-qrcode-field-label";
-  levelLabel.textContent = "工作模式";
-  const levelSelect = document.createElement("select");
-  levelSelect.className = "settings-value webtools-tool-select";
-  levelSelect.name = "webtoolsQrLevel";
-  (
-    [
-      ["L", "L (7%)"],
-      ["M", "M (15%)"],
-      ["Q", "Q (25%)"],
-      ["H", "H (30%)"]
-    ] as const
-  ).forEach(([value, text]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = text;
-    option.selected = webtoolsQrLevel === value;
-    levelSelect.appendChild(option);
-  });
-  levelSelect.addEventListener("change", () => {
-    scheduleWebtoolsQrcodeAutoGenerate(form, true);
-  });
-  const darkColorField = document.createElement("label");
-  darkColorField.className = "webtools-qrcode-field";
-  const darkColorLabel = document.createElement("span");
-  darkColorLabel.className = "webtools-qrcode-field-label";
-  darkColorLabel.textContent = "前景色";
-  const darkColorControl = document.createElement("div");
-  darkColorControl.className = "webtools-qrcode-color-control";
-  const darkColorInput = document.createElement("input");
-  darkColorInput.className = "webtools-qrcode-color-picker";
-  darkColorInput.type = "color";
-  darkColorInput.name = "webtoolsQrDarkColor";
-  darkColorInput.value = webtoolsQrDarkColor;
-  darkColorInput.addEventListener("input", () => {
-    webtoolsQrDarkColor = normalizeWebtoolsQrcodeColor(darkColorInput.value, "#102136");
-    refreshWebtoolsQrcodePanelInForm(form);
-    scheduleWebtoolsQrcodeAutoGenerate(form, true);
-  });
-  const darkColorValue = document.createElement("span");
-  darkColorValue.className = "webtools-qrcode-color-value";
-  darkColorValue.dataset.webtoolsQrcodeDarkValue = "1";
-  darkColorControl.append(darkColorInput, darkColorValue);
-  darkColorField.append(darkColorLabel, darkColorControl);
-
-  const lightColorField = document.createElement("label");
-  lightColorField.className = "webtools-qrcode-field";
-  const lightColorLabel = document.createElement("span");
-  lightColorLabel.className = "webtools-qrcode-field-label";
-  lightColorLabel.textContent = "背景色";
-  const lightColorControl = document.createElement("div");
-  lightColorControl.className = "webtools-qrcode-color-control";
-  const lightColorInput = document.createElement("input");
-  lightColorInput.className = "webtools-qrcode-color-picker";
-  lightColorInput.type = "color";
-  lightColorInput.name = "webtoolsQrLightColor";
-  lightColorInput.value = webtoolsQrLightColor;
-  lightColorInput.addEventListener("input", () => {
-    webtoolsQrLightColor = normalizeWebtoolsQrcodeColor(lightColorInput.value, "#ffffff");
-    refreshWebtoolsQrcodePanelInForm(form);
-    scheduleWebtoolsQrcodeAutoGenerate(form, true);
-  });
-  const lightColorValue = document.createElement("span");
-  lightColorValue.className = "webtools-qrcode-color-value";
-  lightColorValue.dataset.webtoolsQrcodeLightValue = "1";
-  lightColorControl.append(lightColorInput, lightColorValue);
-  lightColorField.append(lightColorLabel, lightColorControl);
-
-  sizeField.append(sizeLabel, sizeInput);
-  levelField.append(levelLabel, levelSelect);
-  configGrid.append(sizeField, levelField, darkColorField, lightColorField);
-
-  const logoSection = document.createElement("div");
-  logoSection.className = "webtools-qrcode-logo-section";
-  const logoSectionHead = document.createElement("div");
-  logoSectionHead.className = "webtools-qrcode-logo-head";
-  const logoTitle = document.createElement("span");
-  logoTitle.className = "webtools-qrcode-field-label";
-  logoTitle.textContent = "Logo";
-  const logoMeta = document.createElement("span");
-  logoMeta.className = "webtools-qrcode-logo-meta";
-  logoMeta.dataset.webtoolsQrcodeLogoMeta = "1";
-  const clearLogoButton = document.createElement("button");
-  clearLogoButton.type = "button";
-  clearLogoButton.className = "settings-btn settings-btn-secondary webtools-qrcode-clear-logo-btn";
-  clearLogoButton.dataset.webtoolsQrcodeClearLogo = "1";
-  clearLogoButton.textContent = "移除 Logo";
-  clearLogoButton.addEventListener("click", () => {
-    if (webtoolsQrLogoMode === "text") {
-      webtoolsQrLogoText = "";
-      logoTextInput.value = "";
-    } else if (webtoolsQrLogoMode === "image") {
-      webtoolsQrLogoImageDataUrl = "";
-      webtoolsQrLogoImageName = "";
-    }
-    refreshWebtoolsQrcodePanelInForm(form);
-    scheduleWebtoolsQrcodeAutoGenerate(form, true);
-  });
-  logoSectionHead.append(logoTitle, logoMeta, clearLogoButton);
-
-  const logoModeField = document.createElement("label");
-  logoModeField.className = "webtools-qrcode-field";
-  const logoModeLabel = document.createElement("span");
-  logoModeLabel.className = "webtools-qrcode-field-label";
-  logoModeLabel.textContent = "Logo 类型";
-  const logoModeSelect = document.createElement("select");
-  logoModeSelect.className = "settings-value webtools-tool-select";
-  logoModeSelect.name = "webtoolsQrLogoMode";
-  (
-    [
-      ["none", "无 Logo"],
-      ["text", "文字 Logo"],
-      ["image", "图片 Logo"]
-    ] as const
-  ).forEach(([value, text]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = text;
-    option.selected = webtoolsQrLogoMode === value;
-    logoModeSelect.appendChild(option);
-  });
-  logoModeSelect.addEventListener("change", () => {
-    webtoolsQrLogoMode =
-      logoModeSelect.value === "text" || logoModeSelect.value === "image"
-        ? logoModeSelect.value
-        : "none";
-    refreshWebtoolsQrcodePanelInForm(form);
-    scheduleWebtoolsQrcodeAutoGenerate(form, true);
-  });
-  logoModeField.append(logoModeLabel, logoModeSelect);
-
-  const logoBody = document.createElement("div");
-  logoBody.className = "webtools-qrcode-logo-body";
-
-  const logoTextField = document.createElement("label");
-  logoTextField.className = "webtools-qrcode-field";
-  logoTextField.dataset.webtoolsQrcodeLogoTextField = "1";
-  const logoTextLabel = document.createElement("span");
-  logoTextLabel.className = "webtools-qrcode-field-label";
-  logoTextLabel.textContent = "Logo 文字";
-  const logoTextInput = document.createElement("input");
-  logoTextInput.className = "settings-value webtools-tool-input";
-  logoTextInput.name = "webtoolsQrLogoText";
-  logoTextInput.maxLength = 6;
-  logoTextInput.placeholder = "输入 1-6 个字";
-  logoTextInput.value = webtoolsQrLogoText;
-  logoTextInput.addEventListener("input", () => {
-    webtoolsQrLogoText = logoTextInput.value.trim().slice(0, 6);
-    refreshWebtoolsQrcodePanelInForm(form);
-    scheduleWebtoolsQrcodeAutoGenerate(form);
-  });
-  logoTextField.append(logoTextLabel, logoTextInput);
-
-  const logoImageField = document.createElement("div");
-  logoImageField.className = "webtools-qrcode-logo-image-field";
-  logoImageField.dataset.webtoolsQrcodeLogoImageField = "1";
-  const logoImageLabel = document.createElement("span");
-  logoImageLabel.className = "webtools-qrcode-field-label";
-  logoImageLabel.textContent = "Logo 图片";
-  const logoImageRow = document.createElement("div");
-  logoImageRow.className = "webtools-qrcode-logo-image-row";
-  const logoFileInput = document.createElement("input");
-  logoFileInput.type = "file";
-  logoFileInput.accept = "image/*";
-  logoFileInput.hidden = true;
-  logoFileInput.addEventListener("change", async () => {
-    try {
-      const file = logoFileInput.files?.[0];
-      if (!file) {
-        schedulePluginNativeInteractionRelease();
-        return;
-      }
-      const normalized = await normalizeWebtoolsQrcodeLogoImage(file);
-      webtoolsQrLogoMode = "image";
-      logoModeSelect.value = "image";
-      webtoolsQrLogoImageDataUrl = normalized.dataUrl;
-      webtoolsQrLogoImageName = normalized.name;
-      refreshWebtoolsQrcodePanelInForm(form);
-      scheduleWebtoolsQrcodeAutoGenerate(form, true);
-      setStatus(`已载入 Logo 图片：${normalized.name}`);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "读取 Logo 图片失败";
-      setStatus(reason);
-    } finally {
-      logoFileInput.value = "";
-      schedulePluginNativeInteractionRelease();
-    }
-  });
-  const chooseLogoButton = document.createElement("button");
-  chooseLogoButton.type = "button";
-  chooseLogoButton.className = "settings-btn settings-btn-secondary";
-  chooseLogoButton.textContent = "选择图片";
-  chooseLogoButton.addEventListener("click", () => {
-    beginPluginNativeInteraction();
-    logoFileInput.click();
-  });
-  const logoImageName = document.createElement("span");
-  logoImageName.className = "webtools-qrcode-logo-image-name";
-  logoImageName.dataset.webtoolsQrcodeLogoImageName = "1";
-  logoImageRow.append(chooseLogoButton, logoImageName, logoFileInput);
-  logoImageField.append(logoImageLabel, logoImageRow);
-
-  logoBody.append(logoModeField, logoTextField, logoImageField);
-  logoSection.append(logoSectionHead, logoBody);
-
-  const actions = document.createElement("div");
-  actions.className = "webtools-qrcode-actions";
-  const downloadButton = document.createElement("button");
-  downloadButton.type = "button";
-  downloadButton.className = "settings-btn settings-btn-primary webtools-qrcode-download-btn";
-  downloadButton.dataset.webtoolsQrcodeDownload = "1";
-  downloadButton.textContent = "下载 PNG";
-  downloadButton.addEventListener("click", async () => {
-    beginPluginNativeInteraction(1500);
-    try {
-      await downloadWebtoolsQrcodePng();
-      setStatus("二维码 PNG 已下载");
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "二维码下载失败";
-      setStatus(reason);
-    } finally {
-      schedulePluginNativeInteractionRelease();
-    }
-  });
-  actions.append(downloadButton);
-
-  setupPane.append(textField, configGrid, logoSection, actions);
-
-  const previewPane = document.createElement("div");
-  previewPane.className = "webtools-qrcode-preview";
-  const previewHost = document.createElement("div");
-  previewHost.className = "webtools-qrcode-preview-host";
-  previewHost.dataset.webtoolsQrcodePreview = "1";
-  previewPane.appendChild(previewHost);
-
-  layout.append(setupPane, previewPane);
-  form.append(header, layout);
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  refreshWebtoolsQrcodePanelInForm(form);
-  scheduleWebtoolsQrcodeAutoGenerate(form, true);
+  panelImplsSafe.renderWebtoolsQrcodePanel();
 }
 
 function applyWebtoolsMarkdownPanelPayload(panel: ActivePluginPanelState): void {
@@ -11017,15 +9348,7 @@ function renderWebtoolsMarkdownPanel(): void {
 }
 
 function applyWebtoolsUaPanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-  if (data && typeof data.ua === "string") {
-    webtoolsUaInput = data.ua;
-  } else {
-    webtoolsUaInput = navigator.userAgent;
-  }
-  webtoolsUaResult = {};
-  webtoolsUaInfo = "";
-  webtoolsUaError = "";
+  panelImplsSafe.applyWebtoolsUaPanelPayload(panel);
 }
 
 function buildWebtoolsUaTarget(ua: string): string {
@@ -11216,152 +9539,11 @@ async function executeWebtoolsUaParse(
 }
 
 function renderWebtoolsUaPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
-
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-ua-panel";
-
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-ua-form";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const node = form.elements.namedItem("webtoolsUaInput");
-    const ua = node instanceof HTMLTextAreaElement ? node.value : "";
-    void executeWebtoolsUaParse(ua);
-  });
-
-  const header = document.createElement("div");
-  header.className = "webtools-ua-header";
-  const titleGroup = document.createElement("div");
-  titleGroup.className = "webtools-ua-header-text";
-  const title = document.createElement("h3");
-  title.className = "webtools-ua-title";
-  title.textContent = activePluginPanel?.title || "UA 解析";
-  const description = document.createElement("p");
-  description.className = "webtools-ua-subtitle";
-  description.textContent =
-    activePluginPanel?.subtitle || "解析浏览器、系统、设备信息";
-  titleGroup.append(title, description);
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "webtools-ua-actions";
-  const useCurrentButton = document.createElement("button");
-  useCurrentButton.type = "button";
-  useCurrentButton.className = "settings-btn settings-btn-secondary";
-  useCurrentButton.textContent = "当前 UA";
-  const clearButton = document.createElement("button");
-  clearButton.type = "button";
-  clearButton.className = "settings-btn settings-btn-secondary";
-  clearButton.textContent = "清空";
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className = "settings-btn settings-btn-primary";
-  copyButton.textContent = "复制";
-  copyButton.dataset.webtoolsUaCopy = "1";
-  toolbar.append(useCurrentButton, clearButton, copyButton);
-  header.append(titleGroup, toolbar);
-
-  const editor = document.createElement("div");
-  editor.className = "webtools-ua-editor";
-  const inputPane = document.createElement("div");
-  inputPane.className = "webtools-ua-input-section";
-  const inputHead = document.createElement("div");
-  inputHead.className = "webtools-ua-input-head";
-  const inputLabel = document.createElement("div");
-  inputLabel.className = "webtools-ua-input-label";
-  inputLabel.textContent = "UA 字符串";
-  const inputMeta = document.createElement("div");
-  inputMeta.className = "webtools-ua-input-meta";
-  inputMeta.textContent = "输入后自动解析";
-  const inputArea = document.createElement("textarea");
-  inputArea.className = "settings-value webtools-textarea webtools-ua-input";
-  inputArea.name = "webtoolsUaInput";
-  inputArea.value = webtoolsUaInput || navigator.userAgent;
-  inputArea.placeholder = "粘贴 User-Agent";
-  inputArea.spellcheck = false;
-  useCurrentButton.addEventListener("click", () => {
-    inputArea.value = navigator.userAgent;
-    scheduleWebtoolsUaAutoParse(form, true);
-  });
-  clearButton.addEventListener("click", () => {
-    if (webtoolsUaAutoTimer !== null) {
-      window.clearTimeout(webtoolsUaAutoTimer);
-      webtoolsUaAutoTimer = null;
-    }
-    webtoolsUaRequestToken += 1;
-    webtoolsUaInput = "";
-    webtoolsUaResult = {};
-    webtoolsUaInfo = "";
-    webtoolsUaError = "";
-    inputArea.value = "";
-    refreshWebtoolsUaResultInForm(form);
-    setStatus("已清空 UA 输入");
-  });
-  copyButton.addEventListener("click", async () => {
-    const input = inputArea.value.trim();
-    if (!input) {
-      setStatus("当前没有可复制的 UA");
-      return;
-    }
-    await navigator.clipboard.writeText(input);
-    setStatus("已复制 UA 字符串");
-  });
-  inputArea.addEventListener("input", () => {
-    webtoolsUaInput = inputArea.value;
-    scheduleWebtoolsUaAutoParse(form);
-  });
-  inputHead.append(inputLabel, inputMeta);
-  inputPane.append(inputHead, inputArea);
-
-  const info = document.createElement("div");
-  info.className = "webtools-ua-info";
-  const grid = document.createElement("div");
-  grid.className = "webtools-ua-grid";
-
-  editor.append(inputPane, info, grid);
-  form.append(header, editor);
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  refreshWebtoolsUaResultInForm(form);
-  scheduleWebtoolsUaAutoParse(form, true);
+  panelImplsSafe.renderWebtoolsUaPanel();
 }
 
 function applyWebtoolsApiPanelPayload(panel: ActivePluginPanelState): void {
-  const data = panel.data;
-  if (data && typeof data.method === "string") {
-    webtoolsApiMethod = data.method;
-  }
-  if (data && typeof data.url === "string") {
-    webtoolsApiUrl = data.url;
-  }
-  if (data && typeof data.bodyType === "string") {
-    webtoolsApiBodyType =
-      data.bodyType === "text" || data.bodyType === "formdata" ? data.bodyType : "json";
-  }
-  if (data && typeof data.bodyContent === "string") {
-    webtoolsApiBodyContent = data.bodyContent;
-  }
-
-  webtoolsApiParams = normalizeWebtoolsApiRows(data?.params);
-  webtoolsApiHeaders = normalizeWebtoolsApiRows(data?.headers, [
-    { key: "Content-Type", value: "application/json", enabled: true },
-    { key: "", value: "", enabled: true }
-  ]);
-  webtoolsApiFormRows = normalizeWebtoolsApiRows(data?.formRows);
-  syncWebtoolsApiContentTypeHeader();
-
-  webtoolsApiResponseStatus = "";
-  webtoolsApiResponseBody = "";
-  webtoolsApiResponseHeaders = {};
-  webtoolsApiResponseTimeMs = 0;
-  webtoolsApiResponseSizeText = "";
-  webtoolsApiResponseUrl = "";
-  webtoolsApiResponseError = "";
-  webtoolsApiHasResponse = false;
-  webtoolsApiIsLoading = false;
+  panelImplsSafe.applyWebtoolsApiPanelPayload(panel);
 }
 
 function buildWebtoolsApiTarget(): string {
@@ -11715,302 +9897,198 @@ async function executeWebtoolsApiRequest(
 }
 
 function renderWebtoolsApiPanel(): void {
-  const panelItem = document.createElement("li");
-  panelItem.className = "settings-panel-item";
+  panelImplsSafe.renderWebtoolsApiPanel();
+}
 
-  const panel = document.createElement("section");
-  panel.className = "settings-panel webtools-api-panel";
+function normalizeWebtoolsHttpMockMethod(value: string): WebtoolsHttpMockMethod {
+  const normalized = value.trim().toUpperCase();
+  if (
+    normalized === "GET" ||
+    normalized === "POST" ||
+    normalized === "PUT" ||
+    normalized === "PATCH" ||
+    normalized === "DELETE" ||
+    normalized === "OPTIONS"
+  ) {
+    return normalized;
+  }
+  return "GET";
+}
 
-  const form = document.createElement("form");
-  form.className = "settings-form webtools-api-form webtools-tool-panel";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void executeWebtoolsApiRequest(form, { render: false });
-  });
+function normalizeWebtoolsHttpMockPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "/mock";
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
 
-  const header = document.createElement("div");
-  header.className = "webtools-tool-header";
-  const titleGroup = document.createElement("div");
-  titleGroup.className = "webtools-tool-title-group";
-  const title = document.createElement("h3");
-  title.className = "webtools-tool-title";
-  title.textContent = activePluginPanel?.title || "API 调试";
-  const description = document.createElement("p");
-  description.className = "webtools-tool-subtitle";
-  description.textContent =
-    activePluginPanel?.subtitle || "HTTP 请求构建与响应查看。";
-  titleGroup.append(title, description);
+function applyWebtoolsHttpMockPanelPayload(panel: ActivePluginPanelState): void {
+  panelImplsSafe.applyWebtoolsHttpMockPanelPayload(panel);
+}
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "webtools-tool-toolbar";
-  const clearButton = document.createElement("button");
-  clearButton.type = "button";
-  clearButton.className = "settings-btn settings-btn-secondary";
-  clearButton.textContent = "清空";
-  clearButton.addEventListener("click", () => {
-    webtoolsApiMethod = "GET";
-    webtoolsApiUrl = "https://jsonplaceholder.typicode.com/posts/1";
-    webtoolsApiRequestTab = "params";
-    webtoolsApiResponseTab = "body";
-    webtoolsApiParams = [{ key: "", value: "", enabled: true }];
-    webtoolsApiHeaders = [
-      { key: "Content-Type", value: "application/json", enabled: true },
-      { key: "", value: "", enabled: true }
-    ];
-    webtoolsApiBodyType = "json";
-    webtoolsApiBodyContent = "{\n  \"title\": \"foo\",\n  \"body\": \"bar\",\n  \"userId\": 1\n}";
-    webtoolsApiFormRows = [{ key: "", value: "", enabled: true }];
-    syncWebtoolsApiContentTypeHeader();
-    webtoolsApiResponseStatus = "";
-    webtoolsApiResponseBody = "";
-    webtoolsApiResponseHeaders = {};
-    webtoolsApiResponseTimeMs = 0;
-    webtoolsApiResponseSizeText = "";
-    webtoolsApiResponseUrl = "";
-    webtoolsApiResponseError = "";
-    webtoolsApiHasResponse = false;
-    webtoolsApiIsLoading = false;
-    renderList();
-  });
-  toolbar.append(clearButton);
-  header.append(titleGroup, toolbar);
+function buildWebtoolsHttpMockTarget(action: "open" | "start" | "stop" | "status"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("port", String(webtoolsHttpMockPort));
+  params.set("path", webtoolsHttpMockPath);
+  params.set("method", webtoolsHttpMockMethod);
+  params.set("statusCode", String(webtoolsHttpMockStatusCode));
+  params.set("contentType", webtoolsHttpMockContentType);
+  params.set("body", webtoolsHttpMockBody);
+  return `command:plugin:${WEBTOOLS_HTTP_MOCK_PLUGIN_ID}?${params.toString()}`;
+}
 
-  const requestRow = document.createElement("div");
-  requestRow.className = "webtools-api-request";
-  const methodSelect = document.createElement("select");
-  methodSelect.className = "settings-value webtools-tool-select webtools-api-method";
-  methodSelect.name = "webtoolsApiMethod";
-  ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].forEach((method) => {
-    const option = document.createElement("option");
-    option.value = method;
-    option.textContent = method;
-    option.selected = webtoolsApiMethod === method;
-    methodSelect.appendChild(option);
-  });
-  const urlInput = document.createElement("input");
-  urlInput.className = "settings-value webtools-tool-input webtools-api-url";
-  urlInput.name = "webtoolsApiUrl";
-  urlInput.value = webtoolsApiUrl;
-  urlInput.placeholder = "https://example.com/api";
-  const sendButton = document.createElement("button");
-  sendButton.type = "submit";
-  sendButton.className = "settings-btn settings-btn-primary webtools-api-send-btn";
-  sendButton.textContent = "发送";
-  requestRow.append(methodSelect, urlInput, sendButton);
-
-  const previewRow = document.createElement("div");
-  previewRow.className = "webtools-api-preview-row";
-  const previewLabel = document.createElement("span");
-  previewLabel.className = "webtools-api-preview-label";
-  previewLabel.textContent = "预览 URL";
-  const previewValue = document.createElement("div");
-  previewValue.className = "webtools-api-preview webtools-tool-code";
-  previewValue.textContent = buildWebtoolsApiPreviewUrl() || "-";
-  previewRow.append(previewLabel, previewValue);
-
-  const requestTabs = document.createElement("div");
-  requestTabs.className = "webtools-api-tabs";
-  [
-    { id: "params" as const, label: "参数" },
-    { id: "headers" as const, label: "请求头" },
-    { id: "body" as const, label: "请求体" }
-  ].forEach(({ id, label }) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "webtools-api-tab";
-    button.dataset.apiRequestTab = id;
-    button.textContent = label;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      webtoolsApiRequestTab = id;
-      refreshWebtoolsApiTabs(form);
-    });
-    requestTabs.appendChild(button);
-  });
-
-  const requestPanels = document.createElement("div");
-  requestPanels.className = "webtools-api-panels";
-
-  const paramsPanel = document.createElement("div");
-  paramsPanel.className = "webtools-api-panel-card";
-  paramsPanel.dataset.apiRequestPanel = "params";
-  paramsPanel.appendChild(createWebtoolsApiRowsEditor(form, "params"));
-
-  const headersPanel = document.createElement("div");
-  headersPanel.className = "webtools-api-panel-card";
-  headersPanel.dataset.apiRequestPanel = "headers";
-  headersPanel.appendChild(createWebtoolsApiRowsEditor(form, "headers"));
-
-  const bodyPanel = document.createElement("div");
-  bodyPanel.className = "webtools-api-panel-card";
-  bodyPanel.dataset.apiRequestPanel = "body";
-  const bodyTop = document.createElement("div");
-  bodyTop.className = "webtools-tool-bar";
-  const bodyTypeRow = document.createElement("div");
-  bodyTypeRow.className = "webtools-tool-bar-group";
-  const bodyTypeInput = document.createElement("input");
-  bodyTypeInput.type = "hidden";
-  bodyTypeInput.name = "webtoolsApiBodyType";
-  bodyTypeInput.value = webtoolsApiBodyType;
-  const bodyTypeGroup = document.createElement("div");
-  bodyTypeGroup.className = "webtools-api-body-types";
-  [
-    { value: "json", label: "JSON" },
-    { value: "text", label: "纯文本" },
-    { value: "formdata", label: "FormData" }
-  ].forEach((entry) => {
-    const label = document.createElement("label");
-    label.className = "webtools-api-body-type";
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "webtoolsApiBodyTypeDisplay";
-    radio.value = entry.value;
-    radio.checked = webtoolsApiBodyType === entry.value;
-    radio.addEventListener("change", () => {
-      if (!radio.checked) {
-        return;
-      }
-      webtoolsApiBodyType = entry.value as "json" | "text" | "formdata";
-      syncWebtoolsApiContentTypeHeader();
-      bodyTypeInput.value = webtoolsApiBodyType;
-      renderList();
-    });
-    const text = document.createElement("span");
-    text.textContent = entry.label;
-    label.append(radio, text);
-    bodyTypeGroup.appendChild(label);
-  });
-  bodyTypeRow.append(bodyTypeGroup);
-  bodyTop.appendChild(bodyTypeRow);
-  bodyPanel.append(bodyTypeInput, bodyTop);
-
-  if (webtoolsApiBodyType === "formdata") {
-    bodyPanel.appendChild(createWebtoolsApiRowsEditor(form, "formdata"));
-  } else {
-    const bodyArea = document.createElement("textarea");
-    bodyArea.className = "settings-value webtools-textarea webtools-api-body";
-    bodyArea.name = "webtoolsApiBody";
-    bodyArea.value = webtoolsApiBodyContent;
-    bodyArea.placeholder = webtoolsApiBodyType === "json" ? "输入 JSON 请求体" : "输入文本请求体";
-    bodyArea.addEventListener("input", () => {
-      webtoolsApiBodyContent = bodyArea.value;
-    });
-    bodyPanel.appendChild(bodyArea);
+function refreshWebtoolsHttpMockPanelInForm(form: HTMLFormElement): void {
+  const methodNode = form.elements.namedItem("webtoolsHttpMockMethod");
+  if (methodNode instanceof HTMLSelectElement) {
+    methodNode.value = webtoolsHttpMockMethod;
+  }
+  const portNode = form.elements.namedItem("webtoolsHttpMockPort");
+  if (portNode instanceof HTMLInputElement) {
+    portNode.value = String(webtoolsHttpMockPort);
+  }
+  const pathNode = form.elements.namedItem("webtoolsHttpMockPath");
+  if (pathNode instanceof HTMLInputElement) {
+    pathNode.value = webtoolsHttpMockPath;
+  }
+  const statusNode = form.elements.namedItem("webtoolsHttpMockStatusCode");
+  if (statusNode instanceof HTMLInputElement) {
+    statusNode.value = String(webtoolsHttpMockStatusCode);
+  }
+  const contentTypeNode = form.elements.namedItem("webtoolsHttpMockContentType");
+  if (contentTypeNode instanceof HTMLInputElement) {
+    contentTypeNode.value = webtoolsHttpMockContentType;
+  }
+  const bodyNode = form.elements.namedItem("webtoolsHttpMockBody");
+  if (bodyNode instanceof HTMLTextAreaElement) {
+    bodyNode.value = webtoolsHttpMockBody;
   }
 
-  requestPanels.append(paramsPanel, headersPanel, bodyPanel);
+  const runtimeNode = form.querySelector<HTMLElement>(".webtools-http-mock-runtime");
+  if (runtimeNode) {
+    runtimeNode.textContent = webtoolsHttpMockRunning
+      ? `运行中：${webtoolsHttpMockMethod} ${webtoolsHttpMockUrl || `http://127.0.0.1:${webtoolsHttpMockPort}${webtoolsHttpMockPath}`}`
+      : "当前未启动";
+    runtimeNode.dataset.state = webtoolsHttpMockRunning ? "ok" : "idle";
+  }
 
-  const responseSection = document.createElement("section");
-  responseSection.className = "webtools-api-response-section";
-  const responseHead = document.createElement("div");
-  responseHead.className = "webtools-api-response-head";
-  const responseMetrics = document.createElement("div");
-  responseMetrics.className = "webtools-api-metrics";
-  const responseBadge = document.createElement("div");
-  responseBadge.className = "webtools-api-status";
-  const responseTime = document.createElement("span");
-  responseTime.className = "webtools-api-time";
-  const responseSize = document.createElement("span");
-  responseSize.className = "webtools-api-size";
-  responseMetrics.append(responseBadge, responseTime, responseSize);
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className = "settings-btn settings-btn-primary webtools-api-copy-btn";
-  copyButton.textContent = "复制";
-  copyButton.addEventListener("click", async () => {
-    if (webtoolsApiResponseTab === "headers") {
-      const headersText = Object.entries(webtoolsApiResponseHeaders)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join("\n");
-      if (!headersText) {
-        setStatus("暂无可复制的响应头");
-        return;
+  const countNode = form.querySelector<HTMLElement>(".webtools-http-mock-count");
+  if (countNode) {
+    countNode.textContent = `请求次数：${webtoolsHttpMockRequestCount}`;
+  }
+
+  const infoNode = form.querySelector<HTMLElement>(".webtools-http-mock-info");
+  if (infoNode) {
+    const text = webtoolsHttpMockError || webtoolsHttpMockInfo || "可配置后启动本地 Mock";
+    infoNode.textContent = text;
+    infoNode.dataset.state = webtoolsHttpMockError
+      ? "error"
+      : webtoolsHttpMockRunning
+        ? "ok"
+        : "idle";
+  }
+}
+
+async function executeWebtoolsHttpMockAction(
+  action: "start" | "stop" | "status",
+  form?: HTMLFormElement
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 HTTP Mock");
+    return;
+  }
+
+  if (form) {
+    const methodNode = form.elements.namedItem("webtoolsHttpMockMethod");
+    const portNode = form.elements.namedItem("webtoolsHttpMockPort");
+    const pathNode = form.elements.namedItem("webtoolsHttpMockPath");
+    const statusNode = form.elements.namedItem("webtoolsHttpMockStatusCode");
+    const contentTypeNode = form.elements.namedItem("webtoolsHttpMockContentType");
+    const bodyNode = form.elements.namedItem("webtoolsHttpMockBody");
+
+    webtoolsHttpMockMethod =
+      methodNode instanceof HTMLSelectElement
+        ? normalizeWebtoolsHttpMockMethod(methodNode.value)
+        : webtoolsHttpMockMethod;
+    if (portNode instanceof HTMLInputElement) {
+      const parsed = Number(portNode.value);
+      if (Number.isFinite(parsed)) {
+        webtoolsHttpMockPort = Math.min(65535, Math.max(1024, Math.floor(parsed)));
       }
-      await navigator.clipboard.writeText(headersText);
-      setStatus("已复制响应头");
-      return;
     }
-
-    if (!webtoolsApiResponseBody.trim()) {
-      setStatus("暂无可复制的响应体");
-      return;
+    if (pathNode instanceof HTMLInputElement) {
+      webtoolsHttpMockPath = normalizeWebtoolsHttpMockPath(pathNode.value);
     }
-    await navigator.clipboard.writeText(webtoolsApiResponseBody);
-    setStatus("已复制响应体");
-  });
-  responseHead.append(responseMetrics, copyButton);
+    if (statusNode instanceof HTMLInputElement) {
+      const parsed = Number(statusNode.value);
+      if (Number.isFinite(parsed)) {
+        webtoolsHttpMockStatusCode = Math.min(599, Math.max(100, Math.floor(parsed)));
+      }
+    }
+    if (contentTypeNode instanceof HTMLInputElement && contentTypeNode.value.trim()) {
+      webtoolsHttpMockContentType = contentTypeNode.value.trim();
+    }
+    if (bodyNode instanceof HTMLTextAreaElement) {
+      webtoolsHttpMockBody = bodyNode.value;
+    }
+  }
 
-  const responseUrl = document.createElement("div");
-  responseUrl.className = "webtools-api-response-url webtools-tool-code";
-  responseUrl.hidden = true;
-  responseUrl.textContent = "";
+  const requestToken = ++webtoolsHttpMockRequestToken;
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_HTTP_MOCK_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "HTTP Mock Server",
+    subtitle: "面板执行",
+    target: buildWebtoolsHttpMockTarget(action),
+    keywords: ["plugin", "http", "mock", "api"]
+  };
 
-  const errorNode = document.createElement("div");
-  errorNode.className = "webtools-api-error";
-  errorNode.hidden = true;
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsHttpMockRequestToken) {
+    return;
+  }
 
-  const responseTabs = document.createElement("div");
-  responseTabs.className = "webtools-api-tabs webtools-api-response-tabs";
-  [
-    { id: "body" as const, label: "响应体" },
-    { id: "headers" as const, label: "响应头" }
-  ].forEach(({ id, label }) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "webtools-api-tab";
-    button.dataset.apiResponseTab = id;
-    button.textContent = label;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      webtoolsApiResponseTab = id;
-      refreshWebtoolsApiTabs(form);
-      refreshWebtoolsApiResponseInForm(form);
-    });
-    responseTabs.appendChild(button);
-  });
+  const data = toRecord(result.data);
+  if (typeof data?.running === "boolean") {
+    webtoolsHttpMockRunning = data.running;
+  }
+  if (typeof data?.url === "string") {
+    webtoolsHttpMockUrl = data.url;
+  }
+  if (typeof data?.requestCount === "number" && Number.isFinite(data.requestCount)) {
+    webtoolsHttpMockRequestCount = Math.max(0, Math.floor(data.requestCount));
+  }
+  if (typeof data?.port === "number" && Number.isFinite(data.port)) {
+    webtoolsHttpMockPort = Math.min(65535, Math.max(1024, Math.floor(data.port)));
+  }
+  if (typeof data?.path === "string") {
+    webtoolsHttpMockPath = normalizeWebtoolsHttpMockPath(data.path);
+  }
+  if (typeof data?.method === "string") {
+    webtoolsHttpMockMethod = normalizeWebtoolsHttpMockMethod(data.method);
+  }
+  if (typeof data?.statusCode === "number" && Number.isFinite(data.statusCode)) {
+    webtoolsHttpMockStatusCode = Math.min(599, Math.max(100, Math.floor(data.statusCode)));
+  }
+  if (typeof data?.contentType === "string" && data.contentType.trim()) {
+    webtoolsHttpMockContentType = data.contentType;
+  }
+  if (typeof data?.body === "string") {
+    webtoolsHttpMockBody = data.body;
+  }
 
-  const responsePanels = document.createElement("div");
-  responsePanels.className = "webtools-api-panels webtools-api-response-panels";
-  const responseBodyPanel = document.createElement("div");
-  responseBodyPanel.className = "webtools-api-panel-card";
-  responseBodyPanel.dataset.apiResponsePanel = "body";
-  const responseBodyArea = document.createElement("pre");
-  responseBodyArea.className = "webtools-api-response-body webtools-tool-code";
-  responseBodyArea.textContent = "";
-  responseBodyPanel.appendChild(responseBodyArea);
-  const responseHeadersPanel = document.createElement("div");
-  responseHeadersPanel.className = "webtools-api-panel-card";
-  responseHeadersPanel.dataset.apiResponsePanel = "headers";
-  const responseHeadersHost = document.createElement("div");
-  responseHeadersHost.className = "webtools-api-response-headers-host";
-  responseHeadersPanel.appendChild(responseHeadersHost);
-  responsePanels.append(responseBodyPanel, responseHeadersPanel);
-  responseSection.append(responseHead, responseUrl, errorNode, responseTabs, responsePanels);
+  webtoolsHttpMockError = result.ok ? "" : result.message || "HTTP Mock 执行失败";
+  webtoolsHttpMockInfo = result.message || (result.ok ? "执行完成" : "执行失败");
+  setStatus(result.message ?? (result.ok ? "HTTP Mock 执行完成" : "HTTP Mock 执行失败"));
+  if (form) {
+    refreshWebtoolsHttpMockPanelInForm(form);
+  }
+}
 
-  methodSelect.addEventListener("change", () => {
-    webtoolsApiMethod = methodSelect.value;
-    refreshWebtoolsApiMethodUi(form);
-  });
-  urlInput.addEventListener("input", () => {
-    webtoolsApiUrl = urlInput.value;
-    refreshWebtoolsApiPreview(form);
-  });
-  form.append(
-    header,
-    requestRow,
-    previewRow,
-    requestTabs,
-    requestPanels,
-    responseSection
-  );
-
-  panel.append(form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
-
-  refreshWebtoolsApiResponseInForm(form);
+function renderWebtoolsHttpMockPanel(): void {
+  panelImplsSafe.renderWebtoolsHttpMockPanel();
 }
 
 function renderPluginPanel(): void {
@@ -12237,6 +10315,13 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     onOpen: applyWebtoolsApiPanelPayload,
     onEnter: runWithPluginForm("form.webtools-api-form", (form) => {
       void executeWebtoolsApiRequest(form);
+    })
+  },
+  [WEBTOOLS_HTTP_MOCK_PLUGIN_ID]: {
+    render: renderWebtoolsHttpMockPanel,
+    onOpen: applyWebtoolsHttpMockPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-http-mock-form", (form) => {
+      void executeWebtoolsHttpMockAction("start", form);
     })
   }
 };
@@ -13211,6 +11296,21 @@ async function refreshEntries(query: string): Promise<void> {
           }
         );
         if (!parsedQuery.explicitScope) {
+          const pluginPageSize = Math.max(1, searchDisplayConfig.pluginLimit);
+          const pluginTotalCount = pluginItems.length;
+          const pluginPageCount = Math.max(
+            1,
+            Math.ceil(Math.max(1, pluginTotalCount) / pluginPageSize)
+          );
+          if (pluginResultPage >= pluginPageCount) {
+            pluginResultPage = pluginPageCount - 1;
+          }
+          const pluginStart = pluginResultPage * pluginPageSize;
+          const pagedPluginItems = pluginItems.slice(
+            pluginStart,
+            pluginStart + pluginPageSize
+          );
+
           addSearchSection(
             "pinned",
             "\u7f6e\u9876",
@@ -13221,9 +11321,14 @@ async function refreshEntries(query: string): Promise<void> {
           addSearchSection(
             "plugin",
             "\u63d2\u4ef6",
-            pluginItems,
-            searchDisplayConfig.pluginLimit,
-            "\u6682\u65e0\u63d2\u4ef6"
+            pagedPluginItems,
+            pluginPageSize,
+            "\u6682\u65e0\u63d2\u4ef6",
+            {
+              totalCount: pluginTotalCount,
+              page: pluginResultPage,
+              pageCount: pluginPageCount
+            }
           );
         }
         selectedIndex = entries.length ? 0 : 0;
@@ -13237,14 +11342,21 @@ async function refreshEntries(query: string): Promise<void> {
             `${parsedQuery.scopeLabel}搜索 ${shownStart}-${shownEnd}/${totalSearchText}`
           );
         } else {
+          const pluginPageSize = Math.max(1, searchDisplayConfig.pluginLimit);
+          const pluginShownStart =
+            pluginItems.length === 0 ? 0 : pluginResultPage * pluginPageSize + 1;
+          const pluginShownEnd =
+            pluginItems.length === 0
+              ? 0
+              : Math.min(
+                  pluginItems.length,
+                  pluginResultPage * pluginPageSize + pluginPageSize
+                );
           setStatus(
             `\u641c\u7d22 ${shownStart}-${shownEnd}/${totalSearchText} \u00b7 \u7f6e\u9876 ${Math.min(
               pinnedItems.length,
               searchDisplayConfig.pinnedLimit
-            )} \u00b7 \u63d2\u4ef6 ${Math.min(
-              pluginItems.length,
-              searchDisplayConfig.pluginLimit
-            )}`
+            )} \u00b7 \u63d2\u4ef6 ${pluginShownStart}-${pluginShownEnd}/${pluginItems.length}`
           );
         }
         return;
@@ -13261,6 +11373,17 @@ async function refreshEntries(query: string): Promise<void> {
       if (token !== latestSearchToken) {
         return;
       }
+
+      const pluginPageSize = Math.max(1, searchDisplayConfig.pluginLimit);
+      const pluginPageCount = Math.max(
+        1,
+        Math.ceil(Math.max(1, pluginItems.length) / pluginPageSize)
+      );
+      if (pluginResultPage >= pluginPageCount) {
+        pluginResultPage = pluginPageCount - 1;
+      }
+      const pluginStart = pluginResultPage * pluginPageSize;
+      const pagedPluginItems = pluginItems.slice(pluginStart, pluginStart + pluginPageSize);
 
       resetSearchSections();
       addSearchSection(
@@ -13280,9 +11403,14 @@ async function refreshEntries(query: string): Promise<void> {
       addSearchSection(
         "plugin",
         "\u63d2\u4ef6",
-        pluginItems,
-        searchDisplayConfig.pluginLimit,
-        "\u6682\u65e0\u63d2\u4ef6"
+        pagedPluginItems,
+        pluginPageSize,
+        "\u6682\u65e0\u63d2\u4ef6",
+        {
+          totalCount: pluginItems.length,
+          page: pluginResultPage,
+          pageCount: pluginPageCount
+        }
       );
       selectedIndex = entries.length ? 0 : 0;
       renderList();
@@ -13290,7 +11418,9 @@ async function refreshEntries(query: string): Promise<void> {
         `\u6700\u8fd1 ${Math.min(recentItems.length, searchDisplayConfig.recentLimit)} \u00b7 \u7f6e\u9876 ${Math.min(
           pinnedItems.length,
           searchDisplayConfig.pinnedLimit
-        )} \u00b7 \u63d2\u4ef6 ${Math.min(pluginItems.length, searchDisplayConfig.pluginLimit)}`
+        )} \u00b7 \u63d2\u4ef6 ${
+          pluginItems.length === 0 ? 0 : pluginStart + 1
+        }-${pluginItems.length === 0 ? 0 : pluginStart + pagedPluginItems.length}/${pluginItems.length}`
       );
       return;
     }

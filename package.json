@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "test:search-settings": "pnpm run build && node dist/test/search-settings-regression.test.js",
     "test:main-flow": "pnpm run build && node dist/test/launcher-main-flow-regression.test.js",
     "test:windows-alias": "pnpm run build && node dist/test/windows-app-alias-regression.test.js",
-    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js",
+    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js",
     "test:regression:full": "pnpm run test:regression && pnpm run test:e2e:smoke",
     "test:path-rules": "pnpm run build && node dist/test/result-path-filter.test.js",
     "test:plugins-visible": "pnpm run build && node dist/test/visible-plugins-regression.test.js",

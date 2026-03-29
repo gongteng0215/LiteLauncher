@@ -1,248 +1,168 @@
 # LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-03-19
-适用版本：LiteLauncher `v1.0.11`
+更新时间：2026-03-29
+适用版本：LiteLauncher `v1.0.12`
 
 ## 1. 产品目标
 
 - 产品名称：LiteLauncher
-- 平台：Windows 11（主）、macOS（开发/打包模板支持）
+- 平台：Windows 11（主）、macOS（开发与打包模板支持）
 - 技术栈：Electron + TypeScript + SQLite
 - 定位：轻量、快速、可扩展的桌面启动器
-- 核心目标：稳定形成“唤起 -> 输入 -> 检索 -> 执行”闭环
+- 核心目标：稳定形成“唤起 -> 输入 -> 搜索 -> 执行”的闭环
 
 ## 2. 目标用户与场景
 
 ### 2.1 目标用户
 
 - 办公用户：高频打开应用、文档、网页
-- 开发用户：快速切换工具与命令入口
-- 效率用户：希望把动作聚合到一个统一入口
+- 开发用户：快速切换工具、命令和插件
+- 效率用户：希望把常用动作收束到统一入口
 
 ### 2.2 典型场景
 
-1. `Alt+Space` 唤起，输入应用名直接启动。
+1. `Alt+Space` 唤起后输入应用名直接启动。
 2. `g 关键词` 立即网页搜索。
-3. `calc 表达式` 快速计算并复制。
+3. `calc 表达式` 快速计算并复制结果。
 4. `clip` 搜索并复用剪贴板内容。
-5. `cash` 打开现金流游戏继续当前对局。
-6. `wt-jwt` 打开 JWT 调试器进行解析/签名。
-7. `wt-time` 打开时间戳工具进行日期互转。
+5. `cash` 打开 Cashflow Lite 继续当前对局。
+6. `wt-jwt` 打开 JWT 调试器进行解析或签名。
+7. `wt-time` 打开时间戳工具进行 Unix / 日期互转。
 8. `wt-qr` 打开二维码生成面板。
-9. `wt-md` 打开 Markdown 预览面板。
+9. `wt-md` 打开 Markdown 预览工具。
 10. 输入 `codex` 命中并启动 Windows 应用别名。
 
-## 3. 功能范围
+## 3. 当前能力范围
 
-### 3.1 已实现（当前版本）
+### 3.1 已实现能力
 
 #### 3.1.1 唤起与窗口
 
 - 全局快捷键默认 `Alt+Space`
-- 冲突自动回退（`Ctrl+Space`、`Alt+Shift+Space`、`Ctrl+Alt+Space`）
-- 二次触发可显示/隐藏主窗口
-- 主窗口：无边框、置顶、居中、任务栏隐藏
+- 冲突自动回退：`Ctrl+Space`、`Alt+Shift+Space`、`Ctrl+Alt+Space`
+- 单实例窗口显示 / 隐藏切换
 - 托盘菜单：显示主窗口、退出
-- 开发模式支持单实例替换，避免旧主进程残留
+- 开发态支持 `--replace-instance`，避免旧主进程残留
 
 #### 3.1.2 搜索与执行
 
-- 统一搜索：应用、文件夹、文件、网页、命令、插件
-- 分区展示：
+- 统一搜索应用、文件、文件夹、网页、命令、插件
+- 搜索分区：
   - 空输入：最近访问 / 置顶 / 插件
   - 非空输入：搜索结果 / 置顶 / 插件
-- 搜索中提供加载反馈，避免无响应感
-- 搜索结果支持分页与页内导航
+- 搜索加载态、输入防抖、结果分页
 - 图标网格展示与方向键导航
-- 右键结果卡动作：置顶/取消置顶、管理员运行、打开所在位置
-- 管理员运行走 Windows UAC，并区分弹窗/取消/失败状态
-- 支持范围前缀过滤：`app:` / `cmd:` / `web:` / `plugin:`
-- 中文检索增强：首字母、拼音片段、别名映射
-- 长串无意义输入噪声抑制
+- 结果卡片右键动作：置顶 / 取消置顶、管理员运行、打开所在位置
+- 搜索范围前缀：`app:` / `cmd:` / `web:` / `plugin:`
+- 中文搜索增强：首字母、拼音片段、别名映射
 - Windows 命令与应用别名支持：
-  - PATH 命令别名搜索
-  - StartApps / WindowsApps 应用激活
+  - PATH 命令别名
+  - StartApps / WindowsApps 激活
   - 典型条目：`codex`
-- 命中同一目标时进行结果去重，优先保留图标/信息更完整的条目
+- 同目标搜索结果去重，优先保留图标和信息更完整的条目
 
-#### 3.1.3 内置与插件
+#### 3.1.3 索引与设置
 
-- 内置命令：`clip`、`settings`、`exit`
-- 可见插件（20 个）：
-  - `cashflow-game`
-  - `webtools-password`
-  - `webtools-cron`
-  - `webtools-json`
-  - `webtools-crypto`
-  - `webtools-jwt`
-  - `webtools-timestamp`
-  - `webtools-strings`
-  - `webtools-colors`
-  - `webtools-diff`
-  - `webtools-image-base64`
-  - `webtools-config-convert`
-  - `webtools-sql-format`
-  - `webtools-unit-convert`
-  - `webtools-regex`
-  - `webtools-url-parse`
-  - `webtools-qrcode`
-  - `webtools-markdown`
-  - `webtools-ua`
-  - `webtools-api-client`
-- WebTools 迁移现状：19 个插件目录已全部接入并默认开放
-
-#### 3.1.4 WebTools 插件能力（当前）
-
-- 密码工具：长度/字符集/数量配置，批量生成与复制
-- Cron 工具：表达式解析、下次执行时间、未来执行时间列表
-- JSON 工具：JSON/CSV/Text/Escaped 转换、格式化、压缩、校验
-- 加密工具：MD5/SHA、AES/DES、RSA、Base64/URL
-- JWT 工具：JWS/JWE 解析与生成，HS256/RS256，JWE `dir` 模式
-- 时间戳工具：双区块互转（Unix/日期）、秒/毫秒切换、当前时间实时显示、获取当前、输入自动转换
-- 正则工具：默认示例、自动匹配、替换预览
-- 字符串工具：大小写转换、UUID 批量生成与复制
-- 文本对比：双栏输入、自动差异对比、统计摘要
-- 配置转换：YAML/JSON/Properties 自动互转
-- SQL 格式化：方言切换、缩进配置、自动格式化
-- 单位换算：容量换算与 px/rem 联动
-- URL 解析：默认示例、自动解析、结构化展示
-- 二维码工具：文本/链接实时生成二维码、颜色配置、Logo 叠加、PNG 下载
-- Markdown 工具：实时预览、HTML 输出、复制 HTML
-- 颜色工具：色板、系统取色器、HEX/RGB/HSL 自动转换、色阶点击回填
-- 图片 Base64：拖拽/上传图片、Base64/DataURL 自动规范化、预览、下载、复制
-- UA 解析：自动解析浏览器、系统、设备、引擎、CPU 架构信息
-- API 调试：结构化请求参数、Body/FormData 编辑与响应查看
-
-#### 3.1.5 剪贴板历史
-
-- 文本监听、去重、持久化
-- 支持搜索、复制、删除、清空
-
-#### 3.1.6 设置页
-
-- 分组设置页：搜索展示 / 索引扫描 / 系统 / 错误日志
-- 可配置最近/置顶/插件/搜索结果显示数量
+- 设置页分组：搜索显示 / 索引扫描 / 系统 / 错误日志
+- 可配置最近、置顶、插件、搜索结果的显示数量
 - 可配置索引扫描源：Program Files / 自定义目录
-- 可配置索引排除目录（扫描黑名单）
-- 可配置结果目录白名单 / 黑名单（搜索、最近、置顶统一过滤）
-- 可配置插件可见白名单（按插件 ID 配置，保存后热更新）
-- 提供重建索引入口
-- 开机启动开关（Windows/macOS）
-- 错误日志查看与清空（最近 40 条）
+- 可配置扫描排除目录
+- 可配置结果白名单 / 黑名单目录
+- 设置页可直接重建索引
+- 支持开机启动开关（Windows / macOS）
+- 错误日志可查看与清空
 
-#### 3.1.7 开发体验
+#### 3.1.4 插件体系
 
-- `pnpm dev` 提供增量开发模式
-- 监听 `src/main` / `src/preload` / `src/shared`
-- 主进程变更自动重启 Electron
-- 监听 `src/renderer` / `src/assets`
-- 渲染层变更自动刷新窗口
+- 插件统一走 `command:plugin:*` 协议
+- 当前默认可见插件 21 个
+- 20 个 WebTools 插件已全部接入并开放
+- 插件原生动作期间支持暂停自动隐藏
+- 多行输入统一为：
+  - `Enter` 换行
+  - `Ctrl+Enter` 执行
+  - `Esc` 返回
 
-#### 3.1.8 打包发布（基础）
+#### 3.1.5 质量与开发
 
-- `electron-builder`：Windows（NSIS/Portable/zip）、macOS（dmg/zip）
-- Windows 图标已接入主窗口、托盘和安装包快捷方式配置
-- GitHub Actions：`v*` tag 自动构建并上传 Release 资产
+- `pnpm dev` 支持增量编译、主进程重启、渲染层刷新
+- 已有自动回归：
+  - 搜索与设置回归
+  - 主流程回归
+  - Windows 应用别名回归
+  - 路径规则回归
+  - 插件可见性回归
+  - 第一版 Playwright UI smoke
 
-### 3.2 规划中
+### 3.2 当前默认可见插件
 
-#### 3.2.1 启动器核心增强
+1. `cashflow-game`
+2. `webtools-password`
+3. `webtools-cron`
+4. `webtools-json`
+5. `webtools-crypto`
+6. `webtools-jwt`
+7. `webtools-timestamp`
+8. `webtools-strings`
+9. `webtools-colors`
+10. `webtools-diff`
+11. `webtools-http-mock`
+12. `webtools-image-base64`
+13. `webtools-config-convert`
+14. `webtools-sql-format`
+15. `webtools-unit-convert`
+16. `webtools-regex`
+17. `webtools-url-parse`
+18. `webtools-qrcode`
+19. `webtools-markdown`
+20. `webtools-ua`
+21. `webtools-api-client`
 
-- 快捷键自定义
-- 执行后行为配置（执行后隐藏/保持）
-- 命令别名与自定义命令模板
-- 插件管理页（启用/禁用/排序）
-- 搜索源扫描规则进一步细化（黑名单/白名单/目录优先级）
+## 4. 非功能要求
 
-#### 3.2.2 WebTools 后续优化
+### 4.1 性能
 
-- 插件面板 UI 一致性收敛（小屏/缩放适配）
-- 插件自动化回归（输入联动、Esc/Enter、状态提示）
-- 插件面板渲染逻辑继续拆分出 `renderer.ts`
+- 唤起：目标 <= 150ms
+- 前 20 条搜索刷新：目标 <= 50ms
+- 执行动作反馈：目标 <= 300ms（依赖系统项除外）
 
-#### 3.2.3 Cashflow 后续
+### 4.2 稳定性
 
-- `cash review` 复盘落地
-- AI 多性格策略与对比面板
-- 结算总结卡、图表面板
+- 快捷键、置顶、历史、设置可持久化
+- 插件异常不应拖垮主搜索
+- 搜索模式与插件模式切换时窗口尺寸稳定
+- 运行异常应写入统一错误日志
+- 原生文件选择、下载等动作期间窗口不应因为失焦直接隐藏
 
-## 4. 搜索与排序
-
-### 4.1 匹配策略
-
-- 前缀匹配
-- 子串匹配
-- 受限模糊匹配（降低噪声）
-- 中文拼音首字母/片段
-- 常见别名映射
-- Windows 命令 / StartApp / WindowsApps 目标补充
-
-### 4.2 排序公式
-
-```text
-score = matchScore * 0.7 + usageScore * 0.2 + recencyScore * 0.1
-```
-
-## 5. 非功能要求
-
-### 5.1 性能目标
-
-- 唤起：<= 150ms
-- 搜索前 20 条刷新：<= 50ms
-- 执行动作响应：<= 300ms（依赖系统）
-
-### 5.2 稳定性
-
-- 关键配置与历史可持久化
-- 插件异常不应导致主搜索不可用
-- 窗口尺寸在插件模式和搜索模式可稳定切换
-- 运行异常需可追踪并在设置页查看错误日志
-- 原生文件选择与下载动作期间，窗口不应因失焦直接隐藏
-
-### 5.3 安全
+### 4.3 安全
 
 - Renderer 禁用 Node 能力
-- 系统能力仅由 Main 执行
+- 系统能力仅由 Main 进程执行
 - Preload 只暴露最小 API
 
-## 6. 数据模型
+## 5. 当前风险与问题
 
-### 6.1 通用表
+1. 部分插件仍处于“可用但未完全齐平原版”的状态。
+2. `src/renderer/renderer.ts` 体量仍大，插件渲染逻辑集中。
+3. 小窗口与高 DPI 下仍需逐项回归插件面板。
+4. UI 文案与历史编码问题需要继续巡检。
 
-- `settings`
-- `items`
-- `usage`
-- `clip_items`
-- `app_error_logs`
+## 6. 下一阶段目标
 
-### 6.2 Cashflow 表
+### 6.1 第一优先级
 
-- `cashflow_games`
-- `cashflow_players`
-- `cashflow_professions`
-- `cashflow_assets`
-- `cashflow_debts`
-- `cashflow_events`
-- `cashflow_decisions`
-- `cashflow_stats`
+1. 扩展 Playwright UI E2E，覆盖更多插件主流程。
+2. 继续拆分插件面板注册与渲染逻辑。
+3. 完成插件小屏与高 DPI 专项回归。
 
-## 7. 验收标准（当前版本）
+### 6.2 第二优先级
 
-- 快捷键可稳定唤起与隐藏
-- 搜索结果与执行稳定
-- 搜索态保留置顶与插件分区
-- 右键菜单动作可用
-- 中文搜索满足 `b/bai -> 百度` 典型场景
-- Windows 应用别名满足 `codex` 典型场景
-- 剪贴板历史管理可用
-- 设置项可保存并生效
-- 设置页索引扫描与错误日志能力可用
-- 可见插件 20 个可正常打开和执行主流程
-- `pnpm dev` 能提供自动编译、自动重启、自动刷新
-- Windows 可产出安装包和便携包
+1. 落地 Cashflow `cash review` 复盘模块。
+2. 继续收敛 WebTools 功能齐平与交互一致性。
+3. 继续完善文案与编码清理。
 
-## 8. 版本路线
+## 7. 版本路线
 
-1. `v1.1`：继续完善插件注册器、插件面板小屏适配与自动化回归。
-2. `v1.2`：Cashflow 复盘与 AI 差异化策略。
-3. `v2.x`：插件生态、签名公证、自动更新闭环。
+1. `v1.1`：E2E 扩展、插件面板拆分、小屏稳定性提升。
+2. `v1.2`：Cashflow 复盘 + AI 多性格策略。
+3. `v2.x`：插件生态、自动更新闭环、签名与公证完善。
