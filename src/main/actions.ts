@@ -66,7 +66,7 @@ async function openWithSystem(target: string): Promise<ExecuteResult> {
 
 async function openSystemCalculator(): Promise<ExecuteResult> {
   if (process.platform !== "win32") {
-    return { ok: false, message: "绯荤粺璁＄畻鍣ㄤ粎鏀寔 Windows" };
+    return { ok: false, message: "系统计算器仅支持 Windows" };
   }
 
   const windowsDir = process.env.WINDIR ?? "C:\\Windows";
@@ -95,10 +95,10 @@ async function openSystemCalculator(): Promise<ExecuteResult> {
     return { ok: true };
   } catch (error) {
     const reason =
-      error instanceof Error && error.message ? error.message : "鏈煡閿欒";
+      error instanceof Error && error.message ? error.message : "未知错误";
     return {
       ok: false,
-      message: `鎵撳紑绯荤粺璁＄畻鍣ㄥけ璐ワ細${reason}`
+      message: `打开系统计算器失败：${reason}`
     };
   }
 }
@@ -233,11 +233,11 @@ function escapeForPowerShellSingleQuote(value: string): string {
 async function runAsAdmin(target: string): Promise<ExecuteResult> {
   const normalized = target.trim();
   if (!normalized) {
-    return { ok: false, message: "绠＄悊鍛樿繍琛屽け璐ワ細鐩爣涓虹┖" };
+    return { ok: false, message: "管理员运行失败：目标为空" };
   }
 
   if (process.platform !== "win32") {
-    return { ok: false, message: "绠＄悊鍛樿繍琛屼粎鏀寔 Windows" };
+    return { ok: false, message: "管理员运行仅支持 Windows" };
   }
 
   const safeTarget = escapeForPowerShellSingleQuote(normalized);
@@ -300,11 +300,11 @@ async function runAsAdmin(target: string): Promise<ExecuteResult> {
 
       child.once("error", (error) => {
         const reason =
-          error instanceof Error && error.message ? error.message : "鏈煡閿欒";
+          error instanceof Error && error.message ? error.message : "未知错误";
         finish({
           ok: false,
           keepOpen: true,
-          message: `绠＄悊鍛樿繍琛屽け璐ワ細${reason}`
+          message: `管理员运行失败：${reason}`
         });
       });
 
@@ -328,20 +328,20 @@ async function runAsAdmin(target: string): Promise<ExecuteResult> {
           return;
         }
 
-        const reason = combined || "鏈兘鍚姩鎻愭潈杩涚▼";
+        const reason = combined || "未能启动提权进程";
         finish({
           ok: false,
           keepOpen: true,
-          message: `绠＄悊鍛樿繍琛屽け璐ワ細${reason}`
+          message: `管理员运行失败：${reason}`
         });
       });
     } catch (error) {
       const reason =
-        error instanceof Error && error.message ? error.message : "鏈煡閿欒";
+        error instanceof Error && error.message ? error.message : "未知错误";
       finish({
         ok: false,
         keepOpen: true,
-        message: `绠＄悊鍛樿繍琛屽け璐ワ細${reason}`
+        message: `管理员运行失败：${reason}`
       });
     }
   });
@@ -350,7 +350,7 @@ async function runAsAdmin(target: string): Promise<ExecuteResult> {
 function revealInFolder(target: string): ExecuteResult {
   const normalized = target.trim();
   if (!normalized) {
-    return { ok: false, message: "鎵撳紑鎵€鍦ㄤ綅缃け璐ワ細鐩爣涓虹┖" };
+    return { ok: false, message: "打开所在位置失败：目标为空" };
   }
 
   if (!fs.existsSync(normalized)) {
@@ -360,17 +360,17 @@ function revealInFolder(target: string): ExecuteResult {
   try {
     shell.showItemInFolder(normalized);
     const title = path.basename(normalized) || normalized;
-    return { ok: true, keepOpen: true, message: `宸叉墦寮€鎵€鍦ㄤ綅缃細${title}` };
+    return { ok: true, keepOpen: true, message: `已打开所在位置：${title}` };
   } catch (error) {
     const reason =
-      error instanceof Error && error.message ? error.message : "鏈煡閿欒";
-    return { ok: false, message: `鎵撳紑鎵€鍦ㄤ綅缃け璐ワ細${reason}` };
+      error instanceof Error && error.message ? error.message : "未知错误";
+    return { ok: false, message: `打开所在位置失败：${reason}` };
   }
 }
 
 function evaluateCalcExpression(expression: string): ExecuteResult {
   if (!expression || !SAFE_CALC_EXPRESSION.test(expression)) {
-    return { ok: false, message: "琛ㄨ揪寮忎笉鍚堟硶" };
+    return { ok: false, message: "表达式不合法" };
   }
 
   let result: unknown;
@@ -382,11 +382,11 @@ function evaluateCalcExpression(expression: string): ExecuteResult {
   }
 
   if (typeof result !== "number" || !Number.isFinite(result)) {
-    return { ok: false, message: "璁＄畻缁撴灉鏃犳晥" };
+    return { ok: false, message: "计算结果无效" };
   }
 
   clipboard.writeText(String(result));
-  return { ok: true, message: `宸插鍒剁粨鏋滐細${result}` };
+  return { ok: true, message: `已复制结果：${result}` };
 }
 
 function parseCommandTarget(target: string): { command: string; arg?: string } {

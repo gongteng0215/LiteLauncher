@@ -106,26 +106,26 @@
 | [x] | LL-403 | README 打包说明 | P0 | 完成 | pnpm 命令 |
 | [x] | LL-405 | GitHub Actions 自动打包 | P2 | 完成 | `v*` tag 触发 |
 | [x] | LL-406 | Windows `.ico` 图标接入 | P1 | 完成 | 主窗口 + 托盘 + 安装包 |
-| [ ] | LL-404 | 自动更新端到端验证 | P1 | 待办 | 发布后联调 |
-| [ ] | LL-407 | macOS 签名与公证 | P1 | 待办 | 证书待接入 |
-| [ ] | LL-411 | macOS `.icns` 图标接入 | P1 | 待办 | 仍需补齐 |
+| [ ] | LL-404 | 自动更新端到端验证 | P2 | 待办 | 自用阶段降级，发布后再联调 |
+| [ ] | LL-407 | macOS 签名与公证 | P2 | 待办 | 自用阶段降级，证书待接入 |
+| [ ] | LL-411 | macOS `.icns` 图标接入 | P2 | 待办 | 自用阶段降级，仍需补齐 |
 
 ## 5. 质量任务
 
 | 完成 | 编号 | 任务 | 优先级 | 状态 | 备注 |
 |---|---|---|---|---|---|
-| [x] | LL-501 | Cashflow 状态机测试 | P0 | 完成 | 已接入 |
-| [x] | LL-502 | Cashflow 持久化测试 | P0 | 完成 | 已接入 |
-| [x] | LL-503 | Cashflow 插件合约测试 | P1 | 完成 | 已接入 |
-| [x] | LL-504 | Cashflow 性能基线测试 | P1 | 完成 | 已接入 |
-| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P1 | 进行中 | 已补第七批 Playwright UI smoke：新增 HTTP Mock 启动/命中/停止与小屏布局断言，并保持既有 Password / Colors / SQL / Cron / JSON / URL / Timestamp / Unit / API / QR / Config / Markdown / ImageBase64 / Diff 全绿 |
-| [x] | LL-506 | WebTools 可见插件回归脚本 | P0 | 完成 | `test:plugins-visible` 已覆盖当前默认可见插件 |
-| [x] | LL-507 | Windows 应用别名回归 | P1 | 完成 | 已补 `test:windows-alias`，覆盖 catalog / dynamic search / AppsFolder 启动 |
+| [x] | LL-501 | Cashflow 状态机测试 | P2 | 完成 | 自用阶段降级，已接入 |
+| [x] | LL-502 | Cashflow 持久化测试 | P2 | 完成 | 自用阶段降级，已接入 |
+| [x] | LL-503 | Cashflow 插件合约测试 | P2 | 完成 | 自用阶段降级，已接入 |
+| [x] | LL-504 | Cashflow 性能基线测试 | P2 | 完成 | 自用阶段降级，已接入 |
+| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已补第七批 Playwright UI smoke：新增 HTTP Mock 启动/命中/停止与小屏布局断言，并保持既有 Password / Colors / SQL / Cron / JSON / URL / Timestamp / Unit / API / QR / Config / Markdown / ImageBase64 / Diff 全绿；失败时自动输出 `artifacts/e2e` 现场 |
+| [x] | LL-506 | WebTools 可见插件回归脚本 | P2 | 完成 | 自用阶段降级，`test:plugins-visible` 已覆盖当前默认可见插件 |
+| [x] | LL-507 | Windows 应用别名回归 | P2 | 完成 | 自用阶段降级，已补 `test:windows-alias`，覆盖 catalog / dynamic search / AppsFolder 启动 |
 
 ## 6. 下一步建议
 
-1. 推进 `LL-505`：继续补全剩余 WebTools 插件的 UI E2E 覆盖，并增加失败定位日志。
-2. 推进 `LL-210`：继续拆分 `src/renderer/renderer.ts` 里的剩余插件面板逻辑。
-3. 推进 `LL-307`：逐项回归插件面板小屏布局与高 DPI 稳定性。
-4. 推进 `LL-207`：落地 Cashflow `cash review` 复盘模块。
-5. 推进 `LL-305`：做一次全仓 UI 文案与编码巡检。
+1. 推进 `LL-210`：继续拆分 `src/renderer/renderer.ts` 里的剩余插件面板逻辑。
+2. 推进 `LL-307`：逐项回归插件面板小屏布局与高 DPI 稳定性。
+3. 推进 `LL-207`：落地 Cashflow `cash review` 复盘模块。
+4. 推进 `LL-305`：做一次全仓 UI 文案与编码巡检。
+5. 推进 `LL-505` / `LL-404` / `LL-407`：测试覆盖、自动更新验证、签名公证统一放到低优先级收尾阶段。

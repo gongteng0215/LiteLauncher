@@ -60,6 +60,30 @@ const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
 const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
 const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
+  "hardware-inspector",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-http-mock",
+  "webtools-image-base64",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-ua",
+  "webtools-api-client"
+] as const;
+const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -80,8 +104,32 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-ua",
   "webtools-api-client"
 ] as const;
+const PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-http-mock",
+  "webtools-image-base64",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-ua",
+  "webtools-api-client"
+] as const;
 const LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
+  "hardware-inspector",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -779,6 +827,14 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       applied,
       [...CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
+    const shouldUpgradeLastCurrentDefault = areStringArraysSetEqual(
+      applied,
+      [...LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
+    const shouldUpgradePreHardwareDefault = areStringArraysSetEqual(
+      applied,
+      [...PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
     const shouldUpgradeLegacyDefault = areStringArraysSetEqual(
       applied,
       [...LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS]
@@ -794,6 +850,8 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
     const next =
       shouldFallback ||
       shouldUpgradeCurrentDefault ||
+      shouldUpgradeLastCurrentDefault ||
+      shouldUpgradePreHardwareDefault ||
       shouldUpgradeLegacyDefault ||
       shouldUpgradePreviousDefault ||
       shouldUpgradeOlderDefault
@@ -802,6 +860,8 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
     if (
       shouldFallback ||
       shouldUpgradeCurrentDefault ||
+      shouldUpgradeLastCurrentDefault ||
+      shouldUpgradePreHardwareDefault ||
       shouldUpgradeLegacyDefault ||
       shouldUpgradePreviousDefault ||
       shouldUpgradeOlderDefault ||

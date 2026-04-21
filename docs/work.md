@@ -55,8 +55,8 @@
 
 ## 下一步建议
 
-1. 继续扩展 Playwright UI 回归，补齐剩余 WebTools 插件并完善失败定位日志。
-2. 继续拆分 `src/renderer/renderer.ts` 中的剩余插件面板逻辑。
-3. 做一次插件面板小屏 / 高 DPI 专项回归。
-4. 推进 Cashflow `cash review` 复盘模块。
-5. 做一次全仓 UI 文案与编码巡检。
+1. 继续拆分 `src/renderer/renderer.ts` 中的剩余插件面板逻辑。
+2. 做一次插件面板小屏 / 高 DPI 专项回归。
+3. 推进 Cashflow `cash review` 复盘模块。
+4. 做一次全仓 UI 文案与编码巡检。
+5. Playwright 扩展、自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。

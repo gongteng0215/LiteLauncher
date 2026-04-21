@@ -1,4 +1,874 @@
+function getPanelDelegate(key: string): (...args: unknown[]) => void {
+  const delegates = window.__LL_PANEL_DELEGATES__ as
+    | Record<string, ((...args: unknown[]) => void) | undefined>
+    | undefined;
+  const delegate = delegates?.[key];
+  if (typeof delegate !== "function") {
+    throw new Error(`Missing renderer panel delegate: ${key}`);
+  }
+  return delegate;
+}
+
+function createHardwareInspectorMetricGrid(
+  items: Array<{ label: string; value: string; changed?: boolean }>
+): HTMLDivElement {
+  const grid = document.createElement("div");
+  grid.className = "hardware-inspector-metric-grid";
+
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "hardware-inspector-metric";
+    if (item.changed) {
+      row.dataset.changed = "true";
+    }
+    const label = document.createElement("div");
+    label.className = "hardware-inspector-metric-label";
+    label.textContent = item.label;
+    const value = document.createElement("div");
+    value.className = "hardware-inspector-metric-value";
+    value.textContent = item.value;
+    row.append(label, value);
+    grid.appendChild(row);
+  });
+
+  return grid;
+}
+
+function createHardwareInspectorSection(
+  titleText: string,
+  descriptionText?: string
+): { section: HTMLDivElement; body: HTMLDivElement } {
+  const section = document.createElement("div");
+  section.className = "hardware-inspector-section";
+
+  const head = document.createElement("div");
+  head.className = "hardware-inspector-section-head";
+  const title = document.createElement("h4");
+  title.className = "hardware-inspector-section-title";
+  title.textContent = titleText;
+  head.appendChild(title);
+
+  if (descriptionText) {
+    const description = document.createElement("div");
+    description.className = "hardware-inspector-section-description";
+    description.textContent = descriptionText;
+    head.appendChild(description);
+  }
+
+  const body = document.createElement("div");
+  body.className = "hardware-inspector-section-body";
+  section.append(head, body);
+  return { section, body };
+}
+
+function createHardwareInspectorCard(titleText: string): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "hardware-inspector-card";
+  const header = document.createElement("div");
+  header.className = "hardware-inspector-card-header";
+  const title = document.createElement("div");
+  title.className = "hardware-inspector-card-title";
+  title.textContent = titleText;
+  header.appendChild(title);
+  card.appendChild(header);
+  return card;
+}
+
+function createHardwareInspectorBadge(
+  text: string,
+  tone: "neutral" | "success" | "warning" | "danger" = "neutral"
+): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "hardware-inspector-badge";
+  badge.dataset.tone = tone;
+  badge.textContent = text;
+  return badge;
+}
+
+function countHardwareInspectorDiskVolumes(disk: HardwareInspectorDisk): number {
+  return disk.partitions.reduce((count, partition) => count + partition.volumes.length, 0);
+}
+
+function formatHardwareInspectorDriveType(value: number | null | undefined): string {
+  switch (value) {
+    case 0:
+      return "未知";
+    case 1:
+      return "不可用";
+    case 2:
+      return "可移动";
+    case 3:
+      return "本地磁盘";
+    case 4:
+      return "网络驱动器";
+    case 5:
+      return "光驱";
+    case 6:
+      return "RAM 磁盘";
+    default:
+      return typeof value === "number" && Number.isFinite(value) ? `类型 ${value}` : "不可用";
+  }
+}
+
+function addHardwareInspectorCardAction(
+  card: HTMLDivElement,
+  label: string,
+  onClick: () => void
+): void {
+  const header = card.querySelector(".hardware-inspector-card-header");
+  if (!(header instanceof HTMLDivElement)) {
+    return;
+  }
+
+  let actions = header.querySelector(".hardware-inspector-card-actions");
+  if (!(actions instanceof HTMLDivElement)) {
+    actions = document.createElement("div");
+    actions.className = "hardware-inspector-card-actions";
+    header.appendChild(actions);
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-btn settings-btn-secondary hardware-inspector-inline-btn";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  actions.appendChild(button);
+}
+
+function addHardwareInspectorInlineAction(
+  header: HTMLDivElement,
+  actionsClassName: string,
+  label: string,
+  onClick: () => void
+): void {
+  let actions = header.querySelector(`.${actionsClassName}`);
+  if (!(actions instanceof HTMLDivElement)) {
+    actions = document.createElement("div");
+    actions.className = actionsClassName;
+    header.appendChild(actions);
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-btn settings-btn-secondary hardware-inspector-inline-btn";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  actions.appendChild(button);
+}
+
+async function copyHardwareInspectorDetail(
+  title: string,
+  lines: string[],
+  successText: string
+): Promise<void> {
+  const content = [title, ...lines].join("\n").trim();
+  const ok = await copyTextToClipboard(content);
+  setStatus(ok ? successText : "复制失败");
+}
+
+function createHardwareInspectorMetricItems(
+  items: Array<{ label: string; value: string }>,
+  changedLabels: readonly string[] = []
+): Array<{ label: string; value: string; changed?: boolean }> {
+  const changedSet = new Set(changedLabels);
+  return items.map((item) => ({
+    ...item,
+    changed: changedSet.has(item.label)
+  }));
+}
+
+function applyHardwareInspectorCardChangeState(
+  card: HTMLDivElement,
+  labels: readonly string[]
+): void {
+  if (labels.length === 0) {
+    return;
+  }
+
+  card.dataset.changed = "true";
+  const summary = document.createElement("div");
+  summary.className = "hardware-inspector-card-change";
+  summary.textContent = `变化：${labels.join("、")}`;
+  card.appendChild(summary);
+}
+
 window.__LL_PANEL_IMPLS__ = {
+  applyHardwareInspectorPanelPayload(panel: ActivePluginPanelState): void {
+    const data = toRecord(panel.data);
+    hardwareInspectorSnapshot = getHardwareInspectorSnapshotFromData(data);
+    hardwareInspectorLoading = data?.loading === true;
+    hardwareInspectorInfo = typeof data?.info === "string" ? data.info : "";
+    hardwareInspectorError = typeof data?.error === "string" ? data.error : "";
+  },
+
+  renderHardwareInspectorPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel hardware-inspector-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form hardware-inspector-form hardware-inspector-shell";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeHardwareInspectorRefresh();
+    });
+
+    const header = document.createElement("div");
+    header.className = "hardware-inspector-header";
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "hardware-inspector-title-wrap";
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "硬件检测";
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "查看主板、CPU、内存、显卡、硬盘等详细信息";
+    titleWrap.append(title, description);
+
+    const actions = document.createElement("div");
+    actions.className = "hardware-inspector-actions";
+
+    const refreshButton = document.createElement("button");
+    refreshButton.type = "button";
+    refreshButton.className = "settings-btn settings-btn-primary";
+    refreshButton.textContent = hardwareInspectorLoading ? "刷新中..." : "刷新";
+    refreshButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    refreshButton.addEventListener("click", () => {
+      void executeHardwareInspectorRefresh();
+    });
+
+    const exportMarkdownButton = document.createElement("button");
+    exportMarkdownButton.type = "button";
+    exportMarkdownButton.className = "settings-btn settings-btn-secondary";
+    exportMarkdownButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出 MD";
+    exportMarkdownButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    exportMarkdownButton.addEventListener("click", () => {
+      void executeHardwareInspectorExportReport("markdown");
+    });
+
+    const exportHtmlButton = document.createElement("button");
+    exportHtmlButton.type = "button";
+    exportHtmlButton.className = "settings-btn settings-btn-secondary";
+    exportHtmlButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出 HTML";
+    exportHtmlButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    exportHtmlButton.addEventListener("click", () => {
+      void executeHardwareInspectorExportReport("html");
+    });
+
+    const copySummaryButton = document.createElement("button");
+    copySummaryButton.type = "button";
+    copySummaryButton.className = "settings-btn settings-btn-secondary";
+    copySummaryButton.textContent = "复制摘要";
+    copySummaryButton.disabled = !hardwareInspectorSnapshot;
+    copySummaryButton.addEventListener("click", () => {
+      if (!hardwareInspectorSnapshot) {
+        setStatus("暂无可复制的硬件摘要");
+        return;
+      }
+      void (async () => {
+        const ok = await copyTextToClipboard(
+          buildHardwareInspectorSummaryText(hardwareInspectorSnapshot)
+        );
+        setStatus(ok ? "已复制硬件摘要" : "复制失败");
+      })();
+    });
+
+    const copyJsonButton = document.createElement("button");
+    copyJsonButton.type = "button";
+    copyJsonButton.className = "settings-btn settings-btn-secondary";
+    copyJsonButton.textContent = "复制 JSON";
+    copyJsonButton.disabled = !hardwareInspectorSnapshot;
+    copyJsonButton.addEventListener("click", () => {
+      if (!hardwareInspectorSnapshot) {
+        setStatus("暂无可复制的硬件数据");
+        return;
+      }
+      void (async () => {
+        const ok = await copyTextToClipboard(
+          JSON.stringify(hardwareInspectorSnapshot, null, 2)
+        );
+        setStatus(ok ? "已复制硬件 JSON" : "复制失败");
+      })();
+    });
+
+    actions.append(
+      refreshButton,
+      exportMarkdownButton,
+      exportHtmlButton,
+      copySummaryButton,
+      copyJsonButton
+    );
+    header.append(titleWrap, actions);
+    form.appendChild(header);
+
+    const status = document.createElement("div");
+    status.className = "hardware-inspector-status";
+    status.dataset.state = hardwareInspectorError
+      ? "error"
+      : hardwareInspectorLoading
+        ? "loading"
+        : hardwareInspectorExporting
+          ? "loading"
+        : hardwareInspectorSnapshot
+          ? "ok"
+          : "idle";
+    status.textContent = hardwareInspectorError
+      ? hardwareInspectorError
+      : hardwareInspectorLoading
+        ? "正在采集硬件信息..."
+        : hardwareInspectorExporting
+          ? "正在导出硬件报告..."
+        : hardwareInspectorInfo || "打开面板后会自动采集一次硬件信息";
+    form.appendChild(status);
+
+    if (hardwareInspectorSnapshot) {
+      const snapshot = hardwareInspectorSnapshot;
+      const diffState = hardwareInspectorDiffState;
+      const overviewChangedSet = new Set(diffState?.overviewChangedKeys ?? []);
+      const cpuChanges = diffState?.cpuChanges ?? {};
+      const memoryChanges = diffState?.memoryChanges ?? {};
+      const gpuChanges = diffState?.gpuChanges ?? {};
+      const diskChanges = diffState?.diskChanges ?? {};
+      const overview = document.createElement("div");
+      overview.className = "hardware-inspector-overview";
+      const systemName =
+        [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+          .filter(Boolean)
+          .join(" ") || "未知设备";
+      const osName =
+        [snapshot.operatingSystem.caption, snapshot.operatingSystem.buildNumber]
+          .filter(Boolean)
+          .join(" / ") || "未知系统";
+      const cpuName = snapshot.cpus[0]?.name ?? "未知 CPU";
+      const totalMemory = formatHardwareInspectorBytes(
+        snapshot.computerSystem.totalPhysicalMemory
+      );
+      const riskDiskCount = countHardwareInspectorRiskDisks(snapshot);
+      [
+        { key: "device", label: "设备", value: systemName },
+        { key: "system", label: "系统", value: osName },
+        { key: "cpu", label: "CPU", value: cpuName },
+        { key: "totalMemory", label: "总内存", value: totalMemory },
+        { key: "gpuCount", label: "显卡", value: `${snapshot.gpus.length} 张` },
+        { key: "diskCount", label: "磁盘", value: `${snapshot.disks.length} 块` },
+        { key: "riskDiskCount", label: "风险磁盘", value: riskDiskCount > 0 ? `${riskDiskCount} 块` : "无" }
+      ].forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "hardware-inspector-overview-card";
+        if (overviewChangedSet.has(item.key)) {
+          card.dataset.changed = "true";
+        }
+        const label = document.createElement("div");
+        label.className = "hardware-inspector-overview-label";
+        label.textContent = item.label;
+        const value = document.createElement("div");
+        value.className = "hardware-inspector-overview-value";
+        value.textContent = item.value;
+        card.append(label, value);
+        overview.appendChild(card);
+      });
+      form.appendChild(overview);
+
+      const compare = document.createElement("div");
+      compare.className = "hardware-inspector-compare";
+      compare.dataset.state = !diffState?.hasBaseline
+        ? "first"
+        : diffState.hasChanges
+          ? "changed"
+          : "stable";
+      const compareTitle = document.createElement("div");
+      compareTitle.className = "hardware-inspector-compare-title";
+      compareTitle.textContent = !diffState?.hasBaseline
+        ? "变化对比：首次采集"
+        : diffState.hasChanges
+          ? "变化对比：检测到变化"
+          : "变化对比：与上次一致";
+      compare.appendChild(compareTitle);
+      const compareMeta = document.createElement("div");
+      compareMeta.className = "hardware-inspector-compare-meta";
+      compareMeta.textContent = diffState?.hasBaseline
+        ? `上次：${formatHardwareInspectorDate(diffState.previousCollectedAt)} / 本次：${formatHardwareInspectorDate(diffState.currentCollectedAt)}`
+        : `本次：${formatHardwareInspectorDate(snapshot.collectedAt)}`;
+      compare.appendChild(compareMeta);
+      const compareList = document.createElement("div");
+      compareList.className = "hardware-inspector-compare-list";
+      (diffState?.summary ?? ["首次采集，下一次刷新将显示变化对比"]).forEach((itemText) => {
+        const item = document.createElement("div");
+        item.className = "hardware-inspector-compare-item";
+        item.textContent = itemText;
+        compareList.appendChild(item);
+      });
+      compare.appendChild(compareList);
+      form.appendChild(compare);
+
+      const meta = document.createElement("div");
+      meta.className = "hardware-inspector-meta";
+      [
+        `采集时间 ${formatHardwareInspectorDate(snapshot.collectedAt)}`,
+        `启动时间 ${formatHardwareInspectorDate(snapshot.operatingSystem.lastBootUpTime)}`,
+        `CPU ${snapshot.cpus.length} 颗`,
+        `内存 ${snapshot.memoryModules.length} 条`,
+        `显卡 ${snapshot.gpus.length} 张`,
+        `磁盘 ${snapshot.disks.length} 块`
+      ].forEach((text) => {
+        const item = document.createElement("span");
+        item.className = "hardware-inspector-meta-item";
+        item.textContent = text;
+        meta.appendChild(item);
+      });
+      form.appendChild(meta);
+
+      const cpuSection = createHardwareInspectorSection("CPU", `共 ${snapshot.cpus.length} 颗`);
+      snapshot.cpus.forEach((cpu, index) => {
+        const card = createHardwareInspectorCard(`处理器 ${index + 1}`);
+        const changeLabels = cpuChanges[getHardwareInspectorCpuKey(cpu, index)] ?? [];
+        applyHardwareInspectorCardChangeState(card, changeLabels);
+        card.appendChild(
+          createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+            { label: "型号", value: formatHardwareInspectorText(cpu.name) },
+            { label: "厂商", value: formatHardwareInspectorText(cpu.manufacturer) },
+            { label: "插槽", value: formatHardwareInspectorText(cpu.socketDesignation) },
+            {
+              label: "核心 / 线程",
+              value: `${cpu.numberOfCores ?? "?"} / ${cpu.numberOfLogicalProcessors ?? "?"}`
+            },
+            { label: "最大频率", value: formatHardwareInspectorClockMhz(cpu.maxClockSpeed) },
+            { label: "当前频率", value: formatHardwareInspectorClockMhz(cpu.currentClockSpeed) },
+            { label: "温度(可选)", value: formatHardwareInspectorTemperature(cpu.temperatureCelsius) },
+            { label: "温度来源", value: cpu.temperatureSource || "不可用" },
+            { label: "架构", value: formatHardwareInspectorText(cpu.architecture) },
+            { label: "位宽", value: cpu.addressWidth ? `${cpu.addressWidth} bit` : "未知" },
+            {
+              label: "虚拟化",
+              value: formatHardwareInspectorBoolean(cpu.virtualizationFirmwareEnabled)
+            },
+            {
+              label: "SLAT",
+              value: formatHardwareInspectorBoolean(
+                cpu.secondLevelAddressTranslationExtensions
+              )
+            }
+          ], changeLabels))
+        );
+        cpuSection.body.appendChild(card);
+      });
+      form.appendChild(cpuSection.section);
+
+      const boardSection = createHardwareInspectorSection("主板 / BIOS");
+      const boardCard = createHardwareInspectorCard("主板");
+      applyHardwareInspectorCardChangeState(boardCard, diffState?.baseBoardChanges ?? []);
+      boardCard.appendChild(
+        createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+          { label: "厂商", value: formatHardwareInspectorText(snapshot.baseBoard.manufacturer) },
+          { label: "型号", value: formatHardwareInspectorText(snapshot.baseBoard.product) },
+          { label: "版本", value: formatHardwareInspectorText(snapshot.baseBoard.version) },
+          { label: "序列号", value: formatHardwareInspectorText(snapshot.baseBoard.serialNumber) }
+        ], diffState?.baseBoardChanges ?? []))
+      );
+      const biosCard = createHardwareInspectorCard("BIOS");
+      applyHardwareInspectorCardChangeState(biosCard, diffState?.biosChanges ?? []);
+      biosCard.appendChild(
+        createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+          { label: "厂商", value: formatHardwareInspectorText(snapshot.bios.manufacturer) },
+          {
+            label: "版本",
+            value: formatHardwareInspectorText(snapshot.bios.smbiosBiosVersion || snapshot.bios.version)
+          },
+          { label: "发布日期", value: formatHardwareInspectorDate(snapshot.bios.releaseDate) },
+          { label: "序列号", value: formatHardwareInspectorText(snapshot.bios.serialNumber) }
+        ], diffState?.biosChanges ?? []))
+      );
+      boardSection.body.append(boardCard, biosCard);
+      form.appendChild(boardSection.section);
+
+      const memorySection = createHardwareInspectorSection(
+        "内存",
+        `共 ${snapshot.memoryModules.length} 条`
+      );
+      snapshot.memoryModules.forEach((memory, index) => {
+        const slotName = memory.deviceLocator || memory.bankLabel || `内存 ${index + 1}`;
+        const card = createHardwareInspectorCard(slotName);
+        const changeLabels = memoryChanges[getHardwareInspectorMemoryKey(memory, index)] ?? [];
+        addHardwareInspectorCardAction(card, "复制", () => {
+          void copyHardwareInspectorDetail(
+            `内存：${slotName}`,
+            [
+              `容量：${formatHardwareInspectorBytes(memory.capacity)}`,
+              `频率：${formatHardwareInspectorClockMhz(
+                memory.configuredClockSpeed || memory.speed
+              )}`,
+              `类型：${formatHardwareInspectorText(memory.memoryType)}`,
+              `形态：${formatHardwareInspectorText(memory.formFactor)}`,
+              `厂商：${formatHardwareInspectorText(memory.manufacturer)}`,
+              `型号：${formatHardwareInspectorText(memory.partNumber)}`,
+              `序列号：${formatHardwareInspectorText(memory.serialNumber)}`
+            ],
+            "已复制内存信息"
+          );
+        });
+        applyHardwareInspectorCardChangeState(card, changeLabels);
+        card.appendChild(
+          createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+            { label: "容量", value: formatHardwareInspectorBytes(memory.capacity) },
+            {
+              label: "频率",
+              value: formatHardwareInspectorClockMhz(
+                memory.configuredClockSpeed || memory.speed
+              )
+            },
+            { label: "类型", value: formatHardwareInspectorText(memory.memoryType) },
+            { label: "形态", value: formatHardwareInspectorText(memory.formFactor) },
+            { label: "厂商", value: formatHardwareInspectorText(memory.manufacturer) },
+            { label: "型号", value: formatHardwareInspectorText(memory.partNumber) },
+            { label: "序列号", value: formatHardwareInspectorText(memory.serialNumber) }
+          ], changeLabels))
+        );
+        memorySection.body.appendChild(card);
+      });
+      form.appendChild(memorySection.section);
+
+      const gpuSection = createHardwareInspectorSection(
+        "显卡",
+        `共 ${snapshot.gpus.length} 张`
+      );
+      snapshot.gpus.forEach((gpu, index) => {
+        const card = createHardwareInspectorCard(gpu.name || `显卡 ${index + 1}`);
+        const changeLabels = gpuChanges[getHardwareInspectorGpuKey(gpu, index)] ?? [];
+        addHardwareInspectorCardAction(card, "复制", () => {
+          void copyHardwareInspectorDetail(
+            `显卡：${gpu.name || `显卡 ${index + 1}`}`,
+            [
+              `厂商：${formatHardwareInspectorText(gpu.manufacturer)}`,
+              `视频处理器：${formatHardwareInspectorText(gpu.videoProcessor)}`,
+              `显存：${formatHardwareInspectorBytes(gpu.adapterRam)}`,
+              `驱动版本：${formatHardwareInspectorText(gpu.driverVersion)}`,
+              `驱动日期：${formatHardwareInspectorDate(gpu.driverDate)}`,
+              `温度(可选)：${formatHardwareInspectorTemperature(gpu.temperatureCelsius)}`,
+              `温度来源：${gpu.temperatureSource || "不可用"}`,
+              `分辨率：${formatHardwareInspectorResolution(gpu)}`,
+              `状态：${formatHardwareInspectorText(gpu.status)}`
+            ],
+            "已复制显卡信息"
+          );
+        });
+        applyHardwareInspectorCardChangeState(card, changeLabels);
+        card.appendChild(
+          createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+            { label: "厂商", value: formatHardwareInspectorText(gpu.manufacturer) },
+            { label: "视频处理器", value: formatHardwareInspectorText(gpu.videoProcessor) },
+            { label: "显存", value: formatHardwareInspectorBytes(gpu.adapterRam) },
+            { label: "驱动版本", value: formatHardwareInspectorText(gpu.driverVersion) },
+            { label: "驱动日期", value: formatHardwareInspectorDate(gpu.driverDate) },
+            { label: "温度(可选)", value: formatHardwareInspectorTemperature(gpu.temperatureCelsius) },
+            { label: "温度来源", value: gpu.temperatureSource || "不可用" },
+            { label: "分辨率", value: formatHardwareInspectorResolution(gpu) },
+            { label: "状态", value: formatHardwareInspectorText(gpu.status) }
+          ], changeLabels))
+        );
+        gpuSection.body.appendChild(card);
+      });
+      form.appendChild(gpuSection.section);
+
+      const diskSection = createHardwareInspectorSection(
+        "存储",
+        `共 ${snapshot.disks.length} 块`
+      );
+      snapshot.disks.forEach((disk, index) => {
+        const card = createHardwareInspectorCard(disk.model || `磁盘 ${index + 1}`);
+        const diskKey = getHardwareInspectorDiskKey(disk, index);
+        const changeLabels = diskChanges[diskKey] ?? [];
+        addHardwareInspectorCardAction(card, "复制", () => {
+          void copyHardwareInspectorDetail(
+            `磁盘：${disk.model || `磁盘 ${index + 1}`}`,
+            [
+              `厂商：${formatHardwareInspectorText(disk.manufacturer)}`,
+              `容量：${formatHardwareInspectorBytes(disk.size)}`,
+              `媒体类型：${formatHardwareInspectorText(disk.storageMediaType || disk.mediaType)}`,
+              `总线：${formatHardwareInspectorText(disk.busType || disk.interfaceType)}`,
+              `固件：${formatHardwareInspectorText(
+                disk.firmwareVersion || disk.firmwareRevision
+              )}`,
+              `健康状态：${formatHardwareInspectorText(disk.healthStatus)}`,
+              `运行状态：${formatHardwareInspectorText(disk.operationalStatus)}`,
+              `预测故障：${formatHardwareInspectorNullableBoolean(
+                disk.smartPredictFailure,
+                "是",
+                "否"
+              )}`,
+              `预测原因：${
+                typeof disk.smartReason === "number" && Number.isFinite(disk.smartReason)
+                  ? String(disk.smartReason)
+                  : "未知"
+              }`,
+              `温度：${formatHardwareInspectorTemperature(disk.temperatureCelsius)}`,
+              `最高温度：${formatHardwareInspectorTemperature(disk.temperatureMaxCelsius)}`,
+              `磨损：${formatHardwareInspectorPercentage(disk.wearPercentage)}`,
+              `通电时长：${formatHardwareInspectorHours(disk.powerOnHours)}`,
+              `转速：${formatHardwareInspectorRpm(disk.spindleSpeed)}`,
+              `逻辑扇区：${formatHardwareInspectorSectorSize(disk.logicalSectorSize)}`,
+              `物理扇区：${formatHardwareInspectorSectorSize(disk.physicalSectorSize)}`,
+              `序列号：${formatHardwareInspectorText(disk.serialNumber)}`,
+              `分区 / 卷：${disk.partitions.length} / ${countHardwareInspectorDiskVolumes(disk)}`
+            ],
+            "已复制磁盘信息"
+          );
+        });
+        applyHardwareInspectorCardChangeState(card, changeLabels);
+        const isRiskDisk = isHardwareInspectorDiskAtRisk(disk);
+        card.dataset.healthTone =
+          formatHardwareInspectorText(disk.healthStatus) === "未知"
+            ? "neutral"
+            : isRiskDisk
+              ? disk.smartPredictFailure
+                ? "danger"
+                : "warning"
+              : "success";
+        const badgeRow = document.createElement("div");
+        badgeRow.className = "hardware-inspector-badge-row";
+        badgeRow.appendChild(
+          createHardwareInspectorBadge(
+            formatHardwareInspectorText(disk.storageMediaType || disk.mediaType),
+            "neutral"
+          )
+        );
+        badgeRow.appendChild(
+          createHardwareInspectorBadge(
+            formatHardwareInspectorText(disk.busType || disk.interfaceType),
+            "neutral"
+          )
+        );
+        badgeRow.appendChild(
+          createHardwareInspectorBadge(
+            formatHardwareInspectorText(disk.healthStatus),
+            card.dataset.healthTone === "warning" || card.dataset.healthTone === "danger"
+              ? (card.dataset.healthTone as "warning" | "danger")
+              : card.dataset.healthTone === "success"
+                ? "success"
+                : "neutral"
+          )
+        );
+        badgeRow.appendChild(
+          createHardwareInspectorBadge(
+            formatHardwareInspectorNullableBoolean(
+              disk.smartPredictFailure,
+              "预测故障",
+              "未预测故障"
+            ),
+            disk.smartPredictFailure === true ? "danger" : "neutral"
+          )
+        );
+        card.appendChild(badgeRow);
+        card.appendChild(
+          createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
+            { label: "厂商", value: formatHardwareInspectorText(disk.manufacturer) },
+            { label: "容量", value: formatHardwareInspectorBytes(disk.size) },
+            { label: "媒体类型", value: formatHardwareInspectorText(disk.storageMediaType || disk.mediaType) },
+            { label: "总线", value: formatHardwareInspectorText(disk.busType || disk.interfaceType) },
+            {
+              label: "固件",
+              value: formatHardwareInspectorText(disk.firmwareVersion || disk.firmwareRevision)
+            },
+            { label: "健康状态", value: formatHardwareInspectorText(disk.healthStatus) },
+            { label: "运行状态", value: formatHardwareInspectorText(disk.operationalStatus) },
+            {
+              label: "预测故障",
+              value: formatHardwareInspectorNullableBoolean(
+                disk.smartPredictFailure,
+                "是",
+                "否"
+              )
+            },
+            {
+              label: "预测原因",
+              value:
+                typeof disk.smartReason === "number" && Number.isFinite(disk.smartReason)
+                  ? String(disk.smartReason)
+                  : "未知"
+            },
+            { label: "温度", value: formatHardwareInspectorTemperature(disk.temperatureCelsius) },
+            {
+              label: "最高温度",
+              value: formatHardwareInspectorTemperature(disk.temperatureMaxCelsius)
+            },
+            { label: "磨损", value: formatHardwareInspectorPercentage(disk.wearPercentage) },
+            { label: "通电时长", value: formatHardwareInspectorHours(disk.powerOnHours) },
+            { label: "转速", value: formatHardwareInspectorRpm(disk.spindleSpeed) },
+            { label: "逻辑扇区", value: formatHardwareInspectorSectorSize(disk.logicalSectorSize) },
+            { label: "物理扇区", value: formatHardwareInspectorSectorSize(disk.physicalSectorSize) },
+            {
+              label: "槽位",
+              value:
+                typeof disk.slotNumber === "number" && Number.isFinite(disk.slotNumber)
+                  ? String(disk.slotNumber)
+                  : "未知"
+            },
+            {
+              label: "机箱槽",
+              value:
+                typeof disk.enclosureNumber === "number" && Number.isFinite(disk.enclosureNumber)
+                  ? String(disk.enclosureNumber)
+                  : "未知"
+            },
+            { label: "用途", value: formatHardwareInspectorText(disk.usage) },
+            {
+              label: "可加入存储池",
+              value: formatHardwareInspectorNullableBoolean(
+                disk.canPool,
+                "可加入",
+                "不可加入"
+              )
+            },
+            { label: "序列号", value: formatHardwareInspectorText(disk.serialNumber) },
+            {
+              label: "分区数",
+              value:
+                typeof disk.partitionCount === "number" ? String(disk.partitionCount) : "未知"
+            }
+          ], changeLabels))
+        );
+
+        if (disk.partitions.length > 0) {
+          const volumeCount = countHardwareInspectorDiskVolumes(disk);
+          const expansionKey = diskKey;
+          const isExpanded = hardwareInspectorExpandedDiskKeys.has(expansionKey);
+          const partitionSummary = document.createElement("div");
+          partitionSummary.className = "hardware-inspector-collapsible-head";
+          const partitionMeta = document.createElement("div");
+          partitionMeta.className = "hardware-inspector-collapsible-meta";
+          partitionMeta.textContent = `分区 ${disk.partitions.length} 个 / 卷 ${volumeCount} 个`;
+          const toggleButton = document.createElement("button");
+          toggleButton.type = "button";
+          toggleButton.className = "settings-btn settings-btn-secondary hardware-inspector-toggle-btn";
+          toggleButton.textContent = isExpanded ? "收起分区" : "展开分区";
+          toggleButton.addEventListener("click", () => {
+            if (hardwareInspectorExpandedDiskKeys.has(expansionKey)) {
+              hardwareInspectorExpandedDiskKeys.delete(expansionKey);
+            } else {
+              hardwareInspectorExpandedDiskKeys.add(expansionKey);
+            }
+            renderList();
+          });
+          partitionSummary.append(partitionMeta, toggleButton);
+          card.appendChild(partitionSummary);
+
+          const partitionWrap = document.createElement("div");
+          partitionWrap.className = "hardware-inspector-sublist";
+          partitionWrap.hidden = !isExpanded;
+          disk.partitions.forEach((partition) => {
+            const partitionNode = document.createElement("div");
+            partitionNode.className = "hardware-inspector-subitem";
+            const partitionHeader = document.createElement("div");
+            partitionHeader.className = "hardware-inspector-subitem-header";
+            const partitionTitle = document.createElement("div");
+            partitionTitle.className = "hardware-inspector-subitem-title";
+            partitionTitle.textContent = partition.name || `分区 ${partition.index ?? "?"}`;
+            partitionHeader.appendChild(partitionTitle);
+            addHardwareInspectorInlineAction(
+              partitionHeader,
+              "hardware-inspector-subitem-actions",
+              "复制",
+              () => {
+                void copyHardwareInspectorDetail(
+                  `分区：${partition.name || `分区 ${partition.index ?? "?"}`}`,
+                  [
+                    `容量：${formatHardwareInspectorBytes(partition.size)}`,
+                    `类型：${formatHardwareInspectorText(partition.type)}`,
+                    `启动分区：${formatHardwareInspectorBoolean(partition.bootPartition)}`,
+                    `主分区：${formatHardwareInspectorBoolean(partition.primaryPartition)}`,
+                    `卷数量：${partition.volumes.length}`
+                  ],
+                  "已复制分区信息"
+                );
+              }
+            );
+            partitionNode.appendChild(partitionHeader);
+            partitionNode.appendChild(
+              createHardwareInspectorMetricGrid([
+                { label: "容量", value: formatHardwareInspectorBytes(partition.size) },
+                { label: "类型", value: formatHardwareInspectorText(partition.type) },
+                {
+                  label: "启动分区",
+                  value: formatHardwareInspectorBoolean(partition.bootPartition)
+                },
+                {
+                  label: "主分区",
+                  value: formatHardwareInspectorBoolean(partition.primaryPartition)
+                }
+              ])
+            );
+
+            if (partition.volumes.length > 0) {
+              const volumeWrap = document.createElement("div");
+              volumeWrap.className = "hardware-inspector-volume-list";
+              partition.volumes.forEach((volume) => {
+                const volumeNode = document.createElement("div");
+                volumeNode.className = "hardware-inspector-volume-item";
+                const volumeHeader = document.createElement("div");
+                volumeHeader.className = "hardware-inspector-volume-header";
+                const head = document.createElement("div");
+                head.className = "hardware-inspector-volume-title";
+                head.textContent =
+                  [volume.deviceId, volume.volumeName].filter(Boolean).join(" / ") || "卷";
+                volumeHeader.appendChild(head);
+                addHardwareInspectorInlineAction(
+                  volumeHeader,
+                  "hardware-inspector-volume-actions",
+                  "复制",
+                  () => {
+                    void copyHardwareInspectorDetail(
+                      `卷：${[volume.deviceId, volume.volumeName].filter(Boolean).join(" / ") || "卷"}`,
+                      [
+                        `文件系统：${formatHardwareInspectorText(volume.fileSystem)}`,
+                        `总空间：${formatHardwareInspectorBytes(volume.size)}`,
+                        `可用空间：${formatHardwareInspectorBytes(volume.freeSpace)}`,
+                        `驱动器类型：${formatHardwareInspectorDriveType(volume.driveType)}`
+                      ],
+                      "已复制卷信息"
+                    );
+                  }
+                );
+                volumeNode.appendChild(volumeHeader);
+                volumeNode.appendChild(
+                  createHardwareInspectorMetricGrid([
+                    { label: "文件系统", value: formatHardwareInspectorText(volume.fileSystem) },
+                    { label: "总空间", value: formatHardwareInspectorBytes(volume.size) },
+                    { label: "可用空间", value: formatHardwareInspectorBytes(volume.freeSpace) },
+                    {
+                      label: "驱动器类型",
+                      value: formatHardwareInspectorDriveType(volume.driveType)
+                    }
+                  ])
+                );
+                volumeWrap.appendChild(volumeNode);
+              });
+              partitionNode.appendChild(volumeWrap);
+            }
+            partitionWrap.appendChild(partitionNode);
+          });
+          card.appendChild(partitionWrap);
+        }
+
+        diskSection.body.appendChild(card);
+      });
+      form.appendChild(diskSection.section);
+    }
+
+    panel.append(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+
+    if (!hardwareInspectorSnapshot && !hardwareInspectorLoading && !hardwareInspectorError) {
+      queueMicrotask(() => {
+        if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+          void executeHardwareInspectorRefresh();
+        }
+      });
+    }
+  },
+
   applyWebtoolsPasswordPanelPayload(panel: ActivePluginPanelState): void {
     const optionsRaw = panel.data?.options;
     const parsed = extractWebtoolsPasswordOptionsFromUnknown(optionsRaw);
@@ -896,6 +1766,215 @@ window.__LL_PANEL_IMPLS__ = {
     });
   },
 
+  applyWebtoolsRegexPanelPayload(panel: ActivePluginPanelState): void {
+    const data = panel.data;
+    if (data && typeof data.pattern === "string") {
+      webtoolsRegexPattern = data.pattern;
+    }
+    if (data && typeof data.flags === "string") {
+      webtoolsRegexFlags = data.flags || "g";
+    }
+    if (data && typeof data.input === "string") {
+      webtoolsRegexInput = data.input;
+    }
+    if (data && typeof data.replacement === "string") {
+      webtoolsRegexReplacement = data.replacement;
+    }
+    if (!webtoolsRegexPattern.trim()) {
+      webtoolsRegexPattern = WEBTOOLS_REGEX_DEFAULT_PATTERN;
+    }
+    if (!webtoolsRegexInput.trim()) {
+      webtoolsRegexInput = WEBTOOLS_REGEX_DEFAULT_INPUT;
+    }
+    webtoolsRegexOutput = "";
+    webtoolsRegexInfo = "";
+    webtoolsRegexError = "";
+    webtoolsRegexHighlightedHtml = "";
+    webtoolsRegexRows = [];
+  },
+
+  renderWebtoolsRegexPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel webtools-regex-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form webtools-regex-form webtools-tool-panel";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      refreshWebtoolsRegexState();
+      refreshWebtoolsRegexPreviewInForm(form);
+      setStatus(webtoolsRegexError || webtoolsRegexInfo || "已刷新正则结果");
+    });
+
+    const header = document.createElement("div");
+    header.className = "webtools-tool-header webtools-regex-header";
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "webtools-tool-title-group";
+    const title = document.createElement("h3");
+    title.className = "webtools-tool-title webtools-regex-title";
+    title.textContent = activePluginPanel?.title || "正则测试";
+    const description = document.createElement("p");
+    description.className = "webtools-tool-subtitle";
+    description.textContent =
+      activePluginPanel?.subtitle || "实时匹配高亮，内置常用正则模板。";
+    titleGroup.append(title, description);
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "webtools-tool-toolbar";
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "settings-btn settings-btn-secondary";
+    resetButton.textContent = "重置";
+    resetButton.addEventListener("click", () => {
+      webtoolsRegexPattern = WEBTOOLS_REGEX_DEFAULT_PATTERN;
+      webtoolsRegexFlags = "g";
+      webtoolsRegexInput = WEBTOOLS_REGEX_DEFAULT_INPUT;
+      webtoolsRegexReplacement = "";
+
+      const patternNode = form.elements.namedItem("webtoolsRegexPattern");
+      if (patternNode instanceof HTMLInputElement) {
+        patternNode.value = webtoolsRegexPattern;
+      }
+      const flagsNode = form.elements.namedItem("webtoolsRegexFlags");
+      if (flagsNode instanceof HTMLInputElement) {
+        flagsNode.value = webtoolsRegexFlags;
+      }
+      const inputNode = form.elements.namedItem("webtoolsRegexInput");
+      if (inputNode instanceof HTMLTextAreaElement) {
+        inputNode.value = webtoolsRegexInput;
+      }
+
+      refreshWebtoolsRegexState();
+      refreshWebtoolsRegexPreviewInForm(form);
+      setStatus("已重置正则测试");
+    });
+    toolbar.append(resetButton);
+    header.append(titleGroup, toolbar);
+
+    const inputBar = document.createElement("div");
+    inputBar.className = "webtools-regex-input-section";
+    const line = document.createElement("div");
+    line.className = "webtools-regex-input-line";
+    const slashLeft = document.createElement("span");
+    slashLeft.className = "webtools-regex-slash";
+    slashLeft.textContent = "/";
+    const patternInput = document.createElement("input");
+    patternInput.className = "settings-value webtools-regex-main";
+    patternInput.name = "webtoolsRegexPattern";
+    patternInput.value = webtoolsRegexPattern;
+    patternInput.placeholder = "正则表达式";
+    const slashRight = document.createElement("span");
+    slashRight.className = "webtools-regex-slash";
+    slashRight.textContent = "/";
+    const flagsInput = document.createElement("input");
+    flagsInput.className = "settings-value webtools-regex-flags";
+    flagsInput.type = "text";
+    flagsInput.name = "webtoolsRegexFlags";
+    flagsInput.value = webtoolsRegexFlags;
+    flagsInput.placeholder = "g";
+    flagsInput.title = "g, i, m, s, u, y, d";
+    line.append(slashLeft, patternInput, slashRight, flagsInput);
+    const error = document.createElement("div");
+    error.className = "webtools-regex-error";
+    error.hidden = true;
+    inputBar.append(line, error);
+
+    const templates = document.createElement("div");
+    templates.className = "webtools-regex-templates";
+    const templatesLabel = document.createElement("span");
+    templatesLabel.className = "webtools-regex-templates-label";
+    templatesLabel.textContent = "模板";
+    templates.appendChild(templatesLabel);
+    WEBTOOLS_REGEX_TEMPLATES.forEach((template) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-regex-template-btn";
+      button.textContent = template.label;
+      button.addEventListener("click", () => {
+        webtoolsRegexPattern = template.pattern;
+        webtoolsRegexFlags = template.flags;
+        patternInput.value = webtoolsRegexPattern;
+        flagsInput.value = webtoolsRegexFlags;
+        refreshWebtoolsRegexState();
+        refreshWebtoolsRegexPreviewInForm(form);
+        setStatus(`已应用模板：${template.label}`);
+      });
+      templates.appendChild(button);
+    });
+
+    const layout = document.createElement("div");
+    layout.className = "webtools-regex-layout";
+
+    const inputPane = document.createElement("div");
+    inputPane.className = "webtools-regex-pane";
+    const inputLabel = document.createElement("label");
+    inputLabel.className = "webtools-regex-pane-label";
+    inputLabel.textContent = "测试文本";
+    const inputArea = document.createElement("textarea");
+    inputArea.className = "settings-value webtools-textarea webtools-regex-textarea";
+    inputArea.name = "webtoolsRegexInput";
+    inputArea.value = webtoolsRegexInput;
+    inputArea.placeholder = "输入待测试文本";
+    inputPane.append(inputLabel, inputArea);
+
+    const previewPane = document.createElement("div");
+    previewPane.className = "webtools-regex-pane";
+    const previewLabel = document.createElement("label");
+    previewLabel.className = "webtools-regex-pane-label";
+    previewLabel.textContent = "匹配结果";
+    const previewBox = document.createElement("div");
+    previewBox.className = "webtools-regex-highlight-box";
+    previewPane.append(previewLabel, previewBox);
+    layout.append(inputPane, previewPane);
+
+    const footer = document.createElement("div");
+    footer.className = "webtools-regex-footer";
+    const info = document.createElement("div");
+    info.className = "webtools-regex-info";
+    const matchList = document.createElement("div");
+    matchList.className = "webtools-regex-match-list";
+    footer.append(info, matchList);
+
+    const refresh = () => {
+      webtoolsRegexPattern = patternInput.value;
+      webtoolsRegexFlags = flagsInput.value || "g";
+      webtoolsRegexInput = inputArea.value;
+      refreshWebtoolsRegexState();
+      refreshWebtoolsRegexPreviewInForm(form);
+    };
+
+    patternInput.addEventListener("input", refresh);
+    flagsInput.addEventListener("input", refresh);
+    inputArea.addEventListener("input", refresh);
+
+    form.append(header, inputBar, templates, layout, footer);
+    panel.append(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+
+    refreshWebtoolsRegexState();
+    refreshWebtoolsRegexPreviewInForm(form);
+  },
+
+  applyWebtoolsCryptoPanelPayload(panel: ActivePluginPanelState): void {
+    getPanelDelegate("applyWebtoolsCryptoPanelPayload")(panel);
+  },
+
+  renderWebtoolsCryptoPanel(): void {
+    getPanelDelegate("renderWebtoolsCryptoPanel")();
+  },
+
+  applyWebtoolsJwtPanelPayload(panel: ActivePluginPanelState): void {
+    getPanelDelegate("applyWebtoolsJwtPanelPayload")(panel);
+  },
+
+  renderWebtoolsJwtPanel(): void {
+    getPanelDelegate("renderWebtoolsJwtPanel")();
+  },
+
   applyWebtoolsDiffPanelPayload(panel: ActivePluginPanelState): void {
     const data = panel.data;
     webtoolsDiffLeft =
@@ -1361,6 +2440,199 @@ window.__LL_PANEL_IMPLS__ = {
 
     refreshWebtoolsSqlResultInForm(form);
     scheduleWebtoolsSqlAutoFormat(form, true);
+  },
+
+  applyWebtoolsUnitPanelPayload(panel: ActivePluginPanelState): void {
+    const data = panel.data;
+    if (data && typeof data.storageValue === "number") {
+      webtoolsUnitStorageValue = data.storageValue;
+    }
+    if (data && typeof data.storageUnit === "string") {
+      const normalized = data.storageUnit.toUpperCase();
+      if (
+        normalized === "B" ||
+        normalized === "KB" ||
+        normalized === "MB" ||
+        normalized === "GB" ||
+        normalized === "TB"
+      ) {
+        webtoolsUnitStorageUnit = normalized;
+      }
+    }
+    if (data && typeof data.pixel === "number") {
+      webtoolsUnitPixel = data.pixel;
+    }
+    if (data && typeof data.rem === "number") {
+      webtoolsUnitRem = data.rem;
+    }
+    if (data && typeof data.basePx === "number") {
+      webtoolsUnitBasePx = data.basePx;
+    }
+    updateWebtoolsUnitStorageFrom(webtoolsUnitStorageUnit, webtoolsUnitStorageValue);
+  },
+
+  renderWebtoolsUnitPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel webtools-unit-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form webtools-unit-form webtools-tool-panel";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      refreshWebtoolsUnitPanelInForm(form);
+      setStatus(webtoolsUnitActiveTab === "storage" ? "容量换算完成" : "px/rem 换算完成");
+    });
+
+    const header = document.createElement("div");
+    header.className = "webtools-tool-header";
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "webtools-tool-title-group";
+    const title = document.createElement("h3");
+    title.className = "webtools-tool-title";
+    title.textContent = activePluginPanel?.title || "单位换算";
+    const description = document.createElement("p");
+    description.className = "webtools-tool-subtitle";
+    description.textContent =
+      activePluginPanel?.subtitle || "存储容量与 px/rem 换算。";
+    titleGroup.append(title, description);
+
+    const tabs = document.createElement("div");
+    tabs.className = "webtools-unit-tabs";
+    [
+      { id: "storage" as const, label: "容量换算" },
+      { id: "screen" as const, label: "px / rem" }
+    ].forEach(({ id, label }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-unit-tab";
+      button.dataset.active = String(webtoolsUnitActiveTab === id);
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        webtoolsUnitActiveTab = id;
+        renderList();
+      });
+      tabs.appendChild(button);
+    });
+    header.append(titleGroup, tabs);
+    form.appendChild(header);
+
+    if (webtoolsUnitActiveTab === "storage") {
+      const stack = document.createElement("div");
+      stack.className = "webtools-unit-storage-stack";
+      (
+        [
+          { unit: "B", label: "Byte (B)" },
+          { unit: "KB", label: "KB" },
+          { unit: "MB", label: "MB" },
+          { unit: "GB", label: "GB" },
+          { unit: "TB", label: "TB" }
+        ] as Array<{ unit: WebtoolsUnitStorageKey; label: string }>
+      ).forEach(({ unit, label }) => {
+        const field = document.createElement("label");
+        field.className = "webtools-unit-field";
+        const fieldLabel = document.createElement("div");
+        fieldLabel.className = "webtools-unit-field-label";
+        fieldLabel.textContent = label;
+        const input = document.createElement("input");
+        input.className = "settings-value webtools-tool-input webtools-tool-code";
+        input.type = "number";
+        input.step = "any";
+        input.dataset.unitStorage = unit;
+        input.addEventListener("input", () => {
+          updateWebtoolsUnitStorageFrom(unit, Number(input.value));
+          refreshWebtoolsUnitPanelInForm(form);
+        });
+        field.append(fieldLabel, input);
+        stack.appendChild(field);
+      });
+
+      const info = document.createElement("div");
+      info.className = "webtools-tool-info webtools-unit-info";
+      form.append(stack, info);
+      panel.append(form);
+      panelItem.appendChild(panel);
+      list.appendChild(panelItem);
+      refreshWebtoolsUnitPanelInForm(form);
+      return;
+    }
+
+    const screenBox = document.createElement("div");
+    screenBox.className = "webtools-unit-screen-box";
+
+    const rootSetup = document.createElement("div");
+    rootSetup.className = "webtools-unit-root-setup";
+    const rootLabel = document.createElement("label");
+    rootLabel.className = "webtools-unit-root-label";
+    rootLabel.textContent = "根字号(px)：";
+    const baseInput = document.createElement("input");
+    baseInput.className = "settings-value webtools-tool-input webtools-unit-root-input";
+    baseInput.type = "number";
+    baseInput.step = "0.01";
+    baseInput.name = "webtoolsUnitBasePx";
+    const rootHint = document.createElement("p");
+    rootHint.className = "webtools-unit-root-hint";
+    rootHint.textContent = "通常浏览器默认根字号为 16px";
+    rootSetup.append(rootLabel, baseInput, rootHint);
+
+    const divider = document.createElement("div");
+    divider.className = "webtools-unit-divider";
+
+    const dualInput = document.createElement("div");
+    dualInput.className = "webtools-unit-dual-input";
+    const pxField = document.createElement("label");
+    pxField.className = "webtools-unit-field";
+    const pxLabel = document.createElement("div");
+    pxLabel.className = "webtools-unit-field-label";
+    pxLabel.textContent = "Pixel (px)";
+    const pxInput = document.createElement("input");
+    pxInput.className = "settings-value webtools-tool-input webtools-tool-code";
+    pxInput.type = "number";
+    pxInput.step = "0.01";
+    pxInput.name = "webtoolsUnitPixel";
+    pxField.append(pxLabel, pxInput);
+
+    const swapIcon = document.createElement("div");
+    swapIcon.className = "webtools-unit-swap-icon";
+    swapIcon.textContent = "⇄";
+
+    const remField = document.createElement("label");
+    remField.className = "webtools-unit-field";
+    const remLabel = document.createElement("div");
+    remLabel.className = "webtools-unit-field-label";
+    remLabel.textContent = "REM (rem)";
+    const remInput = document.createElement("input");
+    remInput.className = "settings-value webtools-tool-input webtools-tool-code";
+    remInput.type = "number";
+    remInput.step = "0.0001";
+    remInput.name = "webtoolsUnitRem";
+    remField.append(remLabel, remInput);
+    dualInput.append(pxField, swapIcon, remField);
+
+    const info = document.createElement("div");
+    info.className = "webtools-tool-info webtools-unit-info";
+
+    baseInput.addEventListener("input", () => {
+      updateWebtoolsUnitFromPixel(webtoolsUnitPixel, Number(baseInput.value));
+      refreshWebtoolsUnitPanelInForm(form);
+    });
+    pxInput.addEventListener("input", () => {
+      updateWebtoolsUnitFromPixel(Number(pxInput.value), Number(baseInput.value));
+      refreshWebtoolsUnitPanelInForm(form);
+    });
+    remInput.addEventListener("input", () => {
+      updateWebtoolsUnitFromRem(Number(remInput.value), Number(baseInput.value));
+      refreshWebtoolsUnitPanelInForm(form);
+    });
+
+    screenBox.append(rootSetup, divider, dualInput);
+    form.append(screenBox, info);
+    panel.append(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+    refreshWebtoolsUnitPanelInForm(form);
   },
 
   applyWebtoolsMarkdownPanelPayload(panel: ActivePluginPanelState): void {

@@ -5,6 +5,11 @@ if (!handlerConstants) {
 
 window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
   {
+    pluginId: handlerConstants.HARDWARE_INSPECTOR_PLUGIN_ID,
+    formSelector: "form.hardware-inspector-form",
+    enterActionKey: "hardware-inspector-refresh"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_PASSWORD_PLUGIN_ID,
     formSelector: "form.webtools-password-form",
     enterActionKey: "password-generate"

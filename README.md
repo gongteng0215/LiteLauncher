@@ -258,8 +258,7 @@ pnpm run check:encoding
 
 ### 当前下一步重点
 
-1. 继续扩展 Playwright UI E2E，补齐剩余插件并强化失败定位日志。
-2. 继续拆分 `src/renderer/renderer.ts` 中的剩余插件面板逻辑。
-3. 继续推进插件面板小屏 / 高 DPI 回归。
-3. 逐项回归插件面板小屏与高 DPI 布局。
-4. 推进 Cashflow `cash review` 复盘模块。
+1. 继续拆分 `src/renderer/renderer.ts` 中的剩余插件面板逻辑。
+2. 继续推进插件面板小屏 / 高 DPI 回归。
+3. 推进 Cashflow `cash review` 与 WebTools 交互收敛。
+4. 测试扩展、自动更新验证、签名 / 公证保持低优先级，放在自用阶段收尾处理。

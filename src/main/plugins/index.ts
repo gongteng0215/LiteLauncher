@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 
 import { ExecuteResult, LaunchItem } from "../../shared/types";
 import { cashflowGamePlugin } from "./cashflow-game";
+import { hardwareInspectorPlugin } from "./hardware-inspector";
 import { LauncherPlugin } from "./types";
 import { webtoolsApiClientPlugin } from "./webtools-api-client";
 import { webtoolsColorsPlugin } from "./webtools-colors";
@@ -26,6 +27,7 @@ import { webtoolsUrlParsePlugin } from "./webtools-url-parse";
 
 const ALL_PLUGINS: LauncherPlugin[] = [
   cashflowGamePlugin,
+  hardwareInspectorPlugin,
   webtoolsPasswordPlugin,
   webtoolsCronPlugin,
   webtoolsJsonPlugin,
@@ -50,6 +52,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
 
 const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
+  "hardware-inspector",
   "webtools-password",
   "webtools-cron",
   "webtools-json",

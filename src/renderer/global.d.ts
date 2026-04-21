@@ -14,6 +14,7 @@ import {
 
 interface RendererPluginConstants {
   CASHFLOW_PLUGIN_ID: string;
+  HARDWARE_INSPECTOR_PLUGIN_ID: string;
   WEBTOOLS_PASSWORD_PLUGIN_ID: string;
   WEBTOOLS_JSON_PLUGIN_ID: string;
   WEBTOOLS_URL_PLUGIN_ID: string;
@@ -67,6 +68,8 @@ interface RendererPluginHandlerConfigItem {
 }
 
 interface RendererPanelImpls {
+  applyHardwareInspectorPanelPayload(panel: unknown): void;
+  renderHardwareInspectorPanel(): void;
   applyWebtoolsPasswordPanelPayload(panel: unknown): void;
   renderWebtoolsPasswordPanel(): void;
   applyWebtoolsJsonPanelPayload(panel: unknown): void;
@@ -77,6 +80,12 @@ interface RendererPanelImpls {
   renderWebtoolsDiffPanel(): void;
   applyWebtoolsTimestampPanelPayload(panel: unknown): void;
   renderWebtoolsTimestampPanel(): void;
+  applyWebtoolsRegexPanelPayload(panel: unknown): void;
+  renderWebtoolsRegexPanel(): void;
+  applyWebtoolsCryptoPanelPayload(panel: unknown): void;
+  renderWebtoolsCryptoPanel(): void;
+  applyWebtoolsJwtPanelPayload(panel: unknown): void;
+  renderWebtoolsJwtPanel(): void;
   applyWebtoolsStringsPanelPayload(panel: unknown): void;
   renderWebtoolsStringsPanel(): void;
   applyWebtoolsColorsPanelPayload(panel: unknown): void;
@@ -87,6 +96,8 @@ interface RendererPanelImpls {
   renderWebtoolsConfigPanel(): void;
   applyWebtoolsSqlPanelPayload(panel: unknown): void;
   renderWebtoolsSqlPanel(): void;
+  applyWebtoolsUnitPanelPayload(panel: unknown): void;
+  renderWebtoolsUnitPanel(): void;
   applyWebtoolsQrcodePanelPayload(panel: unknown): void;
   renderWebtoolsQrcodePanel(): void;
   applyWebtoolsMarkdownPanelPayload(panel: unknown): void;
@@ -101,12 +112,20 @@ interface RendererPanelImpls {
   renderWebtoolsHttpMockPanel(): void;
 }
 
+interface RendererPanelDelegates {
+  applyWebtoolsCryptoPanelPayload(panel: unknown): void;
+  renderWebtoolsCryptoPanel(): void;
+  applyWebtoolsJwtPanelPayload(panel: unknown): void;
+  renderWebtoolsJwtPanel(): void;
+}
+
 declare global {
   interface Window {
     __LL_PLUGIN_CONSTANTS__?: RendererPluginConstants;
     __LL_PLUGIN_STATIC_DATA__?: RendererPluginStaticData;
     __LL_PLUGIN_HANDLER_CONFIGS__?: RendererPluginHandlerConfigItem[];
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
+    __LL_PANEL_DELEGATES__?: RendererPanelDelegates;
     launcher: {
       isDebugKeysEnabled(): boolean;
       getInitialItems(): Promise<LaunchItem[]>;

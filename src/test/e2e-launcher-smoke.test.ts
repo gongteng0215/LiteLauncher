@@ -1,7 +1,8 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  captureE2EFailureArtifacts,
   launchE2ESession,
   openPluginFromSearch,
   returnToSearch,
@@ -12,6 +13,7 @@ test(
   "electron smoke: launch window, open settings, search and open JSON plugin",
   { timeout: 120000 },
   async () => {
+    const testName = "electron smoke: launch window, open settings, search and open JSON plugin";
     let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
     try {
       session = await launchE2ESession();
@@ -40,6 +42,12 @@ test(
       );
       const finalStatus = await statusText.textContent();
       assert.match(finalStatus ?? "", /已打开插件|转换|JSON/);
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
     } finally {
       if (session) {
         await session.close();

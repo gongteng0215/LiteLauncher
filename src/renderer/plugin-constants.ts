@@ -1,5 +1,6 @@
 window.__LL_PLUGIN_CONSTANTS__ = {
   CASHFLOW_PLUGIN_ID: "cashflow-game",
+  HARDWARE_INSPECTOR_PLUGIN_ID: "hardware-inspector",
   WEBTOOLS_PASSWORD_PLUGIN_ID: "webtools-password",
   WEBTOOLS_JSON_PLUGIN_ID: "webtools-json",
   WEBTOOLS_URL_PLUGIN_ID: "webtools-url-parse",
@@ -22,6 +23,7 @@ window.__LL_PLUGIN_CONSTANTS__ = {
   WEBTOOLS_HTTP_MOCK_PLUGIN_ID: "webtools-http-mock",
   DEFAULT_VISIBLE_PLUGIN_IDS: [
     "cashflow-game",
+    "hardware-inspector",
     "webtools-password",
     "webtools-cron",
     "webtools-json",

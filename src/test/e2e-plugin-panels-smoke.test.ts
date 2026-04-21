@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  captureE2EFailureArtifacts,
   launchE2ESession,
   openPluginFromSearch,
   returnToSearch,
@@ -13,6 +14,7 @@ test(
   "electron smoke: open core webtools plugins and verify core UI flows",
   { timeout: 240000 },
   async () => {
+    const testName = "electron smoke: open core webtools plugins and verify core UI flows";
     let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
     try {
       session = await launchE2ESession();
@@ -265,8 +267,8 @@ test(
       const apiUrlInput = apiForm.locator("input.webtools-api-url");
       await apiUrlInput.fill("https://example.com/api?from=e2e");
       await page.waitForFunction(() => {
-        const node = document.querySelector("input.webtools-api-url") as HTMLInputElement | null;
-        return Boolean(node && node.value === "https://example.com/api?from=e2e");
+        const node = document.querySelector(".webtools-api-preview") as HTMLDivElement | null;
+        return Boolean(node && node.textContent?.includes("from=e2e"));
       });
       await apiForm.locator('[data-api-request-tab="headers"]').click();
       await apiForm
@@ -414,6 +416,12 @@ test(
         const viewer = document.querySelector(".webtools-diff-viewer");
         return viewer?.textContent?.includes("gamma") === true;
       });
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
     } finally {
       if (session) {
         await session.close();
