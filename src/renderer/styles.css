@@ -3195,6 +3195,87 @@ body {
   font-family: Consolas, "Cascadia Code", "Courier New", monospace;
 }
 
+.webtools-file-hash-expected-group {
+  flex: 1 1 360px;
+}
+
+.webtools-file-hash-output {
+  min-height: clamp(120px, 22vh, 180px);
+  resize: vertical;
+}
+
+.webtools-file-hash-verify {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.webtools-file-hash-verify[data-state="ok"] {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.14);
+  color: #a7f3d0;
+}
+
+.webtools-file-hash-verify[data-state="error"] {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+}
+
+.webtools-port-helper-controls {
+  gap: 12px 14px;
+}
+
+.webtools-port-helper-results {
+  display: grid;
+  gap: 10px;
+}
+
+.webtools-port-helper-empty {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: rgba(233, 242, 255, 0.72);
+  font-size: 13px;
+}
+
+.webtools-port-helper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.webtools-port-helper-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.webtools-port-helper-row-address {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.92);
+  overflow-wrap: anywhere;
+}
+
+.webtools-port-helper-row-meta {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.72);
+  overflow-wrap: anywhere;
+}
+
+.webtools-port-helper-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .webtools-sql-input,
 .webtools-sql-output,
 .webtools-api-body {
@@ -4715,6 +4796,16 @@ body {
     flex-wrap: wrap;
   }
 
+  .webtools-port-helper-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .webtools-port-helper-row-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .settings-panel-footer {
     flex-wrap: wrap;
   }
@@ -5509,6 +5600,30 @@ body {
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.24);
 }
 
+.hardware-inspector-overview-card[data-tone="success"] {
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.hardware-inspector-overview-card[data-tone="warning"] {
+  border-color: rgba(250, 204, 21, 0.35);
+  background: linear-gradient(
+      180deg,
+      rgba(84, 58, 0, 0.14),
+      rgba(30, 41, 59, 0.58) 38%
+    ),
+    rgba(30, 41, 59, 0.58);
+}
+
+.hardware-inspector-overview-card[data-tone="danger"] {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: linear-gradient(
+      180deg,
+      rgba(91, 25, 33, 0.16),
+      rgba(30, 41, 59, 0.58) 38%
+    ),
+    rgba(30, 41, 59, 0.58);
+}
+
 .hardware-inspector-overview-label,
 .hardware-inspector-metric-label {
   color: rgba(226, 232, 240, 0.62);
@@ -5647,7 +5762,9 @@ body {
   background: rgba(15, 23, 42, 0.45);
   color: rgba(226, 232, 240, 0.88);
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.2;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .hardware-inspector-badge[data-tone="success"] {

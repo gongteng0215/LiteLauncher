@@ -32,7 +32,9 @@ const ICON_COLOR_BY_PLUGIN_ID: Record<string, string> = {
   "webtools-qrcode": "#485460",
   "webtools-markdown": "#333333",
   "webtools-ua": "#ff7675",
-  "webtools-api-client": "#6c5ce7"
+  "webtools-api-client": "#6c5ce7",
+  "webtools-file-hash": "#1e90ff",
+  "webtools-port-helper": "#10b981"
 };
 
 const ICON_DATA_URL_CACHE = new Map<string, string>();
@@ -83,6 +85,10 @@ function getIconSymbolSvg(pluginId: string): string {
       return '<rect x="4" y="6" width="12" height="8" rx="1.5" fill="none" stroke="#fff" stroke-width="2"/><path d="M8 18h4M10 14v4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><rect x="17" y="9" width="3" height="6" rx="1" fill="none" stroke="#fff" stroke-width="2"/>';
     case "webtools-api-client":
       return '<path d="M7 8l-3 4 3 4M17 8l3 4-3 4M10 18l4-12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    case "webtools-file-hash":
+      return '<path d="M5 9V6a2 2 0 0 1 2-2h10v14a2 2 0 0 1-2 2H9l-4-4V9z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M9 20v-4H5M8 8h6M8 12h4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
+    case "webtools-port-helper":
+      return '<path d="M7 7h10M7 12h10M7 17h4M15 17h2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="18.5" cy="17" r="2.5" fill="none" stroke="#fff" stroke-width="2"/>';
     default:
       return '<path d="M22 12h-4l-3 9L9 3l-3 9H2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
   }

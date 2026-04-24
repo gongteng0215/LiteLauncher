@@ -12,6 +12,12 @@ import {
 } from "./collector";
 
 type HardwareInspectorAction = "open" | "refresh" | "export-report" | "export-html";
+type BadgeTone = "neutral" | "warning" | "danger" | "success";
+
+interface CardBadge {
+  text: string;
+  tone?: BadgeTone;
+}
 
 interface HardwareInspectorCommand {
   action: HardwareInspectorAction;
@@ -45,7 +51,8 @@ function getIconDataUrl(): string {
     '<rect x="7" y="7" width="10" height="10" rx="2" fill="none" stroke="#fff" stroke-width="2"/>' +
     '<path d="M9 4v3M12 4v3M15 4v3M9 17v3M12 17v3M15 17v3M4 9h3M4 12h3M4 15h3M17 9h3M17 12h3M17 15h3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>' +
     '</svg>';
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const base64 = Buffer.from(svg, "utf8").toString("base64");
+  return `data:image/svg+xml;base64,${base64}`;
 }
 
 function buildTarget(action: HardwareInspectorAction): string {
@@ -112,7 +119,7 @@ function formatClock(value: number | null | undefined): string {
 
 function formatBoolean(value: boolean | null | undefined): string {
   if (typeof value !== "boolean") {
-    return "鏈煡";
+    return "未知";
   }
 
   return value ? "支持" : "不支持";
@@ -171,6 +178,61 @@ function formatDriveType(value: number | null | undefined): string {
     default:
       return typeof value === "number" && Number.isFinite(value) ? `类型 ${value}` : "不可用";
   }
+}
+
+function hasReadableTemperature(value: number | null | undefined): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function getTemperatureSourceTone(source: string | null | undefined): BadgeTone {
+  const normalized = source?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return "neutral";
+  }
+  if (normalized.includes("acpi") || normalized.includes("best effort")) {
+    return "warning";
+  }
+  return "success";
+}
+
+function formatTemperatureSourceBadge(source: string | null | undefined): string {
+  const normalized = source?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return "温度来源不可用";
+  }
+  if (normalized.includes("acpi")) {
+    return "来源: ACPI 热区";
+  }
+  if (normalized.includes("librehardwaremonitor")) {
+    return "来源: LibreHardwareMonitor";
+  }
+  if (normalized.includes("openhardwaremonitor")) {
+    return "来源: OpenHardwareMonitor";
+  }
+  return "来源: 监控传感器";
+}
+
+function buildTemperatureBadges(
+  temperatureCelsius: number | null | undefined,
+  temperatureSource: string | null | undefined
+): CardBadge[] {
+  const hasTemperature = hasReadableTemperature(temperatureCelsius);
+  const sourceTone = getTemperatureSourceTone(temperatureSource);
+  const badges: CardBadge[] = [
+    {
+      text: hasTemperature ? "温度已采集" : "温度不可用",
+      tone: hasTemperature ? sourceTone : "neutral"
+    }
+  ];
+
+  if (temperatureSource?.trim()) {
+    badges.push({
+      text: formatTemperatureSourceBadge(temperatureSource),
+      tone: sourceTone
+    });
+  }
+
+  return badges;
 }
 
 function formatTemperature(value: number | null | undefined): string {
@@ -357,7 +419,7 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
         );
         partition.volumes.forEach((volume) => {
           lines.push(
-            `    - 卷 ${formatText(volume.deviceId)} ${formatText(volume.volumeName)} / ${formatText(volume.fileSystem)} / ${formatBytes(volume.size)} / 剩余 ${formatBytes(volume.freeSpace)}`
+            `    - 卷 ${formatText(volume.deviceId)} ${formatText(volume.volumeName)} / ${formatText(volume.fileSystem)} / ${formatBytes(volume.size)} / 剩余 ${formatBytes(volume.freeSpace)} / ${formatDriveType(volume.driveType)}`
           );
         });
       });
@@ -397,12 +459,18 @@ function buildMetricGridHtml(
 function buildCardHtml(
   title: string,
   body: string,
-  options?: { risk?: boolean; badges?: string[] }
+  options?: { risk?: boolean; badges?: Array<string | CardBadge> }
 ): string {
   const badgeHtml =
     options?.badges && options.badges.length > 0
       ? `<div class="badge-row">${options.badges
-          .map((badge) => `<span class="badge">${escapeHtml(badge)}</span>`)
+          .map((badge) => {
+            const resolved =
+              typeof badge === "string" ? { text: badge, tone: "neutral" as BadgeTone } : badge;
+            return `<span class="badge" data-tone="${resolved.tone ?? "neutral"}">${escapeHtml(
+              resolved.text
+            )}</span>`;
+          })
           .join("")}</div>`
       : "";
 
@@ -443,7 +511,8 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
 
   const overviewHtml = `
     <section class="overview">
-      ${[
+      ${(
+        [
         { label: "设备", value: systemName },
         {
           label: "系统",
@@ -456,11 +525,15 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
         { label: "总内存", value: formatBytes(snapshot.computerSystem.totalPhysicalMemory) },
         { label: "显卡", value: `${snapshot.gpus.length} 张` },
         { label: "磁盘", value: `${snapshot.disks.length} 块` },
-        { label: "风险磁盘", value: riskDiskCount > 0 ? `${riskDiskCount} 块` : "无" }
-      ]
+        {
+          label: "风险磁盘",
+          value: riskDiskCount > 0 ? `${riskDiskCount} 块` : "无",
+          tone: riskDiskCount > 0 ? "danger" : "success"
+        }
+      ] as Array<{ label: string; value: string; tone?: BadgeTone }>)
         .map(
           (item) => `
-        <div class="overview-item">
+        <div class="overview-item" data-tone="${item.tone ?? "neutral"}">
           <div class="overview-label">${escapeHtml(item.label)}</div>
           <div class="overview-value">${escapeHtml(item.value)}</div>
         </div>`
@@ -487,7 +560,10 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
           { label: "温度来源", value: formatOptionalText(cpu.temperatureSource) },
           { label: "架构", value: formatText(cpu.architecture) },
           { label: "虚拟化", value: formatBoolean(cpu.virtualizationFirmwareEnabled) }
-        ])
+        ]),
+        {
+          badges: buildTemperatureBadges(cpu.temperatureCelsius, cpu.temperatureSource)
+        }
       )
     )
     .join("");
@@ -521,7 +597,10 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
           { label: "温度(可选)", value: formatTemperature(gpu.temperatureCelsius) },
           { label: "温度来源", value: formatOptionalText(gpu.temperatureSource) },
           { label: "状态", value: formatText(gpu.status) }
-        ])
+        ]),
+        {
+          badges: buildTemperatureBadges(gpu.temperatureCelsius, gpu.temperatureSource)
+        }
       )
     )
     .join("");
@@ -688,6 +767,17 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
       color: #f8fafc;
       overflow-wrap: anywhere;
     }
+    .overview-item[data-tone="success"] {
+      border-color: rgba(74, 222, 128, 0.22);
+    }
+    .overview-item[data-tone="warning"] {
+      border-color: rgba(250, 204, 21, 0.35);
+      background: linear-gradient(180deg, rgba(84, 58, 0, 0.14), rgba(30, 41, 59, 0.78) 36%);
+    }
+    .overview-item[data-tone="danger"] {
+      border-color: rgba(248, 113, 113, 0.38);
+      background: linear-gradient(180deg, rgba(91, 25, 33, 0.16), rgba(30, 41, 59, 0.78) 36%);
+    }
     .section {
       display: grid;
       gap: 12px;
@@ -733,6 +823,24 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
       border: 1px solid rgba(148, 163, 184, 0.16);
       color: rgba(226, 232, 240, 0.9);
       font-size: 11px;
+      line-height: 1.2;
+      max-width: 100%;
+      white-space: normal;
+    }
+    .badge[data-tone="success"] {
+      border-color: rgba(74, 222, 128, 0.3);
+      background: rgba(20, 69, 43, 0.38);
+      color: #bbf7d0;
+    }
+    .badge[data-tone="warning"] {
+      border-color: rgba(250, 204, 21, 0.35);
+      background: rgba(84, 58, 0, 0.35);
+      color: #fde68a;
+    }
+    .badge[data-tone="danger"] {
+      border-color: rgba(248, 113, 113, 0.35);
+      background: rgba(91, 25, 33, 0.38);
+      color: #fecaca;
     }
     .metric-grid {
       display: grid;

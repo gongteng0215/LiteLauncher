@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -106,6 +106,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.execute,
   IPC_CHANNELS.setWindowSizePreset,
   IPC_CHANNELS.setAutoHideSuspended,
+  IPC_CHANNELS.pickFilePath,
   IPC_CHANNELS.hide,
   IPC_CHANNELS.getClipItems,
   IPC_CHANNELS.copyClipItem,
@@ -1321,6 +1322,27 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.setAutoHideSuspended, (_, suspendedInput: unknown) => {
     return setWindowAutoHideSuspended(window, suspendedInput === true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.pickFilePath, async () => {
+    if (window.isDestroyed()) {
+      return null;
+    }
+
+    setWindowAutoHideSuspended(window, true);
+    try {
+      const result = await dialog.showOpenDialog(window, {
+        title: "选择文件",
+        properties: ["openFile", "dontAddToRecent"]
+      });
+      if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+        return null;
+      }
+      const selected = result.filePaths[0];
+      return typeof selected === "string" && selected.trim() ? selected : null;
+    } finally {
+      setWindowAutoHideSuspended(window, false);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.hide, () => {

@@ -85,6 +85,70 @@ function createHardwareInspectorBadge(
   return badge;
 }
 
+function getHardwareInspectorTemperatureSourceTone(
+  source: string | null | undefined
+): "neutral" | "success" | "warning" {
+  const normalized = source?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return "neutral";
+  }
+  if (normalized.includes("acpi") || normalized.includes("best effort")) {
+    return "warning";
+  }
+  return "success";
+}
+
+function formatHardwareInspectorTemperatureSourceBadge(
+  source: string | null | undefined
+): string {
+  const normalized = source?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return "温度来源不可用";
+  }
+  if (normalized.includes("acpi")) {
+    return "来源: ACPI 热区";
+  }
+  if (normalized.includes("librehardwaremonitor")) {
+    return "来源: LibreHardwareMonitor";
+  }
+  if (normalized.includes("openhardwaremonitor")) {
+    return "来源: OpenHardwareMonitor";
+  }
+  return "来源: 监控传感器";
+}
+
+function createHardwareInspectorTemperatureBadgeRow(
+  temperatureCelsius: number | null | undefined,
+  temperatureSource: string | null | undefined
+): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "hardware-inspector-badge-row";
+
+  const hasTemperature =
+    typeof temperatureCelsius === "number" &&
+    Number.isFinite(temperatureCelsius) &&
+    temperatureCelsius > 0;
+  const sourceTone = getHardwareInspectorTemperatureSourceTone(temperatureSource);
+
+  row.appendChild(
+    createHardwareInspectorBadge(
+      hasTemperature ? "温度已采集" : "温度不可用",
+      hasTemperature ? sourceTone : "neutral"
+    )
+  );
+
+  if (temperatureSource?.trim()) {
+    row.appendChild(
+      createHardwareInspectorBadge(
+        formatHardwareInspectorTemperatureSourceBadge(temperatureSource),
+        sourceTone
+      )
+    );
+  }
+
+  return row;
+}
+
 function countHardwareInspectorDiskVolumes(disk: HardwareInspectorDisk): number {
   return disk.partitions.reduce((count, partition) => count + partition.volumes.length, 0);
 }
@@ -347,19 +411,33 @@ window.__LL_PANEL_IMPLS__ = {
         snapshot.computerSystem.totalPhysicalMemory
       );
       const riskDiskCount = countHardwareInspectorRiskDisks(snapshot);
-      [
+      const overviewItems: Array<{
+        key: string;
+        label: string;
+        value: string;
+        tone?: "success" | "warning" | "danger";
+      }> = [
         { key: "device", label: "设备", value: systemName },
         { key: "system", label: "系统", value: osName },
         { key: "cpu", label: "CPU", value: cpuName },
         { key: "totalMemory", label: "总内存", value: totalMemory },
         { key: "gpuCount", label: "显卡", value: `${snapshot.gpus.length} 张` },
         { key: "diskCount", label: "磁盘", value: `${snapshot.disks.length} 块` },
-        { key: "riskDiskCount", label: "风险磁盘", value: riskDiskCount > 0 ? `${riskDiskCount} 块` : "无" }
-      ].forEach((item) => {
+        {
+          key: "riskDiskCount",
+          label: "风险磁盘",
+          value: riskDiskCount > 0 ? `${riskDiskCount} 块` : "无",
+          tone: riskDiskCount > 0 ? "danger" : "success"
+        }
+      ];
+      overviewItems.forEach((item) => {
         const card = document.createElement("div");
         card.className = "hardware-inspector-overview-card";
         if (overviewChangedSet.has(item.key)) {
           card.dataset.changed = "true";
+        }
+        if (item.tone) {
+          card.dataset.tone = item.tone;
         }
         const label = document.createElement("div");
         label.className = "hardware-inspector-overview-label";
@@ -426,6 +504,12 @@ window.__LL_PANEL_IMPLS__ = {
         const card = createHardwareInspectorCard(`处理器 ${index + 1}`);
         const changeLabels = cpuChanges[getHardwareInspectorCpuKey(cpu, index)] ?? [];
         applyHardwareInspectorCardChangeState(card, changeLabels);
+        card.appendChild(
+          createHardwareInspectorTemperatureBadgeRow(
+            cpu.temperatureCelsius,
+            cpu.temperatureSource
+          )
+        );
         card.appendChild(
           createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
             { label: "型号", value: formatHardwareInspectorText(cpu.name) },
@@ -555,6 +639,12 @@ window.__LL_PANEL_IMPLS__ = {
           );
         });
         applyHardwareInspectorCardChangeState(card, changeLabels);
+        card.appendChild(
+          createHardwareInspectorTemperatureBadgeRow(
+            gpu.temperatureCelsius,
+            gpu.temperatureSource
+          )
+        );
         card.appendChild(
           createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
             { label: "厂商", value: formatHardwareInspectorText(gpu.manufacturer) },

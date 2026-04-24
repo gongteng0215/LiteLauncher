@@ -10,12 +10,14 @@ import { webtoolsConfigConvertPlugin } from "./webtools-config-convert";
 import { webtoolsCronPlugin } from "./webtools-cron";
 import { webtoolsCryptoPlugin } from "./webtools-crypto";
 import { webtoolsDiffPlugin } from "./webtools-diff";
+import { webtoolsFileHashPlugin } from "./webtools-file-hash";
 import { webtoolsHttpMockPlugin } from "./webtools-http-mock";
 import { webtoolsImageBase64Plugin } from "./webtools-image-base64";
 import { webtoolsJsonPlugin } from "./webtools-json";
 import { webtoolsJwtPlugin } from "./webtools-jwt";
 import { webtoolsMarkdownPlugin } from "./webtools-markdown";
 import { webtoolsPasswordPlugin } from "./webtools-password";
+import { webtoolsPortHelperPlugin } from "./webtools-port-helper";
 import { webtoolsQrcodePlugin } from "./webtools-qrcode";
 import { webtoolsRegexPlugin } from "./webtools-regex";
 import { webtoolsSqlFormatPlugin } from "./webtools-sql-format";
@@ -43,6 +45,8 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsConfigConvertPlugin,
   webtoolsSqlFormatPlugin,
   webtoolsUnitConvertPlugin,
+  webtoolsFileHashPlugin,
+  webtoolsPortHelperPlugin,
   webtoolsUrlParsePlugin,
   webtoolsQrcodePlugin,
   webtoolsMarkdownPlugin,
@@ -67,6 +71,8 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
   "webtools-regex",
   "webtools-url-parse",
   "webtools-qrcode",

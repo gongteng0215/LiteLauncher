@@ -85,6 +85,16 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "unit-convert"
   },
   {
+    pluginId: handlerConstants.WEBTOOLS_FILE_HASH_PLUGIN_ID,
+    formSelector: "form.webtools-file-hash-form",
+    enterActionKey: "file-hash-calculate"
+  },
+  {
+    pluginId: handlerConstants.WEBTOOLS_PORT_HELPER_PLUGIN_ID,
+    formSelector: "form.webtools-port-helper-form",
+    enterActionKey: "port-helper-query"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_QRCODE_PLUGIN_ID,
     formSelector: "form.webtools-qrcode-form",
     enterActionKey: "qrcode-generate"

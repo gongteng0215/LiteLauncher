@@ -93,6 +93,9 @@ const api = {
   setAutoHideSuspended(suspended: boolean): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.setAutoHideSuspended, suspended);
   },
+  pickFilePath(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.pickFilePath);
+  },
   hide(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.hide);
   },

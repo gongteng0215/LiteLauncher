@@ -30,6 +30,8 @@ interface RendererPluginConstants {
   WEBTOOLS_CONFIG_PLUGIN_ID: string;
   WEBTOOLS_SQL_PLUGIN_ID: string;
   WEBTOOLS_UNIT_PLUGIN_ID: string;
+  WEBTOOLS_FILE_HASH_PLUGIN_ID: string;
+  WEBTOOLS_PORT_HELPER_PLUGIN_ID: string;
   WEBTOOLS_QRCODE_PLUGIN_ID: string;
   WEBTOOLS_MARKDOWN_PLUGIN_ID: string;
   WEBTOOLS_UA_PLUGIN_ID: string;
@@ -151,6 +153,7 @@ declare global {
       execute(item: LaunchItem): Promise<ExecuteResult>;
       setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
       setAutoHideSuspended(suspended: boolean): Promise<boolean>;
+      pickFilePath(): Promise<string | null>;
       hide(): Promise<boolean>;
       getClipItems(query: string): Promise<ClipItem[]>;
       copyClipItem(itemId: string): Promise<boolean>;

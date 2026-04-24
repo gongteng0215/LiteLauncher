@@ -58,6 +58,11 @@ const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
 const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
+const REQUIRED_VISIBLE_PLUGIN_IDS = [
+  "hardware-inspector",
+  "webtools-file-hash",
+  "webtools-port-helper"
+] as const;
 const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
@@ -75,6 +80,8 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
   "webtools-regex",
   "webtools-url-parse",
   "webtools-qrcode",
@@ -84,6 +91,7 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
 ] as const;
 const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
+  "hardware-inspector",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -93,6 +101,7 @@ const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
+  "webtools-http-mock",
   "webtools-image-base64",
   "webtools-config-convert",
   "webtools-sql-format",
@@ -810,8 +819,38 @@ function replaceCatalogPluginItems(items: LaunchItem[]): LaunchItem[] {
   return [...nonPluginItems, ...getPluginCatalogItems()];
 }
 
+function isLikelyBrokenVisiblePluginList(pluginIds: string[]): boolean {
+  if (pluginIds.length === 0) {
+    return true;
+  }
+
+  if (pluginIds.length > REQUIRED_VISIBLE_PLUGIN_IDS.length) {
+    return false;
+  }
+
+  const requiredSet = new Set<string>(REQUIRED_VISIBLE_PLUGIN_IDS);
+  return pluginIds.every((id) => requiredSet.has(id));
+}
+
+function ensureRequiredVisiblePluginIds(pluginIds: string[]): string[] {
+  const next = [...pluginIds];
+  for (const pluginId of REQUIRED_VISIBLE_PLUGIN_IDS) {
+    if (next.includes(pluginId)) {
+      continue;
+    }
+    if (next.length >= VISIBLE_PLUGIN_IDS_MAX) {
+      break;
+    }
+    next.push(pluginId);
+  }
+
+  return setVisiblePluginIds(next);
+}
+
 async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
-  const fallback = setVisiblePluginIds(getDefaultVisiblePluginIds());
+  const fallback = ensureRequiredVisiblePluginIds(
+    setVisiblePluginIds(getDefaultVisiblePluginIds())
+  );
   const raw = await db.getSetting(VISIBLE_PLUGIN_IDS_KEY);
   if (!raw) {
     await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(fallback));
@@ -857,6 +896,8 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldUpgradeOlderDefault
         ? fallback
         : applied;
+    const candidate = isLikelyBrokenVisiblePluginList(next) ? fallback : next;
+    const ensured = ensureRequiredVisiblePluginIds(candidate);
     if (
       shouldFallback ||
       shouldUpgradeCurrentDefault ||
@@ -865,11 +906,11 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldUpgradeLegacyDefault ||
       shouldUpgradePreviousDefault ||
       shouldUpgradeOlderDefault ||
-      !areStringArraysEqual(next, requested)
+      !areStringArraysEqual(ensured, requested)
     ) {
-      await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(next));
+      await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(ensured));
     }
-    return next;
+    return ensured;
   } catch {
     await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(fallback));
     return fallback;
@@ -882,12 +923,13 @@ async function saveVisiblePluginIds(
 ): Promise<string[]> {
   const requested = normalizeVisiblePluginIdsInput(pluginIds);
   const applied = setVisiblePluginIds(requested);
-  visiblePluginIds = applied;
-  await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(applied));
+  const ensured = ensureRequiredVisiblePluginIds(applied);
+  visiblePluginIds = ensured;
+  await db.setSetting(VISIBLE_PLUGIN_IDS_KEY, JSON.stringify(ensured));
 
   const nextCatalog = replaceCatalogPluginItems(catalog);
   await persistCatalogSnapshot(db, nextCatalog);
-  return applied;
+  return ensured;
 }
 
 async function rebuildCatalogIndex(

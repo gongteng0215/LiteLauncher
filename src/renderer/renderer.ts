@@ -283,6 +283,18 @@ type WebtoolsUnitStorageKey = "B" | "KB" | "MB" | "GB" | "TB";
 type WebtoolsApiRequestTab = "params" | "headers" | "body";
 type WebtoolsApiResponseTab = "body" | "headers";
 type WebtoolsHttpMockMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+type WebtoolsFileHashAlgorithm = "md5" | "sha1" | "sha256" | "sha512";
+type WebtoolsPortHelperProtocol = "all" | "tcp" | "udp";
+
+interface WebtoolsPortHelperRecord {
+  protocol: string;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  state: string;
+  pid: number;
+  processName: string;
+}
 
 interface PasswordPanelPayload {
   panel: "password";
@@ -541,6 +553,7 @@ interface LauncherApi {
   execute(item: LaunchItem): Promise<ExecuteResult>;
   setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
   setAutoHideSuspended(suspended: boolean): Promise<boolean>;
+  pickFilePath(): Promise<string | null>;
   hide(): Promise<boolean>;
   getClipItems(query: string): Promise<ClipItem[]>;
   copyClipItem(itemId: string): Promise<boolean>;
@@ -858,6 +871,23 @@ let webtoolsHttpMockRequestCount = 0;
 let webtoolsHttpMockInfo = "";
 let webtoolsHttpMockError = "";
 let webtoolsHttpMockRequestToken = 0;
+let webtoolsFileHashFilePath = "";
+let webtoolsFileHashAlgorithm: WebtoolsFileHashAlgorithm = "sha256";
+let webtoolsFileHashExpectedHash = "";
+let webtoolsFileHashOutput = "";
+let webtoolsFileHashInfo = "";
+let webtoolsFileHashError = "";
+let webtoolsFileHashSize = "";
+let webtoolsFileHashMatched: boolean | null = null;
+let webtoolsFileHashRequestToken = 0;
+let webtoolsPortHelperPort = "";
+let webtoolsPortHelperProtocol: WebtoolsPortHelperProtocol = "all";
+let webtoolsPortHelperPid = "";
+let webtoolsPortHelperRecords: WebtoolsPortHelperRecord[] = [];
+let webtoolsPortHelperInfo = "";
+let webtoolsPortHelperError = "";
+let webtoolsPortHelperBusy = false;
+let webtoolsPortHelperRequestToken = 0;
 let hardwareInspectorSnapshot: HardwareInspectorSnapshot | null = null;
 let hardwareInspectorLastSnapshot: HardwareInspectorSnapshot | null = null;
 let hardwareInspectorDiffState: HardwareInspectorDiffState | null = null;
@@ -901,6 +931,8 @@ const WEBTOOLS_IMAGE_BASE64_PLUGIN_ID = "webtools-image-base64";
 const WEBTOOLS_CONFIG_PLUGIN_ID = "webtools-config-convert";
 const WEBTOOLS_SQL_PLUGIN_ID = "webtools-sql-format";
 const WEBTOOLS_UNIT_PLUGIN_ID = "webtools-unit-convert";
+const WEBTOOLS_FILE_HASH_PLUGIN_ID = "webtools-file-hash";
+const WEBTOOLS_PORT_HELPER_PLUGIN_ID = "webtools-port-helper";
 const WEBTOOLS_QRCODE_PLUGIN_ID = "webtools-qrcode";
 const WEBTOOLS_MARKDOWN_PLUGIN_ID = "webtools-markdown";
 const WEBTOOLS_UA_PLUGIN_ID = "webtools-ua";
@@ -1002,6 +1034,8 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
   "webtools-regex",
   "webtools-url-parse",
   "webtools-qrcode",
@@ -1960,7 +1994,7 @@ function formatPercent(value: number): string {
 }
 
 function cashflowPhaseLabel(phase: CashflowPhase): string {
-  return phase === "freedom-phase" ? "閼奉亞鏁遍梼鑸殿唽" : "閼颁線绱剁挧娑滅獓";
+  return phase === "freedom-phase" ? "财富自由阶段" : "老鼠赛跑阶段";
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -10622,6 +10656,831 @@ function renderWebtoolsHttpMockPanel(): void {
   panelImplsSafe.renderWebtoolsHttpMockPanel();
 }
 
+function normalizeWebtoolsFileHashAlgorithm(value: string): WebtoolsFileHashAlgorithm {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "md5" ||
+    normalized === "sha1" ||
+    normalized === "sha256" ||
+    normalized === "sha512"
+  ) {
+    return normalized;
+  }
+  return "sha256";
+}
+
+function applyWebtoolsFileHashPanelPayload(panel: ActivePluginPanelState): void {
+  const data = toRecord(panel.data);
+  if (!data) {
+    return;
+  }
+
+  webtoolsFileHashOutput = "";
+  webtoolsFileHashInfo = "";
+  webtoolsFileHashError = "";
+  webtoolsFileHashSize = "";
+  webtoolsFileHashMatched = null;
+
+  if (typeof data.filePath === "string") {
+    webtoolsFileHashFilePath = data.filePath;
+  }
+  if (typeof data.algorithm === "string") {
+    webtoolsFileHashAlgorithm = normalizeWebtoolsFileHashAlgorithm(data.algorithm);
+  }
+  if (typeof data.expectedHash === "string") {
+    webtoolsFileHashExpectedHash = data.expectedHash;
+  }
+  if (typeof data.hash === "string") {
+    webtoolsFileHashOutput = data.hash;
+  }
+  if (typeof data.matched === "boolean") {
+    webtoolsFileHashMatched = data.matched;
+  } else {
+    webtoolsFileHashMatched = null;
+  }
+  if (typeof data.size === "number" && Number.isFinite(data.size) && data.size >= 0) {
+    webtoolsFileHashSize = formatHardwareInspectorBytes(data.size);
+  }
+  if (typeof data.info === "string") {
+    webtoolsFileHashInfo = data.info;
+  }
+}
+
+function buildWebtoolsFileHashTarget(action: "hash"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("filePath", webtoolsFileHashFilePath);
+  params.set("algorithm", webtoolsFileHashAlgorithm);
+  params.set("expectedHash", webtoolsFileHashExpectedHash);
+  return `command:plugin:${WEBTOOLS_FILE_HASH_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsFileHashPanelInForm(form: HTMLFormElement): void {
+  const pathNode = form.elements.namedItem("webtoolsFileHashPath");
+  if (pathNode instanceof HTMLInputElement) {
+    pathNode.value = webtoolsFileHashFilePath;
+  }
+
+  const algorithmNode = form.elements.namedItem("webtoolsFileHashAlgorithm");
+  if (algorithmNode instanceof HTMLSelectElement) {
+    algorithmNode.value = webtoolsFileHashAlgorithm;
+  }
+
+  const expectedNode = form.elements.namedItem("webtoolsFileHashExpected");
+  if (expectedNode instanceof HTMLInputElement) {
+    expectedNode.value = webtoolsFileHashExpectedHash;
+  }
+
+  const outputNode = form.elements.namedItem("webtoolsFileHashOutput");
+  if (outputNode instanceof HTMLTextAreaElement) {
+    outputNode.value = webtoolsFileHashOutput;
+  }
+
+  const verifyNode = form.querySelector<HTMLElement>(".webtools-file-hash-verify");
+  if (verifyNode) {
+    if (!webtoolsFileHashExpectedHash.trim()) {
+      verifyNode.textContent = "未设置期望哈希（仅展示计算结果）";
+      verifyNode.dataset.state = "idle";
+    } else if (webtoolsFileHashMatched === true) {
+      verifyNode.textContent = "校验结果：匹配";
+      verifyNode.dataset.state = "ok";
+    } else if (webtoolsFileHashMatched === false) {
+      verifyNode.textContent = "校验结果：不匹配";
+      verifyNode.dataset.state = "error";
+    } else {
+      verifyNode.textContent = "请输入文件并执行计算";
+      verifyNode.dataset.state = "idle";
+    }
+  }
+
+  const fileInfoNode = form.querySelector<HTMLElement>(".webtools-file-hash-size");
+  if (fileInfoNode) {
+    const filePath = webtoolsFileHashFilePath.trim();
+    if (filePath && webtoolsFileHashSize) {
+      fileInfoNode.textContent = `${filePath} · ${webtoolsFileHashSize}`;
+    } else {
+      fileInfoNode.textContent = filePath || "未选择文件";
+    }
+  }
+
+  const infoNode = form.querySelector<HTMLElement>(".webtools-file-hash-info");
+  if (infoNode) {
+    const text = webtoolsFileHashError || webtoolsFileHashInfo || "输入文件路径后点击计算";
+    infoNode.textContent = text;
+    infoNode.dataset.state = webtoolsFileHashError
+      ? "error"
+      : webtoolsFileHashOutput
+        ? "ok"
+        : "idle";
+  }
+}
+
+async function executeWebtoolsFileHashCalculate(form: HTMLFormElement): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行文件哈希");
+    return;
+  }
+
+  const pathNode = form.elements.namedItem("webtoolsFileHashPath");
+  const algorithmNode = form.elements.namedItem("webtoolsFileHashAlgorithm");
+  const expectedNode = form.elements.namedItem("webtoolsFileHashExpected");
+
+  webtoolsFileHashFilePath = pathNode instanceof HTMLInputElement ? pathNode.value.trim() : "";
+  webtoolsFileHashAlgorithm =
+    algorithmNode instanceof HTMLSelectElement
+      ? normalizeWebtoolsFileHashAlgorithm(algorithmNode.value)
+      : "sha256";
+  webtoolsFileHashExpectedHash =
+    expectedNode instanceof HTMLInputElement ? expectedNode.value.trim() : "";
+  webtoolsFileHashError = "";
+  webtoolsFileHashInfo = "计算中...";
+  refreshWebtoolsFileHashPanelInForm(form);
+
+  const requestToken = ++webtoolsFileHashRequestToken;
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_FILE_HASH_PLUGIN_ID}:hash`,
+    type: "command",
+    title: "文件哈希",
+    subtitle: "面板执行",
+    target: buildWebtoolsFileHashTarget("hash"),
+    keywords: ["plugin", "hash", "checksum", "file", "文件哈希"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsFileHashRequestToken) {
+    return;
+  }
+
+  const data = toRecord(result.data);
+  if (typeof data?.filePath === "string") {
+    webtoolsFileHashFilePath = data.filePath;
+  }
+  if (typeof data?.algorithm === "string") {
+    webtoolsFileHashAlgorithm = normalizeWebtoolsFileHashAlgorithm(data.algorithm);
+  }
+  if (typeof data?.expectedHash === "string") {
+    webtoolsFileHashExpectedHash = data.expectedHash;
+  }
+  if (typeof data?.hash === "string") {
+    webtoolsFileHashOutput = data.hash;
+  } else if (!result.ok) {
+    webtoolsFileHashOutput = "";
+  }
+  if (typeof data?.matched === "boolean") {
+    webtoolsFileHashMatched = data.matched;
+  } else {
+    webtoolsFileHashMatched = null;
+  }
+  if (typeof data?.size === "number" && Number.isFinite(data.size) && data.size >= 0) {
+    webtoolsFileHashSize = formatHardwareInspectorBytes(data.size);
+  } else {
+    webtoolsFileHashSize = "";
+  }
+  if (typeof data?.info === "string") {
+    webtoolsFileHashInfo = data.info;
+  }
+
+  const matchedError = typeof data?.matched === "boolean" ? data.matched === false : false;
+  webtoolsFileHashError = !result.ok && !matchedError ? result.message || "哈希计算失败" : "";
+  if (!webtoolsFileHashError && result.message) {
+    webtoolsFileHashInfo = result.message;
+  }
+  setStatus(result.message ?? (result.ok ? "哈希计算完成" : "哈希计算失败"));
+  refreshWebtoolsFileHashPanelInForm(form);
+}
+
+function renderWebtoolsFileHashPanel(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel";
+
+  const form = document.createElement("form");
+  form.className = "settings-form webtools-file-hash-form webtools-tool-panel";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void executeWebtoolsFileHashCalculate(form);
+  });
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = activePluginPanel?.title || "文件哈希";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent =
+    activePluginPanel?.subtitle || "计算文件 MD5 / SHA1 / SHA256 / SHA512 并可校验期望值";
+
+  const pathRow = document.createElement("div");
+  pathRow.className = "settings-row webtools-row-full";
+  const pathLabel = document.createElement("span");
+  pathLabel.className = "settings-row-label";
+  pathLabel.textContent = "文件路径";
+  const pathInput = document.createElement("input");
+  pathInput.className = "settings-value webtools-tool-input webtools-tool-code";
+  pathInput.name = "webtoolsFileHashPath";
+  pathInput.type = "text";
+  pathInput.placeholder = "例如：C:\\\\Users\\\\me\\\\Downloads\\\\file.zip";
+  pathInput.addEventListener("input", () => {
+    webtoolsFileHashFilePath = pathInput.value;
+  });
+  const pickButton = document.createElement("button");
+  pickButton.type = "button";
+  pickButton.className = "settings-btn settings-btn-secondary";
+  pickButton.textContent = "选择文件";
+  pickButton.addEventListener("click", () => {
+    const launcher = getLauncherApi();
+    if (!launcher?.pickFilePath) {
+      setStatus("当前版本不支持系统文件选择，请手动粘贴文件路径");
+      return;
+    }
+
+    beginPluginNativeInteraction(20000);
+    void launcher
+      .pickFilePath()
+      .then((selectedPath) => {
+        if (typeof selectedPath === "string" && selectedPath.trim()) {
+          webtoolsFileHashFilePath = selectedPath.trim();
+          webtoolsFileHashError = "";
+          webtoolsFileHashInfo = "已选择文件，点击“计算哈希”开始";
+        }
+      })
+      .catch(() => {
+        setStatus("打开文件选择器失败");
+      })
+      .finally(() => {
+        schedulePluginNativeInteractionRelease(260);
+        refreshWebtoolsFileHashPanelInForm(form);
+      });
+  });
+  pathRow.append(pathLabel, pathInput, pickButton);
+
+  const configRow = document.createElement("div");
+  configRow.className = "webtools-tool-bar";
+
+  const algorithmWrap = document.createElement("label");
+  algorithmWrap.className = "webtools-tool-bar-group";
+  const algorithmLabel = document.createElement("span");
+  algorithmLabel.className = "webtools-tool-bar-label";
+  algorithmLabel.textContent = "算法";
+  const algorithmSelect = document.createElement("select");
+  algorithmSelect.className = "settings-number webtools-tool-select";
+  algorithmSelect.name = "webtoolsFileHashAlgorithm";
+  ["md5", "sha1", "sha256", "sha512"].forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value.toUpperCase();
+    algorithmSelect.appendChild(option);
+  });
+  algorithmSelect.addEventListener("change", () => {
+    webtoolsFileHashAlgorithm = normalizeWebtoolsFileHashAlgorithm(algorithmSelect.value);
+  });
+  algorithmWrap.append(algorithmLabel, algorithmSelect);
+
+  const expectedWrap = document.createElement("label");
+  expectedWrap.className = "webtools-tool-bar-group webtools-file-hash-expected-group";
+  const expectedLabel = document.createElement("span");
+  expectedLabel.className = "webtools-tool-bar-label";
+  expectedLabel.textContent = "期望哈希（可选）";
+  const expectedInput = document.createElement("input");
+  expectedInput.className = "settings-value webtools-tool-input webtools-tool-code";
+  expectedInput.name = "webtoolsFileHashExpected";
+  expectedInput.type = "text";
+  expectedInput.placeholder = "粘贴用于对比的哈希值";
+  expectedInput.addEventListener("input", () => {
+    webtoolsFileHashExpectedHash = expectedInput.value;
+  });
+  expectedWrap.append(expectedLabel, expectedInput);
+
+  configRow.append(algorithmWrap, expectedWrap);
+
+  const outputWrap = document.createElement("label");
+  outputWrap.className = "webtools-tool-pane";
+  const outputHead = document.createElement("div");
+  outputHead.className = "webtools-tool-pane-head";
+  const outputTitle = document.createElement("span");
+  outputTitle.className = "webtools-tool-pane-title";
+  outputTitle.textContent = "哈希结果";
+  const fileInfo = document.createElement("span");
+  fileInfo.className = "webtools-tool-pane-meta webtools-file-hash-size webtools-tool-code";
+  outputHead.append(outputTitle, fileInfo);
+  const outputText = document.createElement("textarea");
+  outputText.className = "settings-value webtools-textarea webtools-tool-code webtools-file-hash-output";
+  outputText.name = "webtoolsFileHashOutput";
+  outputText.readOnly = true;
+  outputText.spellcheck = false;
+  outputWrap.append(outputHead, outputText);
+
+  const verifyLine = document.createElement("div");
+  verifyLine.className = "webtools-tool-info webtools-file-hash-verify";
+
+  const infoLine = document.createElement("div");
+  infoLine.className = "webtools-tool-info webtools-file-hash-info";
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+
+  const calculateButton = document.createElement("button");
+  calculateButton.type = "submit";
+  calculateButton.className = "settings-btn settings-btn-primary";
+  calculateButton.textContent = "计算哈希";
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-secondary";
+  copyButton.textContent = "复制结果";
+  copyButton.addEventListener("click", () => {
+    if (!webtoolsFileHashOutput.trim()) {
+      setStatus("暂无可复制的哈希结果");
+      return;
+    }
+    void (async () => {
+      const copied = await copyTextToClipboard(webtoolsFileHashOutput);
+      setStatus(copied ? "已复制哈希结果" : "复制失败");
+    })();
+  });
+
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "settings-btn settings-btn-secondary";
+  clearButton.textContent = "清空";
+  clearButton.addEventListener("click", () => {
+    webtoolsFileHashFilePath = "";
+    webtoolsFileHashExpectedHash = "";
+    webtoolsFileHashOutput = "";
+    webtoolsFileHashInfo = "";
+    webtoolsFileHashError = "";
+    webtoolsFileHashSize = "";
+    webtoolsFileHashMatched = null;
+    refreshWebtoolsFileHashPanelInForm(form);
+    setStatus("已清空文件哈希输入");
+  });
+
+  actions.append(calculateButton, copyButton, clearButton);
+
+  form.append(
+    title,
+    description,
+    pathRow,
+    configRow,
+    outputWrap,
+    verifyLine,
+    infoLine,
+    actions
+  );
+  panel.appendChild(form);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+
+  refreshWebtoolsFileHashPanelInForm(form);
+}
+
+function normalizeWebtoolsPortHelperProtocol(value: string): WebtoolsPortHelperProtocol {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "all" || normalized === "tcp" || normalized === "udp") {
+    return normalized;
+  }
+  return "all";
+}
+
+function parseWebtoolsPortHelperRecords(value: unknown): WebtoolsPortHelperRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const result: WebtoolsPortHelperRecord[] = [];
+  value.forEach((item) => {
+    const record = toRecord(item);
+    if (!record) {
+      return;
+    }
+    const localPort = Number(record.localPort);
+    const pid = Number(record.pid);
+    if (!Number.isInteger(localPort) || !Number.isInteger(pid)) {
+      return;
+    }
+    result.push({
+      protocol: typeof record.protocol === "string" ? record.protocol : "-",
+      localAddress: typeof record.localAddress === "string" ? record.localAddress : "-",
+      localPort,
+      remoteAddress: typeof record.remoteAddress === "string" ? record.remoteAddress : "-",
+      state: typeof record.state === "string" ? record.state : "-",
+      pid,
+      processName: typeof record.processName === "string" ? record.processName : ""
+    });
+  });
+
+  return result;
+}
+
+function applyWebtoolsPortHelperPanelPayload(panel: ActivePluginPanelState): void {
+  const data = toRecord(panel.data);
+  if (!data) {
+    return;
+  }
+
+  webtoolsPortHelperRecords = [];
+  webtoolsPortHelperError = "";
+
+  if (typeof data.port === "number" && Number.isFinite(data.port)) {
+    webtoolsPortHelperPort = String(Math.floor(data.port));
+  } else if (typeof data.port === "string" && data.port.trim()) {
+    webtoolsPortHelperPort = data.port.trim();
+  }
+  if (typeof data.protocol === "string") {
+    webtoolsPortHelperProtocol = normalizeWebtoolsPortHelperProtocol(data.protocol);
+  }
+  if (typeof data.pid === "number" && Number.isFinite(data.pid) && data.pid > 0) {
+    webtoolsPortHelperPid = String(Math.floor(data.pid));
+  } else if (typeof data.pid === "string" && data.pid.trim()) {
+    webtoolsPortHelperPid = data.pid.trim();
+  }
+  if (Array.isArray(data.records)) {
+    webtoolsPortHelperRecords = parseWebtoolsPortHelperRecords(data.records);
+  }
+  if (typeof data.info === "string") {
+    webtoolsPortHelperInfo = data.info;
+  } else if (panel.message) {
+    webtoolsPortHelperInfo = panel.message;
+  }
+}
+
+function buildWebtoolsPortHelperTarget(
+  action: "query" | "kill",
+  pidOverride?: string | null
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  const portValue = webtoolsPortHelperPort.trim();
+  if (portValue) {
+    params.set("port", portValue);
+  }
+  params.set("protocol", webtoolsPortHelperProtocol);
+  const pidValue = (pidOverride ?? webtoolsPortHelperPid).trim();
+  if (pidValue) {
+    params.set("pid", pidValue);
+  }
+  return `command:plugin:${WEBTOOLS_PORT_HELPER_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsPortHelperPanelInForm(form: HTMLFormElement): void {
+  const portNode = form.elements.namedItem("webtoolsPortHelperPort");
+  if (portNode instanceof HTMLInputElement) {
+    portNode.value = webtoolsPortHelperPort;
+  }
+
+  const protocolNode = form.elements.namedItem("webtoolsPortHelperProtocol");
+  if (protocolNode instanceof HTMLSelectElement) {
+    protocolNode.value = webtoolsPortHelperProtocol;
+  }
+
+  const pidNode = form.elements.namedItem("webtoolsPortHelperPid");
+  if (pidNode instanceof HTMLInputElement) {
+    pidNode.value = webtoolsPortHelperPid;
+  }
+
+  const queryButton = form.querySelector<HTMLButtonElement>("[data-webtools-port-query]");
+  if (queryButton) {
+    queryButton.disabled = webtoolsPortHelperBusy;
+    queryButton.textContent = webtoolsPortHelperBusy ? "查询中..." : "查询占用";
+  }
+
+  const killButton = form.querySelector<HTMLButtonElement>("[data-webtools-port-kill]");
+  if (killButton) {
+    killButton.disabled = webtoolsPortHelperBusy;
+  }
+
+  const infoNode = form.querySelector<HTMLElement>(".webtools-port-helper-info");
+  if (infoNode) {
+    const text =
+      webtoolsPortHelperError ||
+      webtoolsPortHelperInfo ||
+      "端口/PID 二选一，可组合筛选；都留空则查询全部占用";
+    infoNode.textContent = text;
+    infoNode.dataset.state = webtoolsPortHelperError
+      ? "error"
+      : webtoolsPortHelperRecords.length > 0
+        ? "ok"
+        : "idle";
+  }
+
+  const recordsNode = form.querySelector<HTMLElement>(".webtools-port-helper-results");
+  if (!recordsNode) {
+    return;
+  }
+  recordsNode.textContent = "";
+
+  if (webtoolsPortHelperRecords.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "webtools-port-helper-empty";
+    empty.textContent = webtoolsPortHelperBusy ? "正在查询..." : "暂无端口占用记录";
+    recordsNode.appendChild(empty);
+    return;
+  }
+
+  webtoolsPortHelperRecords.forEach((record) => {
+    const row = document.createElement("div");
+    row.className = "webtools-port-helper-row";
+
+    const left = document.createElement("div");
+    left.className = "webtools-port-helper-row-main";
+    const address = document.createElement("div");
+    address.className = "webtools-port-helper-row-address webtools-tool-code";
+    address.textContent = `${record.protocol} ${record.localAddress} -> ${record.remoteAddress}`;
+    const meta = document.createElement("div");
+    meta.className = "webtools-port-helper-row-meta";
+    const processText = record.processName || "未知进程";
+    meta.textContent = `PID ${record.pid} · ${processText} · ${record.state || "-"}`;
+    left.append(address, meta);
+
+    const actionGroup = document.createElement("div");
+    actionGroup.className = "webtools-port-helper-row-actions";
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary";
+    copyButton.textContent = "复制";
+    copyButton.addEventListener("click", () => {
+      const line = `${record.protocol} ${record.localAddress} -> ${record.remoteAddress} | PID ${record.pid} | ${record.processName || "未知进程"} | ${record.state}`;
+      void (async () => {
+        const copied = await copyTextToClipboard(line);
+        setStatus(copied ? "已复制端口记录" : "复制失败");
+      })();
+    });
+
+    const rowKillButton = document.createElement("button");
+    rowKillButton.type = "button";
+    rowKillButton.className = "settings-btn settings-btn-secondary";
+    rowKillButton.textContent = "结束进程";
+    rowKillButton.disabled = webtoolsPortHelperBusy;
+    rowKillButton.addEventListener("click", () => {
+      void executeWebtoolsPortHelperAction("kill", form, String(record.pid));
+    });
+
+    actionGroup.append(copyButton, rowKillButton);
+    row.append(left, actionGroup);
+    recordsNode.appendChild(row);
+  });
+}
+
+async function executeWebtoolsPortHelperAction(
+  action: "query" | "kill",
+  form?: HTMLFormElement,
+  pidOverride?: string | null
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行端口助手");
+    return;
+  }
+
+  if (form) {
+    const portNode = form.elements.namedItem("webtoolsPortHelperPort");
+    const protocolNode = form.elements.namedItem("webtoolsPortHelperProtocol");
+    const pidNode = form.elements.namedItem("webtoolsPortHelperPid");
+    webtoolsPortHelperPort = portNode instanceof HTMLInputElement ? portNode.value.trim() : "";
+    webtoolsPortHelperProtocol =
+      protocolNode instanceof HTMLSelectElement
+        ? normalizeWebtoolsPortHelperProtocol(protocolNode.value)
+        : "all";
+    webtoolsPortHelperPid = pidNode instanceof HTMLInputElement ? pidNode.value.trim() : "";
+  }
+
+  const portRaw = webtoolsPortHelperPort.trim();
+  const hasPort = portRaw.length > 0;
+  if (hasPort) {
+    const portNumber = Number(portRaw);
+    if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+      webtoolsPortHelperError = "端口需为 1-65535，留空可查询全部";
+      webtoolsPortHelperInfo = "";
+      setStatus(webtoolsPortHelperError);
+      if (form) {
+        refreshWebtoolsPortHelperPanelInForm(form);
+      }
+      return;
+    }
+    webtoolsPortHelperPort = String(Math.floor(portNumber));
+  } else {
+    webtoolsPortHelperPort = "";
+  }
+
+  const pidRaw =
+    typeof pidOverride === "string" && pidOverride.trim()
+      ? pidOverride.trim()
+      : webtoolsPortHelperPid.trim();
+  const hasPid = pidRaw.length > 0;
+  let normalizedPid = "";
+  if (hasPid) {
+    const pidNumber = Number(pidRaw);
+    if (!Number.isInteger(pidNumber) || pidNumber <= 0) {
+      webtoolsPortHelperError = "PID 必须为正整数";
+      webtoolsPortHelperInfo = "";
+      setStatus(webtoolsPortHelperError);
+      if (form) {
+        refreshWebtoolsPortHelperPanelInForm(form);
+      }
+      return;
+    }
+    normalizedPid = String(Math.floor(pidNumber));
+    if (!(action === "kill" && typeof pidOverride === "string" && pidOverride.trim())) {
+      webtoolsPortHelperPid = normalizedPid;
+    }
+  } else {
+    webtoolsPortHelperPid = "";
+  }
+  if (action === "kill" && !hasPort && !hasPid) {
+    webtoolsPortHelperError = "结束进程时请填写端口或 PID";
+    webtoolsPortHelperInfo = "";
+    setStatus(webtoolsPortHelperError);
+    if (form) {
+      refreshWebtoolsPortHelperPanelInForm(form);
+    }
+    return;
+  }
+
+  webtoolsPortHelperBusy = true;
+  webtoolsPortHelperError = "";
+  webtoolsPortHelperInfo = action === "kill" ? "正在结束进程..." : "正在查询端口占用...";
+  if (form) {
+    refreshWebtoolsPortHelperPanelInForm(form);
+  }
+
+  const requestToken = ++webtoolsPortHelperRequestToken;
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_PORT_HELPER_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "端口助手",
+    subtitle: "面板执行",
+    target: buildWebtoolsPortHelperTarget(action, normalizedPid || null),
+    keywords: ["plugin", "port", "pid", "netstat", "端口", "占用"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsPortHelperRequestToken) {
+    return;
+  }
+
+  webtoolsPortHelperBusy = false;
+  const data = toRecord(result.data);
+
+  if (typeof data?.port === "number" && Number.isFinite(data.port)) {
+    webtoolsPortHelperPort = String(Math.floor(data.port));
+  } else if (typeof data?.port === "string" && data.port.trim()) {
+    webtoolsPortHelperPort = data.port.trim();
+  }
+  if (typeof data?.protocol === "string") {
+    webtoolsPortHelperProtocol = normalizeWebtoolsPortHelperProtocol(data.protocol);
+  }
+  webtoolsPortHelperRecords = parseWebtoolsPortHelperRecords(data?.records);
+
+  webtoolsPortHelperError = result.ok ? "" : result.message || "端口操作失败";
+  if (typeof data?.info === "string" && data.info.trim()) {
+    webtoolsPortHelperInfo = data.info;
+  } else if (result.message) {
+    webtoolsPortHelperInfo = result.message;
+  }
+  setStatus(result.message ?? (result.ok ? "端口助手执行完成" : "端口助手执行失败"));
+
+  if (form) {
+    refreshWebtoolsPortHelperPanelInForm(form);
+  }
+}
+
+function renderWebtoolsPortHelperPanel(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel";
+
+  const form = document.createElement("form");
+  form.className = "settings-form webtools-port-helper-form webtools-tool-panel";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void executeWebtoolsPortHelperAction("query", form);
+  });
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = activePluginPanel?.title || "端口助手";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent =
+    activePluginPanel?.subtitle || "查看端口占用、定位进程并支持结束占用进程";
+
+  const controls = document.createElement("div");
+  controls.className = "webtools-tool-bar webtools-port-helper-controls";
+
+  const portWrap = document.createElement("label");
+  portWrap.className = "webtools-tool-bar-group";
+  const portLabel = document.createElement("span");
+  portLabel.className = "webtools-tool-bar-label";
+  portLabel.textContent = "端口";
+  const portInput = document.createElement("input");
+  portInput.className = "settings-value webtools-tool-input";
+  portInput.type = "number";
+  portInput.name = "webtoolsPortHelperPort";
+  portInput.min = "1";
+  portInput.max = "65535";
+  portInput.placeholder = "例如 3000（留空=全部）";
+  portInput.addEventListener("input", () => {
+    webtoolsPortHelperPort = portInput.value;
+  });
+  portWrap.append(portLabel, portInput);
+
+  const protocolWrap = document.createElement("label");
+  protocolWrap.className = "webtools-tool-bar-group";
+  const protocolLabel = document.createElement("span");
+  protocolLabel.className = "webtools-tool-bar-label";
+  protocolLabel.textContent = "协议";
+  const protocolSelect = document.createElement("select");
+  protocolSelect.className = "settings-number webtools-tool-select";
+  protocolSelect.name = "webtoolsPortHelperProtocol";
+  [
+    { value: "all", label: "TCP + UDP" },
+    { value: "tcp", label: "TCP" },
+    { value: "udp", label: "UDP" }
+  ].forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    protocolSelect.appendChild(option);
+  });
+  protocolSelect.addEventListener("change", () => {
+    webtoolsPortHelperProtocol = normalizeWebtoolsPortHelperProtocol(protocolSelect.value);
+  });
+  protocolWrap.append(protocolLabel, protocolSelect);
+
+  const pidWrap = document.createElement("label");
+  pidWrap.className = "webtools-tool-bar-group";
+  const pidLabel = document.createElement("span");
+  pidLabel.className = "webtools-tool-bar-label";
+  pidLabel.textContent = "PID（可选）";
+  const pidInput = document.createElement("input");
+  pidInput.className = "settings-value webtools-tool-input";
+  pidInput.type = "number";
+  pidInput.min = "1";
+  pidInput.name = "webtoolsPortHelperPid";
+  pidInput.placeholder = "可单独查询/结束进程";
+  pidInput.addEventListener("input", () => {
+    webtoolsPortHelperPid = pidInput.value;
+  });
+  pidWrap.append(pidLabel, pidInput);
+
+  controls.append(portWrap, protocolWrap, pidWrap);
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+
+  const queryButton = document.createElement("button");
+  queryButton.type = "submit";
+  queryButton.className = "settings-btn settings-btn-primary";
+  queryButton.setAttribute("data-webtools-port-query", "1");
+  queryButton.textContent = "查询占用";
+
+  const killButton = document.createElement("button");
+  killButton.type = "button";
+  killButton.className = "settings-btn settings-btn-secondary";
+  killButton.setAttribute("data-webtools-port-kill", "1");
+  killButton.textContent = "结束进程";
+  killButton.addEventListener("click", () => {
+    void executeWebtoolsPortHelperAction("kill", form);
+  });
+
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "settings-btn settings-btn-secondary";
+  clearButton.textContent = "清空";
+  clearButton.addEventListener("click", () => {
+    webtoolsPortHelperPort = "";
+    webtoolsPortHelperProtocol = "all";
+    webtoolsPortHelperPid = "";
+    webtoolsPortHelperRecords = [];
+    webtoolsPortHelperInfo = "";
+    webtoolsPortHelperError = "";
+    refreshWebtoolsPortHelperPanelInForm(form);
+    setStatus("已清空端口助手输入");
+  });
+
+  actions.append(queryButton, killButton, clearButton);
+
+  const info = document.createElement("div");
+  info.className = "webtools-tool-info webtools-port-helper-info";
+
+  const records = document.createElement("div");
+  records.className = "webtools-port-helper-results";
+
+  form.append(title, description, controls, actions, info, records);
+  panel.appendChild(form);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+
+  refreshWebtoolsPortHelperPanelInForm(form);
+}
+
 function renderPluginPanel(): void {
   const panelItem = document.createElement("li");
   panelItem.className = "settings-panel-item";
@@ -10823,6 +11682,20 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
       }
       refreshWebtoolsUnitPanelInForm(form);
       setStatus("容量换算完成");
+    })
+  },
+  [WEBTOOLS_FILE_HASH_PLUGIN_ID]: {
+    render: renderWebtoolsFileHashPanel,
+    onOpen: applyWebtoolsFileHashPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-file-hash-form", (form) => {
+      void executeWebtoolsFileHashCalculate(form);
+    })
+  },
+  [WEBTOOLS_PORT_HELPER_PLUGIN_ID]: {
+    render: renderWebtoolsPortHelperPanel,
+    onOpen: applyWebtoolsPortHelperPanelPayload,
+    onEnter: runWithPluginForm("form.webtools-port-helper-form", (form) => {
+      void executeWebtoolsPortHelperAction("query", form);
     })
   },
   [WEBTOOLS_QRCODE_PLUGIN_ID]: {

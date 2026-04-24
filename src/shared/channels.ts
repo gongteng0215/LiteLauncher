@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   execute: "launcher:execute",
   setWindowSizePreset: "launcher:set-window-size-preset",
   setAutoHideSuspended: "launcher:set-auto-hide-suspended",
+  pickFilePath: "launcher:pick-file-path",
   hide: "launcher:hide",
   getClipItems: "launcher:get-clip-items",
   copyClipItem: "launcher:copy-clip-item",

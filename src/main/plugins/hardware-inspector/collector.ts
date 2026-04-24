@@ -713,13 +713,13 @@ function normalizeHealthStatus(value: unknown): string | null {
   const raw = toNullableNumber(value);
   switch (raw) {
     case 0:
-      return "鏈煡";
+      return "未知";
     case 1:
-      return "鍋ュ悍";
+      return "健康";
     case 2:
-      return "璀﹀憡";
+      return "警告";
     case 3:
-      return "鏁呴殰";
+      return "故障";
     default: {
       const text = cleanText(typeof value === "string" ? value : "");
       if (!text) {
@@ -727,13 +727,13 @@ function normalizeHealthStatus(value: unknown): string | null {
       }
       const lowered = text.toLowerCase();
       if (lowered.includes("healthy")) {
-        return "鍋ュ悍";
+        return "健康";
       }
       if (lowered.includes("warning")) {
-        return "璀﹀憡";
+        return "警告";
       }
       if (lowered.includes("unhealthy") || lowered.includes("error")) {
-        return "鏁呴殰";
+        return "故障";
       }
       return text;
     }
@@ -751,31 +751,31 @@ function normalizeOperationalStatus(value: unknown): string | null {
   const raw = toNullableNumber(value);
   switch (raw) {
     case 0:
-      return "鏈煡";
+      return "未知";
     case 2:
-      return "姝ｅ父";
+      return "正常";
     case 3:
-      return "闄嶇骇";
+      return "降级";
     case 4:
-      return "鍘嬪姏";
+      return "压力";
     case 5:
-      return "棰勬祴鏁呴殰";
+      return "预测故障";
     case 6:
-      return "閿欒";
+      return "错误";
     case 7:
-      return "涓嶅彲鎭㈠閿欒";
+      return "不可恢复错误";
     case 8:
-      return "鍚姩涓?";
+      return "启动中";
     case 9:
-      return "鍋滄涓?";
+      return "停止中";
     case 10:
-      return "宸插仠姝?";
+      return "已停止";
     case 14:
-      return "宸蹭腑姝?";
+      return "已中止";
     case 15:
-      return "浼戠湢";
+      return "休眠";
     case 17:
-      return "宸插畬鎴?";
+      return "已完成";
     default:
       return cleanText(typeof value === "string" ? value : raw === null ? "" : String(raw));
   }
@@ -785,15 +785,15 @@ function normalizeStorageUsage(value: unknown): string | null {
   const raw = toNullableNumber(value);
   switch (raw) {
     case 1:
-      return "鑷姩";
+      return "自动";
     case 2:
-      return "鎵嬪姩";
+      return "手动";
     case 3:
-      return "鐑";
+      return "热备";
     case 4:
-      return "閫€褰?";
+      return "退役";
     case 5:
-      return "鏃ュ織";
+      return "日志";
     default:
       return cleanText(typeof value === "string" ? value : raw === null ? "" : String(raw));
   }
