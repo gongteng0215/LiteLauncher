@@ -74,6 +74,32 @@ function copyAllAssets() {
   }
 
   copyDirIfExists("src/assets", "dist/assets");
+  writeImagePromptDataScript();
+}
+
+function writeImagePromptDataScript() {
+  const builderPath = path.join(process.cwd(), "dist/shared/image-prompt-builder.js");
+  if (!fs.existsSync(builderPath)) {
+    return;
+  }
+
+  delete require.cache[require.resolve(builderPath)];
+  const builder = require(builderPath);
+  const productId = "chatgpt-images-2";
+  const data = {
+    products: builder.getImagePromptProductTemplates(),
+    optionGroups: builder.getImagePromptOptionGroups(productId),
+    stylePresets: builder.getImagePromptStylePresets(productId),
+    smartTemplates: builder.getImagePromptSmartTemplates(productId),
+    textOptions: builder.getImagePromptTextOptions()
+  };
+  const output = `window.__LL_IMAGE_PROMPT_DATA__ = ${JSON.stringify(data, null, 2)};\n`;
+  copyFileFromText(output, path.join("dist/renderer/image-prompt-data.js"));
+}
+
+function copyFileFromText(content, dest) {
+  ensureDir(path.dirname(dest));
+  fs.writeFileSync(dest, content, "utf8");
 }
 
 function scheduleWatchLog(message) {
@@ -108,6 +134,14 @@ function watchPath(targetPath, options, onChange) {
 
 function startWatchMode() {
   console.info("[copy-assets] watch mode started");
+  const imagePromptDataTimer = setInterval(() => {
+    const targetPath = path.join("dist/renderer/image-prompt-data.js");
+    if (fs.existsSync(targetPath)) {
+      clearInterval(imagePromptDataTimer);
+      return;
+    }
+    writeImagePromptDataScript();
+  }, 250);
 
   watchPath("src/renderer", {}, (_eventType, filename) => {
     const relativePath = filename.replace(/\\/g, "/");
@@ -126,7 +160,16 @@ function startWatchMode() {
     });
   }
 
+  watchPath("dist/shared", {}, (_eventType, filename) => {
+    if (filename !== "image-prompt-builder.js") {
+      return;
+    }
+    writeImagePromptDataScript();
+    scheduleWatchLog("renderer updated: image-prompt-data.js");
+  });
+
   const cleanup = () => {
+    clearInterval(imagePromptDataTimer);
     while (activeWatchers.length > 0) {
       const watcher = activeWatchers.pop();
       watcher?.close();

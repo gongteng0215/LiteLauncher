@@ -27,6 +27,7 @@ interface RendererPluginConstants {
   WEBTOOLS_STRINGS_PLUGIN_ID: string;
   WEBTOOLS_COLORS_PLUGIN_ID: string;
   WEBTOOLS_IMAGE_BASE64_PLUGIN_ID: string;
+  WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID: string;
   WEBTOOLS_CONFIG_PLUGIN_ID: string;
   WEBTOOLS_SQL_PLUGIN_ID: string;
   WEBTOOLS_UNIT_PLUGIN_ID: string;
@@ -69,6 +70,95 @@ interface RendererPluginHandlerConfigItem {
   enterActionKey: string;
 }
 
+interface RendererImagePromptData {
+  products: Array<{
+    id: string;
+    label: string;
+    description: string;
+  }>;
+  optionGroups: Array<{
+    key: string;
+    label: string;
+    description: string;
+    options: string[];
+    categories?: Array<{ label: string; options: string[] }>;
+    allowCustom: boolean;
+  }>;
+  stylePresets: Array<{
+    id: string;
+    group: string;
+    label: string;
+    description: string;
+    defaults: Partial<Record<string, string[]>>;
+    optionGroups: Partial<Record<string, string[]>>;
+    textDefaults?: Partial<{
+      exact: string;
+      position: string;
+      style: string;
+      designId: string;
+      design: string;
+      title: string;
+      subtitle: string;
+      label: string;
+      name: string;
+      age: string;
+      layout: string;
+      hierarchy: string;
+      color: string;
+      effect: string;
+      safeArea: string;
+      flags: string[];
+    }>;
+  }>;
+  smartTemplates: Array<{
+    id: string;
+    label: string;
+    description: string;
+    stylePresetId: string;
+    patch: {
+      selections?: Partial<Record<string, string[]>>;
+      custom?: Partial<Record<string, string>>;
+      text?: Partial<{
+        exact: string;
+        position: string;
+        style: string;
+        designId: string;
+        design: string;
+        title: string;
+        subtitle: string;
+        label: string;
+        name: string;
+        age: string;
+        layout: string;
+        hierarchy: string;
+        color: string;
+        effect: string;
+        safeArea: string;
+        flags: string[];
+      }>;
+      photoDescription?: string;
+      constraints?: string[];
+    };
+  }>;
+  textOptions: {
+    positions: string[];
+    styles: string[];
+    designs: Array<{
+      id: string;
+      label: string;
+      summary: string;
+      typography: string;
+      color: string;
+      effect: string;
+      layout: string;
+      hierarchy: string;
+      safeArea: string;
+      keywords: string[];
+    }>;
+    flags: string[];
+  };
+}
+
 interface RendererPanelImpls {
   applyHardwareInspectorPanelPayload(panel: unknown): void;
   renderHardwareInspectorPanel(): void;
@@ -94,12 +184,18 @@ interface RendererPanelImpls {
   renderWebtoolsColorsPanel(): void;
   applyWebtoolsImageBase64PanelPayload(panel: unknown): void;
   renderWebtoolsImageBase64Panel(): void;
+  applyWebtoolsImagePromptPanelPayload(panel: unknown): void;
+  renderWebtoolsImagePromptPanel(): void;
   applyWebtoolsConfigPanelPayload(panel: unknown): void;
   renderWebtoolsConfigPanel(): void;
   applyWebtoolsSqlPanelPayload(panel: unknown): void;
   renderWebtoolsSqlPanel(): void;
   applyWebtoolsUnitPanelPayload(panel: unknown): void;
   renderWebtoolsUnitPanel(): void;
+  applyWebtoolsFileHashPanelPayload(panel: unknown): void;
+  renderWebtoolsFileHashPanel(): void;
+  applyWebtoolsPortHelperPanelPayload(panel: unknown): void;
+  renderWebtoolsPortHelperPanel(): void;
   applyWebtoolsQrcodePanelPayload(panel: unknown): void;
   renderWebtoolsQrcodePanel(): void;
   applyWebtoolsMarkdownPanelPayload(panel: unknown): void;
@@ -114,20 +210,14 @@ interface RendererPanelImpls {
   renderWebtoolsHttpMockPanel(): void;
 }
 
-interface RendererPanelDelegates {
-  applyWebtoolsCryptoPanelPayload(panel: unknown): void;
-  renderWebtoolsCryptoPanel(): void;
-  applyWebtoolsJwtPanelPayload(panel: unknown): void;
-  renderWebtoolsJwtPanel(): void;
-}
 
 declare global {
   interface Window {
     __LL_PLUGIN_CONSTANTS__?: RendererPluginConstants;
     __LL_PLUGIN_STATIC_DATA__?: RendererPluginStaticData;
+    __LL_IMAGE_PROMPT_DATA__?: RendererImagePromptData;
     __LL_PLUGIN_HANDLER_CONFIGS__?: RendererPluginHandlerConfigItem[];
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
-    __LL_PANEL_DELEGATES__?: RendererPanelDelegates;
     launcher: {
       isDebugKeysEnabled(): boolean;
       getInitialItems(): Promise<LaunchItem[]>;

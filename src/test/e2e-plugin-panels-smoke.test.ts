@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -31,6 +35,16 @@ test(
           (node) => node.getBoundingClientRect().right <= window.innerWidth + 1
         );
         assert.equal(fits, true, `${selector} overflows viewport`);
+      };
+
+      const assertPanelFitsNarrowViewport = async (selector: string): Promise<void> => {
+        await page.setViewportSize({ width: 620, height: 720 });
+        await assertFormFitsViewport(selector);
+        const hasHorizontalOverflow = await page.evaluate(() => {
+          const shell = document.querySelector<HTMLElement>(".shell");
+          return Boolean(shell && shell.scrollWidth > shell.clientWidth + 1);
+        });
+        assert.equal(hasHorizontalOverflow, false, `${selector} creates horizontal overflow`);
       };
 
       await openPluginFromSearch(
@@ -129,6 +143,58 @@ test(
 
       await openPluginFromSearch(
         page,
+        "plugin:crypto",
+        "加密工具",
+        "webtools-crypto"
+      );
+      const cryptoForm = page.locator("form.webtools-crypto-form");
+      await assertFormFitsViewport("form.webtools-crypto-form");
+      const expectedCryptoHash = crypto
+        .createHash("md5")
+        .update("LiteLauncher")
+        .digest("hex");
+      await cryptoForm
+        .locator('textarea[name="webtoolsCryptoInput"]')
+        .fill("LiteLauncher");
+      await page.waitForFunction(
+        (expectedHash) => {
+          const node = document.querySelector(
+            'textarea[name="webtoolsCryptoOutput"]'
+          ) as HTMLTextAreaElement | null;
+          return node?.value.trim() === expectedHash;
+        },
+        expectedCryptoHash,
+        { timeout: 15000 }
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:jwt",
+        "JWT 调试器",
+        "webtools-jwt"
+      );
+      const jwtForm = page.locator("form.webtools-jwt-form");
+      await assertFormFitsViewport("form.webtools-jwt-form");
+      await page.waitForFunction(() => {
+        const payload = document.querySelector(
+          'textarea[name="webtoolsJwtPayload"]'
+        ) as HTMLTextAreaElement | null;
+        const status = document.querySelector(".webtools-jwt-status") as HTMLDivElement | null;
+        return Boolean(
+          payload?.value.includes("John Doe") &&
+            status?.dataset.state &&
+            status.dataset.state !== "idle"
+        );
+      });
+      await jwtForm.locator('textarea[name="webtoolsJwtHeader"]').waitFor({
+        state: "visible",
+        timeout: 10000
+      });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
         "plugin:url",
         "URL 解析",
         "webtools-url-parse"
@@ -180,6 +246,72 @@ test(
           'input[data-unit-storage="KB"]'
         ) as HTMLInputElement | null;
         return Boolean(node && Number(node.value) > 2000);
+      });
+      await returnToSearch(page);
+
+      const hashFixtureDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "litelauncher-file-hash-e2e-")
+      );
+      const hashFixturePath = path.join(hashFixtureDir, "sample.txt");
+      const hashFixtureText = "LiteLauncher file hash e2e\n";
+      await fs.writeFile(hashFixturePath, hashFixtureText, "utf8");
+      const expectedHash = crypto
+        .createHash("sha256")
+        .update(hashFixtureText)
+        .digest("hex");
+
+      try {
+        await openPluginFromSearch(
+          page,
+          "plugin:hash",
+          "文件哈希",
+          "webtools-file-hash"
+        );
+        const hashForm = page.locator("form.webtools-file-hash-form");
+        await assertPanelFitsNarrowViewport("form.webtools-file-hash-form");
+        await hashForm.locator('input[name="webtoolsFileHashPath"]').fill(hashFixturePath);
+        await hashForm.locator('input[name="webtoolsFileHashExpected"]').fill(expectedHash);
+        await hashForm.locator("button", { hasText: "计算哈希" }).click();
+        await page.waitForFunction(
+          (hash) => {
+            const output = document.querySelector(
+              'textarea[name="webtoolsFileHashOutput"]'
+            ) as HTMLTextAreaElement | null;
+            const verify = document.querySelector(
+              ".webtools-file-hash-verify"
+            ) as HTMLDivElement | null;
+            return (
+              output?.value.trim() === hash &&
+              verify?.textContent?.includes("匹配") === true
+            );
+          },
+          expectedHash,
+          { timeout: 15000 }
+        );
+        await returnToSearch(page);
+      } finally {
+        await fs.rm(hashFixtureDir, { recursive: true, force: true });
+      }
+
+      await openPluginFromSearch(
+        page,
+        "plugin:port",
+        "端口助手",
+        "webtools-port-helper"
+      );
+      const portForm = page.locator("form.webtools-port-helper-form");
+      await assertPanelFitsNarrowViewport("form.webtools-port-helper-form");
+      await portForm.locator('input[name="webtoolsPortHelperPort"]').fill("9");
+      await portForm.locator('[data-webtools-port-query="1"]').click();
+      await portForm
+        .locator(".webtools-port-helper-info")
+        .waitFor({ state: "visible", timeout: 15000 });
+      await page.waitForFunction(() => {
+        const info = document.querySelector(
+          ".webtools-port-helper-info"
+        ) as HTMLDivElement | null;
+        const results = document.querySelector(".webtools-port-helper-results");
+        return Boolean(info?.textContent?.trim() && results);
       });
       await returnToSearch(page);
 
@@ -409,13 +541,34 @@ test(
       await diffForm
         .locator('textarea[name="webtoolsDiffRight"]')
         .fill("alpha\ngamma\nline-3");
+      await diffForm.evaluate((form) => {
+        (form as HTMLFormElement).requestSubmit();
+      });
       await diffForm
         .locator('.webtools-diff-summary-status[data-state="changed"]')
         .waitFor({ state: "visible", timeout: 10000 });
       await page.waitForFunction(() => {
         const viewer = document.querySelector(".webtools-diff-viewer");
-        return viewer?.textContent?.includes("gamma") === true;
+        const text = viewer?.textContent ?? "";
+        return text.includes("alpha") && text.includes("gamma");
       });
+
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:hardware",
+        "硬件检测",
+        "hardware-inspector"
+      );
+      const hardwareForm = page.locator("form.hardware-inspector-form");
+      await assertPanelFitsNarrowViewport("form.hardware-inspector-form");
+      await hardwareForm
+        .locator(".hardware-inspector-status")
+        .waitFor({ state: "visible", timeout: 10000 });
+      await hardwareForm
+        .locator(".hardware-inspector-actions .settings-btn", { hasText: /刷新|刷新中/ })
+        .waitFor({ state: "visible", timeout: 10000 });
     } catch (error) {
       if (session) {
         const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);

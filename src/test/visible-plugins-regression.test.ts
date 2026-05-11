@@ -69,6 +69,10 @@ test("visible plugin ids are stable and subset of all plugins", () => {
       `visible plugin should exist in all plugins: ${pluginId}`
     );
   }
+  assert.ok(
+    visiblePluginIds.includes("webtools-image-prompt"),
+    "image prompt plugin should be visible by default"
+  );
 });
 
 test("plugin catalog only exposes visible plugins and covers each visible plugin", () => {
@@ -110,4 +114,44 @@ test("each visible plugin supports default open command", async () => {
     assert.ok(sent.length >= 1, `plugin should emit openPanel: ${pluginId}`);
     assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
   }
+});
+
+test("image prompt build command tolerates malformed state fields", async () => {
+  const { window } = createMockWindow();
+  const params = new URLSearchParams();
+  params.set("action", "build");
+  params.set(
+    "state",
+    JSON.stringify({
+      selections: {
+        subject: [42, "一款无线蓝牙耳机"],
+        mood: ["商业海报", false]
+      },
+      text: {
+        exact: "降噪黑科技",
+        designId: "ecommerce-benefit",
+        design: "电商卖点标题设计：大号粗体无衬线，贴合顶部留白区，不遮挡产品",
+        layout: "主标题放在顶部留白区，和商品保持明确安全距离",
+        flags: ["仅出现一次", 1]
+      },
+      photoDescription: "3岁小女孩，穿白色连衣裙，笑着看镜头",
+      constraints: ["无水印", 2]
+    })
+  );
+
+  const result = await executePluginCommand(
+    `webtools-image-prompt?${params.toString()}`,
+    window as never,
+    createSelectedItem("webtools-image-prompt")
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(typeof result.data?.output, "string");
+  assert.match(String(result.data?.output), /一款无线蓝牙耳机/);
+  assert.match(String(result.data?.output), /商业海报/);
+  assert.match(String(result.data?.output), /文字设计：电商卖点标题设计/);
+  assert.match(String(result.data?.output), /文字布局：主标题放在顶部留白区/);
+  assert.match(String(result.data?.output), /照片人物说明：3岁小女孩/);
+  assert.match(String(result.data?.output), /无水印/);
+  assert.equal(String(result.data?.output).includes("undefined"), false);
 });

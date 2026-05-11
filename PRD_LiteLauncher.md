@@ -1,7 +1,7 @@
 # LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-03-29
-适用版本：LiteLauncher `v1.0.12`
+更新时间：2026-05-12
+适用版本：LiteLauncher `v1.0.14`
 
 ## 1. 产品目标
 
@@ -30,7 +30,10 @@
 7. `wt-time` 打开时间戳工具进行 Unix / 日期互转。
 8. `wt-qr` 打开二维码生成面板。
 9. `wt-md` 打开 Markdown 预览工具。
-10. 输入 `codex` 命中并启动 Windows 应用别名。
+10. `wt-hash` 计算文件哈希并校验发布包完整性。
+11. `wt-port 3000` 查询端口占用并定位进程。
+12. `hardware` 打开硬件检测并导出报告。
+13. 输入 `codex` 命中并启动 Windows 应用别名。
 
 ## 3. 当前能力范围
 
@@ -75,8 +78,9 @@
 #### 3.1.4 插件体系
 
 - 插件统一走 `command:plugin:*` 协议
-- 当前默认可见插件 21 个
-- 20 个 WebTools 插件已全部接入并开放
+- 当前默认可见插件 25 个
+- 23 个 WebTools 插件已接入并开放，其中原 `webTools` 20 个工具迁移接入完成，新增 `webtools-file-hash`、`webtools-port-helper` 与 `webtools-image-prompt`
+- `hardware-inspector` 已开放：支持硬件信息采集、变化对比、Markdown / HTML 报告导出
 - 插件原生动作期间支持暂停自动隐藏
 - 多行输入统一为：
   - `Enter` 换行
@@ -92,31 +96,36 @@
   - Windows 应用别名回归
   - 路径规则回归
   - 插件可见性回归
-  - 第一版 Playwright UI smoke
+  - Playwright UI smoke
+  - Cashflow 状态机 / 持久化 / 合约 / 性能测试
 
 ### 3.2 当前默认可见插件
 
 1. `cashflow-game`
-2. `webtools-password`
-3. `webtools-cron`
-4. `webtools-json`
-5. `webtools-crypto`
-6. `webtools-jwt`
-7. `webtools-timestamp`
-8. `webtools-strings`
-9. `webtools-colors`
-10. `webtools-diff`
-11. `webtools-http-mock`
-12. `webtools-image-base64`
-13. `webtools-config-convert`
-14. `webtools-sql-format`
-15. `webtools-unit-convert`
-16. `webtools-regex`
-17. `webtools-url-parse`
-18. `webtools-qrcode`
-19. `webtools-markdown`
-20. `webtools-ua`
-21. `webtools-api-client`
+2. `hardware-inspector`
+3. `webtools-password`
+4. `webtools-cron`
+5. `webtools-json`
+6. `webtools-crypto`
+7. `webtools-jwt`
+8. `webtools-timestamp`
+9. `webtools-regex`
+10. `webtools-strings`
+11. `webtools-colors`
+12. `webtools-diff`
+13. `webtools-http-mock`
+14. `webtools-image-base64`
+15. `webtools-image-prompt`
+16. `webtools-config-convert`
+17. `webtools-sql-format`
+18. `webtools-unit-convert`
+19. `webtools-file-hash`
+20. `webtools-port-helper`
+21. `webtools-url-parse`
+22. `webtools-qrcode`
+23. `webtools-markdown`
+24. `webtools-ua`
+25. `webtools-api-client`
 
 ## 4. 非功能要求
 
@@ -142,17 +151,17 @@
 
 ## 5. 当前风险与问题
 
-1. 部分插件仍处于“可用但未完全齐平原版”的状态。
+1. 部分插件仍处于“可用但未完全齐平原版”的状态，新增工具也需要补齐 E2E 与小屏回归。
 2. `src/renderer/renderer.ts` 体量仍大，插件渲染逻辑集中。
 3. 小窗口与高 DPI 下仍需逐项回归插件面板。
-4. UI 文案与历史编码问题需要继续巡检。
+4. UI 文案与历史编码问题需要继续巡检，尤其是新增 WebTools 面板文案。
 
 ## 6. 下一阶段目标
 
 ### 6.1 第一优先级
 
-1. 继续拆分插件面板注册与渲染逻辑。
-2. 完成插件小屏与高 DPI 专项回归。
+1. 继续拆分插件面板注册与渲染逻辑，优先处理仍留在 `renderer.ts` 的新增工具与重型面板。
+2. 完成插件小屏与高 DPI 专项回归，并补齐 `hardware-inspector`、`webtools-file-hash`、`webtools-port-helper` 的 E2E。
 3. 落地 Cashflow `cash review` 复盘模块。
 
 ### 6.2 第二优先级

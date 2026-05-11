@@ -13,6 +13,7 @@ import { webtoolsDiffPlugin } from "./webtools-diff";
 import { webtoolsFileHashPlugin } from "./webtools-file-hash";
 import { webtoolsHttpMockPlugin } from "./webtools-http-mock";
 import { webtoolsImageBase64Plugin } from "./webtools-image-base64";
+import { webtoolsImagePromptPlugin } from "./webtools-image-prompt";
 import { webtoolsJsonPlugin } from "./webtools-json";
 import { webtoolsJwtPlugin } from "./webtools-jwt";
 import { webtoolsMarkdownPlugin } from "./webtools-markdown";
@@ -42,6 +43,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsDiffPlugin,
   webtoolsHttpMockPlugin,
   webtoolsImageBase64Plugin,
+  webtoolsImagePromptPlugin,
   webtoolsConfigConvertPlugin,
   webtoolsSqlFormatPlugin,
   webtoolsUnitConvertPlugin,
@@ -68,6 +70,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-diff",
   "webtools-http-mock",
   "webtools-image-base64",
+  "webtools-image-prompt",
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",

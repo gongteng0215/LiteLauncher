@@ -130,6 +130,26 @@ export async function openPluginFromSearch(
 
   await waitForMode(page, "plugin");
   await waitForActivePlugin(page, pluginId);
+  await page.waitForFunction(
+    () => document.querySelector("#status-text")?.textContent?.includes("已打开插件") === true,
+    undefined,
+    { timeout: 10000 }
+  );
+  await page.waitForFunction(
+    (expectedPluginId) =>
+      new Promise<boolean>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve(
+              document.body.dataset.mode === "plugin" &&
+                document.body.dataset.activePluginId === expectedPluginId
+            );
+          });
+        });
+      }),
+    pluginId,
+    { timeout: 10000 }
+  );
 }
 
 export async function returnToSearch(page: Page): Promise<void> {

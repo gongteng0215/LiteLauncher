@@ -1,6 +1,6 @@
 # LiteLauncher 开发任务清单
 
-更新时间：2026-03-29
+更新时间：2026-05-12
 来源：`PRD_LiteLauncher.md`
 
 状态：`待办` / `进行中` / `阻塞` / `完成`  
@@ -44,7 +44,7 @@
 
 ## 2. 插件任务
 
-### 2.1 已开放默认可见插件（当前 21 个）
+### 2.1 已开放默认可见插件（当前 25 个）
 
 | 完成 | 编号 | 任务 | 优先级 | 状态 | 备注 |
 |---|---|---|---|---|---|
@@ -53,6 +53,7 @@
 | [x] | LL-204 | Cashflow 持久化恢复 | P0 | 完成 | 重启恢复 |
 | [x] | LL-205 | Cashflow AI 入口 | P1 | 完成 | `cash ai` |
 | [x] | LL-206 | Cashflow 统计入口 | P1 | 完成 | `cash stat` |
+| [x] | LL-209 | 硬件检测插件 | P1 | 完成 | `hardware-inspector` 默认可见，支持刷新、变化对比、Markdown / HTML 报告导出 |
 | [x] | LL-211 | WebTools 密码工具 | P0 | 完成 | 可视化配置与批量生成 |
 | [x] | LL-212 | WebTools Cron 工具 | P0 | 完成 | 解析 + 下次执行时间 |
 | [x] | LL-213 | WebTools JSON 工具 | P0 | 完成 | JSON / CSV / Text / Escaped 转换 |
@@ -73,6 +74,9 @@
 | [x] | LL-229 | WebTools 单位换算工具开放 | P1 | 完成 | 容量换算与 px/rem 标签页、默认可见 |
 | [x] | LL-230 | WebTools UA 解析工具开放 | P1 | 完成 | 自动解析浏览器 / 系统 / 设备信息、默认可见 |
 | [x] | LL-231 | WebTools API 调试工具开放 | P1 | 完成 | 结构化请求编辑器、响应体 / 响应头查看、默认可见 |
+| [x] | LL-233 | WebTools 文件哈希工具开放 | P1 | 完成 | `webtools-file-hash` 默认可见，支持 MD5 / SHA1 / SHA256 / SHA512 与期望哈希对比 |
+| [x] | LL-234 | WebTools 端口助手开放 | P1 | 完成 | `webtools-port-helper` 默认可见，支持 TCP / UDP 占用查询、PID 定位与释放端口 |
+| [x] | LL-235 | WebTools 图片提示词工具开放 | P1 | 完成 | `webtools-image-prompt` 默认可见，支持 ChatGPT Images 2.0 的 26 类风格预设切换、联动模块点选、生日照片 / 周岁模板、提示词生成与复制反馈 |
 
 ### 2.2 进行中插件工程
 
@@ -80,8 +84,8 @@
 |---|---|---|---|---|---|
 | [ ] | LL-207 | Cashflow 复盘功能实装 | P1 | 待办 | `cash review` 仍是占位 |
 | [ ] | LL-208 | Cashflow AI 多性格策略 | P1 | 待办 | 当前为基础策略 |
-| [ ] | LL-210 | 插件面板注册器收敛 | P0 | 进行中 | 已完成五批实现外提：Diff + Markdown + ImageBase64 + Config + SQL + Strings + Colors + Qrcode + UA + API + Password + Cron + JSON + Timestamp + URL；主渲染已切到包装调用，后续继续覆盖剩余面板簇 |
-| [ ] | LL-232 | WebTools HTTP Mock Server（MVP） | P0 | 进行中 | 第二阶段已补面板编辑、Enter 启动动作与 E2E（启动 -> 命中 -> 停止）；已转默认可见，默认目录仅保留单入口，后续补生命周期健壮性与更多断言 |
+| [ ] | LL-210 | 插件面板注册器收敛 | P0 | 进行中 | 已完成多批实现外提并引入配置驱动 Enter 分发；多数组件 apply/render 均走 `plugin-panel-impls`，已移除 Password / JSON / URL / Timestamp / Cron / Strings / Colors / QR / UA / API / HTTP Mock 等轻量 wrapper，Markdown 也已改为 `panelImplsSafe` 直连；打开插件后的 keepOpen 二次刷新已加保护，后续继续瘦身执行 helper 与共享状态 |
+| [ ] | LL-232 | WebTools HTTP Mock Server（MVP） | P0 | 进行中 | 已补面板编辑、Enter 启动动作与 E2E（启动 -> 命中 -> 停止）；已转默认可见，默认目录仅保留单入口，后续补生命周期健壮性与更多断言 |
 | [x] | LL-216 | 插件可见性配置化 | P1 | 完成 | 设置页可编辑插件白名单，保存后热更新生效 |
 
 ## 3. UI / 交互任务
@@ -93,9 +97,10 @@
 | [x] | LL-303 | Cashflow 布局紧凑化 | P1 | 完成 | 减少空白 |
 | [x] | LL-304 | Cashflow 滚动样式统一 | P1 | 完成 | 深色风格一致 |
 | [x] | LL-306 | 主搜索窗口动态尺寸 | P1 | 完成 | 按显示器限幅 |
-| [ ] | LL-305 | 全量 UI 文案一致性巡检 | P1 | 进行中 | 已修多处乱码，仍需全仓复查 |
-| [ ] | LL-307 | 插件面板小屏自适应 | P0 | 进行中 | 已补 API / 配置转换 / SQL / 二维码关键断点，并新增 Password / Colors / SQL / Cron / JSON / URL / Timestamp / Unit / HTTP Mock 小屏 smoke 断言，仍需继续逐项验证 |
+| [ ] | LL-305 | 全量 UI 文案一致性巡检 | P1 | 进行中 | 文档编码检查通过；Hardware / File Hash / Port Helper 范围 mojibake 扫描未命中，仍需继续巡检其它历史面板 |
+| [ ] | LL-307 | 插件面板小屏自适应 | P0 | 进行中 | 已补多批小屏 smoke 断言；Hardware / File Hash / Port Helper 已加入窄窗 E2E，Crypto / JWT 已补主流程 smoke，后续继续补高 DPI 回归 |
 | [x] | LL-308 | 多行输入 Enter 行为统一 | P1 | 完成 | 多行输入换行，`Ctrl+Enter` 执行 |
+| [x] | LL-309 | 搜索首页分区紧凑自适应 | P1 | 完成 | 最近 / 置顶 / 插件统一固定小卡片，按实际宽度自适应列数，标题最多两行 |
 
 ## 4. 打包与发布
 
@@ -118,14 +123,14 @@
 | [x] | LL-502 | Cashflow 持久化测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-503 | Cashflow 插件合约测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-504 | Cashflow 性能基线测试 | P2 | 完成 | 自用阶段降级，已接入 |
-| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已补第七批 Playwright UI smoke：新增 HTTP Mock 启动/命中/停止与小屏布局断言，并保持既有 Password / Colors / SQL / Cron / JSON / URL / Timestamp / Unit / API / QR / Config / Markdown / ImageBase64 / Diff 全绿；失败时自动输出 `artifacts/e2e` 现场 |
+| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已覆盖搜索首页布局、Hardware / File Hash / Port Helper、Crypto / JWT、HTTP Mock 启动/命中/停止及多项 WebTools 小屏断言 |
 | [x] | LL-506 | WebTools 可见插件回归脚本 | P2 | 完成 | 自用阶段降级，`test:plugins-visible` 已覆盖当前默认可见插件 |
 | [x] | LL-507 | Windows 应用别名回归 | P2 | 完成 | 自用阶段降级，已补 `test:windows-alias`，覆盖 catalog / dynamic search / AppsFolder 启动 |
 
 ## 6. 下一步建议
 
-1. 推进 `LL-210`：继续拆分 `src/renderer/renderer.ts` 里的剩余插件面板逻辑。
-2. 推进 `LL-307`：逐项回归插件面板小屏布局与高 DPI 稳定性。
-3. 推进 `LL-207`：落地 Cashflow `cash review` 复盘模块。
-4. 推进 `LL-305`：做一次全仓 UI 文案与编码巡检。
-5. 推进 `LL-505` / `LL-404` / `LL-407`：测试覆盖、自动更新验证、签名公证统一放到低优先级收尾阶段。
+1. 推进 `LL-210`：继续拆分 `src/renderer/renderer.ts` 里的剩余执行 helper 与共享状态逻辑。
+2. 推进 `LL-307`：补插件面板高 DPI 回归和更细截图断言。
+3. 推进 `LL-305`：继续巡检非新增插件范围的 UI 文案与编码问题。
+4. 推进 `LL-207`：落地 Cashflow `cash review` 复盘模块。
+5. 推进 `LL-404` / `LL-407`：自动更新验证、签名公证继续放到低优先级收尾阶段。

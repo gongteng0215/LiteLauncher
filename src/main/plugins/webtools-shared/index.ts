@@ -25,6 +25,7 @@ const ICON_COLOR_BY_PLUGIN_ID: Record<string, string> = {
   "webtools-colors": "#485460",
   "webtools-diff": "#ff9f43",
   "webtools-image-base64": "#0fbcf9",
+  "webtools-image-prompt": "#8b5cf6",
   "webtools-config-convert": "#05c46b",
   "webtools-sql-format": "#ffc048",
   "webtools-unit-convert": "#ef5777",
@@ -69,6 +70,8 @@ function getIconSymbolSvg(pluginId: string): string {
       return '<path d="M6 7h12M6 12h8M6 17h12M16 10l2 2-2 2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
     case "webtools-image-base64":
       return '<rect x="4" y="6" width="16" height="12" rx="2" fill="none" stroke="#fff" stroke-width="2"/><circle cx="9" cy="10" r="1.5" fill="#fff"/><path d="M6 16l4-4 3 3 2-2 3 3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    case "webtools-image-prompt":
+      return '<rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="#fff" stroke-width="2"/><path d="M8 9h8M8 13h5M15 13l2 2-2 2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
     case "webtools-config-convert":
       return '<path d="M7 7h10M7 12h10M7 17h10M10 5v4M14 10v4M8 15v4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
     case "webtools-sql-format":

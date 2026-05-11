@@ -1,9 +1,16 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-03-29
+更新时间：2026-05-12
 
 ## 最近完成
 
+- 准备发布 `v1.0.14`，应用版本已同步到 `package.json`。
+- 新增默认可见插件 `hardware-inspector`：支持主板、CPU、内存、显卡、硬盘等硬件信息采集，提供变化对比、复制摘要 / JSON、Markdown / HTML 报告导出。
+- 新增默认可见插件 `webtools-file-hash`：支持 MD5 / SHA1 / SHA256 / SHA512 文件哈希计算与期望哈希对比。
+- 新增默认可见插件 `webtools-port-helper`：支持 TCP / UDP 端口占用查询、PID 定位与释放端口。
+- 新增默认可见插件 `webtools-image-prompt`：支持 ChatGPT Images 2.0 产品模板、26 类风格预设切换、12 个智能场景模板、联动模块点选、生日照片 / 周岁模板、文字设计卡片、结构化生日文字、生成与复制图片提示词。
+- 默认可见插件从 21 个扩展到 25 个，插件列表分页链路继续沿用完整可见集合 + 渲染层分页。
+- 插件 Enter 行为配置已补齐到 Hardware / File Hash / Port Helper 等新增插件，默认打开命令由 `test:plugins-visible` 覆盖。
 - 完成文档全量口径同步并准备发布 `v1.0.12`，统一默认可见插件为 21 个（含 `webtools-http-mock`）。
 - 调整 `HTTP Mock Server` 目录展示策略：默认插件目录仅保留单入口，动作项通过别名查询返回，避免插件分区重复占位。
 - 发布 `v1.0.11`，同步 GitHub Release 与英文发布日志。
@@ -35,28 +42,41 @@
 - `HTTP Mock Server` 进入实现阶段：新增主进程插件 `webtools-http-mock`，支持 `start/stop/status` 命令并可启动本地临时接口；当前作为灰度能力注册（默认不可见），待补面板与 E2E。
 - `HTTP Mock Server` 第二阶段完成：补齐插件面板编辑（方法/端口/路径/状态码/响应体）、接入 Enter 启动动作，并新增 E2E 覆盖启动 -> 命中 -> 停止全链路；`pnpm test:e2e:smoke` 通过。
 - 插件分区可扩展能力上线：补齐插件分区分页（支持超过 20 条持续浏览），并修复主进程 IPC 对插件列表的 `pluginLimit` 截断，改为返回完整可见插件集合由渲染层分页展示。
+- 搜索首页布局完成紧凑化：`最近访问`、`置顶`、`插件` 统一使用固定小图标卡片，列数按实际宽度自适应，标题限制两行，置顶标记改为不遮挡内容的小圆点，并新增 Electron 布局 smoke 覆盖。
+- 新增默认插件 UI smoke 已补齐：`hardware-inspector`、`webtools-file-hash`、`webtools-port-helper` 纳入 `test:e2e:smoke`，覆盖小窗口不横向溢出、文件哈希真实文件校验、端口查询主流程。
+- File Hash / Port Helper 面板实现迁入 `plugin-panel-impls.ts`，主渲染侧改为 `panelImplsSafe` 调用，并新增源码回归防止新增默认插件面板回流到 `renderer.ts`。
+- Crypto / JWT delegate 已移除，Diff / Config / SQL handler 已切到 `panelImplsSafe`，五个面板的 apply/render 实现统一落在 `plugin-panel-impls.ts`，源码回归覆盖禁止回流。
+- Password / JSON / URL / Timestamp / Cron / Strings / Colors / QRCode / UA / API / HTTP Mock 等轻量 apply/render wrapper 已删除，handler 直接调用 `panelImplsSafe`，源码回归防止 wrapper 回潮。
+- Markdown 面板 apply/render 已改为 `panelImplsSafe` 直连，`renderer.ts` 只保留渲染执行 helper；同时为打开插件命令增加 keepOpen 刷新保护，避免面板打开后被搜索列表二次刷新覆盖。
+- 图片提示词核心生成器已抽到 `shared/image-prompt-builder` 并接入源码回归；面板实现直接落在 `plugin-panel-impls.ts`，当前按 26 类风格预设切换并联动过滤主体、构图、灯光、材质、环境等模块选项，内置淘宝主图、品牌主视觉、小红书封面、短视频封面、生日照片、宝宝周岁照、美食杂志、App/SaaS、电影海报、旅行宣传、医疗健康、金融商务 12 个智能模板；生日风格支持照片人物说明、周岁模板、年龄 / 祝福语 / 姓名 / 小标签结构化字段；12 个智能模板和 26 类风格预设已绑定 25 套场景化文字设计，面板用文字设计卡片展示字形、颜色、效果、布局、安全区和关键词，提示词会输出文字层级、颜色、效果、布局、安全区和生日文字结构，把文字作为版式元素融入画面而不是后贴字幕；智能模板切换时会重建面板并同步 EXACT 文案、位置、字形、文字设计和结构化文字控件。
+- 图片提示词新增场景级文字推荐：创建不同风格默认状态时会自动推荐更合适的文字位置和字形，例如电影海报默认底部片名、SaaS 默认顶部左侧现代黑体、旅行海报默认顶部品牌字标、人像默认底部细字重；同时补了轻量源码 UI 回归，锁住文字设计下拉使用稳定 id、设计卡片展示字形/颜色/布局/安全区，以及生日快捷模板同步结构化年龄。
+- Playwright UI smoke 新增 `加密工具` 与 `JWT 调试器` 主流程覆盖，分别验证 MD5 自动输出与示例 JWT 解析。
+- 针对 Hardware / File Hash / Port Helper 及相关渲染面板做了 mojibake 扫描，当前未发现明显乱码命中。
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.12`
-- 默认可见插件数量：21
-- 已开放 WebTools 插件数量：20
+- 应用版本：`v1.0.14`
+- 默认可见插件数量：25
+- 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
+- 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`
 - 开发模式：`pnpm dev`
 - 完整回归入口：`pnpm run test:regression:full`
+- 搜索首页布局回归：已接入 `pnpm run test:e2e:smoke`
+- 新增默认插件与 Crypto / JWT UI smoke：已接入 `pnpm run test:e2e:smoke`
 - Windows 应用别名（如 `codex`）已支持搜索与启动
 
 ## 当前主要风险
 
-1. 插件面板的小窗口与高 DPI 布局还没有逐项完全回归。
-2. 渲染层插件逻辑仍然集中在 `src/renderer/renderer.ts`。
+1. 插件面板高 DPI 布局还没有逐项完全回归。
+2. 渲染层执行 helper 与共享状态仍然集中在 `src/renderer/renderer.ts`。
 3. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
-4. 仍有历史 UI 文案和编码问题需要持续清理。
+4. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
 5. Cashflow `cash review` 复盘能力还未真正落地。
 
 ## 下一步建议
 
-1. 继续拆分 `src/renderer/renderer.ts` 中的剩余插件面板逻辑。
-2. 做一次插件面板小屏 / 高 DPI 专项回归。
-3. 推进 Cashflow `cash review` 复盘模块。
-4. 做一次全仓 UI 文案与编码巡检。
-5. Playwright 扩展、自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。
+1. 继续拆分 `src/renderer/renderer.ts` 中剩余执行 helper 与共享状态逻辑。
+2. 做插件面板高 DPI 专项回归，补更细的截图/布局断言。
+3. 继续做非新增插件范围的 UI 文案与历史编码巡检。
+4. 推进 Cashflow `cash review` 复盘模块。
+5. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。

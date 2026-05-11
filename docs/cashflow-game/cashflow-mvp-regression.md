@@ -1,7 +1,7 @@
 # Cashflow MVP 回归清单
 
-更新时间：2026-03-29
-适用版本：LiteLauncher `v1.0.12`（Cashflow Lite 当前主分支）
+更新时间：2026-05-12
+适用版本：LiteLauncher `v1.0.14`（Cashflow Lite 当前主分支）
 
 ## 0. 执行方式
 

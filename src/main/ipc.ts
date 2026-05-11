@@ -16,7 +16,10 @@ import {
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
-import { normalizeSearchDisplayConfig } from "../shared/settings";
+import {
+  normalizeSearchDisplayConfig,
+  SEARCH_DISPLAY_LIMIT_MAX
+} from "../shared/settings";
 import { executeItem } from "./actions";
 import { getDynamicSearchItems } from "./search";
 import { UsageStore } from "./usage-store";
@@ -1033,14 +1036,16 @@ export function registerIpcHandlers(
   }
 
   ipcMain.handle(IPC_CHANNELS.getInitialItems, async () => {
-    const config = options.settingsProvider.getSearchDisplayConfig();
-    const items = await options.searchProvider.getInitialItems(config.recentLimit);
+    const items = await options.searchProvider.getInitialItems(
+      SEARCH_DISPLAY_LIMIT_MAX
+    );
     return attachIcons(items);
   });
 
   ipcMain.handle(IPC_CHANNELS.getPinnedItems, async () => {
-    const config = options.settingsProvider.getSearchDisplayConfig();
-    const items = await options.searchProvider.getPinnedItems(config.pinnedLimit);
+    const items = await options.searchProvider.getPinnedItems(
+      SEARCH_DISPLAY_LIMIT_MAX
+    );
     return attachIcons(items);
   });
 
