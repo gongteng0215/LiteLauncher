@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { IPC_CHANNELS } from "../shared/channels";
@@ -9,6 +11,8 @@ import {
   getPluginCatalogItems,
   getVisiblePluginIds
 } from "../main/plugins";
+
+const mainIndexPath = path.join(process.cwd(), "src", "main", "index.ts");
 
 type SentMessage = {
   channel: string;
@@ -56,6 +60,20 @@ function parsePluginIdFromTarget(target: string): string | null {
   return result || null;
 }
 
+function readMainIndexSource(): string {
+  return fs.readFileSync(mainIndexPath, "utf8");
+}
+
+function extractConstArraySource(source: string, name: string): string {
+  const startToken = `const ${name} = [`;
+  const start = source.indexOf(startToken);
+  assert.notEqual(start, -1, `${name} should be defined as a const array`);
+  const bodyStart = start + startToken.length;
+  const end = source.indexOf("] as const;", bodyStart);
+  assert.notEqual(end, -1, `${name} should end with as const`);
+  return source.slice(bodyStart, end);
+}
+
 test("visible plugin ids are stable and subset of all plugins", () => {
   const allPluginIds = getAllPluginIds();
   const visiblePluginIds = getVisiblePluginIds();
@@ -72,6 +90,29 @@ test("visible plugin ids are stable and subset of all plugins", () => {
   assert.ok(
     visiblePluginIds.includes("webtools-image-prompt"),
     "image prompt plugin should be visible by default"
+  );
+});
+
+test("startup visible plugin migration includes image prompt as a new default", () => {
+  const mainIndexSource = readMainIndexSource();
+  const requiredSource = extractConstArraySource(
+    mainIndexSource,
+    "REQUIRED_VISIBLE_PLUGIN_IDS"
+  );
+  const currentDefaultSource = extractConstArraySource(
+    mainIndexSource,
+    "CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS"
+  );
+
+  assert.match(
+    requiredSource,
+    /"webtools-image-prompt"/,
+    "saved visible plugin lists should be upgraded with the new Image Prompt plugin"
+  );
+  assert.match(
+    currentDefaultSource,
+    /"webtools-image-prompt"/,
+    "current app-level default visible plugin list should include Image Prompt"
   );
 });
 

@@ -61,7 +61,8 @@ const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
 const REQUIRED_VISIBLE_PLUGIN_IDS = [
   "hardware-inspector",
   "webtools-file-hash",
-  "webtools-port-helper"
+  "webtools-port-helper",
+  "webtools-image-prompt"
 ] as const;
 const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -77,6 +78,7 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-diff",
   "webtools-http-mock",
   "webtools-image-base64",
+  "webtools-image-prompt",
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",

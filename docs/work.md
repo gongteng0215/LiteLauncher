@@ -4,7 +4,7 @@
 
 ## 最近完成
 
-- 准备发布 `v1.0.14`，应用版本已同步到 `package.json`。
+- 准备发布 `v1.0.15` 热修版，应用版本已同步到 `package.json`；修复老用户升级后图片提示词插件被旧可见插件白名单隐藏的问题。
 - 新增默认可见插件 `hardware-inspector`：支持主板、CPU、内存、显卡、硬盘等硬件信息采集，提供变化对比、复制摘要 / JSON、Markdown / HTML 报告导出。
 - 新增默认可见插件 `webtools-file-hash`：支持 MD5 / SHA1 / SHA256 / SHA512 文件哈希计算与期望哈希对比。
 - 新增默认可见插件 `webtools-port-helper`：支持 TCP / UDP 端口占用查询、PID 定位与释放端口。
@@ -55,7 +55,7 @@
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.14`
+- 应用版本：`v1.0.15`
 - 默认可见插件数量：25
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`
