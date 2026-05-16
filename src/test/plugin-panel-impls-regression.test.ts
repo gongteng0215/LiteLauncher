@@ -754,6 +754,31 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     /\.webtools-json-textarea\s*\{[\s\S]*flex:\s*1\s+1\s+auto;[\s\S]*min-height:\s*clamp\(240px,\s*46vh,\s*460px\)/,
     "JSON/CSV textareas should expand like an editor and fill more of the lower panel"
   );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*1180px\)[\s\S]*\.codeagent-switch-master-detail\s*\{[\s\S]*grid-template-columns:\s*96px\s+minmax\(0,\s*1fr\)/,
+    "CodeAgent Switch should keep a narrow-width two-column shell before collapsing fully"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "password tool should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-json-control-panel\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "JSON control deck should collapse to a single column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-cron-workspace\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Cron workspace should stack cleanly on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.clipboard-workbench-detail-actions[\s\S]*justify-content:\s*flex-start/,
+    "Clipboard Workbench detail actions should stop hugging the far edge on narrow windows"
+  );
 });
 
 test("Cron panel keeps editing on the left, results on the right, and syntax help on a full-width bottom rail", () => {

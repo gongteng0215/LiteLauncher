@@ -235,6 +235,7 @@ body {
 }
 
 .section-block {
+  min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   padding: 6px;
@@ -249,8 +250,9 @@ body {
 
 .section-title-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
@@ -262,7 +264,10 @@ body {
 .section-pager {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
+  margin-left: auto;
 }
 
 .section-page-btn {
@@ -304,7 +309,9 @@ body {
   display: grid;
   grid-template-columns: repeat(var(--section-grid-columns, auto-fit), 64px);
   justify-content: space-between;
+  align-content: start;
   gap: 3px;
+  width: 100%;
 }
 
 .result-item,
@@ -6945,6 +6952,12 @@ body {
   }
 }
 
+@media (max-width: 1180px) {
+  .codeagent-switch-master-detail {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+}
+
 .hardware-inspector-compare {
   display: grid;
   gap: 6px;
@@ -8545,5 +8558,17 @@ body {
   .clipboard-workbench-manual-text {
     flex-basis: 100%;
     max-height: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .webtools-password-workbench,
+  .webtools-json-control-panel,
+  .webtools-cron-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .clipboard-workbench-detail-actions {
+    justify-content: flex-start;
   }
 }

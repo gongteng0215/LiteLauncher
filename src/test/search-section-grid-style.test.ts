@@ -109,6 +109,29 @@ test("section grid columns follow available width instead of per-section item co
   );
 });
 
+test("search section cards can shrink inside narrow shells", () => {
+  const sectionBlockBody = getRuleBody(".section-block");
+  const minWidth = getProperty(sectionBlockBody, "min-width");
+
+  assert.equal(minWidth, "0");
+});
+
+test("search section grids stay top-aligned and fill the available row width", () => {
+  const gridBody = getRuleBody(".section-grid");
+  const width = getProperty(gridBody, "width");
+  const alignContent = getProperty(gridBody, "align-content");
+
+  assert.equal(width, "100%");
+  assert.equal(alignContent, "start");
+});
+
+test("search section title rows can wrap instead of forcing horizontal squeeze", () => {
+  const titleRowBody = getRuleBody(".section-title-row");
+  const flexWrap = getProperty(titleRowBody, "flex-wrap");
+
+  assert.equal(flexWrap, "wrap");
+});
+
 test("home search sections are not capped by the legacy display limit of 20", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
