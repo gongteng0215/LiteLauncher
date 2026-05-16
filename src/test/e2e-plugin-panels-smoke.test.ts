@@ -79,6 +79,7 @@ test(
       );
       const colorsForm = page.locator("form.webtools-colors-form");
       await assertFormFitsViewport("form.webtools-colors-form");
+      await assertPanelFitsNarrowViewport("form.webtools-colors-form");
       await colorsForm.locator('input[name="webtoolsColorsInput"]').fill("#00ff88");
       await page.waitForFunction(() => {
         const node = document.querySelector(
@@ -96,6 +97,7 @@ test(
       );
       const sqlForm = page.locator("form.webtools-sql-form");
       await assertFormFitsViewport("form.webtools-sql-form");
+      await assertPanelFitsNarrowViewport("form.webtools-sql-form");
       await sqlForm
         .locator('textarea[name="webtoolsSqlInput"]')
         .fill("select id,name from users where status='active' order by id desc");
@@ -159,6 +161,7 @@ test(
       );
       const cryptoForm = page.locator("form.webtools-crypto-form");
       await assertFormFitsViewport("form.webtools-crypto-form");
+      await assertPanelFitsNarrowViewport("form.webtools-crypto-form");
       const expectedCryptoHash = crypto
         .createHash("md5")
         .update("LiteLauncher")
@@ -186,6 +189,7 @@ test(
       );
       const jwtForm = page.locator("form.webtools-jwt-form");
       await assertFormFitsViewport("form.webtools-jwt-form");
+      await assertPanelFitsNarrowViewport("form.webtools-jwt-form");
       await page.waitForFunction(() => {
         const payload = document.querySelector(
           'textarea[name="webtoolsJwtPayload"]'
@@ -211,6 +215,7 @@ test(
       );
       const urlForm = page.locator("form.webtools-url-form");
       await assertFormFitsViewport("form.webtools-url-form");
+      await assertPanelFitsNarrowViewport("form.webtools-url-form");
       await urlForm
         .locator('textarea[name="webtoolsUrlInput"]')
         .fill("https://example.com:8080/path?name=test&id=1#hash");
@@ -230,6 +235,7 @@ test(
       );
       const timestampForm = page.locator("form.webtools-timestamp-form");
       await assertFormFitsViewport("form.webtools-timestamp-form");
+      await assertPanelFitsNarrowViewport("form.webtools-timestamp-form");
       await timestampForm
         .locator('input[name="webtoolsTimestampUnixInput"]')
         .fill("1700000000");
@@ -250,12 +256,49 @@ test(
       );
       const unitForm = page.locator("form.webtools-unit-form");
       await assertFormFitsViewport("form.webtools-unit-form");
+      await assertPanelFitsNarrowViewport("form.webtools-unit-form");
       await unitForm.locator('input[data-unit-storage="MB"]').fill("2");
       await page.waitForFunction(() => {
         const node = document.querySelector(
           'input[data-unit-storage="KB"]'
         ) as HTMLInputElement | null;
         return Boolean(node && Number(node.value) > 2000);
+      });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:string",
+        "字符串工具",
+        "webtools-strings"
+      );
+      const stringsForm = page.locator("form.webtools-strings-form");
+      await assertPanelFitsNarrowViewport("form.webtools-strings-form");
+      await stringsForm.locator('textarea[name="webtoolsStringsInput"]').fill("hello_world");
+      await stringsForm.locator("button", { hasText: "Convert" }).click();
+      await page.waitForFunction(() => {
+        const node = document.querySelector(
+          'textarea[name="webtoolsStringsInput"]'
+        ) as HTMLTextAreaElement | null;
+        return Boolean(node && node.value === "helloWorld");
+      });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:regex",
+        "正则工具",
+        "webtools-regex"
+      );
+      const regexForm = page.locator("form.webtools-regex-form");
+      await assertPanelFitsNarrowViewport("form.webtools-regex-form");
+      await regexForm.locator('input[name="webtoolsRegexPattern"]').fill("LiteLauncher");
+      await regexForm
+        .locator('textarea[name="webtoolsRegexInput"]')
+        .fill("LiteLauncher regex smoke");
+      await page.waitForFunction(() => {
+        const node = document.querySelector(".webtools-regex-highlight-box");
+        return Boolean(node && node.textContent && node.textContent.includes("LiteLauncher"));
       });
       await returnToSearch(page);
 
@@ -358,6 +401,7 @@ test(
       await waitForActivePlugin(page, "webtools-http-mock");
       const mockForm = page.locator("form.webtools-http-mock-form");
       await assertFormFitsViewport("form.webtools-http-mock-form");
+      await assertPanelFitsNarrowViewport("form.webtools-http-mock-form");
       await mockForm.locator('input[name="webtoolsHttpMockPort"]').fill(String(mockPort));
       await mockForm.locator('input[name="webtoolsHttpMockPath"]').fill(mockPath);
       await mockForm.locator('textarea[name="webtoolsHttpMockBody"]').fill(mockBody);
@@ -403,6 +447,7 @@ test(
       );
       const apiForm = page.locator("form.webtools-api-form");
       await apiForm.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-api-form");
       await page
         .locator(".webtools-tool-title", { hasText: "API 调试" })
         .waitFor({ state: "visible", timeout: 10000 });
@@ -433,6 +478,7 @@ test(
       );
       const qrForm = page.locator("form.webtools-qrcode-form");
       await qrForm.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-qrcode-form");
       await page
         .locator(".webtools-qrcode-title", { hasText: "二维码生成" })
         .waitFor({ state: "visible", timeout: 10000 });
@@ -458,12 +504,34 @@ test(
 
       await openPluginFromSearch(
         page,
+        "plugin:ua",
+        "UA 解析",
+        "webtools-ua"
+      );
+      const uaForm = page.locator("form.webtools-ua-form");
+      await assertFormFitsViewport("form.webtools-ua-form");
+      await assertPanelFitsNarrowViewport("form.webtools-ua-form");
+      await uaForm
+        .locator('textarea[name="webtoolsUaInput"]')
+        .fill(
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0"
+        );
+      await page.waitForFunction(() => {
+        const grid = document.querySelector(".webtools-ua-grid");
+        const text = grid?.textContent ?? "";
+        return text.includes("Firefox") && text.includes("Windows");
+      });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
         "plugin:config",
         "配置转换",
         "webtools-config-convert"
       );
       const configForm = page.locator("form.webtools-config-form");
       await configForm.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-config-form");
       await page
         .locator(".webtools-config-title", { hasText: "配置转换" })
         .waitFor({ state: "visible", timeout: 10000 });
@@ -494,6 +562,7 @@ test(
       );
       const markdownForm = page.locator("form.webtools-markdown-form");
       await markdownForm.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-markdown-form");
       const markdownInput = markdownForm.locator('textarea[name="webtoolsMarkdownInput"]');
       await markdownInput.fill("# LiteLauncher E2E\n\n- smoke\n- markdown");
       await page.waitForFunction(() => {
@@ -521,6 +590,7 @@ test(
       );
       const imageBase64Form = page.locator("form.webtools-image-base64-form");
       await imageBase64Form.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-image-base64-form");
       const imageInput = imageBase64Form.locator(
         'textarea[name="webtoolsImageBase64Input"]'
       );
@@ -545,6 +615,7 @@ test(
       );
       const diffForm = page.locator("form.webtools-diff-form");
       await diffForm.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.webtools-diff-form");
       await diffForm
         .locator('textarea[name="webtoolsDiffLeft"]')
         .fill("alpha\nbeta\nline-3");
@@ -563,6 +634,27 @@ test(
         return text.includes("alpha") && text.includes("gamma");
       });
 
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:prompt",
+        "图片提示词",
+        "webtools-image-prompt"
+      );
+      const imagePromptForm = page.locator("form.webtools-image-prompt-form");
+      await assertFormFitsViewport("form.webtools-image-prompt-form");
+      await assertPanelFitsNarrowViewport("form.webtools-image-prompt-form");
+      await imagePromptForm
+        .locator('[data-webtools-image-prompt-smart-template="1"]')
+        .first()
+        .click();
+      await page.waitForFunction(() => {
+        const output = document.querySelector(
+          'textarea[name="webtoolsImagePromptOutput"]'
+        ) as HTMLTextAreaElement | null;
+        return Boolean(output && output.value.trim().length > 0);
+      });
       await returnToSearch(page);
 
       await openPluginFromSearch(

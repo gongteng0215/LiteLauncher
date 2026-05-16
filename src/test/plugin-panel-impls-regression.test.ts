@@ -615,6 +615,76 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     "config top toolbar should hug its contents instead of spanning the full row"
   );
   assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-colors-layout,\s*[\s\S]*\.webtools-image-base64-layout[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "colors and image-base64 layouts should stack into one readable column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-markdown-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "markdown preview should collapse into a single vertical flow on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-regex-layout\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "regex editor and preview should stack when the window narrows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-config-bar\s*\{[\s\S]*width:\s*100%/,
+    "config toolbar should fill the row instead of floating as a wide loose pill on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-url-query-header,\s*[\s\S]*\.webtools-url-query-row\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "URL query rows should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-strings-uuid-item\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "string UUID rows should stop stretching into uneven columns on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-crypto-editors\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "crypto editors should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-jwt-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "JWT encoded and decoded panes should stack on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-api-request\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "API request blocks should collapse into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-qrcode-layout[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "QR setup and preview should stop trying to hold two columns on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-ua-grid,[\s\S]*?\{[\s\S]*grid-template-columns:\s*1fr/,
+    "UA detail cards should stack into one readable column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-image-prompt-grid\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "image prompt option grid should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-image-prompt-text-controls\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "image prompt text controls should stack instead of leaving wide empty side columns"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*680px\)[\s\S]*\.webtools-image-prompt-header\s*\{[\s\S]*flex-direction:\s*column/,
+    "image prompt header should switch to a vertical stack on very narrow widths"
+  );
+  assert.match(
     panelImplsSource,
     /webtools-password-workbench/,
     "password tool should render a two-part workbench instead of stretched rows"

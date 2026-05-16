@@ -4,6 +4,7 @@
 
 ## 最近完成
 
+- 完成插件面板高 DPI / 小窗口第二轮基线：把剩余默认可见插件与剩余 WebTools 面板的窄窗口 smoke 覆盖补齐到 `strings`、`regex`、`crypto`、`jwt`、`http-mock`、`api`、`qrcode`、`ua`、`image-prompt`，并将 Batch A / Batch B / 图片提示词的关键响应式规则补进源码回归断言。
 - 完成插件面板高 DPI / 小窗口首轮基线：为搜索首页补齐收缩与换行样式约束，给 `codeagent-switch`、`clipboard-workbench`、`webtools-password`、`webtools-json`、`webtools-cron` 增加窄窗口断点回归，并把搜索首页与重点插件面板的小窗口不横向溢出检查接入源码断言与 Electron smoke。
 - 准备发布 `v1.0.15` 热修版，应用版本已同步到 `package.json`；修复老用户升级后图片提示词插件被旧可见插件白名单隐藏的问题。
 - 新增默认可见插件 `hardware-inspector`：支持主板、CPU、内存、显卡、硬盘等硬件信息采集，提供变化对比、复制摘要 / JSON、Markdown / HTML 报告导出。
@@ -79,7 +80,7 @@
 
 ## 当前主要风险
 
-1. 插件面板高 DPI 布局已建立首轮基线，但仍缺少对更多历史插件和更细截图层级的覆盖。
+1. 插件面板高 DPI 布局已完成两轮基线，但仍缺少更细粒度的截图级回归与更多历史面板覆盖。
 2. 渲染层执行 helper 与共享状态仍然集中在 `src/renderer/renderer.ts`。
 3. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
 4. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
@@ -88,7 +89,7 @@
 ## 下一步建议
 
 1. 继续拆分 `src/renderer/renderer.ts` 中剩余执行 helper 与共享状态逻辑。
-2. 在现有首轮基线之上继续扩展插件面板高 DPI 专项回归，补更细的截图/布局断言。
+2. 在现有两轮基线之上继续扩展插件面板高 DPI 专项回归，补更细的截图/布局断言。
 3. 继续做非新增插件范围的 UI 文案与历史编码巡检。
 4. 推进 Cashflow `cash review` 复盘模块。
 5. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。
