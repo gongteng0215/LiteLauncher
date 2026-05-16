@@ -162,6 +162,33 @@ test(
       );
       await returnToSearch(page);
 
+      await openPluginFromSearch(page, "plugin:password", "密码工具", "webtools-password");
+      await assertFormFitsViewport(page, "form.webtools-password-form");
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".webtools-password-workbench > *").length >= 2 &&
+          document.querySelectorAll(".webtools-password-control-grid > *").length >= 2
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "password panel");
+      assertSingleColumnStack(
+        "password workbench",
+        await collectStackMetrics(
+          page,
+          ".webtools-password-workbench",
+          ".webtools-password-workbench > *"
+        )
+      );
+      assertSingleColumnStack(
+        "password control grid",
+        await collectStackMetrics(
+          page,
+          ".webtools-password-control-grid",
+          ".webtools-password-control-grid > *"
+        )
+      );
+      await returnToSearch(page);
+
       await openPluginFromSearch(page, "plugin:jwt", "JWT 调试器", "webtools-jwt");
       await assertFormFitsViewport(page, "form.webtools-jwt-form");
       await assertPageHasNoHorizontalOverflow(page, "jwt panel");
@@ -171,15 +198,88 @@ test(
       );
       await returnToSearch(page);
 
+      await openPluginFromSearch(page, "plugin:json", "JSON 工具", "webtools-json");
+      await assertFormFitsViewport(page, "form.webtools-json-form");
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".webtools-json-control-panel > *").length >= 4 &&
+          document.querySelectorAll(".webtools-json-shell > *").length >= 2
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "json panel");
+      assertSingleColumnStack(
+        "json control panel",
+        await collectStackMetrics(
+          page,
+          ".webtools-json-control-panel",
+          ".webtools-json-control-panel > *"
+        )
+      );
+      assertSingleColumnStack(
+        "json editors",
+        await collectStackMetrics(page, ".webtools-json-shell", ".webtools-json-shell > *")
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(page, "plugin:cron", "Cron 生成器", "webtools-cron");
+      await assertFormFitsViewport(page, "form.webtools-cron-form");
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".webtools-cron-workspace > *").length >= 2 &&
+          document.querySelector(".webtools-cron-guide-section")
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "cron panel");
+      assertSingleColumnStack(
+        "cron workspace",
+        await collectStackMetrics(
+          page,
+          ".webtools-cron-workspace",
+          ".webtools-cron-workspace > *"
+        )
+      );
+      await assertStackedPair(
+        page,
+        "form.webtools-cron-form",
+        ".webtools-cron-workspace",
+        ".webtools-cron-guide-section",
+        "cron guide rail"
+      );
+      await returnToSearch(page);
+
       await openPluginFromSearch(page, "plugin:ua", "UA 解析", "webtools-ua");
       await assertFormFitsViewport(page, "form.webtools-ua-form");
       await page.waitForFunction(() => {
         return document.querySelectorAll(".webtools-ua-card").length >= 3;
-      });
+      }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "ua panel");
       assertSingleColumnStack(
         "ua cards",
         await collectStackMetrics(page, ".webtools-ua-grid", ".webtools-ua-card")
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:codeagent",
+        "CodeAgent Switch",
+        "codeagent-switch"
+      );
+      await assertFormFitsViewport(page, "form.codeagent-switch-form");
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".codeagent-switch-shell > *").length >= 3 &&
+          document.querySelector(".codeagent-switch-detail-panel")
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "codeagent switch panel");
+      assertSingleColumnStack(
+        "codeagent switch shell",
+        await collectStackMetrics(
+          page,
+          ".codeagent-switch-shell",
+          ".codeagent-switch-shell > *"
+        )
       );
       await returnToSearch(page);
 
@@ -195,7 +295,7 @@ test(
           document.querySelectorAll(".webtools-image-prompt-field").length >= 4 &&
           document.querySelectorAll(".webtools-image-prompt-text-controls > *").length >= 2
         );
-      });
+      }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "image prompt panel");
       await assertStackedPair(
         page,

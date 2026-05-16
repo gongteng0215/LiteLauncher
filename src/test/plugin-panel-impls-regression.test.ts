@@ -831,6 +831,11 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     stylesSource,
+    /@media \(max-width:\s*1180px\)[\s\S]*@media \(max-width:\s*860px\)[\s\S]*\.codeagent-switch-master-detail\s*\{[\s\S]*grid-template-columns:\s*1fr;/,
+    "CodeAgent Switch should place its final single-column collapse after the intermediate breakpoint so it wins on narrow windows"
+  );
+  assert.match(
+    stylesSource,
     /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
     "password tool should stack into one column on narrow windows"
   );
