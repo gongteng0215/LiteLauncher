@@ -4,6 +4,7 @@
 
 ## 最近完成
 
+- 新增插件面板几何布局 smoke：为 `webtools-crypto`、`webtools-jwt`、`webtools-ua`、`webtools-image-prompt` 补充窄窗口单列堆叠与头部纵向切换断言，并接入 `test:e2e:smoke`，把“没溢出”继续收紧到“布局层级仍然紧凑可读”。
 - 完成插件面板高 DPI / 小窗口第二轮基线：把剩余默认可见插件与剩余 WebTools 面板的窄窗口 smoke 覆盖补齐到 `strings`、`regex`、`crypto`、`jwt`、`http-mock`、`api`、`qrcode`、`ua`、`image-prompt`，并将 Batch A / Batch B / 图片提示词的关键响应式规则补进源码回归断言。
 - 完成插件面板高 DPI / 小窗口首轮基线：为搜索首页补齐收缩与换行样式约束，给 `codeagent-switch`、`clipboard-workbench`、`webtools-password`、`webtools-json`、`webtools-cron` 增加窄窗口断点回归，并把搜索首页与重点插件面板的小窗口不横向溢出检查接入源码断言与 Electron smoke。
 - 准备发布 `v1.0.15` 热修版，应用版本已同步到 `package.json`；修复老用户升级后图片提示词插件被旧可见插件白名单隐藏的问题。
