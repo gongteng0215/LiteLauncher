@@ -159,6 +159,31 @@ test(
           `${sectionId} grid columns do not align with recent`
         );
       }
+
+      await page.setViewportSize({ width: 900, height: 640 });
+      await refreshSearchHome(page);
+      await waitForSearchSections(page);
+
+      const hasHorizontalOverflow = await page.evaluate(() => {
+        const shell = document.querySelector<HTMLElement>(".shell");
+        return Boolean(shell && shell.scrollWidth > shell.clientWidth + 1);
+      });
+      assert.equal(
+        hasHorizontalOverflow,
+        false,
+        "search home should not create page-level horizontal overflow"
+      );
+
+      const sectionFitsViewport = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll<HTMLElement>(".section-block")).every(
+          (node) => node.getBoundingClientRect().right <= window.innerWidth + 1
+        );
+      });
+      assert.equal(
+        sectionFitsViewport,
+        true,
+        "search sections should stay within the viewport"
+      );
     } catch (error) {
       if (session) {
         const artifactDir = await captureE2EFailureArtifacts(
