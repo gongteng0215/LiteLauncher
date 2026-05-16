@@ -6956,6 +6956,11 @@ body {
   .codeagent-switch-master-detail {
     grid-template-columns: 96px minmax(0, 1fr);
   }
+
+  .codeagent-switch-detail-hero-actions,
+  .codeagent-switch-detail-pills {
+    justify-content: flex-start;
+  }
 }
 
 .hardware-inspector-compare {
@@ -8563,12 +8568,21 @@ body {
 
 @media (max-width: 980px) {
   .webtools-password-workbench,
+  .webtools-json-shell,
   .webtools-json-control-panel,
   .webtools-cron-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .clipboard-workbench-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .clipboard-workbench-detail-actions {
     justify-content: flex-start;
+  }
+
+  .webtools-cron-guide-section {
+    order: 3;
   }
 }

@@ -779,6 +779,31 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     /@media \(max-width:\s*980px\)[\s\S]*\.clipboard-workbench-detail-actions[\s\S]*justify-content:\s*flex-start/,
     "Clipboard Workbench detail actions should stop hugging the far edge on narrow windows"
   );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*1180px\)[\s\S]*\.codeagent-switch-detail-hero-actions[\s\S]*justify-content:\s*flex-start/,
+    "CodeAgent Switch hero actions should move toward the content edge on narrower windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*1180px\)[\s\S]*\.codeagent-switch-detail-pills[\s\S]*justify-content:\s*flex-start/,
+    "CodeAgent Switch state pills should stop floating to the far edge on narrower windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.clipboard-workbench-toolbar\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Clipboard Workbench toolbar should collapse into a single readable column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-json-shell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "JSON editor panes should stack when there is no room for two editors"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-cron-guide-section\s*\{[\s\S]*order:\s*3/,
+    "Cron guide rail should stay below the main workspace when the layout stacks"
+  );
 });
 
 test("Cron panel keeps editing on the left, results on the right, and syntax help on a full-width bottom rail", () => {

@@ -38,13 +38,20 @@ test(
       };
 
       const assertPanelFitsNarrowViewport = async (selector: string): Promise<void> => {
+        const previousViewport = page.viewportSize();
         await page.setViewportSize({ width: 620, height: 720 });
-        await assertFormFitsViewport(selector);
-        const hasHorizontalOverflow = await page.evaluate(() => {
-          const shell = document.querySelector<HTMLElement>(".shell");
-          return Boolean(shell && shell.scrollWidth > shell.clientWidth + 1);
-        });
-        assert.equal(hasHorizontalOverflow, false, `${selector} creates horizontal overflow`);
+        try {
+          await assertFormFitsViewport(selector);
+          const hasHorizontalOverflow = await page.evaluate(() => {
+            const shell = document.querySelector<HTMLElement>(".shell");
+            return Boolean(shell && shell.scrollWidth > shell.clientWidth + 1);
+          });
+          assert.equal(hasHorizontalOverflow, false, `${selector} creates horizontal overflow`);
+        } finally {
+          if (previousViewport) {
+            await page.setViewportSize(previousViewport);
+          }
+        }
       };
 
       await openPluginFromSearch(
@@ -55,6 +62,7 @@ test(
       );
       const passwordForm = page.locator("form.webtools-password-form");
       await assertFormFitsViewport("form.webtools-password-form");
+      await assertPanelFitsNarrowViewport("form.webtools-password-form");
       await passwordForm.locator(".webtools-password-generate-btn").click();
       await page.waitForFunction(() => {
         const rows = document.querySelectorAll(".webtools-password-table tbody tr");
@@ -107,6 +115,7 @@ test(
       );
       const cronForm = page.locator("form.webtools-cron-form");
       await assertFormFitsViewport("form.webtools-cron-form");
+      await assertPanelFitsNarrowViewport("form.webtools-cron-form");
       await cronForm
         .locator('input[name="webtoolsCronExpression"]')
         .fill("*/15 9-18 * * 1-5");
@@ -125,6 +134,7 @@ test(
       );
       const jsonForm = page.locator("form.webtools-json-form");
       await assertFormFitsViewport("form.webtools-json-form");
+      await assertPanelFitsNarrowViewport("form.webtools-json-form");
       await jsonForm.locator('select[name="webtoolsJsonSource"]').selectOption("json");
       await jsonForm.locator('select[name="webtoolsJsonTarget"]').selectOption("json");
       await jsonForm
@@ -569,6 +579,15 @@ test(
       await hardwareForm
         .locator(".hardware-inspector-actions .settings-btn", { hasText: /刷新|刷新中/ })
         .waitFor({ state: "visible", timeout: 10000 });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:codeagent",
+        "CodeAgent Switch",
+        "codeagent-switch"
+      );
+      await assertPanelFitsNarrowViewport("form.codeagent-switch-form");
     } catch (error) {
       if (session) {
         const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);
@@ -596,6 +615,34 @@ test(
 
       await page.setViewportSize({ width: 900, height: 720 });
 
+      const assertFormFitsViewport = async (selector: string): Promise<void> => {
+        const form = page.locator(selector);
+        await assert.doesNotReject(() =>
+          form.waitFor({ state: "visible", timeout: 10000 })
+        );
+        const fits = await form.evaluate(
+          (node) => node.getBoundingClientRect().right <= window.innerWidth + 1
+        );
+        assert.equal(fits, true, `${selector} overflows viewport`);
+      };
+
+      const assertPanelFitsNarrowViewport = async (selector: string): Promise<void> => {
+        const previousViewport = page.viewportSize();
+        await page.setViewportSize({ width: 620, height: 720 });
+        try {
+          await assertFormFitsViewport(selector);
+          const hasHorizontalOverflow = await page.evaluate(() => {
+            const shell = document.querySelector<HTMLElement>(".shell");
+            return Boolean(shell && shell.scrollWidth > shell.clientWidth + 1);
+          });
+          assert.equal(hasHorizontalOverflow, false, `${selector} creates horizontal overflow`);
+        } finally {
+          if (previousViewport) {
+            await page.setViewportSize(previousViewport);
+          }
+        }
+      };
+
       const alphaText = `clipboard workbench alpha ${Date.now()}`;
       const betaText = `clipboard workbench beta ${Date.now() + 1}`;
 
@@ -608,6 +655,7 @@ test(
 
       const form = page.locator("form.clipboard-workbench-form");
       await form.waitFor({ state: "visible", timeout: 10000 });
+      await assertPanelFitsNarrowViewport("form.clipboard-workbench-form");
 
       const manualTextInput = form.locator(
         'textarea[name="clipboardWorkbenchManualText"]'
