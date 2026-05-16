@@ -47,6 +47,7 @@ It combines launcher search, clipboard history, plugin panels, indexing controls
 - Hardware inspection with Markdown / HTML report export
 - File hash and port-occupancy helper plugins
 - Image Prompt plugin with ChatGPT Images 2.0 prompt generation, style presets, smart scene templates, scannable text design cards, and structured birthday text fields
+- CodeAgent Switch plugin for Codex config summaries, active Provider/Profile marking, Provider / Profile add-edit-delete, official advanced/runtime config fields, diagnostics, diff preview, backup-first writes, backup restore, and system environment-variable key setup
 - Development watch mode with auto compile, main-process restart, and renderer reload
 
 ### Currently Visible Plugins
@@ -76,6 +77,7 @@ It combines launcher search, clipboard history, plugin panels, indexing controls
 23. `webtools-markdown`
 24. `webtools-ua`
 25. `webtools-api-client`
+26. `codeagent-switch`
 
 ### Common Commands
 
@@ -196,9 +198,10 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 - 文件哈希：计算 MD5 / SHA1 / SHA256 / SHA512，并可对比期望哈希
 - 端口助手：查询 TCP / UDP 端口占用、定位 PID，并可释放端口
 - 图片提示词：按产品模板生成 ChatGPT Images 2.0 图片提示词，支持 26 类风格预设、12 个智能场景模板、联动模块点选、生日照片 / 周岁模板、文字设计卡片、年龄 / 祝福语 / 姓名结构化字段与复制反馈；生成词会写入文字层级、颜色、效果、布局和安全区，减少“后贴字”感
+- CodeAgent Switch：读取 Codex `config.toml`，标注当前 Provider / Profile / 模型摘要，支持 Provider / Profile 新增、编辑、删除与 env_key 名称配置；诊断认证冲突、环境变量缺失、Profile 兼容和会话变化风险；支持 Profile 切换前 diff 预览、所有写入前自动备份、备份列表与恢复，并生成不含真实 Key 的环境变量命令
 - 开发模式 `pnpm dev`：自动编译、主进程自动重启、渲染层自动刷新
 
-### 当前默认可见插件（25 个）
+### 当前默认可见插件（26 个）
 
 1. 富爸爸现金流 `cashflow-game`
 2. 硬件检测 `hardware-inspector`
@@ -225,6 +228,7 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 23. Markdown 预览 `webtools-markdown`
 24. UA 解析 `webtools-ua`
 25. API 调试 `webtools-api-client`
+26. CodeAgent Switch `codeagent-switch`
 
 ### 常用命令
 
@@ -243,6 +247,7 @@ LiteLauncher 是一个基于 `Electron + TypeScript + SQLite` 的轻量桌面启
 - `wt-port`：打开端口助手
 - `wt-qr`：打开二维码生成
 - `wt-md`：打开 Markdown 预览
+- `codex` / `codeagent`：打开 CodeAgent Switch
 - `wt-image` / `wt-base64`：打开图片 Base64 工具
 - `wt-prompt` / `提示词`：打开图片提示词生成器
 - `codex`：在 Windows 上打开 Codex（已安装为应用别名时）

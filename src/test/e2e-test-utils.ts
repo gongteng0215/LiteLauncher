@@ -117,6 +117,9 @@ export async function openPluginFromSearch(
   title: string,
   pluginId: string
 ): Promise<void> {
+  const previousStatusText = await page.evaluate(
+    () => document.querySelector<HTMLElement>("#status-text")?.textContent?.trim() ?? ""
+  );
   const searchInput = page.locator("#search-input");
   await searchInput.click();
   await searchInput.fill(query);
@@ -131,8 +134,12 @@ export async function openPluginFromSearch(
   await waitForMode(page, "plugin");
   await waitForActivePlugin(page, pluginId);
   await page.waitForFunction(
-    () => document.querySelector("#status-text")?.textContent?.includes("已打开插件") === true,
-    undefined,
+    (previousText) => {
+      const statusText =
+        document.querySelector<HTMLElement>("#status-text")?.textContent?.trim() ?? "";
+      return statusText.length > 0 && statusText !== previousText;
+    },
+    previousStatusText,
     { timeout: 10000 }
   );
   await page.waitForFunction(

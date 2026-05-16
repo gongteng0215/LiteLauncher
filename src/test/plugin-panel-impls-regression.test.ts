@@ -105,6 +105,426 @@ test("new default plugin panels are implemented through plugin-panel-impls", () 
   assert.match(panelImplsSource, /renderWebtoolsPortHelperPanel\(\): void/);
 });
 
+test("Clipboard Workbench panel is implemented through plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+  const stylesSource = readRendererStylesSource();
+
+  assert.match(
+    rendererSource,
+    /render:\s*panelImplsSafe\.renderClipboardWorkbenchPanel/,
+    "Clipboard Workbench handler should render through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /onOpen:\s*panelImplsSafe\.applyClipboardWorkbenchPanelPayload/,
+    "Clipboard Workbench handler should apply payload through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /runWithPluginForm\("form\.clipboard-workbench-form"/,
+    "Clipboard Workbench handler should wire Enter to the panel form"
+  );
+  assert.equal(
+    rendererSource.includes("function renderClipboardWorkbenchPanel"),
+    false,
+    "Clipboard Workbench render implementation should live outside renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function applyClipboardWorkbenchPanelPayload"),
+    false,
+    "Clipboard Workbench apply implementation should live outside renderer.ts"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderClipboardWorkbenchPanel\(\): void/,
+    "Clipboard Workbench render implementation should be present in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /applyClipboardWorkbenchPanelPayload\(panel: ActivePluginPanelState\): void/,
+    "Clipboard Workbench payload applier should be present in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /clipboard-workbench-preview-image/,
+    "Clipboard Workbench should render a dedicated image preview element"
+  );
+  assert.match(
+    panelImplsSource,
+    /activeItem\.assetUrl/,
+    "Clipboard Workbench image preview should use a resolved asset url"
+  );
+  assert.match(
+    panelImplsSource,
+    /clipboard-workbench-item-thumb/,
+    "Clipboard Workbench item list should render image thumbnails"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-shell/,
+    "Clipboard Workbench shell styles should be present"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-item-summary[\s\S]*overflow-wrap:\s*anywhere;/,
+    "Clipboard Workbench summaries should wrap long unbroken content"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-item-preview[\s\S]*overflow-wrap:\s*anywhere;/,
+    "Clipboard Workbench previews should wrap long unbroken content"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-panel[\s\S]*height:\s*min\(78vh,\s*760px\);/,
+    "Clipboard Workbench panel should cap its height for compact browsing"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-list,\s*[\s\S]*\.clipboard-workbench-detail[\s\S]*overflow:\s*auto;/,
+    "Clipboard Workbench content panes should scroll internally"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-manual-text[\s\S]*max-height:\s*44px;/,
+    "Clipboard Workbench draft box should stay compact by default"
+  );
+});
+
+test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+  const stylesSource = readRendererStylesSource();
+  const handlerConfigSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "renderer", "plugin-handler-config.ts"),
+    "utf8"
+  );
+
+  assert.equal(
+    rendererSource.includes("function renderCodeAgentSwitchPanel"),
+    false,
+    "CodeAgent Switch render implementation should live outside renderer.ts"
+  );
+  assert.match(
+    rendererSource,
+    /render:\s*panelImplsSafe\.renderCodeAgentSwitchPanel/,
+    "CodeAgent Switch handler should render through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /onOpen:\s*panelImplsSafe\.applyCodeAgentSwitchPanelPayload/,
+    "CodeAgent Switch handler should apply payload through panelImplsSafe"
+  );
+  assert.match(panelImplsSource, /renderCodeAgentSwitchPanel\(\): void/);
+  assert.match(panelImplsSource, /applyCodeAgentSwitchPanelPayload\(panel: unknown\): void/);
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchAction\("preview", selectedProfile\.id\)/,
+    "CodeAgent Switch profile detail should expose preview actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchAction\("apply", selectedProfile\.id\)/,
+    "CodeAgent Switch profile detail should expose safe apply actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-list-switch-actions/,
+    "CodeAgent Switch profile rows should expose visible preview/apply switch actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchAction\("apply", profile\.id\)/,
+    "CodeAgent Switch profile rows should make switching available without hunting in the detail pane"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-hero-actions/,
+    "CodeAgent Switch profile detail should put preview/apply actions in the visible hero area"
+  );
+  assert.match(
+    panelImplsSource,
+    /设为当前/,
+    "CodeAgent Switch should label switching as setting the selected profile current"
+  );
+  assert.match(
+    panelImplsSource,
+    /deriveCodeAgentSwitchEnvKeyName/,
+    "CodeAgent Switch should derive env_key names instead of forcing manual env_key entry"
+  );
+  assert.match(
+    panelImplsSource,
+    /deriveCodeAgentSwitchProviderName/,
+    "CodeAgent Switch should derive provider display names instead of requiring users to type names"
+  );
+  assert.match(
+    panelImplsSource,
+    /makeUniqueCodeAgentSwitchId/,
+    "CodeAgent Switch should prefill a non-conflicting Provider ID for new providers"
+  );
+  assert.match(
+    panelImplsSource,
+    /providerApiKey/,
+    "CodeAgent Switch provider editor should accept a non-persisted API key value for copyable commands"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchSetProviderKey/,
+    "CodeAgent Switch provider editor should write API keys into the user environment from the panel"
+  );
+  assert.match(
+    panelImplsSource,
+    /set-provider-key/,
+    "CodeAgent Switch should expose a command action for writing provider keys"
+  );
+  assert.match(
+    panelImplsSource,
+    /写入系统 Key/,
+    "CodeAgent Switch should make direct system key writing the primary key action"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-key-box/,
+    "CodeAgent Switch provider editor should expose key setup as a dedicated section"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeAgentSwitchCopyState:\s*"" \| "env" \| "diagnostics" \| "diff" \| "key"/,
+    "CodeAgent Switch should keep key copy feedback separate from generic env command copy feedback"
+  );
+  assert.equal(
+    panelImplsSource.includes('getCodeAgentSwitchFormValue(container, "providerEnvKey")'),
+    false,
+    "CodeAgent Switch should not ask users to manually type env_key names"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-diff/,
+    "CodeAgent Switch should render a diff preview block"
+  );
+  assert.match(
+    panelImplsSource,
+    /copyCodeAgentSwitchText\(\s*"diagnostics"/,
+    "CodeAgent Switch should expose diagnostic copy feedback"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchAction\("backups"\)/,
+    "CodeAgent Switch should expose backup refresh actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchAction\("restore", undefined, backup\.id\)/,
+    "CodeAgent Switch should expose restore actions for backup entries"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-backups/,
+    "CodeAgent Switch should render a backup list section"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-tool-sidebar/,
+    "CodeAgent Switch should expose a fixed-width tool sidebar for Codex and planned adapters"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-shell/,
+    "CodeAgent Switch should render an app-like shell"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-profile-list/,
+    "CodeAgent Switch should make Profile the primary selectable list"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-provider-strip/,
+    "CodeAgent Switch should keep Provider selection as a compact strip"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-section/,
+    "CodeAgent Switch detail pages should be split into grouped sections"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-current-card/,
+    "CodeAgent Switch should surface the active config as a scan-friendly current card"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-overview/,
+    "CodeAgent Switch detail pages should show a read-only overview before editing"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-state-badge/,
+    "CodeAgent Switch should distinguish selected and active states with explicit badges"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-primary-actions/,
+    "CodeAgent Switch profile detail should keep preview/apply actions visually primary"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-danger-zone/,
+    "CodeAgent Switch delete actions should live in a danger zone"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeAgentSwitchData\.active/,
+    "CodeAgent Switch should render the active provider/profile summary"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchSaveProvider/,
+    "CodeAgent Switch should expose provider save actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /providerEnvKeyInstructions/,
+    "CodeAgent Switch provider editor should expose env_key_instructions"
+  );
+  assert.match(
+    panelImplsSource,
+    /providerHttpHeaders/,
+    "CodeAgent Switch provider editor should expose http_headers"
+  );
+  assert.match(
+    panelImplsSource,
+    /providerEnvHttpHeaders/,
+    "CodeAgent Switch provider editor should expose env_http_headers"
+  );
+  assert.match(
+    panelImplsSource,
+    /providerQueryParams/,
+    "CodeAgent Switch provider editor should expose query_params"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchDeleteProvider/,
+    "CodeAgent Switch should expose provider delete actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchSaveProfile/,
+    "CodeAgent Switch should expose profile save actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /profilePlanReasoning/,
+    "CodeAgent Switch profile editor should expose plan_mode_reasoning_effort"
+  );
+  assert.match(
+    panelImplsSource,
+    /profileReasoningSummary/,
+    "CodeAgent Switch profile editor should expose model_reasoning_summary"
+  );
+  assert.match(
+    panelImplsSource,
+    /profileVerbosity/,
+    "CodeAgent Switch profile editor should expose model_verbosity"
+  );
+  assert.match(
+    panelImplsSource,
+    /profileServiceTier/,
+    "CodeAgent Switch profile editor should expose service_tier"
+  );
+  assert.match(
+    panelImplsSource,
+    /profileWebSearch/,
+    "CodeAgent Switch profile editor should expose web_search"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-runtime/,
+    "CodeAgent Switch should expose a runtime permissions section"
+  );
+  assert.match(
+    panelImplsSource,
+    /save-runtime/,
+    "CodeAgent Switch should support saving runtime permissions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchDeleteProfile/,
+    "CodeAgent Switch should expose profile delete actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-active-pill/,
+    "CodeAgent Switch should mark active providers and matching profiles visibly"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeAgentSwitchSelectedKind/,
+    "CodeAgent Switch should keep an explicit selected Provider/Profile state"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-master-detail/,
+    "CodeAgent Switch should use a master-detail layout"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-list-panel/,
+    "CodeAgent Switch should render compact config lists"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-panel/,
+    "CodeAgent Switch should edit providers and profiles in the detail pane"
+  );
+  assert.match(
+    panelImplsSource,
+    /dataset\.selected/,
+    "CodeAgent Switch list rows should expose visible selected state"
+  );
+  assert.equal(
+    panelImplsSource.includes("item.append(body, createCodeAgentSwitchProviderEditor(provider), actions)"),
+    false,
+    "CodeAgent Switch provider list rows should not contain inline editors"
+  );
+  assert.equal(
+    panelImplsSource.includes("item.append(body, createCodeAgentSwitchProfileEditor(profile, providers), actions)"),
+    false,
+    "CodeAgent Switch profile list rows should not contain inline editors"
+  );
+  assert.equal(
+    panelImplsSource.includes("grid.append(providerSection, profileSection);"),
+    false,
+    "CodeAgent Switch should not keep the old provider/profile grid mounted"
+  );
+  assert.equal(
+    panelImplsSource.includes("grid.dataset.legacy"),
+    false,
+    "CodeAgent Switch should not keep legacy provider/profile list construction in V2"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-editor-grid/,
+    "CodeAgent Switch should render compact edit forms for providers and profiles"
+  );
+  assert.match(
+    stylesSource,
+    /grid-template-columns:\s*112px\s+minmax\(220px,\s*0\.58fr\)\s+minmax\(360px,\s*1\.42fr\)/,
+    "CodeAgent Switch shell should reserve a fixed-width tool sidebar and give more room to detail"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-tool-button/,
+    "CodeAgent Switch tool buttons should be fixed sidebar buttons instead of auto-stretched tabs"
+  );
+  assert.match(
+    handlerConfigSource,
+    /CODEAGENT_SWITCH_PLUGIN_ID/,
+    "CodeAgent Switch should have handler config for Enter behavior"
+  );
+});
+
 test("core webtools panel handlers use plugin-panel-impls without renderer delegates", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
@@ -157,6 +577,223 @@ test("core webtools panel handlers use plugin-panel-impls without renderer deleg
     rendererSource.includes("window.__LL_PANEL_DELEGATES__"),
     false,
     "renderer.ts should not expose panel delegate callbacks"
+  );
+});
+
+test("shared webtools layouts stay compact instead of stretching cards edge to edge", () => {
+  const stylesSource = readRendererStylesSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    stylesSource,
+    /\.webtools-tool-editors\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(280px,\s*420px\)\)/,
+    "shared webtools editor pairs should use bounded columns instead of full-width 1fr tracks"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-config-editors\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(280px,\s*420px\)\)/,
+    "config editors should keep bounded pane widths"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-unit-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(132px,\s*176px\)\)/,
+    "unit result cards should not auto-stretch across the full row"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-ua-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(180px,\s*240px\)\)/,
+    "UA cards should keep compact widths"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-image-prompt-preset-options\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(136px,\s*188px\)\)/,
+    "image prompt preset chips should use bounded widths"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-config-bar\s*\{[\s\S]*width:\s*fit-content;/,
+    "config top toolbar should hug its contents instead of spanning the full row"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-workbench/,
+    "password tool should render a two-part workbench instead of stretched rows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-preset-grid/,
+    "password tool should expose quick presets to fill the layout with useful actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-summary-grid/,
+    "password tool should render a real-time summary area instead of leaving the side empty"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(360px,\s*1\.45fr\)\s+minmax\(230px,\s*0\.75fr\)/,
+    "password tool workbench should reserve a compact summary column instead of stretching one giant form"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-preset-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(96px,\s*1fr\)\)/,
+    "password preset buttons should use bounded widths instead of auto-stretching across the row"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-generate-copy-btn/,
+    "password tool should support generating and copying the first result in one action"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-copy-all-btn/,
+    "password tool should support copying all generated rows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-copy-numbered-btn/,
+    "password tool should support copying numbered generated rows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-copy-json-btn/,
+    "password tool should support copying generated rows as JSON"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-mask-btn/,
+    "password tool should support masking generated passwords in the result table"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-symbol-quick/,
+    "password tool should expose compact symbol preset shortcuts"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-shell/,
+    "JSON/CSV tool should render a compact workbench shell instead of loose full-width rows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-route-presets/,
+    "JSON/CSV tool should expose one-click route presets for common conversions"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-sample-strip/,
+    "JSON/CSV tool should expose sample input shortcuts to fill empty space with useful actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-copy-input-btn/,
+    "JSON/CSV tool should support copying the current input"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-use-output-btn/,
+    "JSON/CSV tool should support using the output as the next input"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-structure-card/,
+    "JSON/CSV tool should render a structure preview section for parsed payloads"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-validate-btn/,
+    "JSON/CSV tool should expose a dedicated validate action"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-clean-actions/,
+    "JSON/CSV tool should expose one-click cleaning actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-fields-card/,
+    "JSON/CSV tool should render a field extraction section"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-json-sync/,
+    "JSON/CSV tool should refresh compact stats when auto-conversion updates the result"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-shell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/,
+    "JSON/CSV editor panes should fill the available width because the text areas are the main workspace"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-control-panel\s*\{[\s\S]*grid-template-columns:\s*minmax\(340px,\s*400px\)\s+minmax\(260px,\s*1\.1fr\)\s+minmax\(220px,\s*0\.95fr\)/,
+    "JSON/CSV controls should use a three-part top deck so the width is filled by converter, routes, and samples"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-lab\s*\{[\s\S]*grid-template-rows:\s*auto\s+auto\s+minmax\(0,\s*1fr\)\s+auto;/,
+    "JSON/CSV form should reserve the remaining height for the editor workspace"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-pane\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/,
+    "JSON/CSV panes should stack header and textarea as a vertical workspace"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-route-presets,\s*[\s\S]*padding:\s*8px;[\s\S]*border:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.12\)/,
+    "JSON/CSV route and sample groups should be framed as compact cards instead of floating in empty space"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-sample-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(116px,\s*148px\)\)/,
+    "JSON/CSV sample buttons should use a denser card width that better fills the top deck"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-textarea\s*\{[\s\S]*flex:\s*1\s+1\s+auto;[\s\S]*min-height:\s*clamp\(240px,\s*46vh,\s*460px\)/,
+    "JSON/CSV textareas should expand like an editor and fill more of the lower panel"
+  );
+});
+
+test("Cron panel keeps editing on the left, results on the right, and syntax help on a full-width bottom rail", () => {
+  const panelImplsSource = readPanelImplsSource();
+  const stylesSource = readRendererStylesSource();
+
+  assert.match(
+    panelImplsSource,
+    /leftColumn\.append\(templatesSection,\s*fieldsSection\);/,
+    "Cron editor should keep templates grouped with field editing in the left column"
+  );
+  assert.match(
+    panelImplsSource,
+    /rightColumn\.append\(summaryCard,\s*resultsSection\);/,
+    "Cron result summaries should stay grouped in the right column"
+  );
+  assert.match(
+    panelImplsSource,
+    /guideSection\.className\s*=\s*"webtools-cron-section webtools-cron-guide-section";/,
+    "Cron syntax help should have its own bottom-rail class hook"
+  );
+  assert.match(
+    panelImplsSource,
+    /workspace\.append\(leftColumn,\s*rightColumn\);/,
+    "Cron workspace should return to a two-column layout"
+  );
+  assert.match(
+    panelImplsSource,
+    /form\.append\(toolbar,\s*workspace,\s*guideSection\);/,
+    "Cron syntax help should render below the main workspace instead of competing for a side column"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-cron-workspace\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1\.3[0-9]*fr\)\s+minmax\(320px,\s*0\.9[0-9]*fr\)/,
+    "Cron workspace should use a balanced two-column split that fills the panel without a third floating column"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-cron-guide-section\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1;/,
+    "Cron syntax help should explicitly span the full width below the workspace"
   );
 });
 

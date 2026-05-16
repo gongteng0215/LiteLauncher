@@ -23,10 +23,2670 @@ function createHardwareInspectorMetricGrid(
   return grid;
 }
 
+type CodeAgentSwitchDiagnosticView = {
+  id: string;
+  level: "error" | "warning" | "info";
+  message: string;
+  suggestion: string;
+};
+
+type CodeAgentSwitchProviderView = {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  wireApi?: string;
+  envKey?: string;
+  envKeyInstructions?: string;
+  requiresOpenAiAuth?: boolean;
+  requestMaxRetries?: number;
+  streamMaxRetries?: number;
+  streamIdleTimeoutMs?: number;
+  supportsWebsockets?: boolean;
+  httpHeaders?: Record<string, string>;
+  envHttpHeaders?: Record<string, string>;
+  queryParams?: Record<string, string>;
+};
+
+type CodeAgentSwitchProfileView = {
+  id: string;
+  providerId?: string;
+  model?: string;
+  reviewModel?: string;
+  modelReasoningEffort?: string;
+  planModeReasoningEffort?: string;
+  modelReasoningSummary?: string;
+  modelVerbosity?: string;
+  serviceTier?: string;
+  webSearch?: string;
+  modelAutoCompactTokenLimit?: number;
+};
+
+type CodeAgentSwitchBackupView = {
+  id: string;
+  fileName?: string;
+  path?: string;
+  sizeBytes?: number;
+  createdAtMs?: number;
+};
+
+type CodeAgentSwitchToolView = {
+  id: string;
+  label: string;
+  status: "ready" | "planned";
+  description: string;
+};
+
+type CodeAgentSwitchProfileMatchView = {
+  profileId: string;
+  level: "exact" | "partial" | "none";
+  matchedFields?: string[];
+  mismatchedFields?: string[];
+};
+
+let codeAgentSwitchData: {
+  tool?: string;
+  tools?: CodeAgentSwitchToolView[];
+  exists?: boolean;
+  configPath?: string;
+  config?: {
+    profile?: string;
+    modelProvider?: string;
+    model?: string;
+    reviewModel?: string;
+    modelReasoningEffort?: string;
+    modelAutoCompactTokenLimit?: number;
+    approvalPolicy?: string;
+    sandboxMode?: string;
+    defaultPermissions?: string;
+    networkAccess?: string;
+    windows?: {
+      sandbox?: string;
+      sandboxPrivateDesktop?: boolean;
+    };
+    providers?: CodeAgentSwitchProviderView[];
+    profiles?: CodeAgentSwitchProfileView[];
+  };
+  active?: {
+    activeProviderId?: string;
+    activeProvider?: CodeAgentSwitchProviderView;
+    activeProfileId?: string;
+    activeProfile?: CodeAgentSwitchProfileView;
+    activeProfileMatch?: "exact" | "partial" | "none";
+    matchedFields?: string[];
+    profileMatches?: CodeAgentSwitchProfileMatchView[];
+  };
+  diagnostics?: CodeAgentSwitchDiagnosticView[];
+  envCommands?: Record<string, string>;
+  backups?: CodeAgentSwitchBackupView[];
+  preview: {
+    profileId?: string;
+    providerId?: string;
+    changedFields?: string[];
+    diffLines?: string[];
+  };
+  applied?: boolean;
+  restored?: boolean;
+  savedProvider?: boolean;
+  deletedProvider?: boolean;
+  setProviderKey?: boolean;
+  keyAppliedEnvKey?: string;
+  savedProfile?: boolean;
+  savedRuntime?: boolean;
+  deletedProfile?: boolean;
+  backupPath?: string;
+  restoredBackupPath?: string;
+  error?: string;
+} = { preview: {} };
+let codeAgentSwitchCopyState: "" | "env" | "diagnostics" | "diff" | "key" = "";
+type CodeAgentSwitchSelectedKind = "provider" | "profile";
+let codeAgentSwitchSelectedKind: CodeAgentSwitchSelectedKind = "profile";
+let codeAgentSwitchSelectedId = "";
+let codeAgentSwitchSelectionMode: "auto" | "manual" = "auto";
+
+function getCodeAgentSwitchDataFromPanel(panel: unknown): typeof codeAgentSwitchData {
+  const record = panel && typeof panel === "object" ? (panel as { data?: unknown }) : {};
+  const data = record.data && typeof record.data === "object" ? record.data : {};
+  const nextData = data as typeof codeAgentSwitchData;
+  if (!nextData.preview) {
+    nextData.preview = {};
+  }
+  return nextData;
+}
+
+function getCodeAgentSwitchProviders(): CodeAgentSwitchProviderView[] {
+  return codeAgentSwitchData.config?.providers ?? [];
+}
+
+function getCodeAgentSwitchProfiles(): CodeAgentSwitchProfileView[] {
+  return codeAgentSwitchData.config?.profiles ?? [];
+}
+
+function isCodeAgentSwitchSelectedEntityPresent(
+  kind: CodeAgentSwitchSelectedKind,
+  id: string
+): boolean {
+  if (!id) {
+    return true;
+  }
+  return kind === "provider"
+    ? getCodeAgentSwitchProviders().some((provider) => provider.id === id)
+    : getCodeAgentSwitchProfiles().some((profile) => profile.id === id);
+}
+
+function chooseDefaultCodeAgentSwitchSelection(): void {
+  const providers = getCodeAgentSwitchProviders();
+  const profiles = getCodeAgentSwitchProfiles();
+  const active = codeAgentSwitchData.active ?? {};
+  const exactProfileId =
+    active.activeProfileId ??
+    active.profileMatches?.find((match) => match.level === "exact")?.profileId;
+
+  if (exactProfileId && profiles.some((profile) => profile.id === exactProfileId)) {
+    codeAgentSwitchSelectedKind = "profile";
+    codeAgentSwitchSelectedId = exactProfileId;
+    return;
+  }
+
+  const previewProfileId = codeAgentSwitchData.preview?.profileId;
+  if (previewProfileId && profiles.some((profile) => profile.id === previewProfileId)) {
+    codeAgentSwitchSelectedKind = "profile";
+    codeAgentSwitchSelectedId = previewProfileId;
+    return;
+  }
+
+  const activeProviderId = active.activeProviderId ?? codeAgentSwitchData.config?.modelProvider;
+  if (activeProviderId && providers.some((provider) => provider.id === activeProviderId)) {
+    codeAgentSwitchSelectedKind = "provider";
+    codeAgentSwitchSelectedId = activeProviderId;
+    return;
+  }
+
+  if (profiles[0]) {
+    codeAgentSwitchSelectedKind = "profile";
+    codeAgentSwitchSelectedId = profiles[0].id;
+    return;
+  }
+
+  if (providers[0]) {
+    codeAgentSwitchSelectedKind = "provider";
+    codeAgentSwitchSelectedId = providers[0].id;
+    return;
+  }
+
+  codeAgentSwitchSelectedKind = "profile";
+  codeAgentSwitchSelectedId = "";
+}
+
+function syncCodeAgentSwitchSelectionFromData(): void {
+  if (
+    codeAgentSwitchSelectionMode === "manual" &&
+    isCodeAgentSwitchSelectedEntityPresent(codeAgentSwitchSelectedKind, codeAgentSwitchSelectedId)
+  ) {
+    return;
+  }
+  codeAgentSwitchSelectionMode = "auto";
+  chooseDefaultCodeAgentSwitchSelection();
+}
+
+function selectCodeAgentSwitchDetail(kind: CodeAgentSwitchSelectedKind, id: string): void {
+  codeAgentSwitchSelectedKind = kind;
+  codeAgentSwitchSelectedId = id;
+  codeAgentSwitchSelectionMode = "manual";
+  renderList();
+}
+
+function createCodeAgentSwitchMetric(labelText: string, valueText: string): HTMLDivElement {
+  const item = document.createElement("div");
+  item.className = "codeagent-switch-metric";
+  const label = document.createElement("div");
+  label.className = "codeagent-switch-metric-label";
+  label.textContent = labelText;
+  const value = document.createElement("div");
+  value.className = "codeagent-switch-metric-value";
+  value.textContent = valueText || "未配置";
+  item.append(label, value);
+  return item;
+}
+
+function createCodeAgentSwitchCommandItem(labelText: string, commandText: string): HTMLDivElement {
+  const item = document.createElement("div");
+  item.className = "codeagent-switch-command";
+  const label = document.createElement("div");
+  label.className = "codeagent-switch-command-label";
+  label.textContent = labelText;
+  const code = document.createElement("code");
+  code.className = "codeagent-switch-command-code";
+  code.textContent = commandText;
+  item.append(label, code);
+  return item;
+}
+
+function createCodeAgentSwitchPill(text: string, tone: "active" | "muted" = "muted"): HTMLSpanElement {
+  const pill = document.createElement("span");
+  pill.className = "codeagent-switch-active-pill";
+  pill.dataset.tone = tone;
+  pill.textContent = text;
+  return pill;
+}
+
+function createCodeAgentSwitchStateBadge(
+  text: string,
+  tone: "active" | "selected" | "muted" = "muted"
+): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "codeagent-switch-state-badge";
+  badge.dataset.tone = tone;
+  badge.textContent = text;
+  return badge;
+}
+
+function createCodeAgentSwitchOverviewItem(labelText: string, valueText: string): HTMLDivElement {
+  const item = document.createElement("div");
+  item.className = "codeagent-switch-overview-item";
+  const label = document.createElement("span");
+  label.className = "codeagent-switch-overview-label";
+  label.textContent = labelText;
+  const value = document.createElement("span");
+  value.className = "codeagent-switch-overview-value";
+  value.textContent = valueText || "未配置";
+  item.append(label, value);
+  return item;
+}
+
+function createCodeAgentSwitchDetailOverview(
+  items: Array<{ label: string; value: string | undefined }>
+): HTMLDivElement {
+  const grid = document.createElement("div");
+  grid.className = "codeagent-switch-detail-overview";
+  for (const item of items) {
+    grid.appendChild(createCodeAgentSwitchOverviewItem(item.label, item.value ?? ""));
+  }
+  return grid;
+}
+
+function deriveCodeAgentSwitchEnvKeyName(providerId: string): string {
+  const normalized = providerId
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+  return `CODEAGENT_${normalized || "PROVIDER"}_API_KEY`;
+}
+
+function deriveCodeAgentSwitchProviderName(providerId: string, baseUrl = ""): string {
+  const host = (() => {
+    try {
+      return baseUrl ? new URL(baseUrl).hostname : "";
+    } catch {
+      return "";
+    }
+  })();
+  const hostPart = host
+    .split(".")
+    .find((part) => part && !["api", "gateway", "www", "v1"].includes(part.toLowerCase()));
+  const source = hostPart || providerId || "provider";
+  const words = source
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const readable = words
+    .map((word) =>
+      word.toLowerCase() === "openai"
+        ? "OpenAI"
+        : `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`
+    )
+    .join(" ");
+  return readable || "Provider";
+}
+
+function deriveCodeAgentSwitchProviderId(source: string): string {
+  const host = (() => {
+    try {
+      return source ? new URL(source).hostname : "";
+    } catch {
+      return "";
+    }
+  })();
+  const raw = host || source || "provider";
+  const normalized = raw
+    .replace(/\.[^.]+$/u, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+  return normalized || "provider";
+}
+
+function makeUniqueCodeAgentSwitchId(baseId: string, existingIds: Set<string>): string {
+  const base = deriveCodeAgentSwitchProviderId(baseId);
+  if (!existingIds.has(base)) {
+    return base;
+  }
+  let index = 2;
+  while (existingIds.has(`${base}_${index}`)) {
+    index += 1;
+  }
+  return `${base}_${index}`;
+}
+
+function createCodeAgentSwitchInput(
+  labelText: string,
+  name: string,
+  value: string | number | undefined,
+  placeholder = "",
+  type = "text"
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "codeagent-switch-editor-field";
+  const text = document.createElement("span");
+  text.textContent = labelText;
+  const input = document.createElement("input");
+  input.className = "settings-value webtools-tool-input";
+  input.name = name;
+  input.type = type;
+  input.value = value === undefined ? "" : String(value);
+  input.placeholder = placeholder;
+  label.append(text, input);
+  return label;
+}
+
+function createCodeAgentSwitchTextarea(
+  labelText: string,
+  name: string,
+  value: string | undefined,
+  placeholder = ""
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "codeagent-switch-editor-field codeagent-switch-editor-field-wide";
+  const text = document.createElement("span");
+  text.textContent = labelText;
+  const textarea = document.createElement("textarea");
+  textarea.className = "settings-value webtools-tool-input codeagent-switch-textarea";
+  textarea.name = name;
+  textarea.value = value ?? "";
+  textarea.placeholder = placeholder;
+  label.append(text, textarea);
+  return label;
+}
+
+function createCodeAgentSwitchSelect(
+  labelText: string,
+  name: string,
+  value: string | undefined,
+  options: Array<{ value: string; label: string }>
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "codeagent-switch-editor-field";
+  const text = document.createElement("span");
+  text.textContent = labelText;
+  const select = document.createElement("select");
+  select.className = "settings-value webtools-tool-input";
+  select.name = name;
+  const normalizedOptions = [...options];
+  if (value && !normalizedOptions.some((option) => option.value === value)) {
+    normalizedOptions.unshift({ value, label: `当前：${value}` });
+  }
+  for (const option of normalizedOptions) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    select.appendChild(node);
+  }
+  select.value = value ?? "";
+  label.append(text, select);
+  return label;
+}
+
+function formatCodeAgentSwitchStringMap(map?: Record<string, string>): string {
+  return Object.entries(map ?? {})
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function getCodeAgentSwitchProfileMatch(
+  profileId: string
+): CodeAgentSwitchProfileMatchView | undefined {
+  return codeAgentSwitchData.active?.profileMatches?.find(
+    (item) => item.profileId === profileId
+  );
+}
+
+function createCodeAgentSwitchToolSidebar(): HTMLDivElement {
+  const sidebar = document.createElement("div");
+  sidebar.className = "codeagent-switch-tool-sidebar";
+  const label = document.createElement("div");
+  label.className = "codeagent-switch-sidebar-label";
+  label.textContent = "工具";
+  const stack = document.createElement("div");
+  stack.className = "codeagent-switch-tool-stack";
+  const tools =
+    codeAgentSwitchData.tools && codeAgentSwitchData.tools.length > 0
+      ? codeAgentSwitchData.tools
+      : [
+          {
+            id: "codex",
+            label: "Codex",
+            status: "ready" as const,
+            description: "已接入 config.toml 读写"
+          },
+          {
+            id: "claude-code",
+            label: "Claude Code",
+            status: "planned" as const,
+            description: "Adapter 规划中"
+          },
+          {
+            id: "gemini-cli",
+            label: "Gemini CLI",
+            status: "planned" as const,
+            description: "Adapter 规划中"
+          }
+        ];
+  for (const tool of tools) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "codeagent-switch-tool-button";
+    button.dataset.active = String((codeAgentSwitchData.tool || "codex") === tool.id);
+    button.dataset.status = tool.status;
+    button.setAttribute("aria-pressed", String((codeAgentSwitchData.tool || "codex") === tool.id));
+    button.title = tool.description;
+    button.disabled = tool.status !== "ready";
+    const name = document.createElement("span");
+    name.className = "codeagent-switch-tool-name";
+    name.textContent = tool.label;
+    const state = document.createElement("span");
+    state.className = "codeagent-switch-tool-state";
+    state.textContent = tool.status === "ready" ? "已接入" : "规划中";
+    button.append(name, state);
+    stack.appendChild(button);
+  }
+  sidebar.append(label, stack);
+  return sidebar;
+}
+
+function createCodeAgentSwitchDetailSection(
+  titleText: string,
+  descriptionText = "",
+  extraClass = ""
+): HTMLElement {
+  const section = document.createElement("section");
+  section.className = `codeagent-switch-detail-section${extraClass ? ` ${extraClass}` : ""}`;
+  const head = document.createElement("div");
+  head.className = "codeagent-switch-section-head";
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "codeagent-switch-detail-section-title";
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  titleWrap.appendChild(title);
+  if (descriptionText) {
+    const description = document.createElement("div");
+    description.className = "codeagent-switch-list-detail";
+    description.textContent = descriptionText;
+    titleWrap.appendChild(description);
+  }
+  head.appendChild(titleWrap);
+  section.appendChild(head);
+  return section;
+}
+
+function createCodeAgentSwitchProviderEditor(provider?: CodeAgentSwitchProviderView): HTMLDivElement {
+  const editor = document.createElement("div");
+  editor.className = "codeagent-switch-editor codeagent-switch-provider-editor";
+  const providerId =
+    provider?.id ??
+    makeUniqueCodeAgentSwitchId(
+      "relay",
+      new Set(getCodeAgentSwitchProviders().map((item) => item.id))
+    );
+  const derivedEnvKey = provider?.envKey || deriveCodeAgentSwitchEnvKeyName(providerId);
+
+  const grid = document.createElement("div");
+  grid.className = "codeagent-switch-editor-grid";
+  grid.append(
+    createCodeAgentSwitchInput("ID", "providerId", providerId, "自动生成"),
+    createCodeAgentSwitchInput(
+      "显示名称",
+      "providerName",
+      provider?.name ?? deriveCodeAgentSwitchProviderName(providerId, provider?.baseUrl),
+      "自动生成"
+    ),
+    createCodeAgentSwitchInput(
+      "Base URL",
+      "providerBaseUrl",
+      provider?.baseUrl,
+      "https://relay.example.com/v1"
+    ),
+    createCodeAgentSwitchInput("wire_api", "providerWireApi", provider?.wireApi || "responses"),
+    createCodeAgentSwitchSelect(
+      "认证方式",
+      "providerAuth",
+      provider?.requiresOpenAiAuth ? "openai_auth" : "env_key",
+      [
+        { value: "env_key", label: "env_key 环境变量" },
+        { value: "openai_auth", label: "OpenAI 登录态" }
+      ]
+    ),
+    createCodeAgentSwitchInput(
+      "请求重试",
+      "providerRequestMaxRetries",
+      provider?.requestMaxRetries,
+      "可选",
+      "number"
+    ),
+    createCodeAgentSwitchInput(
+      "流式重试",
+      "providerStreamMaxRetries",
+      provider?.streamMaxRetries,
+      "可选",
+      "number"
+    ),
+    createCodeAgentSwitchInput(
+      "流式超时 ms",
+      "providerStreamIdleTimeoutMs",
+      provider?.streamIdleTimeoutMs,
+      "可选",
+      "number"
+    ),
+    createCodeAgentSwitchInput(
+      "env_key_instructions",
+      "providerEnvKeyInstructions",
+      provider?.envKeyInstructions,
+      "例如：在控制台创建 Key 后写入环境变量"
+    ),
+    createCodeAgentSwitchSelect(
+      "WebSocket",
+      "providerSupportsWebsockets",
+      provider?.supportsWebsockets === true ? "true" : "",
+      [
+        { value: "", label: "默认" },
+        { value: "true", label: "支持" }
+      ]
+    ),
+    createCodeAgentSwitchTextarea(
+      "http_headers",
+      "providerHttpHeaders",
+      formatCodeAgentSwitchStringMap(provider?.httpHeaders),
+      "X-App=LiteLauncher\nX-Team=AI"
+    ),
+    createCodeAgentSwitchTextarea(
+      "env_http_headers",
+      "providerEnvHttpHeaders",
+      formatCodeAgentSwitchStringMap(provider?.envHttpHeaders),
+      "Authorization=RELAY_AUTH_HEADER"
+    ),
+    createCodeAgentSwitchTextarea(
+      "query_params",
+      "providerQueryParams",
+      formatCodeAgentSwitchStringMap(provider?.queryParams),
+      "api-version=2026-01-01"
+    )
+  );
+  const providerIdNode = grid.querySelector('[name="providerId"]');
+  const providerNameNode = grid.querySelector('[name="providerName"]');
+  const providerBaseUrlNode = grid.querySelector('[name="providerBaseUrl"]');
+  let syncKeyEnvName = (): void => {};
+  const syncProviderGeneratedFields = () => {
+    const nextProviderId = providerIdNode instanceof HTMLInputElement ? providerIdNode.value : "";
+    const nextBaseUrl = providerBaseUrlNode instanceof HTMLInputElement ? providerBaseUrlNode.value : "";
+    if (providerNameNode instanceof HTMLInputElement && !providerNameNode.dataset.userEdited) {
+      providerNameNode.value = deriveCodeAgentSwitchProviderName(nextProviderId, nextBaseUrl);
+    }
+  };
+  if (providerNameNode instanceof HTMLInputElement) {
+    providerNameNode.addEventListener("input", () => {
+      providerNameNode.dataset.userEdited = "true";
+    });
+  }
+  if (providerIdNode instanceof HTMLInputElement) {
+    providerIdNode.addEventListener("input", () => {
+      providerIdNode.dataset.userEdited = "true";
+    });
+  }
+  if (providerIdNode instanceof HTMLInputElement) {
+    providerIdNode.addEventListener("input", syncProviderGeneratedFields);
+  }
+  if (providerBaseUrlNode instanceof HTMLInputElement) {
+    providerBaseUrlNode.addEventListener("input", () => {
+      if (!provider && providerIdNode instanceof HTMLInputElement && !providerIdNode.dataset.userEdited) {
+        providerIdNode.value = makeUniqueCodeAgentSwitchId(
+          providerBaseUrlNode.value,
+          new Set(getCodeAgentSwitchProviders().map((item) => item.id))
+        );
+      }
+      syncProviderGeneratedFields();
+      syncKeyEnvName();
+    });
+  }
+
+  const keySection = document.createElement("div");
+  keySection.className = "codeagent-switch-key-box";
+  const keyHead = document.createElement("div");
+  keyHead.className = "codeagent-switch-key-head";
+  const keyTitle = document.createElement("div");
+  keyTitle.className = "codeagent-switch-key-title";
+  keyTitle.textContent = "Key 设置";
+  const keyHint = document.createElement("div");
+  keyHint.className = "codeagent-switch-list-detail";
+  keyHint.textContent = "变量名自动生成，写入 Windows 用户级环境变量，不保存明文 Key。";
+  keyHead.append(keyTitle, keyHint);
+  const keyGrid = document.createElement("div");
+  keyGrid.className = "codeagent-switch-editor-grid codeagent-switch-key-grid";
+  keyGrid.append(
+    createCodeAgentSwitchInput("自动变量名", "providerEnvKeyAuto", derivedEnvKey, "保存时自动生成"),
+    createCodeAgentSwitchInput("API Key（不保存）", "providerApiKey", undefined, "粘贴后写入系统", "password")
+  );
+  keySection.append(keyHead, keyGrid);
+  const keyEnvAutoNode = keyGrid.querySelector('[name="providerEnvKeyAuto"]');
+  if (keyEnvAutoNode instanceof HTMLInputElement) {
+    keyEnvAutoNode.readOnly = true;
+  }
+  syncKeyEnvName = () => {
+    if (keyEnvAutoNode instanceof HTMLInputElement && providerIdNode instanceof HTMLInputElement) {
+      keyEnvAutoNode.value = deriveCodeAgentSwitchEnvKeyName(providerIdNode.value);
+    }
+  };
+  if (providerIdNode instanceof HTMLInputElement) {
+    providerIdNode.addEventListener("input", syncKeyEnvName);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "codeagent-switch-inline-actions";
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "settings-btn settings-btn-primary";
+  saveButton.textContent = provider ? "保存 Provider" : "新增 Provider";
+  saveButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchSaveProvider(editor);
+  });
+  const applyKeyButton = document.createElement("button");
+  applyKeyButton.type = "button";
+  applyKeyButton.className = "settings-btn settings-btn-primary";
+  applyKeyButton.textContent =
+    codeAgentSwitchData.setProviderKey && codeAgentSwitchData.keyAppliedEnvKey === derivedEnvKey
+      ? "已写入系统 Key"
+      : "写入系统 Key";
+  applyKeyButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchSetProviderKey(editor);
+  });
+  const copyKeyButton = document.createElement("button");
+  copyKeyButton.type = "button";
+  copyKeyButton.className = "settings-btn settings-btn-secondary";
+  copyKeyButton.textContent = codeAgentSwitchCopyState === "key" ? "已复制 Key 命令" : "复制命令";
+  copyKeyButton.addEventListener("click", () => {
+    void copyCodeAgentSwitchProviderKeyCommand(editor);
+  });
+  actions.append(saveButton, applyKeyButton, copyKeyButton);
+  editor.append(grid, keySection, actions);
+  return editor;
+}
+
+function createCodeAgentSwitchProfileEditor(
+  profile?: CodeAgentSwitchProfileView,
+  providers: CodeAgentSwitchProviderView[] = []
+): HTMLDivElement {
+  const editor = document.createElement("div");
+  editor.className = "codeagent-switch-editor codeagent-switch-profile-editor";
+
+  const providerOptions = [
+    { value: "", label: "选择 Provider" },
+    ...providers.map((provider) => ({
+      value: provider.id,
+      label: provider.name ? `${provider.name} (${provider.id})` : provider.id
+    }))
+  ];
+  const grid = document.createElement("div");
+  grid.className = "codeagent-switch-editor-grid";
+  grid.append(
+    createCodeAgentSwitchInput("ID", "profileId", profile?.id, "daily"),
+    createCodeAgentSwitchSelect("Provider", "profileProvider", profile?.providerId, providerOptions),
+    createCodeAgentSwitchInput("模型", "profileModel", profile?.model, "gpt-5.5"),
+    createCodeAgentSwitchInput("Review", "profileReviewModel", profile?.reviewModel, "gpt-5.5"),
+    createCodeAgentSwitchSelect("Reasoning", "profileReasoning", profile?.modelReasoningEffort, [
+      { value: "", label: "默认" },
+      { value: "low", label: "low" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" },
+      { value: "xhigh", label: "xhigh" }
+    ]),
+    createCodeAgentSwitchSelect(
+      "Plan reasoning",
+      "profilePlanReasoning",
+      profile?.planModeReasoningEffort,
+      [
+        { value: "", label: "默认" },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+        { value: "xhigh", label: "xhigh" }
+      ]
+    ),
+    createCodeAgentSwitchSelect(
+      "Summary",
+      "profileReasoningSummary",
+      profile?.modelReasoningSummary,
+      [
+        { value: "", label: "默认" },
+        { value: "auto", label: "auto" },
+        { value: "concise", label: "concise" },
+        { value: "detailed", label: "detailed" },
+        { value: "none", label: "none" }
+      ]
+    ),
+    createCodeAgentSwitchSelect("Verbosity", "profileVerbosity", profile?.modelVerbosity, [
+      { value: "", label: "默认" },
+      { value: "low", label: "low" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" }
+    ]),
+    createCodeAgentSwitchSelect("Service tier", "profileServiceTier", profile?.serviceTier, [
+      { value: "", label: "默认" },
+      { value: "auto", label: "auto" },
+      { value: "flex", label: "flex" },
+      { value: "fast", label: "fast" }
+    ]),
+    createCodeAgentSwitchSelect("Web search", "profileWebSearch", profile?.webSearch, [
+      { value: "", label: "默认" },
+      { value: "disabled", label: "disabled" },
+      { value: "cached", label: "cached" },
+      { value: "live", label: "live" }
+    ]),
+    createCodeAgentSwitchInput(
+      "Compact token",
+      "profileCompactLimit",
+      profile?.modelAutoCompactTokenLimit,
+      "350000",
+      "number"
+    )
+  );
+
+  const actions = document.createElement("div");
+  actions.className = "codeagent-switch-inline-actions";
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "settings-btn settings-btn-primary";
+  saveButton.textContent = profile ? "保存 Profile" : "新增 Profile";
+  saveButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchSaveProfile(editor);
+  });
+  actions.appendChild(saveButton);
+  editor.append(grid, actions);
+  return editor;
+}
+
+function createCodeAgentSwitchRuntimeEditor(
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): HTMLElement {
+  const runtime = createCodeAgentSwitchDetailSection(
+    "运行权限",
+    "对应 Codex 官方 config.toml 的 approval、sandbox、network 和 Windows 沙箱字段。",
+    "codeagent-switch-runtime"
+  );
+  const editor = document.createElement("div");
+  editor.className = "codeagent-switch-editor codeagent-switch-runtime-editor";
+  const grid = document.createElement("div");
+  grid.className = "codeagent-switch-editor-grid";
+  grid.append(
+    createCodeAgentSwitchSelect("approval_policy", "runtimeApprovalPolicy", config.approvalPolicy, [
+      { value: "", label: "默认" },
+      { value: "untrusted", label: "untrusted" },
+      { value: "on-failure", label: "on-failure" },
+      { value: "on-request", label: "on-request" },
+      { value: "never", label: "never" }
+    ]),
+    createCodeAgentSwitchSelect("sandbox_mode", "runtimeSandboxMode", config.sandboxMode, [
+      { value: "", label: "默认" },
+      { value: "read-only", label: "read-only" },
+      { value: "workspace-write", label: "workspace-write" },
+      { value: "danger-full-access", label: "danger-full-access" }
+    ]),
+    createCodeAgentSwitchSelect(
+      "default_permissions",
+      "runtimeDefaultPermissions",
+      config.defaultPermissions,
+      [
+        { value: "", label: "默认" },
+        { value: "trusted", label: "trusted" },
+        { value: "untrusted", label: "untrusted" }
+      ]
+    ),
+    createCodeAgentSwitchSelect("network_access", "runtimeNetworkAccess", config.networkAccess, [
+      { value: "", label: "默认" },
+      { value: "enabled", label: "enabled" },
+      { value: "restricted", label: "restricted" },
+      { value: "disabled", label: "disabled" }
+    ]),
+    createCodeAgentSwitchSelect("windows.sandbox", "runtimeWindowsSandbox", config.windows?.sandbox, [
+      { value: "", label: "默认" },
+      { value: "read-only", label: "read-only" },
+      { value: "workspace-write", label: "workspace-write" },
+      { value: "elevated", label: "elevated" }
+    ]),
+    createCodeAgentSwitchSelect(
+      "windows.private_desktop",
+      "runtimeWindowsSandboxPrivateDesktop",
+      config.windows?.sandboxPrivateDesktop === true ? "true" : "",
+      [
+        { value: "", label: "默认" },
+        { value: "true", label: "启用" }
+      ]
+    )
+  );
+  const actions = document.createElement("div");
+  actions.className = "codeagent-switch-inline-actions";
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "settings-btn settings-btn-primary";
+  saveButton.textContent = "保存运行权限";
+  saveButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchSaveRuntime(editor);
+  });
+  actions.appendChild(saveButton);
+  editor.append(grid, actions);
+  runtime.appendChild(editor);
+  return runtime;
+}
+
+function getCodeAgentSwitchProviderSummary(provider: CodeAgentSwitchProviderView): string {
+  const auth = provider.envKey || (provider.requiresOpenAiAuth ? "OpenAI 登录态" : "未配置认证");
+  return `${provider.id} · ${provider.baseUrl || "未配置 base_url"} · ${auth}`;
+}
+
+function getCodeAgentSwitchProfileSummary(profile: CodeAgentSwitchProfileView): string {
+  return `${profile.providerId || "未绑定 Provider"} · ${
+    profile.model || "未配置模型"
+  } · ${profile.modelReasoningEffort || "默认 reasoning"}`;
+}
+
+function getCodeAgentSwitchEffectiveProfile(
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): CodeAgentSwitchProfileView | undefined {
+  const profileId = active.activeProfileId ?? active.activeProfile?.id ?? config.profile;
+  return profileId
+    ? (config.profiles ?? []).find((profile) => profile.id === profileId)
+    : undefined;
+}
+
+function getCodeAgentSwitchEffectiveModelInfo(
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): {
+  providerId?: string;
+  model?: string;
+  reviewModel?: string;
+  reasoning?: string;
+} {
+  const profile = getCodeAgentSwitchEffectiveProfile(active, config);
+  return {
+    providerId: active.activeProviderId ?? config.modelProvider ?? profile?.providerId,
+    model: config.model ?? profile?.model,
+    reviewModel: config.reviewModel ?? profile?.reviewModel,
+    reasoning: config.modelReasoningEffort ?? profile?.modelReasoningEffort
+  };
+}
+
+function createCodeAgentSwitchListButton(
+  kind: CodeAgentSwitchSelectedKind,
+  id: string,
+  titleText: string,
+  detailText: string,
+  options: {
+    active?: boolean;
+    selected?: boolean;
+    pills?: HTMLSpanElement[];
+  } = {}
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "codeagent-switch-list-item codeagent-switch-list-button";
+  button.dataset.kind = kind;
+  button.dataset.selected = String(Boolean(options.selected));
+  if (options.active) {
+    button.dataset.active = "true";
+  }
+  button.addEventListener("click", () => {
+    selectCodeAgentSwitchDetail(kind, id);
+  });
+
+  const body = document.createElement("div");
+  body.className = "codeagent-switch-list-body";
+  const titleLine = document.createElement("div");
+  titleLine.className = "codeagent-switch-list-title";
+  titleLine.textContent = titleText;
+  if (options.selected) {
+    titleLine.appendChild(createCodeAgentSwitchStateBadge("选中", "selected"));
+  }
+  if (options.active) {
+    titleLine.appendChild(createCodeAgentSwitchStateBadge("当前", "active"));
+  }
+  for (const pill of options.pills ?? []) {
+    titleLine.appendChild(pill);
+  }
+  const detail = document.createElement("div");
+  detail.className = "codeagent-switch-list-detail";
+  detail.textContent = detailText;
+  body.append(titleLine, detail);
+  button.appendChild(body);
+  return button;
+}
+
+function createCodeAgentSwitchCurrentCard(
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): HTMLElement {
+  const effective = getCodeAgentSwitchEffectiveModelInfo(active, config);
+  const card = document.createElement("section");
+  card.className = "codeagent-switch-current-card";
+  const head = document.createElement("div");
+  head.className = "codeagent-switch-current-head";
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("h3");
+  title.textContent = "当前配置";
+  const subtitle = document.createElement("div");
+  subtitle.className = "codeagent-switch-list-detail";
+  subtitle.textContent =
+    active.activeProfileId || active.activeProfileMatch === "partial"
+      ? active.activeProfileId
+        ? `${active.activeProfileId} · exact`
+        : `partial · ${(active.matchedFields ?? []).join(", ") || "字段匹配"}`
+      : "未匹配到 Profile";
+  titleWrap.append(title, subtitle);
+  head.append(titleWrap, createCodeAgentSwitchStateBadge("生效中", "active"));
+
+  const overview = createCodeAgentSwitchDetailOverview([
+    { label: "Provider", value: effective.providerId },
+    { label: "Model", value: effective.model },
+    { label: "Review", value: effective.reviewModel },
+    { label: "Reasoning", value: effective.reasoning }
+  ]);
+  card.append(head, overview);
+  return card;
+}
+
+function createCodeAgentSwitchListPanel(
+  providers: CodeAgentSwitchProviderView[],
+  profiles: CodeAgentSwitchProfileView[],
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): HTMLDivElement {
+  const listPanel = document.createElement("div");
+  listPanel.className = "codeagent-switch-list-panel";
+  listPanel.appendChild(createCodeAgentSwitchCurrentCard(active, config));
+
+  const providerSection = document.createElement("section");
+  providerSection.className = "codeagent-switch-provider-strip";
+  const providerHead = document.createElement("div");
+  providerHead.className = "codeagent-switch-section-head";
+  const providerTitle = document.createElement("h3");
+  providerTitle.textContent = "Provider";
+  const addProviderButton = document.createElement("button");
+  addProviderButton.type = "button";
+  addProviderButton.className = "settings-btn settings-btn-secondary";
+  addProviderButton.textContent = "新增";
+  addProviderButton.addEventListener("click", () => {
+    selectCodeAgentSwitchDetail("provider", "");
+  });
+  providerHead.append(providerTitle, addProviderButton);
+  providerSection.appendChild(providerHead);
+
+  const providerItems = document.createElement("div");
+  providerItems.className = "codeagent-switch-provider-strip-items";
+  if (providers.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "codeagent-switch-list-item";
+    empty.textContent = "当前配置还没有 Provider";
+    providerItems.appendChild(empty);
+  }
+
+  for (const provider of providers) {
+    const isActive = provider.id === active.activeProviderId || provider.id === config.modelProvider;
+    const isSelected =
+      codeAgentSwitchSelectedKind === "provider" && codeAgentSwitchSelectedId === provider.id;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "codeagent-switch-provider-chip";
+    button.dataset.active = String(isActive);
+    button.dataset.selected = String(isSelected);
+    button.addEventListener("click", () => {
+      selectCodeAgentSwitchDetail("provider", provider.id);
+    });
+    const titleLine = document.createElement("span");
+    titleLine.className = "codeagent-switch-provider-chip-title";
+    titleLine.textContent = provider.name || provider.id;
+    const detail = document.createElement("span");
+    detail.className = "codeagent-switch-provider-chip-detail";
+    detail.textContent = provider.envKey || (provider.requiresOpenAiAuth ? "OpenAI 登录态" : provider.id);
+    button.append(titleLine, detail);
+    if (isSelected) {
+      button.appendChild(createCodeAgentSwitchStateBadge("选中", "selected"));
+    }
+    if (isActive) {
+      button.appendChild(createCodeAgentSwitchStateBadge("当前", "active"));
+    }
+    providerItems.appendChild(button);
+  }
+  providerSection.appendChild(providerItems);
+
+  const profileSection = document.createElement("section");
+  profileSection.className = "codeagent-switch-section codeagent-switch-profile-list";
+  const profileHead = document.createElement("div");
+  profileHead.className = "codeagent-switch-section-head";
+  const profileTitle = document.createElement("h3");
+  profileTitle.textContent = "Profiles";
+  const addProfileButton = document.createElement("button");
+  addProfileButton.type = "button";
+  addProfileButton.className = "settings-btn settings-btn-secondary";
+  addProfileButton.textContent = "新增";
+  addProfileButton.addEventListener("click", () => {
+    selectCodeAgentSwitchDetail("profile", "");
+  });
+  profileHead.append(profileTitle, addProfileButton);
+  profileSection.appendChild(profileHead);
+
+  const profileItems = document.createElement("div");
+  profileItems.className = "codeagent-switch-profile-list-items";
+  if (profiles.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "codeagent-switch-list-item";
+    empty.textContent = "当前配置还没有 Profile";
+    profileItems.appendChild(empty);
+  }
+
+  for (const profile of profiles) {
+    const match = getCodeAgentSwitchProfileMatch(profile.id);
+    const isActive = match?.level === "exact";
+    const isSelected =
+      codeAgentSwitchSelectedKind === "profile" && codeAgentSwitchSelectedId === profile.id;
+    const pills: HTMLSpanElement[] = [];
+    if (match?.level === "exact") {
+      pills.push(createCodeAgentSwitchPill("当前 exact", "active"));
+    } else if (match?.level === "partial") {
+      pills.push(createCodeAgentSwitchPill("部分匹配", "muted"));
+    }
+    if (profile.id === codeAgentSwitchData.preview?.profileId) {
+      pills.push(createCodeAgentSwitchPill("已预览", "muted"));
+    }
+    const row = createCodeAgentSwitchListButton(
+      "profile",
+      profile.id,
+      profile.id,
+      getCodeAgentSwitchProfileSummary(profile),
+      {
+        active: isActive,
+        selected: isSelected,
+        pills
+      }
+    );
+    const actions = document.createElement("div");
+    actions.className = "codeagent-switch-list-switch-actions";
+    const previewButton = document.createElement("button");
+    previewButton.type = "button";
+    previewButton.className = "settings-btn settings-btn-secondary";
+    previewButton.textContent = "预览";
+    previewButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void executeCodeAgentSwitchAction("preview", profile.id);
+    });
+    const applyButton = document.createElement("button");
+    applyButton.type = "button";
+    applyButton.className = "settings-btn settings-btn-primary";
+    applyButton.textContent = isActive ? "当前" : "设为当前";
+    applyButton.disabled = isActive;
+    applyButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void executeCodeAgentSwitchAction("apply", profile.id);
+    });
+    actions.append(previewButton, applyButton);
+    row.appendChild(actions);
+    profileItems.appendChild(row);
+  }
+  profileSection.appendChild(profileItems);
+
+  listPanel.append(providerSection, profileSection);
+  return listPanel;
+}
+
+function createCodeAgentSwitchPreviewSection(): HTMLElement {
+  const preview = createCodeAgentSwitchDetailSection(
+    "切换预览",
+    "Profile 应用前先看 managed fields 的 diff，确认后再写入。",
+    "codeagent-switch-preview"
+  );
+  const head = preview.querySelector(".codeagent-switch-section-head");
+  const copyDiffButton = document.createElement("button");
+  copyDiffButton.type = "button";
+  copyDiffButton.className = "settings-btn settings-btn-secondary";
+  copyDiffButton.textContent = codeAgentSwitchCopyState === "diff" ? "已复制" : "复制 diff";
+  copyDiffButton.disabled = !(codeAgentSwitchData.preview?.diffLines ?? []).length;
+  copyDiffButton.addEventListener("click", () => {
+    void copyCodeAgentSwitchText(
+      "diff",
+      (codeAgentSwitchData.preview?.diffLines ?? []).join("\n"),
+      "已复制 diff",
+      "暂无可复制的 diff"
+    );
+  });
+  head?.appendChild(copyDiffButton);
+
+  const previewMeta = document.createElement("div");
+  previewMeta.className = "codeagent-switch-preview-meta";
+  const currentPreview = codeAgentSwitchData.preview;
+  previewMeta.textContent = currentPreview?.profileId
+    ? `Profile ${currentPreview.profileId || "-"} · Provider ${
+        currentPreview.providerId || "-"
+      } · 字段 ${(currentPreview.changedFields ?? []).join(", ") || "无变化"}`
+    : "选择 Profile 后先生成 diff 预览。";
+  const diff = document.createElement("pre");
+  diff.className = "codeagent-switch-diff";
+  diff.textContent = (codeAgentSwitchData.preview?.diffLines ?? []).join("\n") || "暂无 diff";
+  preview.append(previewMeta, diff);
+  if (codeAgentSwitchData.backupPath) {
+    const backup = document.createElement("div");
+    backup.className = "codeagent-switch-backup";
+    backup.textContent = codeAgentSwitchData.restored
+      ? `恢复前备份：${codeAgentSwitchData.backupPath}`
+      : `备份：${codeAgentSwitchData.backupPath}`;
+    preview.appendChild(backup);
+  }
+  return preview;
+}
+
+function createCodeAgentSwitchDiagnosticsSection(): HTMLElement {
+  const diagnostics = createCodeAgentSwitchDetailSection(
+    "诊断",
+    "集中显示认证、Provider、项目级覆盖等风险。",
+    "codeagent-switch-diagnostics"
+  );
+  const head = diagnostics.querySelector(".codeagent-switch-section-head");
+  const copyDiagnosticsButton = document.createElement("button");
+  copyDiagnosticsButton.type = "button";
+  copyDiagnosticsButton.className = "settings-btn settings-btn-secondary";
+  copyDiagnosticsButton.textContent = codeAgentSwitchCopyState === "diagnostics" ? "已复制" : "复制诊断";
+  copyDiagnosticsButton.addEventListener("click", () => {
+    const text = (codeAgentSwitchData.diagnostics ?? [])
+      .map((item) => `[${item.id}] ${item.level}: ${item.message} - ${item.suggestion}`)
+      .join("\n");
+    void copyCodeAgentSwitchText("diagnostics", text, "已复制诊断报告", "暂无可复制的诊断报告");
+  });
+  head?.appendChild(copyDiagnosticsButton);
+
+  const items = codeAgentSwitchData.diagnostics ?? [];
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "codeagent-switch-list-item";
+    empty.textContent = "暂无诊断问题";
+    diagnostics.appendChild(empty);
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "codeagent-switch-diagnostic";
+    row.dataset.level = item.level;
+    row.textContent = `[${item.id}] ${item.message}；${item.suggestion}`;
+    diagnostics.appendChild(row);
+  }
+  return diagnostics;
+}
+
+function createCodeAgentSwitchCommandsSection(): HTMLElement {
+  const commands = createCodeAgentSwitchDetailSection(
+    "环境变量命令",
+    "只生成设置命令，不保存真实 API Key。",
+    "codeagent-switch-env-commands"
+  );
+  const head = commands.querySelector(".codeagent-switch-section-head");
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-secondary";
+  copyButton.textContent = codeAgentSwitchCopyState === "env" ? "已复制" : "复制命令";
+  copyButton.addEventListener("click", () => {
+    const text = Object.entries(codeAgentSwitchData.envCommands ?? {})
+      .map(([label, value]) => `${label}: ${value}`)
+      .join("\n");
+    void copyCodeAgentSwitchText("env", text, "已复制环境变量命令", "暂无可复制的环境变量命令");
+  });
+  head?.appendChild(copyButton);
+
+  const entries = Object.entries(codeAgentSwitchData.envCommands ?? {});
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "codeagent-switch-list-item";
+    empty.textContent = "暂无环境变量命令";
+    commands.appendChild(empty);
+  }
+  for (const [label, command] of entries) {
+    commands.appendChild(createCodeAgentSwitchCommandItem(label, command));
+  }
+  return commands;
+}
+
+function createCodeAgentSwitchBackupsSection(): HTMLElement {
+  const backups = createCodeAgentSwitchDetailSection(
+    "备份",
+    "应用和恢复前都会保留当前 config.toml。",
+    "codeagent-switch-backups"
+  );
+  const head = backups.querySelector(".codeagent-switch-section-head");
+  const refreshBackupsButton = document.createElement("button");
+  refreshBackupsButton.type = "button";
+  refreshBackupsButton.className = "settings-btn settings-btn-secondary";
+  refreshBackupsButton.textContent = "刷新备份";
+  refreshBackupsButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchAction("backups");
+  });
+  head?.appendChild(refreshBackupsButton);
+
+  const backupItems = codeAgentSwitchData.backups ?? [];
+  if (backupItems.length === 0) {
+    const emptyBackup = document.createElement("div");
+    emptyBackup.className = "codeagent-switch-list-item";
+    emptyBackup.textContent = "暂无插件创建的配置备份";
+    backups.appendChild(emptyBackup);
+  }
+  for (const backup of backupItems) {
+    const row = document.createElement("div");
+    row.className = "codeagent-switch-list-item codeagent-switch-backup-item";
+    if (backup.path === codeAgentSwitchData.restoredBackupPath) {
+      row.dataset.active = "true";
+    }
+    const body = document.createElement("div");
+    body.className = "codeagent-switch-list-body";
+    body.textContent = `${backup.fileName || backup.id} · ${formatCodeAgentSwitchBackupSize(
+      backup.sizeBytes
+    )} · ${formatCodeAgentSwitchBackupTime(backup.createdAtMs)}`;
+    const actions = document.createElement("div");
+    actions.className = "codeagent-switch-inline-actions";
+    const restoreButton = document.createElement("button");
+    restoreButton.type = "button";
+    restoreButton.className = "settings-btn settings-btn-secondary";
+    restoreButton.textContent = "恢复";
+    restoreButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchAction("restore", undefined, backup.id);
+    });
+    actions.appendChild(restoreButton);
+    row.append(body, actions);
+    backups.appendChild(row);
+  }
+  return backups;
+}
+
+function createCodeAgentSwitchDetailPanel(
+  providers: CodeAgentSwitchProviderView[],
+  profiles: CodeAgentSwitchProfileView[],
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): HTMLElement {
+  const detailPanel = document.createElement("div");
+  detailPanel.className = "codeagent-switch-detail-panel";
+
+  const selectedProvider =
+    codeAgentSwitchSelectedKind === "provider"
+      ? providers.find((provider) => provider.id === codeAgentSwitchSelectedId)
+      : undefined;
+  const selectedProfile =
+    codeAgentSwitchSelectedKind === "profile"
+      ? profiles.find((profile) => profile.id === codeAgentSwitchSelectedId)
+      : undefined;
+  const isProviderDetail = codeAgentSwitchSelectedKind === "provider";
+
+  const hero = document.createElement("section");
+  hero.className = "codeagent-switch-detail-section codeagent-switch-detail-hero";
+  const head = document.createElement("div");
+  head.className = "codeagent-switch-section-head";
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "codeagent-switch-detail-title";
+  const title = document.createElement("h3");
+  title.textContent = isProviderDetail
+    ? selectedProvider
+      ? selectedProvider.name || selectedProvider.id
+      : "新增 Provider"
+      : selectedProfile
+        ? selectedProfile.id
+        : "新增 Profile";
+  const subtitle = document.createElement("div");
+  subtitle.className = "codeagent-switch-list-detail";
+  subtitle.textContent = isProviderDetail
+    ? selectedProvider
+      ? getCodeAgentSwitchProviderSummary(selectedProvider)
+      : "配置 Codex 访问的中转、官方登录态或兼容端点"
+    : selectedProfile
+      ? getCodeAgentSwitchProfileSummary(selectedProfile)
+      : "组合 Provider、模型、reasoning 和 compact 限制";
+  titleWrap.append(title, subtitle);
+
+  const pills = document.createElement("div");
+  pills.className = "codeagent-switch-detail-pills";
+  pills.appendChild(createCodeAgentSwitchPill("已选中", "muted"));
+  let selectedProfileIsActive = false;
+  if (isProviderDetail) {
+    const providerId = selectedProvider?.id ?? "";
+    if (providerId && (providerId === active.activeProviderId || providerId === config.modelProvider)) {
+      pills.appendChild(createCodeAgentSwitchPill("当前 Provider", "active"));
+    }
+  } else if (selectedProfile) {
+    const match = getCodeAgentSwitchProfileMatch(selectedProfile.id);
+    selectedProfileIsActive = match?.level === "exact";
+    if (match?.level === "exact") {
+      pills.appendChild(createCodeAgentSwitchPill("当前 Profile", "active"));
+    } else if (match?.level === "partial") {
+      pills.appendChild(createCodeAgentSwitchPill("部分匹配", "muted"));
+    }
+  }
+  const heroAside = document.createElement("div");
+  heroAside.className = "codeagent-switch-detail-hero-aside";
+  heroAside.appendChild(pills);
+  if (!isProviderDetail && selectedProfile) {
+    const heroActions = document.createElement("div");
+    heroActions.className = "codeagent-switch-detail-hero-actions";
+    const previewButton = document.createElement("button");
+    previewButton.type = "button";
+    previewButton.className = "settings-btn settings-btn-secondary";
+    previewButton.textContent = "预览";
+    previewButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchAction("preview", selectedProfile.id);
+    });
+    const applyButton = document.createElement("button");
+    applyButton.type = "button";
+    applyButton.className = "settings-btn settings-btn-primary";
+    applyButton.textContent = selectedProfileIsActive ? "当前配置" : "设为当前";
+    applyButton.disabled = selectedProfileIsActive;
+    applyButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchAction("apply", selectedProfile.id);
+    });
+    heroActions.append(previewButton, applyButton);
+    heroAside.appendChild(heroActions);
+  }
+  head.append(titleWrap, heroAside);
+  hero.appendChild(head);
+  hero.appendChild(
+    createCodeAgentSwitchDetailOverview(
+      isProviderDetail
+        ? [
+            { label: "ID", value: selectedProvider?.id ?? codeAgentSwitchSelectedId },
+            { label: "Base URL", value: selectedProvider?.baseUrl },
+            { label: "Auth", value: selectedProvider?.requiresOpenAiAuth ? "OpenAI 登录态" : "env_key" },
+            { label: "env_key", value: selectedProvider?.envKey }
+          ]
+        : [
+            { label: "ID", value: selectedProfile?.id ?? codeAgentSwitchSelectedId },
+            { label: "Provider", value: selectedProfile?.providerId },
+            { label: "Model", value: selectedProfile?.model },
+            { label: "Reasoning", value: selectedProfile?.modelReasoningEffort }
+          ]
+    )
+  );
+  detailPanel.appendChild(hero);
+
+  if (isProviderDetail) {
+    const providerConfig = createCodeAgentSwitchDetailSection(
+      "Provider 配置",
+      "管理 base_url、wire_api、认证方式、headers、query 和 env_key 名称。"
+    );
+    providerConfig.appendChild(createCodeAgentSwitchProviderEditor(selectedProvider));
+    detailPanel.appendChild(providerConfig);
+    detailPanel.append(
+      createCodeAgentSwitchRuntimeEditor(config),
+      createCodeAgentSwitchCommandsSection(),
+      createCodeAgentSwitchDiagnosticsSection(),
+      createCodeAgentSwitchBackupsSection()
+    );
+    if (selectedProvider) {
+      const danger = createCodeAgentSwitchDetailSection(
+        "危险区",
+        "删除 Provider 不会删除真实环境变量，但会改写 Codex 配置。",
+        "codeagent-switch-danger-zone"
+      );
+      const actions = document.createElement("div");
+      actions.className = "codeagent-switch-inline-actions codeagent-switch-detail-actions";
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "settings-btn settings-btn-secondary";
+      deleteButton.textContent = "删除 Provider";
+      deleteButton.disabled =
+        selectedProvider.id === active.activeProviderId || selectedProvider.id === config.modelProvider;
+      deleteButton.addEventListener("click", () => {
+        void executeCodeAgentSwitchDeleteProvider(selectedProvider.id);
+      });
+      actions.appendChild(deleteButton);
+      danger.appendChild(actions);
+      detailPanel.appendChild(danger);
+    }
+    return detailPanel;
+  }
+
+  const profileConfig = createCodeAgentSwitchDetailSection(
+    "Profile 配置",
+    "选择 Provider，并配置主模型、review 模型、reasoning、summary、verbosity 和 compact。"
+  );
+  profileConfig.appendChild(createCodeAgentSwitchProfileEditor(selectedProfile, providers));
+  detailPanel.appendChild(profileConfig);
+  if (selectedProfile) {
+    const switchActions = createCodeAgentSwitchDetailSection(
+      "切换操作",
+      "先预览 diff，再应用到 Codex config.toml。",
+      "codeagent-switch-detail-primary-actions"
+    );
+    const actions = document.createElement("div");
+    actions.className = "codeagent-switch-inline-actions codeagent-switch-detail-actions";
+    const previewButton = document.createElement("button");
+    previewButton.type = "button";
+    previewButton.className = "settings-btn settings-btn-secondary";
+    previewButton.textContent = "预览切换";
+    previewButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchAction("preview", selectedProfile.id);
+    });
+    const applyButton = document.createElement("button");
+    applyButton.type = "button";
+    applyButton.className = "settings-btn settings-btn-primary";
+    applyButton.textContent = selectedProfileIsActive ? "当前配置" : "设为当前";
+    applyButton.disabled = selectedProfileIsActive;
+    applyButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchAction("apply", selectedProfile.id);
+    });
+    actions.append(previewButton, applyButton);
+    switchActions.appendChild(actions);
+    detailPanel.appendChild(switchActions);
+  }
+  detailPanel.append(
+    createCodeAgentSwitchRuntimeEditor(config),
+    createCodeAgentSwitchPreviewSection(),
+    createCodeAgentSwitchDiagnosticsSection(),
+    createCodeAgentSwitchBackupsSection(),
+    createCodeAgentSwitchCommandsSection()
+  );
+  if (selectedProfile) {
+    const danger = createCodeAgentSwitchDetailSection(
+      "危险区",
+      "删除 Profile 只移除预设，不会清理真实环境变量。",
+      "codeagent-switch-danger-zone"
+    );
+    const actions = document.createElement("div");
+    actions.className = "codeagent-switch-inline-actions codeagent-switch-detail-actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "settings-btn settings-btn-secondary";
+    deleteButton.textContent = "删除 Profile";
+    deleteButton.addEventListener("click", () => {
+      void executeCodeAgentSwitchDeleteProfile(selectedProfile.id);
+    });
+    actions.appendChild(deleteButton);
+    danger.appendChild(actions);
+    detailPanel.appendChild(danger);
+  }
+
+  return detailPanel;
+}
+
+function renderCodeAgentSwitchPanelV2(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel codeagent-switch-panel";
+
+  const form = document.createElement("form");
+  form.className = "settings-form codeagent-switch-form webtools-tool-panel";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+  });
+
+  const header = document.createElement("div");
+  header.className = "webtools-tool-header";
+  const titleGroup = document.createElement("div");
+  titleGroup.className = "webtools-tool-title-group";
+  const title = document.createElement("h2");
+  title.className = "webtools-tool-title";
+  title.textContent = activePluginPanel?.title || "CodeAgent Switch";
+  const subtitle = document.createElement("p");
+  subtitle.className = "webtools-tool-subtitle";
+  subtitle.textContent = "Codex 配置管理，Provider / Profile 可编辑，Claude 和 Gemini 适配器规划中";
+  titleGroup.append(title, subtitle);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "webtools-tool-toolbar";
+  const refreshButton = document.createElement("button");
+  refreshButton.type = "button";
+  refreshButton.className = "settings-btn settings-btn-primary";
+  refreshButton.textContent = "重新读取";
+  refreshButton.dataset.actionKey = "codeagent-switch-read";
+  refreshButton.addEventListener("click", () => {
+    void executeCodeAgentSwitchAction("read");
+  });
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-secondary";
+  copyButton.textContent = codeAgentSwitchCopyState === "env" ? "已复制" : "复制环境变量命令";
+  copyButton.addEventListener("click", () => {
+    const text = Object.entries(codeAgentSwitchData.envCommands ?? {})
+      .map(([label, value]) => `${label}: ${value}`)
+      .join("\n");
+    void copyCodeAgentSwitchText("env", text, "已复制环境变量命令", "暂无可复制的环境变量命令");
+  });
+  const copyDiagnosticsButton = document.createElement("button");
+  copyDiagnosticsButton.type = "button";
+  copyDiagnosticsButton.className = "settings-btn settings-btn-secondary";
+  copyDiagnosticsButton.textContent = codeAgentSwitchCopyState === "diagnostics" ? "已复制" : "复制诊断";
+  copyDiagnosticsButton.addEventListener("click", () => {
+    const text = (codeAgentSwitchData.diagnostics ?? [])
+      .map((item) => `[${item.id}] ${item.level}: ${item.message} - ${item.suggestion}`)
+      .join("\n");
+    void copyCodeAgentSwitchText("diagnostics", text, "已复制诊断报告", "暂无可复制的诊断报告");
+  });
+  toolbar.append(refreshButton, copyButton, copyDiagnosticsButton);
+  header.append(titleGroup, toolbar);
+
+  const status = document.createElement("div");
+  status.className = "codeagent-switch-status";
+  status.dataset.state =
+    codeAgentSwitchData.error
+      ? "error"
+      : (codeAgentSwitchData.diagnostics ?? []).some((item) => item.level === "error")
+        ? "error"
+        : (codeAgentSwitchData.diagnostics ?? []).some((item) => item.level === "warning")
+          ? "warning"
+          : "ok";
+  status.textContent = codeAgentSwitchData.error
+    ? `执行失败：${codeAgentSwitchData.error}`
+    : codeAgentSwitchData.savedProvider
+      ? "已保存 Provider，写入前已备份当前配置。"
+      : codeAgentSwitchData.setProviderKey
+        ? `已写入用户级系统环境变量：${codeAgentSwitchData.keyAppliedEnvKey ?? ""}`
+      : codeAgentSwitchData.savedRuntime
+        ? "已保存运行权限，写入前已备份当前配置。"
+      : codeAgentSwitchData.savedProfile
+        ? "已保存 Profile，写入前已备份当前配置。"
+        : codeAgentSwitchData.deletedProvider
+          ? "已删除 Provider，写入前已备份当前配置。"
+          : codeAgentSwitchData.deletedProfile
+            ? "已删除 Profile，写入前已备份当前配置。"
+            : codeAgentSwitchData.restored
+              ? "已从备份恢复 Codex 配置。"
+              : codeAgentSwitchData.applied
+                ? "已备份并写入 Codex 配置，新会话可能看到不同 Provider / 模型。"
+      : codeAgentSwitchData.preview?.profileId
+                  ? "已生成切换预览，确认 diff 后再应用。"
+                  : "只保存环境变量名，不保存真实 API Key；切换 Provider 可能影响新会话显示。";
+
+  const config = codeAgentSwitchData.config ?? {};
+  const active = codeAgentSwitchData.active ?? {};
+  const providers = config.providers ?? [];
+  const profiles = config.profiles ?? [];
+  const effective = getCodeAgentSwitchEffectiveModelInfo(active, config);
+
+  const metrics = document.createElement("div");
+  metrics.className = "codeagent-switch-metrics";
+  metrics.append(
+    createCodeAgentSwitchMetric("配置路径", codeAgentSwitchData.configPath ?? "~/.codex/config.toml"),
+    createCodeAgentSwitchMetric("当前 Provider", effective.providerId ?? ""),
+    createCodeAgentSwitchMetric("当前模型", effective.model ?? ""),
+    createCodeAgentSwitchMetric("Review 模型", effective.reviewModel ?? ""),
+    createCodeAgentSwitchMetric("Reasoning", effective.reasoning ?? ""),
+    createCodeAgentSwitchMetric(
+      "当前 Profile",
+      active.activeProfileId
+        ? `${active.activeProfileId} · exact`
+        : active.activeProfileMatch === "partial"
+          ? `partial · ${(active.matchedFields ?? []).join(", ")}`
+          : ""
+    ),
+    createCodeAgentSwitchMetric("Provider 数量", String(providers.length)),
+    createCodeAgentSwitchMetric("Profile 数量", String(profiles.length))
+  );
+
+  const shell = document.createElement("div");
+  shell.className = "codeagent-switch-shell codeagent-switch-master-detail";
+  shell.append(
+    createCodeAgentSwitchToolSidebar(),
+    createCodeAgentSwitchListPanel(providers, profiles, active, config),
+    createCodeAgentSwitchDetailPanel(providers, profiles, active, config)
+  );
+
+  form.append(
+    header,
+    status,
+    metrics,
+    shell
+  );
+  panel.appendChild(form);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+}
+
+function renderWebtoolsCronPanelV2(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel webtools-cron-panel";
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = activePluginPanel?.title || "Cron 生成器";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent =
+    activePluginPanel?.subtitle || "定时表达式解析、模板套用与未来执行预览。";
+
+  const cronFieldMeta = getWebtoolsCronFieldMeta();
+  const cronTemplates = getWebtoolsCronTemplates();
+
+  const form = document.createElement("form");
+  form.className = "settings-form webtools-cron-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const node = form.elements.namedItem("webtoolsCronExpression");
+    const expression = node instanceof HTMLInputElement ? node.value : "";
+    void executeWebtoolsCronAction("parse", expression, {
+      render: false,
+      form
+    });
+  });
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "webtools-cron-toolbar";
+
+  const expressionBlock = document.createElement("label");
+  expressionBlock.className = "webtools-cron-expression-block";
+  const expressionLabel = document.createElement("span");
+  expressionLabel.className = "webtools-cron-expression-label";
+  expressionLabel.textContent = "Cron 表达式";
+  const expressionInput = document.createElement("input");
+  expressionInput.className = "settings-value webtools-cron-expression-input";
+  expressionInput.name = "webtoolsCronExpression";
+  expressionInput.value = webtoolsCronExpression;
+  expressionInput.placeholder = "例如: */15 9-18 * * 1-5";
+  expressionInput.addEventListener("input", () => {
+    scheduleWebtoolsCronAutoParse(form);
+  });
+  expressionInput.addEventListener("change", () => {
+    scheduleWebtoolsCronAutoParse(form, true);
+  });
+  const expressionHint = document.createElement("span");
+  expressionHint.className = "webtools-cron-expression-hint";
+  expressionHint.textContent = "格式: 分 时 日 月 周";
+  expressionBlock.append(expressionLabel, expressionInput, expressionHint);
+
+  const toolbarActions = document.createElement("div");
+  toolbarActions.className = "webtools-cron-toolbar-actions";
+
+  const randomButton = document.createElement("button");
+  randomButton.type = "button";
+  randomButton.className = "settings-btn settings-btn-secondary";
+  randomButton.textContent = "随机";
+  randomButton.addEventListener("click", () => {
+    const node = form.elements.namedItem("webtoolsCronExpression");
+    const expression = node instanceof HTMLInputElement ? node.value : "";
+    void executeWebtoolsCronAction("random", expression, {
+      render: false,
+      form
+    });
+  });
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-secondary";
+  copyButton.setAttribute("data-webtools-cron-copy", "expression");
+  copyButton.textContent =
+    webtoolsCronCopyState === "expression" ? "已复制表达式" : "复制表达式";
+  copyButton.addEventListener("click", () => {
+    void copyWebtoolsCronText("expression", webtoolsCronExpression, form);
+  });
+
+  const copyReadableButton = document.createElement("button");
+  copyReadableButton.type = "button";
+  copyReadableButton.className = "settings-btn settings-btn-secondary";
+  copyReadableButton.setAttribute("data-webtools-cron-copy", "readable");
+  copyReadableButton.textContent =
+    webtoolsCronCopyState === "readable" ? "已复制说明" : "复制说明";
+  copyReadableButton.addEventListener("click", () => {
+    void copyWebtoolsCronText(
+      "readable",
+      webtoolsCronReadable || webtoolsCronErrorMessage,
+      form
+    );
+  });
+
+  const parseButton = document.createElement("button");
+  parseButton.type = "submit";
+  parseButton.className = "settings-btn settings-btn-primary";
+  parseButton.textContent = "解析";
+
+  toolbarActions.append(randomButton, copyButton, copyReadableButton, parseButton);
+  toolbar.append(expressionBlock, toolbarActions);
+
+  const workspace = document.createElement("div");
+  workspace.className = "webtools-cron-workspace";
+  const leftColumn = document.createElement("div");
+  leftColumn.className = "webtools-cron-column webtools-cron-column-main";
+  const rightColumn = document.createElement("div");
+  rightColumn.className = "webtools-cron-column webtools-cron-column-results";
+
+  const templatesSection = document.createElement("section");
+  templatesSection.className = "webtools-cron-section";
+  const templatesHead = document.createElement("div");
+  templatesHead.className = "webtools-cron-section-head";
+  const templatesTitle = document.createElement("h4");
+  templatesTitle.textContent = "快速模板";
+  const templatesMeta = document.createElement("span");
+  templatesMeta.className = "webtools-cron-section-meta";
+  templatesMeta.textContent = "先套模板，再细调字段";
+  templatesHead.append(templatesTitle, templatesMeta);
+  const templateGrid = document.createElement("div");
+  templateGrid.className = "webtools-cron-template-grid";
+  cronTemplates.forEach((template) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.value = template.key;
+    button.className =
+      template.key === webtoolsCronTemplateKey
+        ? "settings-btn webtools-cron-template-chip is-active"
+        : "settings-btn webtools-cron-template-chip";
+    button.setAttribute("data-webtools-cron-template", template.key);
+    button.textContent = template.summary;
+    button.addEventListener("click", () => {
+      const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+      if (expressionNode instanceof HTMLInputElement) {
+        expressionNode.value = template.expression;
+      }
+      void executeWebtoolsCronAction("parse", template.expression, {
+        render: false,
+        form
+      });
+    });
+    templateGrid.appendChild(button);
+  });
+  templatesSection.append(templatesHead, templateGrid);
+
+  const fieldsSection = document.createElement("section");
+  fieldsSection.className = "webtools-cron-section";
+  const fieldsHead = document.createElement("div");
+  fieldsHead.className = "webtools-cron-section-head";
+  const fieldsTitle = document.createElement("h4");
+  fieldsTitle.textContent = "字段编辑";
+  const fieldsMeta = document.createElement("span");
+  fieldsMeta.className = "webtools-cron-section-meta";
+  fieldsMeta.textContent = "五段式直接改";
+  fieldsHead.append(fieldsTitle, fieldsMeta);
+  const fieldGrid = document.createElement("div");
+  fieldGrid.className = "webtools-cron-field-grid";
+  cronFieldMeta.forEach((field) => {
+    const card = document.createElement("label");
+    card.className = field.hasError
+      ? "webtools-cron-field-card is-error"
+      : "webtools-cron-field-card";
+    card.setAttribute("data-webtools-cron-field-card", field.key);
+    const label = document.createElement("span");
+    label.className = "webtools-cron-field-label";
+    label.textContent = field.label;
+    const input = document.createElement("input");
+    input.className = "settings-value webtools-cron-field-input";
+    input.name = `webtoolsCronField-${field.key}`;
+    input.setAttribute("data-webtools-cron-field", field.key);
+    input.value = field.value;
+    input.addEventListener("input", () => {
+      const nextExpression = rebuildWebtoolsCronExpressionFromFields(form);
+      const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+      if (expressionNode instanceof HTMLInputElement) {
+        expressionNode.value = nextExpression;
+      }
+      scheduleWebtoolsCronAutoParse(form);
+    });
+    input.addEventListener("change", () => {
+      const nextExpression = rebuildWebtoolsCronExpressionFromFields(form);
+      const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+      if (expressionNode instanceof HTMLInputElement) {
+        expressionNode.value = nextExpression;
+      }
+      scheduleWebtoolsCronAutoParse(form, true);
+    });
+    const hint = document.createElement("span");
+    hint.className = "webtools-cron-field-hint";
+    hint.setAttribute("data-webtools-cron-field-hint", field.key);
+    hint.textContent = field.hint;
+    card.append(label, input, hint);
+    fieldGrid.appendChild(card);
+  });
+  fieldsSection.append(fieldsHead, fieldGrid);
+
+  const guideSection = document.createElement("section");
+  guideSection.className = "webtools-cron-section webtools-cron-guide-section";
+  const guideHead = document.createElement("div");
+  guideHead.className = "webtools-cron-section-head";
+  const guideTitle = document.createElement("h4");
+  guideTitle.textContent = "语法速览";
+  const guideMeta = document.createElement("span");
+  guideMeta.className = "webtools-cron-section-meta";
+  guideMeta.textContent = "常用符号";
+  guideHead.append(guideTitle, guideMeta);
+  const guideList = document.createElement("div");
+  guideList.className = "webtools-cron-guide-list";
+  [
+    ["*", "任意值"],
+    [",", "多个值"],
+    ["-", "范围"],
+    ["/", "步进"]
+  ].forEach(([token, text]) => {
+    const item = document.createElement("div");
+    item.className = "webtools-cron-guide-item";
+    const tokenNode = document.createElement("code");
+    tokenNode.className = "webtools-cron-guide-token";
+    tokenNode.textContent = token;
+    const textNode = document.createElement("span");
+    textNode.className = "webtools-cron-guide-text";
+    textNode.textContent = text;
+    item.append(tokenNode, textNode);
+    guideList.appendChild(item);
+  });
+  guideSection.append(guideHead, guideList);
+
+  const summaryCard = document.createElement("section");
+  summaryCard.className = "webtools-cron-section webtools-cron-summary-card";
+  const summaryHead = document.createElement("div");
+  summaryHead.className = "webtools-cron-section-head";
+  const summaryTitle = document.createElement("h4");
+  summaryTitle.textContent = "解析结果";
+  const statusBadge = document.createElement("span");
+  statusBadge.className = "webtools-cron-status-badge";
+  statusBadge.textContent = webtoolsCronReadable ? "已解析" : "待输入";
+  summaryHead.append(summaryTitle, statusBadge);
+  const summaryText = document.createElement("div");
+  summaryText.className = "webtools-cron-summary";
+  summaryText.textContent =
+    webtoolsCronErrorMessage ||
+    webtoolsCronTemplateSummary ||
+    webtoolsCronReadable ||
+    "编辑表达式后自动解析";
+  const readableValue = document.createElement("div");
+  readableValue.className = "webtools-cron-readable";
+  readableValue.textContent = webtoolsCronReadable || "-";
+  const nextValue = document.createElement("span");
+  nextValue.className = "webtools-cron-next";
+  nextValue.textContent = webtoolsCronNextRun ? `下一次 ${webtoolsCronNextRun}` : "-";
+  summaryCard.append(summaryHead, summaryText, readableValue, nextValue);
+
+  const resultsSection = document.createElement("section");
+  resultsSection.className = "webtools-cron-section";
+  const resultsHead = document.createElement("div");
+  resultsHead.className = "webtools-cron-section-head";
+  const resultsTitle = document.createElement("h4");
+  resultsTitle.textContent = "接下来 7 次";
+  const resultsMeta = document.createElement("span");
+  resultsMeta.className = "webtools-cron-section-meta";
+  resultsMeta.textContent = "未来执行时间";
+  resultsHead.append(resultsTitle, resultsMeta);
+  const resultsGrid = document.createElement("div");
+  resultsGrid.className = "webtools-cron-results-grid";
+  const upcomingValue = document.createElement("div");
+  upcomingValue.className = "webtools-cron-upcoming-value";
+  upcomingValue.textContent =
+    webtoolsCronUpcoming.length > 0 ? webtoolsCronUpcoming.join("\n") : "-";
+  upcomingValue.style.whiteSpace = "pre-line";
+  resultsGrid.appendChild(upcomingValue);
+  resultsSection.append(resultsHead, resultsGrid);
+
+  leftColumn.append(templatesSection, fieldsSection);
+  rightColumn.append(summaryCard, resultsSection);
+  workspace.append(leftColumn, rightColumn);
+
+  form.append(toolbar, workspace, guideSection);
+  panel.append(title, description, form);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+
+  refreshWebtoolsCronResultInForm(form);
+  scheduleWebtoolsCronAutoParse(form, true);
+}
+
+type CodeAgentSwitchUiAction =
+  | "read"
+  | "preview"
+  | "apply"
+  | "backups"
+  | "restore"
+  | "save-provider"
+  | "set-provider-key"
+  | "delete-provider"
+  | "save-profile"
+  | "save-runtime"
+  | "delete-profile";
+
+function buildCodeAgentSwitchTarget(
+  action: CodeAgentSwitchUiAction,
+  profileId?: string,
+  backupId?: string,
+  extraParams?: Record<string, string | number | boolean | undefined>
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("tool", codeAgentSwitchData.tool || "codex");
+  if (codeAgentSwitchData.configPath) {
+    params.set("configPath", codeAgentSwitchData.configPath);
+  }
+  if (profileId) {
+    params.set("profile", profileId);
+  }
+  if (backupId) {
+    params.set("backup", backupId);
+  }
+  for (const [key, value] of Object.entries(extraParams ?? {})) {
+    if (value === undefined || value === "") {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+  return `command:plugin:${CODEAGENT_SWITCH_PLUGIN_ID}?${params.toString()}`;
+}
+
+async function executeCodeAgentSwitchAction(
+  action: CodeAgentSwitchUiAction,
+  profileId?: string,
+  backupId?: string,
+  extraParams?: Record<string, string | number | boolean | undefined>
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 CodeAgent Switch");
+    return;
+  }
+
+  const item: LaunchItem = {
+    id: `plugin:${CODEAGENT_SWITCH_PLUGIN_ID}:${action}${profileId ? `:${profileId}` : ""}${
+      backupId ? `:${backupId}` : ""
+    }`,
+    type: "command",
+    title: "CodeAgent Switch",
+    subtitle: "面板执行",
+    target: buildCodeAgentSwitchTarget(action, profileId, backupId, extraParams),
+    keywords: ["plugin", "codex", "codeagent", "switch", "profile"]
+  };
+
+  const result = await launcher.execute(item);
+  setStatus(result.message ?? (result.ok ? "CodeAgent Switch 已执行" : "CodeAgent Switch 执行失败"));
+}
+
+function getCodeAgentSwitchFormValue(container: HTMLElement, name: string): string {
+  const node =
+    container instanceof HTMLFormElement
+      ? container.elements.namedItem(name)
+      : container.querySelector(`[name="${name}"]`);
+  if (
+    node instanceof HTMLInputElement ||
+    node instanceof HTMLSelectElement ||
+    node instanceof HTMLTextAreaElement
+  ) {
+    return node.value.trim();
+  }
+  return "";
+}
+
+function getCodeAgentSwitchOptionalNumber(container: HTMLElement, name: string): number | undefined {
+  const value = getCodeAgentSwitchFormValue(container, name);
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+async function executeCodeAgentSwitchSaveProvider(container: HTMLElement): Promise<void> {
+  const providerId = getCodeAgentSwitchFormValue(container, "providerId");
+  if (!providerId) {
+    setStatus("请先填写 Provider ID");
+    return;
+  }
+  codeAgentSwitchSelectedKind = "provider";
+  codeAgentSwitchSelectedId = providerId;
+  codeAgentSwitchSelectionMode = "manual";
+  const auth = getCodeAgentSwitchFormValue(container, "providerAuth") || "env_key";
+  const baseUrl = getCodeAgentSwitchFormValue(container, "providerBaseUrl");
+  const name =
+    getCodeAgentSwitchFormValue(container, "providerName") ||
+    deriveCodeAgentSwitchProviderName(providerId, baseUrl);
+  await executeCodeAgentSwitchAction("save-provider", undefined, undefined, {
+    provider: providerId,
+    name,
+    baseUrl,
+    wireApi: getCodeAgentSwitchFormValue(container, "providerWireApi") || "responses",
+    auth,
+    envKey: auth === "openai_auth" ? undefined : deriveCodeAgentSwitchEnvKeyName(providerId),
+    envKeyInstructions: getCodeAgentSwitchFormValue(container, "providerEnvKeyInstructions"),
+    supportsWebsockets:
+      getCodeAgentSwitchFormValue(container, "providerSupportsWebsockets") === "true" ? true : undefined,
+    httpHeaders: getCodeAgentSwitchFormValue(container, "providerHttpHeaders"),
+    envHttpHeaders: getCodeAgentSwitchFormValue(container, "providerEnvHttpHeaders"),
+    queryParams: getCodeAgentSwitchFormValue(container, "providerQueryParams"),
+    requestMaxRetries: getCodeAgentSwitchOptionalNumber(container, "providerRequestMaxRetries"),
+    streamMaxRetries: getCodeAgentSwitchOptionalNumber(container, "providerStreamMaxRetries"),
+    streamIdleTimeoutMs: getCodeAgentSwitchOptionalNumber(container, "providerStreamIdleTimeoutMs")
+  });
+}
+
+async function copyCodeAgentSwitchProviderKeyCommand(container: HTMLElement): Promise<void> {
+  const providerId = getCodeAgentSwitchFormValue(container, "providerId");
+  if (!providerId) {
+    setStatus("请先填写 Provider ID");
+    return;
+  }
+  const apiKey = getCodeAgentSwitchFormValue(container, "providerApiKey");
+  if (!apiKey) {
+    setStatus("请先粘贴 API Key，插件只用于复制命令，不会保存它");
+    return;
+  }
+  const envKey = deriveCodeAgentSwitchEnvKeyName(providerId);
+  const escapedKey = envKey.replace(/'/g, "''");
+  const escapedValue = apiKey.replace(/'/g, "''");
+  const text = `$env:${envKey}='${escapedValue}'\n[Environment]::SetEnvironmentVariable('${escapedKey}', '${escapedValue}', 'User')`;
+  await copyCodeAgentSwitchText(
+    "key",
+    text,
+    `已复制 ${envKey} 的 Key 设置命令`,
+    "暂无可复制的 Key 设置命令"
+  );
+}
+
+async function executeCodeAgentSwitchSetProviderKey(container: HTMLElement): Promise<void> {
+  const providerId = getCodeAgentSwitchFormValue(container, "providerId");
+  if (!providerId) {
+    setStatus("请先填写 Provider ID");
+    return;
+  }
+  const apiKey = getCodeAgentSwitchFormValue(container, "providerApiKey");
+  if (!apiKey) {
+    setStatus("请先粘贴 API Key，插件会写入用户级系统环境变量，不会保存它");
+    return;
+  }
+  const envKey = deriveCodeAgentSwitchEnvKeyName(providerId);
+  await executeCodeAgentSwitchAction("set-provider-key", undefined, undefined, {
+    provider: providerId,
+    envKey,
+    apiKey
+  });
+}
+
+async function executeCodeAgentSwitchDeleteProvider(providerId: string): Promise<void> {
+  if (!providerId) {
+    setStatus("请先选择 Provider");
+    return;
+  }
+  codeAgentSwitchSelectionMode = "auto";
+  await executeCodeAgentSwitchAction("delete-provider", undefined, undefined, {
+    provider: providerId
+  });
+}
+
+async function executeCodeAgentSwitchSaveProfile(container: HTMLElement): Promise<void> {
+  const profileId = getCodeAgentSwitchFormValue(container, "profileId");
+  if (!profileId) {
+    setStatus("请先填写 Profile ID");
+    return;
+  }
+  codeAgentSwitchSelectedKind = "profile";
+  codeAgentSwitchSelectedId = profileId;
+  codeAgentSwitchSelectionMode = "manual";
+  await executeCodeAgentSwitchAction("save-profile", profileId, undefined, {
+    provider: getCodeAgentSwitchFormValue(container, "profileProvider"),
+    model: getCodeAgentSwitchFormValue(container, "profileModel"),
+    reviewModel: getCodeAgentSwitchFormValue(container, "profileReviewModel"),
+    reasoning: getCodeAgentSwitchFormValue(container, "profileReasoning"),
+    planReasoning: getCodeAgentSwitchFormValue(container, "profilePlanReasoning"),
+    reasoningSummary: getCodeAgentSwitchFormValue(container, "profileReasoningSummary"),
+    verbosity: getCodeAgentSwitchFormValue(container, "profileVerbosity"),
+    serviceTier: getCodeAgentSwitchFormValue(container, "profileServiceTier"),
+    webSearch: getCodeAgentSwitchFormValue(container, "profileWebSearch"),
+    compactLimit: getCodeAgentSwitchOptionalNumber(container, "profileCompactLimit")
+  });
+}
+
+async function executeCodeAgentSwitchSaveRuntime(container: HTMLElement): Promise<void> {
+  await executeCodeAgentSwitchAction("save-runtime", undefined, undefined, {
+    approvalPolicy: getCodeAgentSwitchFormValue(container, "runtimeApprovalPolicy"),
+    sandboxMode: getCodeAgentSwitchFormValue(container, "runtimeSandboxMode"),
+    defaultPermissions: getCodeAgentSwitchFormValue(container, "runtimeDefaultPermissions"),
+    networkAccess: getCodeAgentSwitchFormValue(container, "runtimeNetworkAccess"),
+    windowsSandbox: getCodeAgentSwitchFormValue(container, "runtimeWindowsSandbox"),
+    windowsSandboxPrivateDesktop:
+      getCodeAgentSwitchFormValue(container, "runtimeWindowsSandboxPrivateDesktop") === "true"
+        ? true
+        : undefined
+  });
+}
+
+async function executeCodeAgentSwitchDeleteProfile(profileId: string): Promise<void> {
+  if (!profileId) {
+    setStatus("请先选择 Profile");
+    return;
+  }
+  codeAgentSwitchSelectionMode = "auto";
+  await executeCodeAgentSwitchAction("delete-profile", profileId);
+}
+
+async function copyCodeAgentSwitchText(
+  kind: "env" | "diagnostics" | "diff" | "key",
+  text: string,
+  successText: string,
+  emptyText: string
+): Promise<void> {
+  if (!text.trim()) {
+    setStatus(emptyText);
+    return;
+  }
+  const ok = await copyTextToClipboard(text);
+  if (!ok) {
+    setStatus("复制失败");
+    return;
+  }
+  codeAgentSwitchCopyState = kind;
+  setStatus(successText);
+  renderList();
+  window.setTimeout(() => {
+    codeAgentSwitchCopyState = "";
+    if (mode === "plugin" && activePluginPanel?.pluginId === CODEAGENT_SWITCH_PLUGIN_ID) {
+      renderList();
+    }
+  }, 1400);
+}
+
+function formatCodeAgentSwitchBackupSize(sizeBytes: number | undefined): string {
+  if (typeof sizeBytes !== "number" || !Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    return "-";
+  }
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatCodeAgentSwitchBackupTime(createdAtMs: number | undefined): string {
+  if (typeof createdAtMs !== "number" || !Number.isFinite(createdAtMs)) {
+    return "-";
+  }
+  const date = new Date(createdAtMs);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 const WEBTOOLS_IMAGE_PROMPT_VISIBLE_OPTION_LIMIT = 8;
 const webtoolsImagePromptExpandedGroups = new Set<WebtoolsImagePromptOptionGroupKey>();
 let webtoolsImagePromptStyleGroup: WebtoolsImagePromptStylePresetGroup | "" = "";
 let webtoolsImagePromptSmartTemplateId: WebtoolsImagePromptSmartTemplateId | "" = "";
+
+type ClipboardWorkbenchPanelKind = "text" | "image" | "files";
+type ClipboardWorkbenchPanelSource = "auto" | "manual" | "screenshot";
+
+interface ClipboardWorkbenchPanelItemView {
+  id: string;
+  kind: ClipboardWorkbenchPanelKind;
+  source: ClipboardWorkbenchPanelSource;
+  title: string;
+  summary: string;
+  note: string;
+  tags: string[];
+  favorite: boolean;
+  pinned: boolean;
+  sensitive: boolean;
+  createdAt: number;
+  updatedAt: number;
+  previewText?: string;
+  filePaths?: string[];
+  assetPath?: string;
+  assetUrl?: string;
+}
+
+interface ClipboardWorkbenchPanelData {
+  items: ClipboardWorkbenchPanelItemView[];
+  groups: Array<{ id: string; name: string; count: number }>;
+  settings: {
+    autoCollect: boolean;
+    sensitiveMode: boolean;
+    maxItems: number;
+    maxBytes: number;
+  };
+  stats: {
+    totalItems: number;
+    totalBytes: number;
+  };
+  query: {
+    search: string;
+    scope: string;
+    groupId: string;
+  };
+}
+
+const CLIPBOARD_WORKBENCH_SCOPE_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "recent", label: "Recent" },
+  { key: "favorites", label: "Favorites" },
+  { key: "pinned", label: "Pinned" },
+  { key: "text", label: "Text" },
+  { key: "image", label: "Images" },
+  { key: "files", label: "Files" },
+  { key: "screenshots", label: "Screenshots" }
+] as const;
+
+let clipboardWorkbenchPanelData: ClipboardWorkbenchPanelData =
+  createDefaultClipboardWorkbenchPanelData();
+let clipboardWorkbenchActiveItemId = "";
+let clipboardWorkbenchSelectedItemIds = new Set<string>();
+let clipboardWorkbenchManualTextDraft = "";
+let clipboardWorkbenchSearchDraft = "";
+
+function createDefaultClipboardWorkbenchPanelData(): ClipboardWorkbenchPanelData {
+  return {
+    items: [],
+    groups: [],
+    settings: {
+      autoCollect: true,
+      sensitiveMode: false,
+      maxItems: 50,
+      maxBytes: 512 * 1024 * 1024
+    },
+    stats: {
+      totalItems: 0,
+      totalBytes: 0
+    },
+    query: {
+      search: "",
+      scope: "all",
+      groupId: ""
+    }
+  };
+}
+
+function toClipboardWorkbenchStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toClipboardWorkbenchPanelItem(
+  value: unknown
+): ClipboardWorkbenchPanelItemView | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const id = typeof record.id === "string" ? record.id.trim() : "";
+  const summary = typeof record.summary === "string" ? record.summary.trim() : "";
+  if (!id || !summary) {
+    return null;
+  }
+
+  const kind =
+    record.kind === "image" || record.kind === "files" ? record.kind : "text";
+  const source =
+    record.source === "manual" || record.source === "screenshot"
+      ? record.source
+      : "auto";
+  const createdAt =
+    typeof record.createdAt === "number" && Number.isFinite(record.createdAt)
+      ? record.createdAt
+      : 0;
+  const updatedAt =
+    typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
+      ? record.updatedAt
+      : createdAt;
+
+  return {
+    id,
+    kind,
+    source,
+    title:
+      typeof record.title === "string" && record.title.trim()
+        ? record.title.trim()
+        : summary,
+    summary,
+    note:
+      typeof record.note === "string" && record.note.trim()
+        ? record.note.trim()
+        : "",
+    tags: toClipboardWorkbenchStringArray(record.tags),
+    favorite: record.favorite === true,
+    pinned: record.pinned === true,
+    sensitive: record.sensitive === true,
+    createdAt,
+    updatedAt,
+    previewText:
+      typeof record.previewText === "string" && record.previewText.trim()
+        ? record.previewText
+        : undefined,
+    filePaths: toClipboardWorkbenchStringArray(record.filePaths),
+    assetPath:
+      typeof record.assetPath === "string" && record.assetPath.trim()
+        ? record.assetPath.trim()
+        : undefined,
+    assetUrl:
+      typeof record.assetUrl === "string" && record.assetUrl.trim()
+        ? record.assetUrl.trim()
+        : undefined
+  };
+}
+
+function normalizeClipboardWorkbenchPanelData(
+  value: unknown
+): ClipboardWorkbenchPanelData {
+  const base = createDefaultClipboardWorkbenchPanelData();
+  const record = toRecord(value);
+  if (!record) {
+    return base;
+  }
+
+  const items = Array.isArray(record.items)
+    ? record.items
+        .map((item) => toClipboardWorkbenchPanelItem(item))
+        .filter((item): item is ClipboardWorkbenchPanelItemView => item !== null)
+    : [];
+
+  const groups = Array.isArray(record.groups)
+    ? record.groups
+        .map((group) => {
+          const next = toRecord(group);
+          if (!next) {
+            return null;
+          }
+
+          const id = typeof next.id === "string" ? next.id.trim() : "";
+          const name = typeof next.name === "string" ? next.name.trim() : "";
+          const count =
+            typeof next.count === "number" && Number.isFinite(next.count)
+              ? Math.max(0, Math.round(next.count))
+              : 0;
+          if (!id || !name) {
+            return null;
+          }
+
+          return { id, name, count };
+        })
+        .filter(
+          (group): group is { id: string; name: string; count: number } =>
+            group !== null
+        )
+    : [];
+
+  const settings = toRecord(record.settings);
+  const stats = toRecord(record.stats);
+  const query = toRecord(record.query);
+
+  return {
+    items,
+    groups,
+    settings: {
+      autoCollect:
+        typeof settings?.autoCollect === "boolean"
+          ? settings.autoCollect
+          : base.settings.autoCollect,
+      sensitiveMode:
+        typeof settings?.sensitiveMode === "boolean"
+          ? settings.sensitiveMode
+          : base.settings.sensitiveMode,
+      maxItems:
+        typeof settings?.maxItems === "number" && Number.isFinite(settings.maxItems)
+          ? Math.max(1, Math.round(settings.maxItems))
+          : base.settings.maxItems,
+      maxBytes:
+        typeof settings?.maxBytes === "number" && Number.isFinite(settings.maxBytes)
+          ? Math.max(0, Math.round(settings.maxBytes))
+          : base.settings.maxBytes
+    },
+    stats: {
+      totalItems:
+        typeof stats?.totalItems === "number" && Number.isFinite(stats.totalItems)
+          ? Math.max(0, Math.round(stats.totalItems))
+          : items.length,
+      totalBytes:
+        typeof stats?.totalBytes === "number" && Number.isFinite(stats.totalBytes)
+          ? Math.max(0, Math.round(stats.totalBytes))
+          : 0
+    },
+    query: {
+      search:
+        typeof query?.search === "string" ? query.search : base.query.search,
+      scope:
+        typeof query?.scope === "string" && query.scope.trim()
+          ? query.scope.trim()
+          : base.query.scope,
+      groupId:
+        typeof query?.groupId === "string" ? query.groupId : base.query.groupId
+    }
+  };
+}
+
+function ensureClipboardWorkbenchSelection(): void {
+  const visibleIds = new Set(
+    clipboardWorkbenchPanelData.items.map((item) => item.id)
+  );
+  clipboardWorkbenchSelectedItemIds = new Set(
+    [...clipboardWorkbenchSelectedItemIds].filter((itemId) => visibleIds.has(itemId))
+  );
+
+  const firstId = clipboardWorkbenchPanelData.items[0]?.id ?? "";
+  if (!firstId) {
+    clipboardWorkbenchActiveItemId = "";
+    clipboardWorkbenchSelectedItemIds.clear();
+    return;
+  }
+
+  const exists = clipboardWorkbenchPanelData.items.some(
+    (item) => item.id === clipboardWorkbenchActiveItemId
+  );
+  if (!exists) {
+    clipboardWorkbenchActiveItemId = firstId;
+  }
+}
+
+function getClipboardWorkbenchActiveItem(): ClipboardWorkbenchPanelItemView | null {
+  ensureClipboardWorkbenchSelection();
+  return (
+    clipboardWorkbenchPanelData.items.find(
+      (item) => item.id === clipboardWorkbenchActiveItemId
+    ) ?? null
+  );
+}
+
+function getClipboardWorkbenchSelectedItems(): ClipboardWorkbenchPanelItemView[] {
+  ensureClipboardWorkbenchSelection();
+  return clipboardWorkbenchPanelData.items.filter((item) =>
+    clipboardWorkbenchSelectedItemIds.has(item.id)
+  );
+}
+
+function isClipboardWorkbenchItemSelected(itemId: string): boolean {
+  return clipboardWorkbenchSelectedItemIds.has(itemId);
+}
+
+function toggleClipboardWorkbenchItemSelection(itemId: string): void {
+  if (!itemId) {
+    return;
+  }
+
+  if (clipboardWorkbenchSelectedItemIds.has(itemId)) {
+    clipboardWorkbenchSelectedItemIds.delete(itemId);
+  } else {
+    clipboardWorkbenchSelectedItemIds.add(itemId);
+  }
+  clipboardWorkbenchActiveItemId = itemId;
+  renderList();
+}
+
+function clearClipboardWorkbenchSelection(): void {
+  if (clipboardWorkbenchSelectedItemIds.size === 0) {
+    return;
+  }
+  clipboardWorkbenchSelectedItemIds.clear();
+  renderList();
+}
+
+function buildClipboardWorkbenchQueryParams(
+  overrides: Partial<ClipboardWorkbenchPanelData["query"]> = {}
+): Record<string, string> {
+  const nextSearch =
+    overrides.search ??
+    clipboardWorkbenchSearchDraft ??
+    clipboardWorkbenchPanelData.query.search;
+  const nextScope = overrides.scope ?? clipboardWorkbenchPanelData.query.scope;
+  const nextGroupId = overrides.groupId ?? clipboardWorkbenchPanelData.query.groupId;
+
+  const params: Record<string, string> = {};
+  if (typeof nextSearch === "string" && nextSearch.trim()) {
+    params.search = nextSearch;
+  }
+  if (
+    typeof nextScope === "string" &&
+    nextScope.trim() &&
+    nextScope.trim().toLowerCase() !== "all"
+  ) {
+    params.scope = nextScope.trim();
+  }
+  if (typeof nextGroupId === "string" && nextGroupId.trim()) {
+    params.groupId = nextGroupId.trim();
+  }
+  return params;
+}
+
+function createClipboardWorkbenchBadge(
+  text: string,
+  tone: "neutral" | "accent" | "warning" | "success" = "neutral"
+): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "clipboard-workbench-badge";
+  badge.dataset.tone = tone;
+  badge.textContent = text;
+  return badge;
+}
+
+function formatClipboardWorkbenchBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let next = value;
+  let index = 0;
+  while (next >= 1024 && index < units.length - 1) {
+    next /= 1024;
+    index += 1;
+  }
+  const digits = next >= 100 ? 0 : next >= 10 ? 1 : 2;
+  return `${next.toFixed(digits)} ${units[index]}`;
+}
+
+function formatClipboardWorkbenchTime(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Unknown";
+  }
+  return new Date(value).toLocaleString();
+}
+
+function getClipboardWorkbenchKindLabel(kind: ClipboardWorkbenchPanelKind): string {
+  switch (kind) {
+    case "image":
+      return "Image";
+    case "files":
+      return "Files";
+    default:
+      return "Text";
+  }
+}
+
+function getClipboardWorkbenchSourceLabel(
+  source: ClipboardWorkbenchPanelSource
+): string {
+  switch (source) {
+    case "manual":
+      return "Manual";
+    case "screenshot":
+      return "Screenshot";
+    default:
+      return "Auto";
+  }
+}
+
+function getClipboardWorkbenchItemPreview(
+  item: ClipboardWorkbenchPanelItemView
+): string {
+  if (item.kind === "files") {
+    const count = item.filePaths?.length ?? 0;
+    return count > 0 ? `${count} file path${count === 1 ? "" : "s"}` : item.summary;
+  }
+  if (item.kind === "image") {
+    return item.assetUrl ? "Image preview available" : item.summary;
+  }
+  return item.previewText ?? item.summary;
+}
+
+async function executeClipboardWorkbenchAction(
+  action: string,
+  actionParams: Record<string, string | string[]> = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("Launcher bridge is unavailable.");
+    return;
+  }
+
+  const params = new URLSearchParams();
+  params.set("action", action);
+  Object.entries(actionParams).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .forEach((entry) => {
+          params.append(key, entry);
+        });
+      return;
+    }
+
+    const nextValue = value.trim();
+    if (nextValue) {
+      params.set(key, nextValue);
+    }
+  });
+  const result = await launcher.execute({
+    id: `plugin:${CLIPBOARD_WORKBENCH_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "Clipboard Workbench",
+    subtitle: "panel action",
+    target: `command:plugin:${CLIPBOARD_WORKBENCH_PLUGIN_ID}?${params.toString()}`,
+    keywords: ["plugin", "clipboard", "workbench"]
+  });
+
+  if (!result.ok) {
+    setStatus(result.message ?? "Clipboard Workbench action failed.");
+    return;
+  }
+
+  if (activePluginPanel) {
+    activePluginPanel.data = result.data ?? activePluginPanel.data;
+    window.__LL_PANEL_IMPLS__?.applyClipboardWorkbenchPanelPayload(activePluginPanel);
+    if (action === "save-manual-text") {
+      const manualText = actionParams.manualText;
+      if (typeof manualText === "string" && manualText.trim()) {
+        clipboardWorkbenchManualTextDraft = "";
+      }
+    }
+    renderList();
+  }
+
+  setStatus(result.message ?? "Clipboard Workbench updated.");
+}
 
 function syncWebtoolsImagePromptSmartTemplateSelection(container: HTMLElement): void {
   container
@@ -961,6 +3621,583 @@ window.__LL_PANEL_IMPLS__ = {
     }
   },
 
+  applyClipboardWorkbenchPanelPayload(panel: ActivePluginPanelState): void {
+    clipboardWorkbenchPanelData = normalizeClipboardWorkbenchPanelData(panel.data);
+    clipboardWorkbenchSearchDraft = clipboardWorkbenchPanelData.query.search;
+    ensureClipboardWorkbenchSelection();
+  },
+
+  renderClipboardWorkbenchPanel(): void {
+    ensureClipboardWorkbenchSelection();
+    const selectedItems = getClipboardWorkbenchSelectedItems();
+    const selectedItemIds = selectedItems.map((item) => item.id);
+    const canMergeSelectedItems =
+      selectedItems.length > 0 &&
+      (selectedItems.every((item) => item.kind === "text") ||
+        selectedItems.every((item) => item.kind === "files"));
+
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel clipboard-workbench-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form clipboard-workbench-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeClipboardWorkbenchAction(
+        "refresh",
+        buildClipboardWorkbenchQueryParams()
+      );
+    });
+
+    const shell = document.createElement("div");
+    shell.className = "clipboard-workbench-shell";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "clipboard-workbench-toolbar";
+
+    const toolbarHead = document.createElement("div");
+    toolbarHead.className = "clipboard-workbench-toolbar-head";
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "Clipboard Workbench";
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent =
+      activePluginPanel?.subtitle ||
+      "Search and inspect captured clipboard items across text, images, and file lists.";
+    toolbarHead.append(title, description);
+
+    const toolbarMeta = document.createElement("div");
+    toolbarMeta.className = "clipboard-workbench-toolbar-meta";
+    toolbarMeta.append(
+      createClipboardWorkbenchBadge(
+        clipboardWorkbenchPanelData.settings.autoCollect
+          ? "Auto collect on"
+          : "Auto collect paused",
+        clipboardWorkbenchPanelData.settings.autoCollect ? "success" : "warning"
+      ),
+      createClipboardWorkbenchBadge(
+        clipboardWorkbenchPanelData.settings.sensitiveMode
+          ? "Sensitive mode"
+          : "Sensitive mode off",
+        clipboardWorkbenchPanelData.settings.sensitiveMode ? "warning" : "neutral"
+      ),
+      createClipboardWorkbenchBadge(
+        `Limit ${clipboardWorkbenchPanelData.settings.maxItems}`,
+        "accent"
+      )
+    );
+
+    const toolbarStats = document.createElement("div");
+    toolbarStats.className = "clipboard-workbench-toolbar-stats";
+    [
+      {
+        label: "Items",
+        value: String(clipboardWorkbenchPanelData.stats.totalItems)
+      },
+      {
+        label: "Bytes",
+        value: formatClipboardWorkbenchBytes(
+          clipboardWorkbenchPanelData.stats.totalBytes
+        )
+      },
+      {
+        label: "Search",
+        value: clipboardWorkbenchPanelData.query.search.trim() || "None"
+      }
+    ].forEach((entry) => {
+      const card = document.createElement("div");
+      card.className = "clipboard-workbench-stat";
+      const statLabel = document.createElement("div");
+      statLabel.className = "clipboard-workbench-stat-label";
+      statLabel.textContent = entry.label;
+      const statValue = document.createElement("div");
+      statValue.className = "clipboard-workbench-stat-value";
+      statValue.textContent = entry.value;
+      card.append(statLabel, statValue);
+      toolbarStats.appendChild(card);
+    });
+
+    const toolbarControls = document.createElement("div");
+    toolbarControls.className = "clipboard-workbench-toolbar-controls";
+
+    const searchRow = document.createElement("div");
+    searchRow.className = "clipboard-workbench-search-row";
+    const searchInput = document.createElement("input");
+    searchInput.className = "settings-value clipboard-workbench-search-input";
+    searchInput.name = "clipboardWorkbenchSearch";
+    searchInput.type = "text";
+    searchInput.placeholder = "Search summaries, notes, tags, and file paths";
+    searchInput.value = clipboardWorkbenchSearchDraft;
+    searchInput.addEventListener("input", () => {
+      clipboardWorkbenchSearchDraft = searchInput.value;
+    });
+    const searchButton = document.createElement("button");
+    searchButton.type = "submit";
+    searchButton.className = "settings-btn settings-btn-primary";
+    searchButton.textContent = "Search";
+    const clearSearchButton = document.createElement("button");
+    clearSearchButton.type = "button";
+    clearSearchButton.className = "settings-btn settings-btn-secondary";
+    clearSearchButton.textContent = "Clear";
+    clearSearchButton.addEventListener("click", () => {
+      clipboardWorkbenchSearchDraft = "";
+      void executeClipboardWorkbenchAction(
+        "refresh",
+        buildClipboardWorkbenchQueryParams({ search: "", groupId: "" })
+      );
+    });
+    searchRow.append(searchInput, searchButton, clearSearchButton);
+
+    const toolbarActions = document.createElement("div");
+    toolbarActions.className = "clipboard-workbench-toolbar-actions";
+
+    const refreshButton = document.createElement("button");
+    refreshButton.type = "button";
+    refreshButton.className = "settings-btn settings-btn-secondary";
+    refreshButton.textContent = "Refresh";
+    refreshButton.addEventListener("click", () => {
+      void executeClipboardWorkbenchAction(
+        "refresh",
+        buildClipboardWorkbenchQueryParams()
+      );
+    });
+
+    const saveCurrentButton = document.createElement("button");
+    saveCurrentButton.type = "button";
+    saveCurrentButton.className = "settings-btn settings-btn-secondary";
+    saveCurrentButton.textContent = "Save clipboard";
+    saveCurrentButton.addEventListener("click", () => {
+      void executeClipboardWorkbenchAction("save-current");
+    });
+
+    const toggleCollectButton = document.createElement("button");
+    toggleCollectButton.type = "button";
+    toggleCollectButton.className = "settings-btn settings-btn-secondary";
+    toggleCollectButton.textContent = clipboardWorkbenchPanelData.settings.autoCollect
+      ? "Pause collect"
+      : "Resume collect";
+    toggleCollectButton.addEventListener("click", () => {
+      void executeClipboardWorkbenchAction("toggle-collect");
+    });
+
+    const toggleSensitiveButton = document.createElement("button");
+    toggleSensitiveButton.type = "button";
+    toggleSensitiveButton.className = "settings-btn settings-btn-secondary";
+    toggleSensitiveButton.textContent = clipboardWorkbenchPanelData.settings.sensitiveMode
+      ? "Disable sensitive"
+      : "Enable sensitive";
+    toggleSensitiveButton.addEventListener("click", () => {
+      void executeClipboardWorkbenchAction("toggle-sensitive");
+    });
+
+    toolbarActions.append(
+      refreshButton,
+      saveCurrentButton,
+      toggleCollectButton,
+      toggleSensitiveButton
+    );
+
+    const composer = document.createElement("div");
+    composer.className = "clipboard-workbench-composer";
+    const composerTitle = document.createElement("div");
+    composerTitle.className = "clipboard-workbench-section-title";
+    composerTitle.textContent = "Manual text draft";
+
+    const manualTextInput = document.createElement("textarea");
+    manualTextInput.className = "settings-textarea clipboard-workbench-manual-text";
+    manualTextInput.name = "clipboardWorkbenchManualText";
+    manualTextInput.placeholder = "Type or paste text here, then save it into the workbench.";
+    manualTextInput.value = clipboardWorkbenchManualTextDraft;
+
+    const composerRow = document.createElement("div");
+    composerRow.className = "clipboard-workbench-composer-row";
+    const saveManualButton = document.createElement("button");
+    saveManualButton.type = "button";
+    saveManualButton.className = "settings-btn settings-btn-primary";
+    saveManualButton.dataset.clipboardWorkbenchSaveManual = "1";
+    saveManualButton.textContent = "Save draft";
+    saveManualButton.disabled = clipboardWorkbenchManualTextDraft.trim().length === 0;
+
+    manualTextInput.addEventListener("input", () => {
+      clipboardWorkbenchManualTextDraft = manualTextInput.value;
+      saveManualButton.disabled = clipboardWorkbenchManualTextDraft.trim().length === 0;
+    });
+    saveManualButton.addEventListener("click", () => {
+      void executeClipboardWorkbenchAction("save-manual-text", {
+        manualText: clipboardWorkbenchManualTextDraft
+      });
+    });
+    composerRow.append(manualTextInput, saveManualButton);
+    composer.append(composerTitle, composerRow);
+
+    toolbarControls.append(searchRow, toolbarActions, composer);
+    toolbar.append(toolbarHead, toolbarMeta, toolbarStats, toolbarControls);
+
+    const rail = document.createElement("aside");
+    rail.className = "clipboard-workbench-rail";
+    const railTitle = document.createElement("div");
+    railTitle.className = "clipboard-workbench-section-title";
+    railTitle.textContent = "Views";
+    rail.appendChild(railTitle);
+
+    const scopeList = document.createElement("div");
+    scopeList.className = "clipboard-workbench-scope-list";
+    CLIPBOARD_WORKBENCH_SCOPE_OPTIONS.forEach((scope) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "clipboard-workbench-scope-btn";
+      button.dataset.selected = String(
+        clipboardWorkbenchPanelData.query.scope === scope.key
+      );
+      button.textContent = scope.label;
+      button.addEventListener("click", () => {
+        const nextScope =
+          clipboardWorkbenchPanelData.query.scope === scope.key ? "all" : scope.key;
+        void executeClipboardWorkbenchAction(
+          "refresh",
+          buildClipboardWorkbenchQueryParams({ scope: nextScope, groupId: "" })
+        );
+      });
+      scopeList.appendChild(button);
+    });
+    rail.appendChild(scopeList);
+
+    const groupTitle = document.createElement("div");
+    groupTitle.className = "clipboard-workbench-section-title";
+    groupTitle.textContent = "Groups";
+    rail.appendChild(groupTitle);
+
+    const groupList = document.createElement("div");
+    groupList.className = "clipboard-workbench-group-list";
+    if (clipboardWorkbenchPanelData.groups.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "clipboard-workbench-empty";
+      empty.textContent = "No groups yet.";
+      groupList.appendChild(empty);
+    } else {
+      clipboardWorkbenchPanelData.groups.forEach((group) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "clipboard-workbench-group-chip";
+        chip.dataset.selected = String(
+          clipboardWorkbenchPanelData.query.groupId === group.id
+        );
+        chip.textContent = `${group.name} (${group.count})`;
+        chip.addEventListener("click", () => {
+          const nextGroupId =
+            clipboardWorkbenchPanelData.query.groupId === group.id ? "" : group.id;
+          void executeClipboardWorkbenchAction(
+            "refresh",
+            buildClipboardWorkbenchQueryParams({ groupId: nextGroupId })
+          );
+        });
+        groupList.appendChild(chip);
+      });
+    }
+    rail.appendChild(groupList);
+
+    const listSection = document.createElement("section");
+    listSection.className = "clipboard-workbench-list";
+    const listHeader = document.createElement("div");
+    listHeader.className = "clipboard-workbench-list-head";
+    const listTitle = document.createElement("div");
+    listTitle.className = "clipboard-workbench-section-title";
+    listTitle.textContent = "Items";
+    const listMeta = document.createElement("div");
+    listMeta.className = "clipboard-workbench-list-meta";
+    listMeta.textContent =
+      selectedItems.length > 0
+        ? `${clipboardWorkbenchPanelData.items.length} visible - ${selectedItems.length} selected`
+        : `${clipboardWorkbenchPanelData.items.length} visible`;
+    listHeader.append(listTitle, listMeta);
+    listSection.appendChild(listHeader);
+
+    const itemList = document.createElement("div");
+    itemList.className = "clipboard-workbench-item-list";
+    if (clipboardWorkbenchPanelData.items.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "clipboard-workbench-empty";
+      empty.textContent = "No clipboard items are available yet.";
+      itemList.appendChild(empty);
+    } else {
+      clipboardWorkbenchPanelData.items.forEach((item) => {
+        const selected = isClipboardWorkbenchItemSelected(item.id);
+
+        const card = document.createElement("article");
+        card.className = "clipboard-workbench-item";
+        card.dataset.active = String(item.id === clipboardWorkbenchActiveItemId);
+        card.dataset.marked = String(selected);
+        card.dataset.clipboardWorkbenchItemId = item.id;
+
+        const itemTop = document.createElement("div");
+        itemTop.className = "clipboard-workbench-item-top";
+        const itemSelectHint = document.createElement("div");
+        itemSelectHint.className = "clipboard-workbench-item-select-hint";
+        itemSelectHint.textContent = selected ? "Selected for batch" : "Add to batch";
+        const toggleButton = document.createElement("button");
+        toggleButton.type = "button";
+        toggleButton.className = "clipboard-workbench-item-toggle";
+        toggleButton.dataset.clipboardWorkbenchItemToggle = item.id;
+        toggleButton.dataset.selected = String(selected);
+        toggleButton.textContent = selected ? "Selected" : "Select";
+        toggleButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleClipboardWorkbenchItemSelection(item.id);
+        });
+        itemTop.append(itemSelectHint, toggleButton);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "clipboard-workbench-item-main";
+        button.dataset.selected = String(item.id === clipboardWorkbenchActiveItemId);
+        button.addEventListener("click", () => {
+          clipboardWorkbenchActiveItemId = item.id;
+          renderList();
+        });
+
+        if (item.kind === "image" && item.assetUrl) {
+          const thumb = document.createElement("img");
+          thumb.className = "clipboard-workbench-item-thumb";
+          thumb.src = item.assetUrl;
+          thumb.alt = item.summary;
+          thumb.loading = "lazy";
+          card.appendChild(thumb);
+        }
+
+        const itemHead = document.createElement("div");
+        itemHead.className = "clipboard-workbench-item-head";
+        const itemTitle = document.createElement("div");
+        itemTitle.className = "clipboard-workbench-item-title";
+        itemTitle.textContent = item.title || item.summary;
+        const badgeRow = document.createElement("div");
+        badgeRow.className = "clipboard-workbench-item-badges";
+        badgeRow.append(
+          createClipboardWorkbenchBadge(getClipboardWorkbenchKindLabel(item.kind), "accent"),
+          createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(item.source))
+        );
+        if (item.favorite) {
+          badgeRow.appendChild(createClipboardWorkbenchBadge("Favorite", "success"));
+        }
+        if (item.pinned) {
+          badgeRow.appendChild(createClipboardWorkbenchBadge("Pinned", "accent"));
+        }
+        if (item.sensitive) {
+          badgeRow.appendChild(createClipboardWorkbenchBadge("Sensitive", "warning"));
+        }
+        itemHead.append(itemTitle, badgeRow);
+
+        const itemSummary = document.createElement("div");
+        itemSummary.className = "clipboard-workbench-item-summary";
+        itemSummary.textContent = item.summary;
+
+        const itemPreview = document.createElement("div");
+        itemPreview.className = "clipboard-workbench-item-preview";
+        itemPreview.textContent = getClipboardWorkbenchItemPreview(item);
+
+        const itemFoot = document.createElement("div");
+        itemFoot.className = "clipboard-workbench-item-foot";
+        itemFoot.textContent = formatClipboardWorkbenchTime(item.updatedAt);
+
+        button.append(itemHead, itemSummary, itemPreview, itemFoot);
+        card.append(itemTop, button);
+        itemList.appendChild(card);
+      });
+    }
+    listSection.appendChild(itemList);
+
+    if (selectedItems.length > 0) {
+      const bulkBar = document.createElement("div");
+      bulkBar.className = "clipboard-workbench-bulk-bar";
+
+      const bulkMeta = document.createElement("div");
+      bulkMeta.className = "clipboard-workbench-bulk-meta";
+      bulkMeta.textContent = `${selectedItems.length} selected`;
+
+      const bulkActions = document.createElement("div");
+      bulkActions.className = "clipboard-workbench-bulk-actions";
+
+      const sequentialButton = document.createElement("button");
+      sequentialButton.type = "button";
+      sequentialButton.className = "settings-btn settings-btn-primary";
+      sequentialButton.dataset.clipboardWorkbenchBulkAction = "sequential";
+      sequentialButton.textContent = "Paste sequentially";
+      sequentialButton.addEventListener("click", () => {
+        void executeClipboardWorkbenchAction("paste-batch", {
+          itemIds: selectedItemIds,
+          pasteMode: "sequential"
+        });
+      });
+
+      const mergeButton = document.createElement("button");
+      mergeButton.type = "button";
+      mergeButton.className = "settings-btn settings-btn-secondary";
+      mergeButton.dataset.clipboardWorkbenchBulkAction = "merge-once";
+      mergeButton.textContent = "Merge once";
+      mergeButton.disabled = !canMergeSelectedItems;
+      mergeButton.addEventListener("click", () => {
+        void executeClipboardWorkbenchAction("paste-batch", {
+          itemIds: selectedItemIds,
+          pasteMode: "merge-once",
+          mergeSeparatorMode: "newline"
+        });
+      });
+
+      const clearSelectionButton = document.createElement("button");
+      clearSelectionButton.type = "button";
+      clearSelectionButton.className = "settings-btn settings-btn-secondary";
+      clearSelectionButton.textContent = "Clear selection";
+      clearSelectionButton.addEventListener("click", () => {
+        clearClipboardWorkbenchSelection();
+      });
+
+      bulkActions.append(
+        sequentialButton,
+        mergeButton,
+        clearSelectionButton
+      );
+      bulkBar.append(bulkMeta, bulkActions);
+
+      if (!canMergeSelectedItems) {
+        const bulkNote = document.createElement("div");
+        bulkNote.className = "clipboard-workbench-note";
+        bulkNote.textContent =
+          "Merge once currently supports text-only or file-list-only selections.";
+        bulkBar.appendChild(bulkNote);
+      }
+
+      listSection.appendChild(bulkBar);
+    }
+
+    const detail = document.createElement("aside");
+    detail.className = "clipboard-workbench-detail";
+    const detailTitle = document.createElement("div");
+    detailTitle.className = "clipboard-workbench-section-title";
+    detailTitle.textContent = "Details";
+    detail.appendChild(detailTitle);
+
+    const activeItem = getClipboardWorkbenchActiveItem();
+    if (!activeItem) {
+      const empty = document.createElement("div");
+      empty.className = "clipboard-workbench-empty";
+      empty.textContent = "Select an item to inspect its detail view.";
+      detail.appendChild(empty);
+    } else {
+      const hero = document.createElement("div");
+      hero.className = "clipboard-workbench-detail-hero";
+      const heroTitle = document.createElement("div");
+      heroTitle.className = "clipboard-workbench-detail-title";
+      heroTitle.textContent = activeItem.title || activeItem.summary;
+      const heroMeta = document.createElement("div");
+      heroMeta.className = "clipboard-workbench-detail-meta";
+      heroMeta.append(
+        createClipboardWorkbenchBadge(getClipboardWorkbenchKindLabel(activeItem.kind), "accent"),
+        createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(activeItem.source)),
+        createClipboardWorkbenchBadge(
+          clipboardWorkbenchPanelData.query.scope || "all"
+        )
+      );
+      hero.append(heroTitle, heroMeta);
+      detail.appendChild(hero);
+
+      const preview = document.createElement("div");
+      preview.className = "clipboard-workbench-preview";
+      if (activeItem.kind === "text") {
+        const pre = document.createElement("pre");
+        pre.className = "clipboard-workbench-preview-text";
+        pre.textContent = activeItem.previewText ?? activeItem.summary;
+        preview.appendChild(pre);
+      } else if (activeItem.kind === "files") {
+        const listNode = document.createElement("ul");
+        listNode.className = "clipboard-workbench-file-list";
+        (activeItem.filePaths ?? []).forEach((filePath) => {
+          const row = document.createElement("li");
+          row.className = "clipboard-workbench-file-row";
+          row.textContent = filePath;
+          listNode.appendChild(row);
+        });
+        preview.appendChild(listNode);
+      } else if (activeItem.assetUrl) {
+        const image = document.createElement("img");
+        image.className = "clipboard-workbench-preview-image";
+        image.src = activeItem.assetUrl;
+        image.alt = activeItem.summary;
+        preview.appendChild(image);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "clipboard-workbench-image-placeholder";
+        placeholder.textContent = "No preview image is available.";
+        preview.appendChild(placeholder);
+      }
+      detail.appendChild(preview);
+
+      const metaGrid = document.createElement("div");
+      metaGrid.className = "clipboard-workbench-detail-grid";
+      [
+        { label: "Summary", value: activeItem.summary },
+        { label: "Updated", value: formatClipboardWorkbenchTime(activeItem.updatedAt) },
+        { label: "Created", value: formatClipboardWorkbenchTime(activeItem.createdAt) },
+        {
+          label: "Tags",
+          value: activeItem.tags.length > 0 ? activeItem.tags.join(", ") : "None"
+        }
+      ].forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "clipboard-workbench-detail-row";
+        const label = document.createElement("div");
+        label.className = "clipboard-workbench-detail-label";
+        label.textContent = entry.label;
+        const value = document.createElement("div");
+        value.className = "clipboard-workbench-detail-value";
+        value.textContent = entry.value;
+        row.append(label, value);
+        metaGrid.appendChild(row);
+      });
+      detail.appendChild(metaGrid);
+
+      const note = document.createElement("div");
+      note.className = "clipboard-workbench-note";
+      note.textContent = activeItem.note || "No note saved for this item yet.";
+      detail.appendChild(note);
+
+      const detailActions = document.createElement("div");
+      detailActions.className = "clipboard-workbench-detail-actions";
+
+      const restoreButton = document.createElement("button");
+      restoreButton.type = "button";
+      restoreButton.className = "settings-btn settings-btn-primary";
+      restoreButton.textContent = "Restore to clipboard";
+      restoreButton.addEventListener("click", () => {
+        void executeClipboardWorkbenchAction("restore-item", {
+          itemId: activeItem.id
+        });
+      });
+
+      const batchButton = document.createElement("button");
+      batchButton.type = "button";
+      batchButton.className = "settings-btn settings-btn-secondary";
+      batchButton.textContent = isClipboardWorkbenchItemSelected(activeItem.id)
+        ? "Remove from batch"
+        : "Add to batch";
+      batchButton.addEventListener("click", () => {
+        toggleClipboardWorkbenchItemSelection(activeItem.id);
+      });
+
+      detailActions.append(restoreButton, batchButton);
+      detail.appendChild(detailActions);
+    }
+
+    shell.append(toolbar, rail, listSection, detail);
+    form.appendChild(shell);
+    panel.appendChild(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+  },
+
   applyWebtoolsFileHashPanelPayload(panel: ActivePluginPanelState): void {
     const data = toRecord(panel.data);
     if (!data) {
@@ -1365,91 +4602,454 @@ window.__LL_PANEL_IMPLS__ = {
     panelItem.className = "settings-panel-item";
 
     const panel = document.createElement("section");
-    panel.className = "settings-panel";
+    panel.className = "settings-panel settings-panel-structured";
 
     const form = document.createElement("form");
-    form.className = "settings-form webtools-password-form webtools-password-lab";
+    form.className =
+      "settings-form settings-form-grouped webtools-password-form webtools-password-lab";
+
+    const panelTitle = activePluginPanel?.title || "随机密码";
+    const panelSubtitle =
+      activePluginPanel?.subtitle || "按场景切换预设，再微调字符池、长度和批量数量。";
+    const lengthOptions = [
+      { value: 6, label: "6 位 · PIN / 验证码" },
+      { value: 8, label: "8 位 · 低强度" },
+      { value: 12, label: "12 位 · 日常登录" },
+      { value: 16, label: "16 位 · 高强度" },
+      { value: 20, label: "20 位 · 更稳妥" },
+      { value: 24, label: "24 位 · Token / 密钥" },
+      { value: 32, label: "32 位 · 极高强度" },
+      { value: 64, label: "64 位 · 长串密钥" }
+    ];
+    const countOptions = [
+      { value: 1, label: "1 条" },
+      { value: 5, label: "5 条" },
+      { value: 10, label: "10 条" },
+      { value: 20, label: "20 条" },
+      { value: 50, label: "50 条" }
+    ];
+    const quickLengthValues = [8, 12, 16, 20, 24, 32, 64];
+    const symbolPresets = [
+      { label: "常用", value: "!@#$%^&*" },
+      { label: "兼容", value: "-_+=." },
+      { label: "严格", value: "!#$%&*+-=?@" },
+      { label: "扩展", value: "-_!@#$%^&*+=" }
+    ];
+    const passwordPresets = [
+      {
+        id: "daily-login",
+        label: "日常登录",
+        description: "账号",
+        usage: "适合常规网站账号，兼顾强度和手动输入体验。",
+        options: {
+          length: 12,
+          count: 5,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: false,
+          symbolChars: WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS,
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "secure-admin",
+        label: "后台",
+        description: "强安全",
+        usage: "优先安全性，适合不常手动输入的重要账号。",
+        options: {
+          length: 20,
+          count: 10,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: true,
+          symbolChars: "!@#$%^&*",
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "numeric-pin",
+        label: "数字 PIN",
+        description: "短码",
+        usage: "只保留数字，适合键盘或遥控器输入场景。",
+        options: {
+          length: 6,
+          count: 10,
+          includeLowercase: false,
+          includeUppercase: false,
+          includeDigits: true,
+          includeSymbols: false,
+          symbolChars: WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS,
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "dev-token",
+        label: "开发密钥",
+        description: "Token",
+        usage: "长度更长，适合 API Token、临时环境密钥一类场景。",
+        options: {
+          length: 24,
+          count: 5,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: true,
+          symbolChars: "-_!@#$%^&*+=",
+          excludeSimilar: false
+        }
+      },
+      {
+        id: "readable",
+        label: "易读",
+        description: "人工录入",
+        usage: "排除相似字符且不用符号，适合需要口述或手输的场景。",
+        options: {
+          length: 14,
+          count: 5,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: false,
+          symbolChars: WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS,
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "wifi",
+        label: "Wi-Fi",
+        description: "路由器",
+        usage: "适合 Wi-Fi、共享设备和家庭网络密码。",
+        options: {
+          length: 16,
+          count: 5,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: true,
+          symbolChars: "-_+=.",
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "temporary",
+        label: "临时",
+        description: "一次性",
+        usage: "适合短期共享、测试账号和低风险临时登录。",
+        options: {
+          length: 10,
+          count: 10,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: false,
+          symbolChars: WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS,
+          excludeSimilar: true
+        }
+      },
+      {
+        id: "archive",
+        label: "长期",
+        description: "保险箱",
+        usage: "适合长期保存的核心账号、密钥库和保险箱记录。",
+        options: {
+          length: 32,
+          count: 5,
+          includeLowercase: true,
+          includeUppercase: true,
+          includeDigits: true,
+          includeSymbols: true,
+          symbolChars: "!#$%&*+-=?@",
+          excludeSimilar: true
+        }
+      }
+    ].map((preset) => ({
+      ...preset,
+      options: normalizeWebtoolsPasswordOptions(preset.options, webtoolsPasswordOptions)
+    }));
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void generateFromWebtoolsPasswordPanel(form, { render: false });
+      void (async () => {
+        await generateFromWebtoolsPasswordPanel(form, { render: false });
+        syncPasswordWorkbench();
+      })();
+    });
+    form.addEventListener("webtools-password-sync", () => {
+      syncPasswordWorkbench();
     });
 
-    const hero = document.createElement("h3");
-    hero.className = "webtools-password-hero";
-    hero.textContent = "随机密码";
-
-    const createOptionRow = (labelText: string): {
-      row: HTMLDivElement;
-      main: HTMLDivElement;
-    } => {
-      const row = document.createElement("div");
-      row.className = "webtools-password-option";
-
-      const label = document.createElement("div");
-      label.className = "webtools-password-option-label";
-      label.textContent = labelText;
-
-      const main = document.createElement("div");
-      main.className = "webtools-password-option-main";
-
-      row.append(label, main);
-      return { row, main };
+    const syncSelectOptions = (
+      select: HTMLSelectElement,
+      options: Array<{ value: number; label: string }>,
+      selectedValue: number,
+      fallbackLabel: (value: number) => string
+    ): void => {
+      select.replaceChildren();
+      options.forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = String(entry.value);
+        option.textContent = entry.label;
+        option.selected = entry.value === selectedValue;
+        select.appendChild(option);
+      });
+      if (options.every((entry) => entry.value !== selectedValue)) {
+        const fallback = document.createElement("option");
+        fallback.value = String(selectedValue);
+        fallback.textContent = fallbackLabel(selectedValue);
+        fallback.selected = true;
+        select.appendChild(fallback);
+      }
+      select.value = String(selectedValue);
     };
 
-    const charsRowNodes = createOptionRow("字符选项");
+    const createChip = (text: string, tone: "" | "accent" | "warning" = ""): HTMLSpanElement => {
+      const chip = document.createElement("span");
+      chip.className = "webtools-password-chip";
+      if (tone) {
+        chip.dataset.tone = tone;
+      }
+      chip.textContent = text;
+      return chip;
+    };
+
+    const createCardHead = (titleText: string, subtitleText: string): HTMLDivElement => {
+      const head = document.createElement("div");
+      head.className = "webtools-password-card-head";
+
+      const title = document.createElement("div");
+      title.className = "webtools-password-card-title";
+      title.textContent = titleText;
+
+      const subtitle = document.createElement("div");
+      subtitle.className = "webtools-password-card-subtitle";
+      subtitle.textContent = subtitleText;
+
+      head.append(title, subtitle);
+      return head;
+    };
+
+    const createBlock = (
+      titleText: string,
+      subtitleText: string
+    ): { block: HTMLDivElement; body: HTMLDivElement } => {
+      const block = document.createElement("div");
+      block.className = "webtools-password-block";
+
+      const head = document.createElement("div");
+      head.className = "webtools-password-block-head";
+
+      const title = document.createElement("div");
+      title.className = "webtools-password-block-title";
+      title.textContent = titleText;
+
+      const subtitle = document.createElement("div");
+      subtitle.className = "webtools-password-block-subtitle";
+      subtitle.textContent = subtitleText;
+
+      const body = document.createElement("div");
+      body.className = "webtools-password-block-body";
+
+      head.append(title, subtitle);
+      block.append(head, body);
+      return { block, body };
+    };
+
+    const createFlagCard = (
+      inputName: string,
+      labelText: string,
+      metaText: string,
+      checked: boolean
+    ): { wrap: HTMLLabelElement; input: HTMLInputElement } => {
+      const wrap = document.createElement("label");
+      wrap.className = "webtools-password-flag webtools-password-flag-card";
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = inputName;
+      input.className = "password-checkbox";
+      input.checked = checked;
+
+      const copy = document.createElement("span");
+      copy.className = "webtools-password-flag-copy";
+
+      const title = document.createElement("strong");
+      title.textContent = labelText;
+
+      const meta = document.createElement("small");
+      meta.textContent = metaText;
+
+      copy.append(title, meta);
+      wrap.append(input, copy);
+      return { wrap, input };
+    };
+
+    const getPasswordPoolSize = (options: WebtoolsPasswordOptions): number => {
+      let size = 0;
+      if (options.includeLowercase) {
+        size += 26;
+      }
+      if (options.includeUppercase) {
+        size += 26;
+      }
+      if (options.includeDigits) {
+        size += 10;
+      }
+      if (options.includeSymbols) {
+        size += Math.max(1, new Set(options.symbolChars.split("")).size);
+      }
+      return size;
+    };
+
+    const getStrengthMeta = (
+      entropy: number
+    ): {
+      label: WebtoolsPasswordResultRow["strength"];
+      toneClass:
+        | "webtools-password-strength-weak"
+        | "webtools-password-strength-medium"
+        | "webtools-password-strength-strong"
+        | "webtools-password-strength-very-strong";
+      description: string;
+    } => {
+      if (entropy < 45) {
+        return {
+          label: "弱",
+          toneClass: "webtools-password-strength-weak",
+          description: "更适合临时用途，重要账号建议继续加长或增加字符类型。"
+        };
+      }
+      if (entropy < 65) {
+        return {
+          label: "中",
+          toneClass: "webtools-password-strength-medium",
+          description: "适合一般登录场景，再加长度会更稳。"
+        };
+      }
+      if (entropy < 90) {
+        return {
+          label: "强",
+          toneClass: "webtools-password-strength-strong",
+          description: "已经足够稳妥，适合后台、工作账号等核心场景。"
+        };
+      }
+      return {
+        label: "很强",
+        toneClass: "webtools-password-strength-very-strong",
+        description: "更适合高敏感账号、长期凭证和开发密钥。"
+      };
+    };
+
+    const findMatchingPreset = (
+      options: WebtoolsPasswordOptions
+    ): (typeof passwordPresets)[number] | undefined =>
+      passwordPresets.find((preset) => {
+        const presetOptions = preset.options;
+        return (
+          presetOptions.length === options.length &&
+          presetOptions.count === options.count &&
+          presetOptions.includeLowercase === options.includeLowercase &&
+          presetOptions.includeUppercase === options.includeUppercase &&
+          presetOptions.includeDigits === options.includeDigits &&
+          presetOptions.includeSymbols === options.includeSymbols &&
+          presetOptions.excludeSimilar === options.excludeSimilar &&
+          (!options.includeSymbols || presetOptions.symbolChars === options.symbolChars)
+        );
+      });
+
+    const hero = document.createElement("div");
+    hero.className = "webtools-password-hero";
+    const heroCopy = document.createElement("div");
+    heroCopy.className = "webtools-password-hero-copy";
+    const heroTitle = document.createElement("h3");
+    heroTitle.className = "webtools-password-hero-title";
+    heroTitle.textContent = panelTitle;
+    const heroSubtitle = document.createElement("p");
+    heroSubtitle.className = "webtools-password-hero-subtitle";
+    heroSubtitle.textContent = panelSubtitle;
+    const heroBadges = document.createElement("div");
+    heroBadges.className = "webtools-password-hero-badges";
+    heroCopy.append(heroTitle, heroSubtitle);
+    hero.append(heroCopy, heroBadges);
+
+    const workbench = document.createElement("div");
+    workbench.className = "webtools-password-workbench";
+
+    const configCard = document.createElement("section");
+    configCard.className = "settings-group webtools-password-card webtools-password-config-card";
+    configCard.appendChild(createCardHead("生成配置", "预设、字符、长度、数量集中操作。"));
+
+    const presetBlockNodes = createBlock("快捷预设", "按场景切组合。");
+    const presetGrid = document.createElement("div");
+    presetGrid.className = "webtools-password-preset-grid";
+    const presetButtons: HTMLButtonElement[] = [];
+    passwordPresets.forEach((preset) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-password-preset";
+      button.dataset.presetId = preset.id;
+
+      const title = document.createElement("strong");
+      title.textContent = preset.label;
+
+      const description = document.createElement("span");
+      description.textContent = preset.description;
+
+      button.append(title, description);
+      button.addEventListener("click", () => {
+        applyOptionsToForm(preset.options);
+        syncPasswordWorkbench();
+        setStatus(`已切换到 ${preset.label}`);
+      });
+      presetButtons.push(button);
+      presetGrid.appendChild(button);
+    });
+    presetBlockNodes.body.appendChild(presetGrid);
+
+    const controlsGrid = document.createElement("div");
+    controlsGrid.className = "webtools-password-control-grid";
+
+    const charsBlockNodes = createBlock("字符池", "勾选参与生成的字符类型。");
     const charsWrap = document.createElement("div");
-    charsWrap.className = "webtools-password-flags";
+    charsWrap.className = "webtools-password-flags webtools-password-flag-grid";
 
-    const lowerWrap = document.createElement("label");
-    lowerWrap.className = "webtools-password-flag";
-    const lowerInput = document.createElement("input");
-    lowerInput.type = "checkbox";
-    lowerInput.name = "webtoolsLowercase";
-    lowerInput.className = "password-checkbox";
-    lowerInput.checked = webtoolsPasswordOptions.includeLowercase;
-    const lowerText = document.createElement("span");
-    lowerText.textContent = "小写字母 (a-z)";
-    lowerWrap.append(lowerInput, lowerText);
+    const lowerNodes = createFlagCard(
+      "webtoolsLowercase",
+      "小写字母",
+      "a-z",
+      webtoolsPasswordOptions.includeLowercase
+    );
+    const lowerInput = lowerNodes.input;
+    const upperNodes = createFlagCard(
+      "webtoolsUppercase",
+      "大写字母",
+      "A-Z",
+      webtoolsPasswordOptions.includeUppercase
+    );
+    const upperInput = upperNodes.input;
+    const digitsNodes = createFlagCard(
+      "webtoolsDigits",
+      "数字",
+      "0-9",
+      webtoolsPasswordOptions.includeDigits
+    );
+    const digitsInput = digitsNodes.input;
 
-    const upperWrap = document.createElement("label");
-    upperWrap.className = "webtools-password-flag";
-    const upperInput = document.createElement("input");
-    upperInput.type = "checkbox";
-    upperInput.name = "webtoolsUppercase";
-    upperInput.className = "password-checkbox";
-    upperInput.checked = webtoolsPasswordOptions.includeUppercase;
-    const upperText = document.createElement("span");
-    upperText.textContent = "大写字母 (A-Z)";
-    upperWrap.append(upperInput, upperText);
+    charsWrap.append(lowerNodes.wrap, upperNodes.wrap, digitsNodes.wrap);
+    charsBlockNodes.body.appendChild(charsWrap);
 
-    const digitsWrap = document.createElement("label");
-    digitsWrap.className = "webtools-password-flag";
-    const digitsInput = document.createElement("input");
-    digitsInput.type = "checkbox";
-    digitsInput.name = "webtoolsDigits";
-    digitsInput.className = "password-checkbox";
-    digitsInput.checked = webtoolsPasswordOptions.includeDigits;
-    const digitsText = document.createElement("span");
-    digitsText.textContent = "数字 (0-9)";
-    digitsWrap.append(digitsInput, digitsText);
-
-    charsWrap.append(lowerWrap, upperWrap, digitsWrap);
-    charsRowNodes.main.append(charsWrap);
-
-    const symbolsRowNodes = createOptionRow("特殊字符");
+    const symbolsBlockNodes = createBlock("符号与容错", "符号集可一键切换。");
     const symbolsWrap = document.createElement("div");
-    symbolsWrap.className = "webtools-password-symbols";
+    symbolsWrap.className = "webtools-password-symbols webtools-password-symbol-stack";
 
-    const includeSymbolsWrap = document.createElement("label");
-    includeSymbolsWrap.className = "webtools-password-flag";
-    const includeSymbolsInput = document.createElement("input");
-    includeSymbolsInput.type = "checkbox";
-    includeSymbolsInput.name = "webtoolsSymbols";
-    includeSymbolsInput.className = "password-checkbox";
-    includeSymbolsInput.checked = webtoolsPasswordOptions.includeSymbols;
-    const includeSymbolsText = document.createElement("span");
-    includeSymbolsText.textContent = "特殊字符";
-    includeSymbolsWrap.append(includeSymbolsInput, includeSymbolsText);
+    const includeSymbolsNodes = createFlagCard(
+      "webtoolsSymbols",
+      "特殊字符",
+      "提升复杂度",
+      webtoolsPasswordOptions.includeSymbols
+    );
+    const includeSymbolsInput = includeSymbolsNodes.input;
 
     const symbolsInput = document.createElement("input");
     symbolsInput.className = "settings-value webtools-password-symbol-input";
@@ -1458,82 +5058,247 @@ window.__LL_PANEL_IMPLS__ = {
     symbolsInput.value = webtoolsPasswordOptions.symbolChars;
     symbolsInput.placeholder = "!@#$%^&*";
 
-    const excludeSimilarWrap = document.createElement("label");
-    excludeSimilarWrap.className = "webtools-password-flag";
-    const excludeSimilarInput = document.createElement("input");
-    excludeSimilarInput.type = "checkbox";
-    excludeSimilarInput.name = "webtoolsExcludeSimilar";
-    excludeSimilarInput.className = "password-checkbox";
-    excludeSimilarInput.checked = webtoolsPasswordOptions.excludeSimilar;
-    const excludeSimilarText = document.createElement("span");
-    excludeSimilarText.textContent = "排除相似字符";
-    excludeSimilarWrap.append(excludeSimilarInput, excludeSimilarText);
+    const symbolsField = document.createElement("label");
+    symbolsField.className = "webtools-password-input-field";
+    const symbolsFieldLabel = document.createElement("span");
+    symbolsFieldLabel.className = "webtools-password-field-label";
+    symbolsFieldLabel.textContent = "符号集合";
+    symbolsField.append(symbolsFieldLabel, symbolsInput);
 
-    symbolsWrap.append(includeSymbolsWrap, symbolsInput, excludeSimilarWrap);
-    symbolsRowNodes.main.append(symbolsWrap);
+    const symbolQuickGrid = document.createElement("div");
+    symbolQuickGrid.className = "webtools-password-quick-grid webtools-password-symbol-quick";
+    const symbolQuickButtons: HTMLButtonElement[] = [];
+    symbolPresets.forEach((preset) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-password-mini-btn";
+      button.textContent = preset.label;
+      button.title = preset.value;
+      button.addEventListener("click", () => {
+        includeSymbolsInput.checked = true;
+        symbolsInput.value = preset.value;
+        syncPasswordWorkbench();
+        setStatus(`已套用${preset.label}符号集`);
+      });
+      symbolQuickButtons.push(button);
+      symbolQuickGrid.appendChild(button);
+    });
 
-    const lengthRowNodes = createOptionRow("密码长度");
+    const excludeSimilarNodes = createFlagCard(
+      "webtoolsExcludeSimilar",
+      "排除相似字符",
+      "避免 0/O、1/l 混淆",
+      webtoolsPasswordOptions.excludeSimilar
+    );
+    const excludeSimilarInput = excludeSimilarNodes.input;
+
+    symbolsWrap.append(includeSymbolsNodes.wrap, symbolsField, symbolQuickGrid, excludeSimilarNodes.wrap);
+    symbolsBlockNodes.body.appendChild(symbolsWrap);
+
+    controlsGrid.append(charsBlockNodes.block, symbolsBlockNodes.block);
+
+    const sizingGrid = document.createElement("div");
+    sizingGrid.className = "webtools-password-sizing-grid";
+
+    const lengthField = document.createElement("label");
+    lengthField.className = "webtools-password-field";
+    const lengthLabel = document.createElement("span");
+    lengthLabel.className = "webtools-password-field-label";
+    lengthLabel.textContent = "密码长度";
     const lengthInput = document.createElement("select");
     lengthInput.className = "settings-number webtools-password-length-select";
     lengthInput.name = "webtoolsLength";
-    [
-      { value: 8, label: "8 位密码 (低强度)" },
-      { value: 12, label: "12 位密码 (中强度)" },
-      { value: 16, label: "16 位密码 (高强度)" },
-      { value: 20, label: "20 位密码 (高强度)" },
-      { value: 32, label: "32 位密码 (极高强度)" },
-      { value: 64, label: "64 位密码 (极高强度)" }
-    ].forEach((entry) => {
-      const option = document.createElement("option");
-      option.value = String(entry.value);
-      option.textContent = entry.label;
-      option.selected = entry.value === webtoolsPasswordOptions.length;
-      lengthInput.appendChild(option);
-    });
-    if (lengthInput.selectedIndex === -1) {
-      const fallback = document.createElement("option");
-      fallback.value = String(webtoolsPasswordOptions.length);
-      fallback.textContent = `${webtoolsPasswordOptions.length} 位密码 (自定义)`;
-      fallback.selected = true;
-      lengthInput.appendChild(fallback);
-    }
     const lengthHint = document.createElement("span");
-    lengthHint.className = "webtools-password-safe-hint";
-    lengthHint.textContent = "密码长度很安全";
-    lengthRowNodes.main.append(lengthInput, lengthHint);
+    lengthHint.className = "webtools-password-field-hint webtools-password-safe-hint";
+    lengthField.append(lengthLabel, lengthInput, lengthHint);
 
-    const countRowNodes = createOptionRow("生成数量");
+    const quickLengthGrid = document.createElement("div");
+    quickLengthGrid.className = "webtools-password-quick-grid webtools-password-length-quick";
+    const quickLengthButtons: HTMLButtonElement[] = [];
+    quickLengthValues.forEach((value) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-password-mini-btn";
+      button.textContent = String(value);
+      button.addEventListener("click", () => {
+        syncSelectOptions(
+          lengthInput,
+          lengthOptions,
+          value,
+          (customValue) => `${customValue} 位 · 自定义`
+        );
+        syncPasswordWorkbench();
+      });
+      quickLengthButtons.push(button);
+      quickLengthGrid.appendChild(button);
+    });
+
+    const countField = document.createElement("label");
+    countField.className = "webtools-password-field";
+    const countLabel = document.createElement("span");
+    countLabel.className = "webtools-password-field-label";
+    countLabel.textContent = "生成数量";
     const countInput = document.createElement("select");
     countInput.className = "settings-number webtools-password-count-select";
     countInput.name = "webtoolsCount";
-    [1, 5, 10, 20, 50].forEach((count) => {
-      const option = document.createElement("option");
-      option.value = String(count);
-      option.textContent = String(count);
-      option.selected = count === webtoolsPasswordOptions.count;
-      countInput.appendChild(option);
-    });
-    if (countInput.selectedIndex === -1) {
-      const fallback = document.createElement("option");
-      fallback.value = String(webtoolsPasswordOptions.count);
-      fallback.textContent = String(webtoolsPasswordOptions.count);
-      fallback.selected = true;
-      countInput.appendChild(fallback);
-    }
-    countRowNodes.main.append(countInput);
+    const countHint = document.createElement("span");
+    countHint.className = "webtools-password-field-hint";
+    countField.append(countLabel, countInput, countHint);
+    const lengthStack = document.createElement("div");
+    lengthStack.className = "webtools-password-field-stack";
+    lengthStack.append(lengthField, quickLengthGrid);
+    sizingGrid.append(lengthStack, countField);
 
-    const outputHost = document.createElement("div");
-    outputHost.className = "webtools-password-result-host";
-    outputHost.appendChild(createWebtoolsPasswordResultTable(webtoolsPasswordRows));
-
-    const generateWrap = document.createElement("div");
-    generateWrap.className = "webtools-password-generate-wrap";
+    const actionRow = document.createElement("div");
+    actionRow.className = "webtools-password-action-row";
 
     const generateButton = document.createElement("button");
     generateButton.type = "submit";
     generateButton.className = "settings-btn settings-btn-primary webtools-password-generate-btn";
     generateButton.textContent = "生成密码";
-    generateWrap.appendChild(generateButton);
+    actionRow.appendChild(generateButton);
+
+    const generateCopyButton = document.createElement("button");
+    generateCopyButton.type = "button";
+    generateCopyButton.className =
+      "settings-btn settings-btn-primary webtools-password-generate-copy-btn";
+    generateCopyButton.textContent = "生成并复制";
+    generateCopyButton.addEventListener("click", () => {
+      void (async () => {
+        await generateFromWebtoolsPasswordPanel(form, { render: false });
+        syncPasswordWorkbench();
+        const firstPassword = webtoolsPasswordRows[0]?.password;
+        if (!firstPassword) {
+          return;
+        }
+        const copied = await copyTextToClipboard(firstPassword);
+        setStatus(copied ? "已生成并复制首条密码" : "密码已生成，复制失败");
+      })();
+    });
+    actionRow.appendChild(generateCopyButton);
+
+    const copyFirstButton = document.createElement("button");
+    copyFirstButton.type = "button";
+    copyFirstButton.className =
+      "settings-btn settings-btn-secondary webtools-password-copy-first-btn";
+    copyFirstButton.textContent = "复制首条";
+    copyFirstButton.addEventListener("click", () => {
+      const firstPassword = webtoolsPasswordRows[0]?.password;
+      if (!firstPassword) {
+        setStatus("还没有可复制的密码");
+        return;
+      }
+      void (async () => {
+        const copied = await copyTextToClipboard(firstPassword);
+        setStatus(copied ? "已复制首条密码" : "复制失败");
+      })();
+    });
+    actionRow.appendChild(copyFirstButton);
+
+    configCard.append(presetBlockNodes.block, controlsGrid, sizingGrid, actionRow);
+
+    const summaryCard = document.createElement("aside");
+    summaryCard.className =
+      "settings-group webtools-password-card webtools-password-summary-card";
+    summaryCard.appendChild(createCardHead("摘要", "实时看强度和结果。"));
+
+    const summaryGrid = document.createElement("div");
+    summaryGrid.className = "webtools-password-summary-grid";
+
+    const createMetric = (
+      labelText: string
+    ): { metric: HTMLDivElement; value: HTMLDivElement } => {
+      const metric = document.createElement("div");
+      metric.className = "webtools-password-metric";
+      const label = document.createElement("div");
+      label.className = "webtools-password-metric-label";
+      label.textContent = labelText;
+      const value = document.createElement("div");
+      value.className = "webtools-password-metric-value";
+      metric.append(label, value);
+      return { metric, value };
+    };
+
+    const lengthMetric = createMetric("长度");
+    const poolMetric = createMetric("字符池");
+    const groupMetric = createMetric("字符类型");
+    const countMetric = createMetric("批量数量");
+    summaryGrid.append(
+      lengthMetric.metric,
+      poolMetric.metric,
+      groupMetric.metric,
+      countMetric.metric
+    );
+
+    const strengthPanel = document.createElement("div");
+    strengthPanel.className = "webtools-password-strength-panel";
+    const strengthBadge = document.createElement("span");
+    strengthBadge.className = "webtools-password-strength";
+    const strengthDescription = document.createElement("div");
+    strengthDescription.className = "webtools-password-entropy";
+    strengthPanel.append(strengthBadge, strengthDescription);
+
+    const summaryBadges = document.createElement("div");
+    summaryBadges.className = "webtools-password-summary-badges";
+
+    const preview = document.createElement("div");
+    preview.className = "webtools-password-preview";
+    const previewHead = document.createElement("div");
+    previewHead.className = "webtools-password-preview-head";
+    const previewTitle = document.createElement("div");
+    previewTitle.className = "webtools-password-preview-title";
+    previewTitle.textContent = "最近首条";
+    const previewMeta = document.createElement("div");
+    previewMeta.className = "webtools-password-card-subtitle";
+    previewHead.append(previewTitle, previewMeta);
+    const previewValue = document.createElement("code");
+    previewValue.className = "webtools-password-preview-value";
+    preview.append(previewHead, previewValue);
+
+    const tips = document.createElement("div");
+    tips.className = "webtools-password-tip-list";
+
+    summaryCard.append(summaryGrid, strengthPanel, summaryBadges, preview, tips);
+
+    workbench.append(configCard, summaryCard);
+
+    const resultsCard = document.createElement("section");
+    resultsCard.className =
+      "settings-group webtools-password-card webtools-password-results-card";
+    const resultsHead = document.createElement("div");
+    resultsHead.className = "webtools-password-results-head";
+    const resultsHeadCopy = createCardHead("生成结果", "结果会按强度展示，并支持逐条复制。");
+    const resultsActions = document.createElement("div");
+    resultsActions.className = "webtools-password-results-actions";
+    let passwordResultsMasked = false;
+
+    const updatePasswordMaskState = (): void => {
+      resultsCard.dataset.masked = passwordResultsMasked ? "true" : "false";
+    };
+
+    const copyPasswordRows = (
+      mode: "plain" | "numbered" | "json",
+      successText: string
+    ): void => {
+      if (webtoolsPasswordRows.length === 0) {
+        setStatus("还没有可复制的密码");
+        return;
+      }
+      let content = "";
+      if (mode === "json") {
+        content = JSON.stringify(webtoolsPasswordRows, null, 2);
+      } else if (mode === "numbered") {
+        content = webtoolsPasswordRows
+          .map((row, index) => `${index + 1}. ${row.password}`)
+          .join("\n");
+      } else {
+        content = webtoolsPasswordRows.map((row) => row.password).join("\n");
+      }
+      void (async () => {
+        const copied = await copyTextToClipboard(content);
+        setStatus(copied ? successText : "复制失败");
+      })();
+    };
 
     const actions = document.createElement("div");
     actions.className = "settings-actions webtools-password-tools-actions";
@@ -1545,32 +5310,261 @@ window.__LL_PANEL_IMPLS__ = {
     clearButton.addEventListener("click", () => {
       webtoolsPasswordRows = [];
       refreshWebtoolsPasswordResultInForm(form);
+      syncPasswordWorkbench();
       setStatus("已清空密码结果");
     });
+    resultsActions.appendChild(clearButton);
+
+    const maskButton = document.createElement("button");
+    maskButton.type = "button";
+    maskButton.className = "settings-btn settings-btn-secondary webtools-password-mask-btn";
+    maskButton.textContent = "隐藏密码";
+    maskButton.addEventListener("click", () => {
+      passwordResultsMasked = !passwordResultsMasked;
+      maskButton.textContent = passwordResultsMasked ? "显示密码" : "隐藏密码";
+      updatePasswordMaskState();
+    });
+    resultsActions.appendChild(maskButton);
+
+    const copyAllButton = document.createElement("button");
+    copyAllButton.type = "button";
+    copyAllButton.className = "settings-btn settings-btn-secondary webtools-password-copy-all-btn";
+    copyAllButton.textContent = "复制全部";
+    copyAllButton.addEventListener("click", () => {
+      copyPasswordRows("plain", `已复制 ${webtoolsPasswordRows.length} 条密码`);
+    });
+    resultsActions.appendChild(copyAllButton);
+
+    const copyNumberedButton = document.createElement("button");
+    copyNumberedButton.type = "button";
+    copyNumberedButton.className =
+      "settings-btn settings-btn-secondary webtools-password-copy-numbered-btn";
+    copyNumberedButton.textContent = "复制编号";
+    copyNumberedButton.addEventListener("click", () => {
+      copyPasswordRows("numbered", `已复制 ${webtoolsPasswordRows.length} 条带编号密码`);
+    });
+    resultsActions.appendChild(copyNumberedButton);
+
+    const copyJsonButton = document.createElement("button");
+    copyJsonButton.type = "button";
+    copyJsonButton.className = "settings-btn settings-btn-secondary webtools-password-copy-json-btn";
+    copyJsonButton.textContent = "复制 JSON";
+    copyJsonButton.addEventListener("click", () => {
+      copyPasswordRows("json", "已复制密码 JSON");
+    });
+    resultsActions.appendChild(copyJsonButton);
 
     const backButton = document.createElement("button");
     backButton.type = "button";
-    backButton.className = "settings-btn settings-btn-secondary";
+    backButton.className = "settings-btn settings-btn-secondary webtools-password-back-btn";
     backButton.textContent = "返回搜索";
     backButton.addEventListener("click", () => {
       backToSearch();
     });
+    resultsActions.appendChild(backButton);
 
-    actions.append(clearButton, backButton);
+    resultsHead.append(resultsHeadCopy, resultsActions);
+
+    const outputHost = document.createElement("div");
+    outputHost.className = "webtools-password-result-host";
+    outputHost.appendChild(createWebtoolsPasswordResultTable(webtoolsPasswordRows));
+    resultsCard.append(resultsHead, outputHost);
+
+    const readDraftOptions = (): Partial<WebtoolsPasswordOptions> => ({
+      length: Number(lengthInput.value),
+      count: Number(countInput.value),
+      includeLowercase: lowerInput.checked,
+      includeUppercase: upperInput.checked,
+      includeDigits: digitsInput.checked,
+      includeSymbols: includeSymbolsInput.checked,
+      symbolChars: symbolsInput.value,
+      excludeSimilar: excludeSimilarInput.checked
+    });
+
+    const applyOptionsToForm = (nextOptions: Partial<WebtoolsPasswordOptions>): void => {
+      const normalized = normalizeWebtoolsPasswordOptions(nextOptions, webtoolsPasswordOptions);
+      lowerInput.checked = normalized.includeLowercase;
+      upperInput.checked = normalized.includeUppercase;
+      digitsInput.checked = normalized.includeDigits;
+      includeSymbolsInput.checked = normalized.includeSymbols;
+      excludeSimilarInput.checked = normalized.excludeSimilar;
+      symbolsInput.value = normalized.symbolChars;
+      syncSelectOptions(
+        lengthInput,
+        lengthOptions,
+        normalized.length,
+        (value) => `${value} 位 · 自定义`
+      );
+      syncSelectOptions(
+        countInput,
+        countOptions,
+        normalized.count,
+        (value) => `${value} 条`
+      );
+    };
+
+    const syncPasswordWorkbench = (): void => {
+      const draftOptions = readDraftOptions();
+      const rawGroupCount =
+        Number(lowerInput.checked) +
+        Number(upperInput.checked) +
+        Number(digitsInput.checked) +
+        Number(includeSymbolsInput.checked);
+      const normalized = normalizeWebtoolsPasswordOptions(draftOptions, webtoolsPasswordOptions);
+      const poolSize = getPasswordPoolSize(normalized);
+      const entropy = normalized.length * Math.log2(Math.max(2, poolSize));
+      const strength = getStrengthMeta(entropy);
+      const matchedPreset = findMatchingPreset(normalized);
+
+      syncSelectOptions(
+        lengthInput,
+        lengthOptions,
+        normalized.length,
+        (value) => `${value} 位 · 自定义`
+      );
+      syncSelectOptions(
+        countInput,
+        countOptions,
+        normalized.count,
+        (value) => `${value} 条`
+      );
+
+      heroBadges.replaceChildren(
+        createChip(matchedPreset?.label || "自定义"),
+        createChip(`${normalized.length} 位`),
+        createChip(`${normalized.count} 条`, normalized.count >= 10 ? "accent" : "")
+      );
+
+      lengthHint.textContent =
+        normalized.length >= 24
+          ? "更适合 Token、密钥和长期凭证。"
+          : normalized.length >= 16
+            ? "兼顾安全性与常规登录使用。"
+            : normalized.length >= 12
+              ? "适合大多数站点登录。"
+              : "更适合短 PIN 或一次性场景。";
+      countHint.textContent =
+        normalized.count >= 20 ? "更适合批量抽样挑选。" : "更适合手动逐条查看。";
+
+      lengthMetric.value.textContent = `${normalized.length} 位`;
+      poolMetric.value.textContent = `${poolSize} 种`;
+      groupMetric.value.textContent = `${Math.max(rawGroupCount, 1)} 类`;
+      countMetric.value.textContent = `${normalized.count} 条`;
+
+      strengthBadge.className = "webtools-password-strength";
+      strengthBadge.classList.add(strength.toneClass);
+      strengthBadge.textContent = strength.label;
+      strengthDescription.textContent = `约 ${Math.round(entropy)} bit 熵值 · ${strength.description}`;
+
+      summaryBadges.replaceChildren();
+      if (normalized.includeLowercase) {
+        summaryBadges.appendChild(createChip("小写字母"));
+      }
+      if (normalized.includeUppercase) {
+        summaryBadges.appendChild(createChip("大写字母"));
+      }
+      if (normalized.includeDigits) {
+        summaryBadges.appendChild(createChip("数字"));
+      }
+      if (normalized.includeSymbols) {
+        summaryBadges.appendChild(createChip("特殊字符", "accent"));
+      }
+      if (normalized.excludeSimilar) {
+        summaryBadges.appendChild(createChip("排除相似字符"));
+      }
+      if (rawGroupCount === 0) {
+        summaryBadges.appendChild(createChip("生成时会自动回退到字母+数字", "warning"));
+      }
+
+      const firstPassword = webtoolsPasswordRows[0]?.password;
+      if (firstPassword) {
+        previewValue.textContent = firstPassword;
+        previewValue.dataset.empty = "false";
+        previewMeta.textContent = `已生成 ${webtoolsPasswordRows.length} 条，可逐条复制。`;
+      } else {
+        previewValue.textContent = "还没有生成结果，先选个预设再点生成。";
+        previewValue.dataset.empty = "true";
+        previewMeta.textContent = matchedPreset?.usage || "右侧会在生成后展示最近首条。";
+      }
+
+      tips.replaceChildren();
+      const tipTexts = [
+        matchedPreset?.usage ||
+          "没有完全匹配的预设，当前组合会按你的勾选生成。",
+        normalized.includeSymbols
+          ? `当前符号池含 ${Math.max(1, new Set(normalized.symbolChars.split("")).size)} 种字符。`
+          : "未启用特殊字符，输入体验更轻，但强度会低一些。",
+        normalized.excludeSimilar
+          ? "已尽量避开容易看错的字符，更适合人工录入。"
+          : "保留所有字符可扩大组合空间，适合复制粘贴型场景。"
+      ];
+      tipTexts.forEach((tipText) => {
+        const item = document.createElement("div");
+        item.className = "webtools-password-tip";
+        item.textContent = tipText;
+        tips.appendChild(item);
+      });
+
+      const resultsMeta = resultsHeadCopy.querySelector(".webtools-password-card-subtitle");
+      if (resultsMeta instanceof HTMLDivElement) {
+        resultsMeta.textContent = firstPassword
+          ? `共 ${webtoolsPasswordRows.length} 条，支持逐条复制和首条快捷复制。`
+          : "结果会按强度展示，并支持逐条复制。";
+      }
+
+      copyFirstButton.disabled = !firstPassword;
+      copyAllButton.disabled = webtoolsPasswordRows.length === 0;
+      copyNumberedButton.disabled = webtoolsPasswordRows.length === 0;
+      copyJsonButton.disabled = webtoolsPasswordRows.length === 0;
+      maskButton.disabled = webtoolsPasswordRows.length === 0;
+      clearButton.disabled = webtoolsPasswordRows.length === 0;
+      symbolsInput.disabled = !includeSymbolsInput.checked;
+      symbolQuickButtons.forEach((button, index) => {
+        button.dataset.active =
+          includeSymbolsInput.checked && symbolPresets[index]?.value === normalized.symbolChars
+            ? "true"
+            : "false";
+      });
+      quickLengthButtons.forEach((button) => {
+        button.dataset.active = button.textContent === String(normalized.length) ? "true" : "false";
+      });
+
+      presetButtons.forEach((button) => {
+        button.dataset.active =
+          button.dataset.presetId === matchedPreset?.id ? "true" : "false";
+      });
+    };
+
+    [
+      lowerInput,
+      upperInput,
+      digitsInput,
+      includeSymbolsInput,
+      excludeSimilarInput,
+      lengthInput,
+      countInput
+    ].forEach((inputNode) => {
+      inputNode.addEventListener("change", () => {
+        syncPasswordWorkbench();
+      });
+    });
+    symbolsInput.addEventListener("input", () => {
+      syncPasswordWorkbench();
+    });
+
+    updatePasswordMaskState();
 
     form.append(
       hero,
-      charsRowNodes.row,
-      symbolsRowNodes.row,
-      lengthRowNodes.row,
-      countRowNodes.row,
-      generateWrap,
-      outputHost,
-      actions
+      workbench,
+      resultsCard
     );
     panel.append(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
+
+    applyOptionsToForm(webtoolsPasswordOptions);
+    syncPasswordWorkbench();
   },
 
   applyWebtoolsJsonPanelPayload(panel: ActivePluginPanelState): void {
@@ -1608,50 +5602,197 @@ window.__LL_PANEL_IMPLS__ = {
       valid: null,
       sourceFormat,
       targetFormat,
-      compressed
+      compressed,
+      preview: null,
+      errorPosition: null,
+      selectedFields: []
     };
   },
 
   renderWebtoolsJsonPanel(): void {
+    type JsonFormat = "json" | "csv" | "text" | "escaped";
+
+    const formatOptions: Array<{ value: JsonFormat; label: string }> = [
+      { value: "json", label: "JSON" },
+      { value: "csv", label: "CSV" },
+      { value: "text", label: "纯文本" },
+      { value: "escaped", label: "Escaped" }
+    ];
+    const routePresets: Array<{
+      label: string;
+      source: JsonFormat;
+      target: JsonFormat;
+      compressed?: boolean;
+    }> = [
+      { label: "JSON -> CSV", source: "json", target: "csv" },
+      { label: "CSV -> JSON", source: "csv", target: "json" },
+      { label: "格式化 JSON", source: "json", target: "json", compressed: false },
+      { label: "压缩 JSON", source: "json", target: "json", compressed: true },
+      { label: "JSON -> Escaped", source: "json", target: "escaped" },
+      { label: "Escaped -> JSON", source: "escaped", target: "json" },
+      { label: "Text -> JSON", source: "text", target: "json" },
+      { label: "Text -> Escaped", source: "text", target: "escaped" }
+    ];
+    const sampleInputs: Array<{
+      label: string;
+      note: string;
+      source: JsonFormat;
+      target: JsonFormat;
+      input: string;
+      compressed?: boolean;
+    }> = [
+      {
+        label: "订单 JSON",
+        note: "数组转表格",
+        source: "json",
+        target: "csv",
+        input:
+          "[\n" +
+          "  {\"orderId\":\"T1001\",\"buyer\":\"Alice\",\"amount\":128.5,\"paid\":true},\n" +
+          "  {\"orderId\":\"T1002\",\"buyer\":\"Bob\",\"amount\":89,\"paid\":false}\n" +
+          "]"
+      },
+      {
+        label: "CSV 表格",
+        note: "表格转对象",
+        source: "csv",
+        target: "json",
+        input: "name,role,active\nAlice,Admin,true\nBob,Editor,false"
+      },
+      {
+        label: "接口返回",
+        note: "格式化查看",
+        source: "json",
+        target: "json",
+        input:
+          "{\"code\":0,\"data\":{\"items\":[{\"id\":1,\"title\":\"发布提醒\"},{\"id\":2,\"title\":\"订单同步\"}],\"page\":1},\"traceId\":\"demo-2026\"}"
+      },
+      {
+        label: "Escaped",
+        note: "反转义 JSON",
+        source: "escaped",
+        target: "json",
+        input: JSON.stringify(
+          JSON.stringify({
+            title: "发布提醒",
+            done: false,
+            tags: ["json", "escaped"]
+          })
+        )
+      },
+      {
+        label: "多行文本",
+        note: "转字符串",
+        source: "text",
+        target: "escaped",
+        input: "第一行文本\n第二行包含 \"引号\" 和路径 C:\\\\temp"
+      }
+    ];
+    const formatLabel = (value: string): string =>
+      formatOptions.find((option) => option.value === value)?.label ?? value.toUpperCase();
+    const summarizeText = (value: string): string => {
+      if (!value) {
+        return "0 字符 · 0 行";
+      }
+      return `${value.length} 字符 · ${value.split(/\r\n|\r|\n/).length} 行`;
+    };
+    const describePayload = (value: string, format: string): string => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return "等待输入";
+      }
+      if (format === "csv") {
+        const lines = trimmed.split(/\r\n|\r|\n/).filter(Boolean);
+        const columns = lines[0]?.split(",").length ?? 0;
+        return `${lines.length} 行 · ${columns} 列`;
+      }
+      if (format === "json") {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            return `数组 · ${parsed.length} 项`;
+          }
+          if (parsed && typeof parsed === "object") {
+            return `对象 · ${Object.keys(parsed as Record<string, unknown>).length} 键`;
+          }
+          return typeof parsed;
+        } catch {
+          return "等待校验";
+        }
+      }
+      if (format === "escaped") {
+        return "JSON 字符串";
+      }
+      return "纯文本";
+    };
+    const markButton = (button: HTMLButtonElement, text: string, resetText: string): void => {
+      button.textContent = text;
+      window.setTimeout(() => {
+        if (button.isConnected) {
+          button.textContent = resetText;
+        }
+      }, 1200);
+    };
+
     const panelItem = document.createElement("li");
     panelItem.className = "settings-panel-item";
 
     const panel = document.createElement("section");
     panel.className = "settings-panel";
 
-    const title = document.createElement("h3");
-    title.className = "settings-title";
-    title.textContent = activePluginPanel?.title || "JSON & CSV 实验室";
-
-    const description = document.createElement("p");
-    description.className = "settings-description";
-    description.textContent =
-      activePluginPanel?.subtitle || "支持 JSON/CSV/纯文本/Escaped 双向转换。";
-
     const form = document.createElement("form");
-    form.className = "settings-form webtools-json-form webtools-json-lab";
+    form.className = "settings-form webtools-json-form webtools-tool-panel webtools-json-lab";
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void executeWebtoolsJsonConvert(form, { render: false });
     });
 
-    const topActions = document.createElement("div");
-    topActions.className = "webtools-json-toolbar";
+    const header = document.createElement("div");
+    header.className = "webtools-tool-header webtools-json-header";
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "webtools-tool-title-group";
+    const title = document.createElement("h3");
+    title.className = "webtools-tool-title";
+    title.textContent = activePluginPanel?.title || "JSON & CSV 实验室";
+    const description = document.createElement("p");
+    description.className = "webtools-tool-subtitle";
+    description.textContent =
+      activePluginPanel?.subtitle || "格式转换、校验、转义和样例测试集中在一个紧凑工作台。";
+    titleGroup.append(title, description);
+
+    const headerActions = document.createElement("div");
+    headerActions.className = "webtools-json-toolbar";
+    const convertButton = document.createElement("button");
+    convertButton.type = "submit";
+    convertButton.className = "settings-btn settings-btn-primary webtools-json-convert-btn";
+    convertButton.textContent = "转换";
+    const validateButton = document.createElement("button");
+    validateButton.type = "button";
+    validateButton.className =
+      "settings-btn settings-btn-secondary webtools-json-validate-btn";
+    validateButton.textContent = "校验";
+    validateButton.addEventListener("click", () => {
+      void executeWebtoolsJsonConvert(form, { render: false, action: "validate" });
+    });
     const clearButton = document.createElement("button");
     clearButton.type = "button";
-    clearButton.className = "settings-btn settings-btn-secondary";
+    clearButton.className = "settings-btn settings-btn-secondary webtools-json-clear-btn";
     clearButton.textContent = "清空";
     clearButton.addEventListener("click", () => {
       webtoolsJsonState.input = "";
       webtoolsJsonState.output = "";
       webtoolsJsonState.info = "";
       webtoolsJsonState.valid = null;
+      webtoolsJsonState.preview = null;
+      webtoolsJsonState.errorPosition = null;
+      webtoolsJsonState.selectedFields = [];
       inputArea.value = "";
       outputArea.value = "";
       refreshWebtoolsJsonResultInForm(form);
       setStatus("已清空输入与输出");
     });
-    topActions.append(clearButton);
+    headerActions.append(convertButton, validateButton, clearButton);
+    header.append(titleGroup, headerActions);
 
     const converterBar = document.createElement("div");
     converterBar.className = "webtools-json-converter";
@@ -1664,12 +5805,7 @@ window.__LL_PANEL_IMPLS__ = {
     const sourceSelect = document.createElement("select");
     sourceSelect.className = "settings-number webtools-json-select";
     sourceSelect.name = "webtoolsJsonSource";
-    [
-      ["text", "纯文本"],
-      ["json", "JSON"],
-      ["csv", "CSV"],
-      ["escaped", "Escaped"]
-    ].forEach(([value, label]) => {
+    formatOptions.forEach(({ value, label }) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -1681,7 +5817,7 @@ window.__LL_PANEL_IMPLS__ = {
     const swapButton = document.createElement("button");
     swapButton.type = "button";
     swapButton.className = "settings-btn settings-btn-secondary webtools-json-swap";
-    swapButton.textContent = "⇅";
+    swapButton.textContent = "交换";
 
     const targetGroup = document.createElement("label");
     targetGroup.className = "webtools-json-converter-group";
@@ -1691,12 +5827,7 @@ window.__LL_PANEL_IMPLS__ = {
     const targetSelect = document.createElement("select");
     targetSelect.className = "settings-number webtools-json-select";
     targetSelect.name = "webtoolsJsonTarget";
-    [
-      ["json", "JSON"],
-      ["csv", "CSV"],
-      ["text", "纯文本"],
-      ["escaped", "Escaped"]
-    ].forEach(([value, label]) => {
+    formatOptions.forEach(({ value, label }) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -1707,6 +5838,135 @@ window.__LL_PANEL_IMPLS__ = {
 
     const formatHint = document.createElement("div");
     formatHint.className = "webtools-json-route";
+
+    const controlPanel = document.createElement("section");
+    controlPanel.className = "webtools-json-control-panel";
+
+    const routePresetWrap = document.createElement("div");
+    routePresetWrap.className = "webtools-json-route-presets";
+    const routePresetLabel = document.createElement("span");
+    routePresetLabel.className = "webtools-json-mini-label";
+    routePresetLabel.textContent = "常用路线";
+    const routeButtonWrap = document.createElement("div");
+    routeButtonWrap.className = "webtools-json-chip-row";
+    const routeButtons: HTMLButtonElement[] = [];
+    routePresets.forEach((preset) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-json-chip-btn";
+      button.textContent = preset.label;
+      button.addEventListener("click", () => {
+        sourceSelect.value = preset.source;
+        targetSelect.value = preset.target;
+        compressedInput.checked = preset.compressed ?? false;
+        updateJsonFormHead();
+        scheduleWebtoolsJsonAutoConvert(form, true);
+      });
+      routeButtons.push(button);
+      routeButtonWrap.appendChild(button);
+    });
+    routePresetWrap.append(routePresetLabel, routeButtonWrap);
+
+    const sampleWrap = document.createElement("div");
+    sampleWrap.className = "webtools-json-sample-strip";
+    const sampleLabel = document.createElement("span");
+    sampleLabel.className = "webtools-json-mini-label";
+    sampleLabel.textContent = "快速样例";
+    const sampleButtonWrap = document.createElement("div");
+    sampleButtonWrap.className = "webtools-json-sample-grid";
+    sampleInputs.forEach((sample) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-json-sample-btn";
+      const buttonTitle = document.createElement("strong");
+      buttonTitle.textContent = sample.label;
+      const buttonNote = document.createElement("span");
+      buttonNote.textContent = sample.note;
+      button.append(buttonTitle, buttonNote);
+      button.addEventListener("click", () => {
+      inputArea.value = sample.input;
+      outputArea.value = "";
+      webtoolsJsonState.output = "";
+      webtoolsJsonState.selectedFields = [];
+      sourceSelect.value = sample.source;
+      targetSelect.value = sample.target;
+      compressedInput.checked = sample.compressed ?? false;
+        updateJsonFormHead();
+        updateJsonStats();
+        scheduleWebtoolsJsonAutoConvert(form, true);
+        setStatus(`已载入${sample.label}样例`);
+      });
+      sampleButtonWrap.appendChild(button);
+    });
+    sampleWrap.append(sampleLabel, sampleButtonWrap);
+
+    const stats = document.createElement("div");
+    stats.className = "webtools-json-stats";
+    const routeStat = document.createElement("span");
+    routeStat.className = "webtools-json-stat webtools-json-route-stat";
+    const inputStat = document.createElement("span");
+    inputStat.className = "webtools-json-stat webtools-json-input-stat";
+    const outputStat = document.createElement("span");
+    outputStat.className = "webtools-json-stat webtools-json-output-stat";
+    const payloadStat = document.createElement("span");
+    payloadStat.className = "webtools-json-stat webtools-json-payload-stat";
+    stats.append(routeStat, inputStat, outputStat, payloadStat);
+
+    const utilityDeck = document.createElement("section");
+    utilityDeck.className = "webtools-json-utility-deck";
+
+    const structureCard = document.createElement("section");
+    structureCard.className = "webtools-json-structure-card";
+    const structureHead = document.createElement("div");
+    structureHead.className = "webtools-json-card-head";
+    const structureTitle = document.createElement("span");
+    structureTitle.className = "webtools-json-card-title";
+    structureTitle.textContent = "结构预览";
+    const structureMeta = document.createElement("span");
+    structureMeta.className = "webtools-json-card-meta";
+    structureHead.append(structureTitle, structureMeta);
+    const structureSummary = document.createElement("div");
+    structureSummary.className = "webtools-json-structure-summary";
+    const structureFields = document.createElement("div");
+    structureFields.className = "webtools-json-structure-fields";
+    const structureSample = document.createElement("pre");
+    structureSample.className = "webtools-json-structure-sample";
+    structureCard.append(structureHead, structureSummary, structureFields, structureSample);
+
+    const cleanActionsCard = document.createElement("section");
+    cleanActionsCard.className = "webtools-json-clean-actions";
+    const cleanHead = document.createElement("div");
+    cleanHead.className = "webtools-json-card-head";
+    const cleanTitle = document.createElement("span");
+    cleanTitle.className = "webtools-json-card-title";
+    cleanTitle.textContent = "一键清洗";
+    const cleanMeta = document.createElement("span");
+    cleanMeta.className = "webtools-json-card-meta";
+    cleanMeta.textContent = "作用于输入区";
+    cleanHead.append(cleanTitle, cleanMeta);
+    const cleanButtonGrid = document.createElement("div");
+    cleanButtonGrid.className = "webtools-json-clean-button-grid";
+    cleanActionsCard.append(cleanHead, cleanButtonGrid);
+
+    const fieldsCard = document.createElement("section");
+    fieldsCard.className = "webtools-json-fields-card";
+    const fieldsHead = document.createElement("div");
+    fieldsHead.className = "webtools-json-card-head";
+    const fieldsTitle = document.createElement("span");
+    fieldsTitle.className = "webtools-json-card-title";
+    fieldsTitle.textContent = "字段提取";
+    const fieldsMeta = document.createElement("span");
+    fieldsMeta.className = "webtools-json-card-meta";
+    fieldsHead.append(fieldsTitle, fieldsMeta);
+    const fieldsHint = document.createElement("div");
+    fieldsHint.className = "webtools-json-fields-hint";
+    const fieldActions = document.createElement("div");
+    fieldActions.className = "webtools-json-fields-actions";
+    const fieldChipWrap = document.createElement("div");
+    fieldChipWrap.className = "webtools-json-field-chip-row";
+    fieldsCard.append(fieldsHead, fieldsHint, fieldActions, fieldChipWrap);
+
+    utilityDeck.append(structureCard, cleanActionsCard, fieldsCard);
 
     const inputArea = document.createElement("textarea");
     inputArea.className = "settings-value webtools-textarea webtools-json-textarea";
@@ -1725,9 +5985,27 @@ window.__LL_PANEL_IMPLS__ = {
     compressedText.textContent = "压缩输出 (Minify)";
     compressedWrap.append(compressedInput, compressedText);
 
-    const outputMeta = document.createElement("div");
-    outputMeta.className = "webtools-json-pane-controls";
-    outputMeta.append(compressedWrap);
+    const inputActions = document.createElement("div");
+    inputActions.className = "webtools-json-pane-controls";
+    const copyInputButton = document.createElement("button");
+    copyInputButton.type = "button";
+    copyInputButton.className =
+      "settings-btn settings-btn-secondary webtools-json-copy-input-btn";
+    copyInputButton.textContent = "复制输入";
+    copyInputButton.addEventListener("click", () => {
+      void (async () => {
+        if (!inputArea.value) {
+          setStatus("当前没有可复制的输入内容");
+          return;
+        }
+        const copied = await copyTextToClipboard(inputArea.value);
+        if (copied) {
+          markButton(copyInputButton, "已复制", "复制输入");
+        }
+        setStatus(copied ? "已复制输入内容" : "复制失败");
+      })();
+    });
+    inputActions.append(copyInputButton);
 
     const outputArea = document.createElement("textarea");
     outputArea.className = "settings-value webtools-textarea webtools-json-textarea";
@@ -1736,24 +6014,329 @@ window.__LL_PANEL_IMPLS__ = {
     outputArea.placeholder = "转换后结果";
     outputArea.value = webtoolsJsonState.output;
 
+    const outputMeta = document.createElement("div");
+    outputMeta.className = "webtools-json-pane-controls";
+    outputMeta.append(compressedWrap);
+
+    const useOutputButton = document.createElement("button");
+    useOutputButton.type = "button";
+    useOutputButton.className =
+      "settings-btn settings-btn-secondary webtools-json-use-output-btn";
+    useOutputButton.textContent = "回填";
+    useOutputButton.addEventListener("click", () => {
+      if (!outputArea.value.trim()) {
+        setStatus("当前没有可回填的输出内容");
+        return;
+      }
+      inputArea.value = outputArea.value;
+      sourceSelect.value = targetSelect.value;
+      webtoolsJsonState.output = "";
+      webtoolsJsonState.selectedFields = [];
+      outputArea.value = "";
+      updateJsonFormHead();
+      updateJsonStats();
+      scheduleWebtoolsJsonAutoConvert(form, true);
+      setStatus("已将输出回填为输入");
+    });
+
     const copyButton = document.createElement("button");
     copyButton.type = "button";
     copyButton.className =
       "settings-btn settings-btn-secondary webtools-json-copy-btn";
-    copyButton.textContent = "复制";
+    copyButton.textContent = "复制输出";
     copyButton.addEventListener("click", () => {
       void (async () => {
+        if (!outputArea.value) {
+          setStatus("当前没有可复制的输出内容");
+          return;
+        }
         const copied = await copyTextToClipboard(outputArea.value);
+        if (copied) {
+          markButton(copyButton, "已复制", "复制输出");
+        }
         setStatus(copied ? "已复制输出内容" : "复制失败");
       })();
     });
-    outputMeta.append(copyButton);
+    outputMeta.append(useOutputButton, copyButton);
+
+    const sortJsonKeys = (value: unknown): unknown => {
+      if (Array.isArray(value)) {
+        return value.map((item) => sortJsonKeys(item));
+      }
+      if (value && typeof value === "object") {
+        return Object.keys(value as Record<string, unknown>)
+          .sort((left, right) => left.localeCompare(right))
+          .reduce<Record<string, unknown>>((result, key) => {
+            result[key] = sortJsonKeys((value as Record<string, unknown>)[key]);
+            return result;
+          }, {});
+      }
+      return value;
+    };
+
+    const pruneJsonValue = (value: unknown): unknown => {
+      if (Array.isArray(value)) {
+        const items = value
+          .map((item) => pruneJsonValue(item))
+          .filter(
+            (item) =>
+              item !== null &&
+              item !== "" &&
+              !(Array.isArray(item) && item.length === 0) &&
+              !(item && typeof item === "object" && Object.keys(item as Record<string, unknown>).length === 0)
+          );
+        return items;
+      }
+      if (value && typeof value === "object") {
+        const nextEntries = Object.entries(value as Record<string, unknown>)
+          .map(([key, item]) => [key, pruneJsonValue(item)] as const)
+          .filter(
+            ([, item]) =>
+              item !== null &&
+              item !== "" &&
+              !(Array.isArray(item) && item.length === 0) &&
+              !(item && typeof item === "object" && Object.keys(item as Record<string, unknown>).length === 0)
+          );
+        return Object.fromEntries(nextEntries);
+      }
+      return value;
+    };
+
+    const updateJsonInputValue = (nextInput: string, statusText: string): void => {
+      inputArea.value = nextInput;
+      webtoolsJsonState.input = nextInput;
+      webtoolsJsonState.output = "";
+      webtoolsJsonState.valid = null;
+      webtoolsJsonState.info = "";
+      webtoolsJsonState.errorPosition = null;
+      updateJsonStats();
+      scheduleWebtoolsJsonAutoConvert(form, true);
+      setStatus(statusText);
+    };
+
+    const applyJsonCleanAction = (
+      label: string,
+      transform: (source: string) => string
+    ): void => {
+      try {
+        updateJsonInputValue(transform(inputArea.value), `已执行${label}`);
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : `${label}失败`;
+        setStatus(message);
+      }
+    };
+
+    const renderPreviewFieldPills = (): void => {
+      structureFields.replaceChildren();
+      const fields = webtoolsJsonState.preview?.fields ?? [];
+      if (fields.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "webtools-json-inline-empty";
+        empty.textContent = "当前结构里还没有可识别字段";
+        structureFields.appendChild(empty);
+        return;
+      }
+      fields.slice(0, 8).forEach((field) => {
+        const pill = document.createElement("span");
+        pill.className = "webtools-json-inline-pill";
+        pill.textContent =
+          typeof field.count === "number" ? `${field.key} · ${field.count}` : field.key;
+        structureFields.appendChild(pill);
+      });
+    };
+
+    const renderStructurePreview = (): void => {
+      const preview = webtoolsJsonState.preview;
+      structureMeta.textContent = preview?.kind ?? "unknown";
+      structureSummary.textContent = preview?.summary ?? "等待自动识别输入结构";
+      renderPreviewFieldPills();
+      structureSample.textContent =
+        preview && preview.sampleRows.length > 0
+          ? JSON.stringify(preview.sampleRows, null, 2)
+          : "暂无样例行";
+    };
+
+    const applySelectedFields = (): void => {
+      const selected = webtoolsJsonState.selectedFields;
+      if (selected.length === 0) {
+        setStatus("请先选择至少一个字段");
+        return;
+      }
+      try {
+        if (sourceSelect.value === "csv") {
+          const lines = inputArea.value.split(/\r?\n/).filter((line) => line.length > 0);
+          if (lines.length === 0) {
+            setStatus("当前没有可提取的 CSV 内容");
+            return;
+          }
+          const headers = lines[0].split(",");
+          const indexes = selected
+            .map((key) => headers.indexOf(key))
+            .filter((index) => index >= 0);
+          const nextLines = lines.map((line, index) => {
+            const cells = line.split(",");
+            if (index === 0) {
+              return indexes.map((cellIndex) => cells[cellIndex] ?? "").join(",");
+            }
+            return indexes.map((cellIndex) => cells[cellIndex] ?? "").join(",");
+          });
+          updateJsonInputValue(nextLines.join("\n"), `已提取 ${selected.length} 个字段`);
+          return;
+        }
+
+        const parsed = JSON.parse(inputArea.value);
+        const pickObject = (row: Record<string, unknown>) =>
+          selected.reduce<Record<string, unknown>>((result, key) => {
+            if (key in row) {
+              result[key] = row[key];
+            }
+            return result;
+          }, {});
+
+        const nextValue = Array.isArray(parsed)
+          ? parsed.map((item) =>
+              item && typeof item === "object" && !Array.isArray(item)
+                ? pickObject(item as Record<string, unknown>)
+                : item
+            )
+          : parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? pickObject(parsed as Record<string, unknown>)
+          : parsed;
+        const nextInput = JSON.stringify(nextValue, null, 2);
+        updateJsonInputValue(nextInput, `已提取 ${selected.length} 个字段`);
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : "字段提取失败";
+        setStatus(message);
+      }
+    };
+
+    const renderFieldSelector = (): void => {
+      fieldChipWrap.replaceChildren();
+      fieldActions.replaceChildren();
+      const fields = webtoolsJsonState.preview?.fields ?? [];
+      fieldsMeta.textContent = fields.length > 0 ? `${fields.length} 个字段` : "不可用";
+      fieldsHint.textContent =
+        fields.length > 0
+          ? "选中后可直接把当前输入收敛成目标字段"
+          : "解析到对象数组或 CSV 表头后，这里会出现可选字段";
+      if (fields.length === 0) {
+        return;
+      }
+
+      const selectAllButton = document.createElement("button");
+      selectAllButton.type = "button";
+      selectAllButton.className = "settings-btn settings-btn-secondary webtools-json-mini-btn";
+      selectAllButton.textContent = "全选";
+      selectAllButton.addEventListener("click", () => {
+        webtoolsJsonState.selectedFields = fields.map((field) => field.key);
+        renderFieldSelector();
+      });
+
+      const clearSelectButton = document.createElement("button");
+      clearSelectButton.type = "button";
+      clearSelectButton.className = "settings-btn settings-btn-secondary webtools-json-mini-btn";
+      clearSelectButton.textContent = "清空";
+      clearSelectButton.addEventListener("click", () => {
+        webtoolsJsonState.selectedFields = [];
+        renderFieldSelector();
+      });
+
+      const applyFieldsButton = document.createElement("button");
+      applyFieldsButton.type = "button";
+      applyFieldsButton.className = "settings-btn settings-btn-secondary webtools-json-mini-btn";
+      applyFieldsButton.textContent = "应用字段";
+      applyFieldsButton.addEventListener("click", () => {
+        applySelectedFields();
+      });
+
+      fieldActions.append(selectAllButton, clearSelectButton, applyFieldsButton);
+
+      fields.forEach((field) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "webtools-json-field-chip";
+        const selected = webtoolsJsonState.selectedFields.includes(field.key);
+        chip.dataset.active = String(selected);
+        chip.textContent =
+          typeof field.count === "number" ? `${field.key} (${field.count})` : field.key;
+        chip.addEventListener("click", () => {
+          if (selected) {
+            webtoolsJsonState.selectedFields = webtoolsJsonState.selectedFields.filter(
+              (key) => key !== field.key
+            );
+          } else {
+            webtoolsJsonState.selectedFields = [...webtoolsJsonState.selectedFields, field.key];
+          }
+          renderFieldSelector();
+        });
+        fieldChipWrap.appendChild(chip);
+      });
+    };
+
+    [
+      {
+        label: "格式化 JSON",
+        action: () =>
+          applyJsonCleanAction("格式化 JSON", (source) =>
+            JSON.stringify(JSON.parse(source), null, 2)
+          )
+      },
+      {
+        label: "压缩 JSON",
+        action: () =>
+          applyJsonCleanAction("压缩 JSON", (source) => JSON.stringify(JSON.parse(source)))
+      },
+      {
+        label: "字段排序",
+        action: () =>
+          applyJsonCleanAction("字段排序", (source) =>
+            JSON.stringify(sortJsonKeys(JSON.parse(source)), null, 2)
+          )
+      },
+      {
+        label: "移除空值",
+        action: () =>
+          applyJsonCleanAction("移除空值", (source) =>
+            JSON.stringify(pruneJsonValue(JSON.parse(source)), null, 2)
+          )
+      }
+    ].forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "settings-btn settings-btn-secondary webtools-json-clean-btn";
+      button.textContent = item.label;
+      button.addEventListener("click", item.action);
+      cleanButtonGrid.appendChild(button);
+    });
+
+    const updateJsonStats = (): void => {
+      routeStat.textContent = `${formatLabel(sourceSelect.value)} -> ${formatLabel(targetSelect.value)}`;
+      inputStat.textContent = `输入 ${summarizeText(inputArea.value)}`;
+      outputStat.textContent = `输出 ${summarizeText(outputArea.value)}`;
+      payloadStat.textContent = describePayload(inputArea.value, sourceSelect.value);
+      payloadStat.dataset.state = webtoolsJsonState.valid === false ? "error" : "idle";
+      renderStructurePreview();
+      renderFieldSelector();
+    };
 
     const updateJsonFormHead = (): void => {
-      const source = sourceSelect.value.toUpperCase();
-      const target = targetSelect.value.toUpperCase();
-      formatHint.textContent = `${source} -> ${target}`;
+      const source = formatLabel(sourceSelect.value);
+      const target = formatLabel(targetSelect.value);
+      const minifyText = targetSelect.value === "json" && compressedInput.checked ? " · Minify" : "";
+      formatHint.textContent = `${source} -> ${target}${minifyText}`;
       compressedWrap.style.display = targetSelect.value === "json" ? "" : "none";
+      inputMeta.textContent = sourceSelect.value.toUpperCase();
+      outputMetaText.textContent = targetSelect.value.toUpperCase();
+      routeButtons.forEach((button, index) => {
+        const preset = routePresets[index];
+        button.dataset.active = String(
+          sourceSelect.value === preset.source &&
+            targetSelect.value === preset.target &&
+            (preset.compressed === undefined ||
+              compressedInput.checked === Boolean(preset.compressed))
+        );
+      });
+      updateJsonStats();
     };
 
     swapButton.addEventListener("click", () => {
@@ -1764,6 +6347,7 @@ window.__LL_PANEL_IMPLS__ = {
       if (webtoolsJsonState.output.trim()) {
         inputArea.value = webtoolsJsonState.output;
         webtoolsJsonState.output = "";
+        webtoolsJsonState.selectedFields = [];
         outputArea.value = "";
       }
       updateJsonFormHead();
@@ -1779,17 +6363,20 @@ window.__LL_PANEL_IMPLS__ = {
       scheduleWebtoolsJsonAutoConvert(form, true);
     });
     compressedInput.addEventListener("change", () => {
+      updateJsonFormHead();
       scheduleWebtoolsJsonAutoConvert(form, true);
     });
     inputArea.addEventListener("input", () => {
+      webtoolsJsonState.selectedFields = [];
+      updateJsonStats();
       scheduleWebtoolsJsonAutoConvert(form);
     });
-    updateJsonFormHead();
 
-    converterBar.append(sourceGroup, swapButton, targetGroup);
+    converterBar.append(sourceGroup, swapButton, targetGroup, formatHint);
+    controlPanel.append(converterBar, routePresetWrap, sampleWrap, stats);
 
     const editors = document.createElement("div");
-    editors.className = "webtools-json-editors";
+    editors.className = "webtools-json-shell webtools-json-editors";
 
     const inputPane = document.createElement("section");
     inputPane.className = "webtools-json-pane";
@@ -1801,7 +6388,10 @@ window.__LL_PANEL_IMPLS__ = {
     const inputMeta = document.createElement("span");
     inputMeta.className = "webtools-json-pane-meta webtools-json-input-meta";
     inputMeta.textContent = webtoolsJsonState.sourceFormat.toUpperCase();
-    inputHead.append(inputTitle, inputMeta);
+    const inputTitleWrap = document.createElement("div");
+    inputTitleWrap.className = "webtools-json-pane-title-wrap";
+    inputTitleWrap.append(inputTitle, inputMeta);
+    inputHead.append(inputTitleWrap, inputActions);
     const inputError = document.createElement("div");
     inputError.className = "webtools-json-error";
     inputError.hidden = true;
@@ -1831,8 +6421,14 @@ window.__LL_PANEL_IMPLS__ = {
     info.textContent = infoState.text;
     info.dataset.state = infoState.state;
 
-    form.append(topActions, converterBar, formatHint, editors, info);
-    panel.append(title, description, form);
+    form.addEventListener("webtools-json-sync", () => {
+      updateJsonFormHead();
+      updateJsonStats();
+    });
+    updateJsonFormHead();
+
+    form.append(header, controlPanel, utilityDeck, editors, info);
+    panel.append(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
 
@@ -5678,16 +10274,28 @@ window.__LL_PANEL_IMPLS__ = {
     refreshWebtoolsHttpMockPanelInForm(form);
   },
 
+  applyCodeAgentSwitchPanelPayload(panel: unknown): void {
+    codeAgentSwitchData = getCodeAgentSwitchDataFromPanel(panel);
+    codeAgentSwitchCopyState = "";
+    syncCodeAgentSwitchSelectionFromData();
+  },
+
+  renderCodeAgentSwitchPanel(): void {
+    renderCodeAgentSwitchPanelV2();
+  },
+
   applyWebtoolsCronPanelPayload(panel: ActivePluginPanelState): void {
-    if (panel.data && typeof panel.data.expression === "string") {
-      webtoolsCronExpression = panel.data.expression;
-    }
-    webtoolsCronReadable = "";
-    webtoolsCronNextRun = "";
-    webtoolsCronUpcoming = [];
+    const data = toRecord(panel.data);
+    resetWebtoolsCronState(
+      data && typeof data.expression === "string" ? data.expression : webtoolsCronExpression
+    );
+    hydrateWebtoolsCronState(data);
   },
 
   renderWebtoolsCronPanel(): void {
+    renderWebtoolsCronPanelV2();
+    return;
+
     const panelItem = document.createElement("li");
     panelItem.className = "settings-panel-item";
 

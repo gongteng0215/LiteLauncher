@@ -25,6 +25,10 @@ import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { filterItemsByPathRules } from "./path-rule-filter";
 import {
+  ClipboardWorkbenchService,
+  setClipboardWorkbenchService
+} from "./plugins/clipboard-workbench";
+import {
   CashflowDatabasePersistence,
   setCashflowGamePersistence
 } from "./plugins/cashflow-game";
@@ -60,11 +64,42 @@ const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
 const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
 const REQUIRED_VISIBLE_PLUGIN_IDS = [
   "hardware-inspector",
+  "clipboard-workbench",
   "webtools-file-hash",
   "webtools-port-helper",
-  "webtools-image-prompt"
+  "webtools-image-prompt",
+  "codeagent-switch"
 ] as const;
 const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  "cashflow-game",
+  "hardware-inspector",
+  "clipboard-workbench",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-http-mock",
+  "webtools-image-base64",
+  "webtools-image-prompt",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-ua",
+  "webtools-api-client",
+  "codeagent-switch"
+] as const;
+const PRE_CLIPBOARD_WORKBENCH_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
   "webtools-password",
@@ -89,7 +124,8 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-qrcode",
   "webtools-markdown",
   "webtools-ua",
-  "webtools-api-client"
+  "webtools-api-client",
+  "codeagent-switch"
 ] as const;
 const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -188,6 +224,7 @@ let shortcutRegistered = false;
 let activeShortcut: string | null = null;
 let searchWorker: SearchWorkerClient | null = null;
 let clipService: ClipService | null = null;
+let clipboardWorkbenchService: ClipboardWorkbenchService | null = null;
 let appQuitting = false;
 let searchDisplayConfig: SearchDisplayConfig = {
   ...DEFAULT_SEARCH_DISPLAY_CONFIG
@@ -635,6 +672,20 @@ async function ensureDataLayer(): Promise<void> {
   if (!clipService) {
     clipService = new ClipService(database);
   }
+
+  if (!clipboardWorkbenchService) {
+    const dbPath = path.join(app.getPath("userData"), "litelauncher.db");
+    clipboardWorkbenchService = new ClipboardWorkbenchService({
+      dbPath,
+      assetsDir: path.join(
+        app.getPath("userData"),
+        "clipboard-workbench",
+        "assets"
+      )
+    });
+    await clipboardWorkbenchService.init();
+    setClipboardWorkbenchService(clipboardWorkbenchService);
+  }
 }
 
 async function loadSearchDisplayConfig(
@@ -876,6 +927,10 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       applied,
       [...PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
+    const shouldUpgradePreClipboardWorkbenchDefault = areStringArraysSetEqual(
+      applied,
+      [...PRE_CLIPBOARD_WORKBENCH_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
     const shouldUpgradeLegacyDefault = areStringArraysSetEqual(
       applied,
       [...LEGACY_DEFAULT_VISIBLE_PLUGIN_IDS]
@@ -893,6 +948,7 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldUpgradeCurrentDefault ||
       shouldUpgradeLastCurrentDefault ||
       shouldUpgradePreHardwareDefault ||
+      shouldUpgradePreClipboardWorkbenchDefault ||
       shouldUpgradeLegacyDefault ||
       shouldUpgradePreviousDefault ||
       shouldUpgradeOlderDefault
@@ -905,6 +961,7 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldUpgradeCurrentDefault ||
       shouldUpgradeLastCurrentDefault ||
       shouldUpgradePreHardwareDefault ||
+      shouldUpgradePreClipboardWorkbenchDefault ||
       shouldUpgradeLegacyDefault ||
       shouldUpgradePreviousDefault ||
       shouldUpgradeOlderDefault ||
@@ -1094,6 +1151,7 @@ async function bootstrap(): Promise<void> {
 
   const activeUsageStore = usageStore;
   const activeClipService = clipService;
+  const activeClipboardWorkbenchService = clipboardWorkbenchService;
   const activeDatabase = database;
   if (!activeUsageStore) {
     throw new Error("Usage store was not initialized");
@@ -1103,6 +1161,9 @@ async function bootstrap(): Promise<void> {
   }
   if (!activeDatabase) {
     throw new Error("Database was not initialized");
+  }
+  if (!activeClipboardWorkbenchService) {
+    throw new Error("Clipboard Workbench service was not initialized");
   }
 
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
@@ -1283,6 +1344,7 @@ async function bootstrap(): Promise<void> {
   });
 
   activeClipService.start();
+  activeClipboardWorkbenchService.start();
   if (!E2E_MODE) {
     registerGlobalShortcut(
       () => toggleLauncherWindow(launcherWindow),
@@ -1380,6 +1442,12 @@ app.on("will-quit", () => {
     clipService.stop();
     clipService = null;
   }
+  if (clipboardWorkbenchService) {
+    clipboardWorkbenchService.stop();
+    void clipboardWorkbenchService.close();
+    clipboardWorkbenchService = null;
+  }
+  setClipboardWorkbenchService(null);
   if (searchWorker) {
     void searchWorker.terminate();
     searchWorker = null;

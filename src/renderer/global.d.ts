@@ -15,6 +15,7 @@ import {
 interface RendererPluginConstants {
   CASHFLOW_PLUGIN_ID: string;
   HARDWARE_INSPECTOR_PLUGIN_ID: string;
+  CLIPBOARD_WORKBENCH_PLUGIN_ID: string;
   WEBTOOLS_PASSWORD_PLUGIN_ID: string;
   WEBTOOLS_JSON_PLUGIN_ID: string;
   WEBTOOLS_URL_PLUGIN_ID: string;
@@ -38,6 +39,7 @@ interface RendererPluginConstants {
   WEBTOOLS_UA_PLUGIN_ID: string;
   WEBTOOLS_API_PLUGIN_ID: string;
   WEBTOOLS_HTTP_MOCK_PLUGIN_ID: string;
+  CODEAGENT_SWITCH_PLUGIN_ID: string;
   DEFAULT_VISIBLE_PLUGIN_IDS: string[];
 }
 
@@ -162,6 +164,8 @@ interface RendererImagePromptData {
 interface RendererPanelImpls {
   applyHardwareInspectorPanelPayload(panel: unknown): void;
   renderHardwareInspectorPanel(): void;
+  applyClipboardWorkbenchPanelPayload(panel: unknown): void;
+  renderClipboardWorkbenchPanel(): void;
   applyWebtoolsPasswordPanelPayload(panel: unknown): void;
   renderWebtoolsPasswordPanel(): void;
   applyWebtoolsJsonPanelPayload(panel: unknown): void;
@@ -208,6 +212,8 @@ interface RendererPanelImpls {
   renderWebtoolsApiPanel(): void;
   applyWebtoolsHttpMockPanelPayload(panel: unknown): void;
   renderWebtoolsHttpMockPanel(): void;
+  applyCodeAgentSwitchPanelPayload(panel: unknown): void;
+  renderCodeAgentSwitchPanel(): void;
 }
 
 

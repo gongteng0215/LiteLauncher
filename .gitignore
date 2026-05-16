@@ -8,3 +8,4 @@ _tmp_*
 tmp-*
 pnpm-debug.log*
 release
+.superpowers/

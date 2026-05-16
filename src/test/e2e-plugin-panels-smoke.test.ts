@@ -582,3 +582,129 @@ test(
     }
   }
 );
+
+test(
+  "electron smoke: clipboard workbench saves manual text and shows bulk actions",
+  { timeout: 240000 },
+  async () => {
+    const testName =
+      "electron smoke: clipboard workbench saves manual text and shows bulk actions";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    try {
+      session = await launchE2ESession();
+      const { page } = session;
+
+      await page.setViewportSize({ width: 900, height: 720 });
+
+      const alphaText = `clipboard workbench alpha ${Date.now()}`;
+      const betaText = `clipboard workbench beta ${Date.now() + 1}`;
+
+      await openPluginFromSearch(
+        page,
+        "clipx",
+        "Clipboard Workbench",
+        "clipboard-workbench"
+      );
+
+      const form = page.locator("form.clipboard-workbench-form");
+      await form.waitFor({ state: "visible", timeout: 10000 });
+
+      const manualTextInput = form.locator(
+        'textarea[name="clipboardWorkbenchManualText"]'
+      );
+      const saveManualButton = form.locator(
+        '[data-clipboard-workbench-save-manual="1"]'
+      );
+
+      await manualTextInput.fill(alphaText);
+      await saveManualButton.click();
+      await page.waitForFunction(
+        (expectedText) => {
+          const items = Array.from(
+            document.querySelectorAll(".clipboard-workbench-item")
+          );
+          const status = document.querySelector("#status-text");
+          return (
+            items.some((node) => node.textContent?.includes(expectedText)) &&
+            status?.textContent?.includes("Saved manual text") === true
+          );
+        },
+        alphaText,
+        { timeout: 15000 }
+      );
+
+      await manualTextInput.fill(betaText);
+      await saveManualButton.click();
+      await page.waitForFunction(
+        ([firstText, secondText]) => {
+          const items = Array.from(
+            document.querySelectorAll(".clipboard-workbench-item")
+          );
+          return (
+            items.some((node) => node.textContent?.includes(firstText)) &&
+            items.some((node) => node.textContent?.includes(secondText))
+          );
+        },
+        [alphaText, betaText],
+        { timeout: 15000 }
+      );
+
+      const alphaCard = form
+        .locator(".clipboard-workbench-item")
+        .filter({ hasText: alphaText })
+        .first();
+      const betaCard = form
+        .locator(".clipboard-workbench-item")
+        .filter({ hasText: betaText })
+        .first();
+
+      await alphaCard
+        .locator('[data-clipboard-workbench-item-toggle]')
+        .click();
+      await betaCard
+        .locator('[data-clipboard-workbench-item-toggle]')
+        .click();
+
+      const bulkBar = form.locator(".clipboard-workbench-bulk-bar");
+      await bulkBar.waitFor({ state: "visible", timeout: 10000 });
+      await page.waitForFunction(() => {
+        const bulk = document.querySelector(".clipboard-workbench-bulk-bar");
+        return bulk?.textContent?.includes("2 selected") === true;
+      });
+
+      await bulkBar
+        .locator('[data-clipboard-workbench-bulk-action="merge-once"]')
+        .click();
+      await page.waitForFunction(() => {
+        const status = document.querySelector("#status-text");
+        return (
+          status?.textContent?.includes(
+            "Merged text restored to the clipboard."
+          ) === true
+        );
+      });
+
+      await bulkBar
+        .locator('[data-clipboard-workbench-bulk-action="sequential"]')
+        .click();
+      await page.waitForFunction(() => {
+        const status = document.querySelector("#status-text");
+        const text = status?.textContent ?? "";
+        return (
+          text.includes("Pasted 2 items sequentially.") ||
+          text.includes("Restored to the clipboard. Use Ctrl+V manually.")
+        );
+      });
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await session.close();
+      }
+    }
+  }
+);

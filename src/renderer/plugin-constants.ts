@@ -1,6 +1,7 @@
 window.__LL_PLUGIN_CONSTANTS__ = {
   CASHFLOW_PLUGIN_ID: "cashflow-game",
   HARDWARE_INSPECTOR_PLUGIN_ID: "hardware-inspector",
+  CLIPBOARD_WORKBENCH_PLUGIN_ID: "clipboard-workbench",
   WEBTOOLS_PASSWORD_PLUGIN_ID: "webtools-password",
   WEBTOOLS_JSON_PLUGIN_ID: "webtools-json",
   WEBTOOLS_URL_PLUGIN_ID: "webtools-url-parse",
@@ -24,9 +25,11 @@ window.__LL_PLUGIN_CONSTANTS__ = {
   WEBTOOLS_UA_PLUGIN_ID: "webtools-ua",
   WEBTOOLS_API_PLUGIN_ID: "webtools-api-client",
   WEBTOOLS_HTTP_MOCK_PLUGIN_ID: "webtools-http-mock",
+  CODEAGENT_SWITCH_PLUGIN_ID: "codeagent-switch",
   DEFAULT_VISIBLE_PLUGIN_IDS: [
     "cashflow-game",
     "hardware-inspector",
+    "clipboard-workbench",
     "webtools-password",
     "webtools-cron",
     "webtools-json",
@@ -49,6 +52,7 @@ window.__LL_PLUGIN_CONSTANTS__ = {
     "webtools-qrcode",
     "webtools-markdown",
     "webtools-ua",
-    "webtools-api-client"
+    "webtools-api-client",
+    "codeagent-switch"
   ]
 };

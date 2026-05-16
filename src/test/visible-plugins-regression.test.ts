@@ -11,6 +11,7 @@ import {
   getPluginCatalogItems,
   getVisiblePluginIds
 } from "../main/plugins";
+import { setClipboardWorkbenchServiceForTest } from "../main/plugins/clipboard-workbench";
 
 const mainIndexPath = path.join(process.cwd(), "src", "main", "index.ts");
 
@@ -91,6 +92,14 @@ test("visible plugin ids are stable and subset of all plugins", () => {
     visiblePluginIds.includes("webtools-image-prompt"),
     "image prompt plugin should be visible by default"
   );
+  assert.ok(
+    visiblePluginIds.includes("clipboard-workbench"),
+    "clipboard workbench should be visible by default"
+  );
+  assert.ok(
+    visiblePluginIds.includes("codeagent-switch"),
+    "CodeAgent Switch plugin should be visible by default"
+  );
 });
 
 test("startup visible plugin migration includes image prompt as a new default", () => {
@@ -106,6 +115,16 @@ test("startup visible plugin migration includes image prompt as a new default", 
 
   assert.match(
     requiredSource,
+    /"clipboard-workbench"/,
+    "saved visible plugin lists should be upgraded with Clipboard Workbench"
+  );
+  assert.match(
+    currentDefaultSource,
+    /"clipboard-workbench"/,
+    "current app-level default visible plugin list should include Clipboard Workbench"
+  );
+  assert.match(
+    requiredSource,
     /"webtools-image-prompt"/,
     "saved visible plugin lists should be upgraded with the new Image Prompt plugin"
   );
@@ -114,6 +133,48 @@ test("startup visible plugin migration includes image prompt as a new default", 
     /"webtools-image-prompt"/,
     "current app-level default visible plugin list should include Image Prompt"
   );
+  assert.match(
+    requiredSource,
+    /"codeagent-switch"/,
+    "saved visible plugin lists should be upgraded with CodeAgent Switch"
+  );
+  assert.match(
+    currentDefaultSource,
+    /"codeagent-switch"/,
+    "current app-level default visible plugin list should include CodeAgent Switch"
+  );
+});
+
+test("CodeAgent Switch opens a plugin panel with parsed Codex summary", async () => {
+  const { window, sent } = createMockWindow();
+  const result = await executePluginCommand(
+    "codeagent-switch",
+    window as never,
+    createSelectedItem("codeagent-switch")
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.keepOpen, true);
+  assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
+
+  const payload = sent[0]?.payload as {
+    panel?: string;
+    pluginId?: string;
+    data?: {
+      config?: {
+        providers?: unknown[];
+        profiles?: unknown[];
+      };
+      diagnostics?: unknown[];
+      envCommands?: Record<string, string>;
+    };
+  };
+  assert.equal(payload.panel, "plugin");
+  assert.equal(payload.pluginId, "codeagent-switch");
+  assert.ok(Array.isArray(payload.data?.config?.providers));
+  assert.ok(Array.isArray(payload.data?.config?.profiles));
+  assert.ok(Array.isArray(payload.data?.diagnostics));
+  assert.equal(typeof payload.data?.envCommands?.powershellUser, "string");
 });
 
 test("plugin catalog only exposes visible plugins and covers each visible plugin", () => {
@@ -142,18 +203,47 @@ test("plugin catalog only exposes visible plugins and covers each visible plugin
 });
 
 test("each visible plugin supports default open command", async () => {
-  for (const pluginId of getVisiblePluginIds()) {
-    const { window, sent } = createMockWindow();
-    const result = await executePluginCommand(
-      pluginId,
-      window as never,
-      createSelectedItem(pluginId)
-    );
+  setClipboardWorkbenchServiceForTest({
+    async perform() {
+      return {
+        message: "Opened Clipboard Workbench",
+        payload: {
+          items: [],
+          groups: [],
+          settings: {
+            version: 1,
+            autoCollect: true,
+            sensitiveMode: false,
+            maxItems: 50,
+            maxBytes: 512 * 1024 * 1024,
+            ignoreShortCodes: true,
+            shortCodeLengthMax: 8,
+            ignoredAppHints: [],
+            batchPasteDelayMs: 180
+          },
+          stats: { totalItems: 0, totalBytes: 0 },
+          query: { search: "", scope: "all", groupId: "" }
+        }
+      };
+    }
+  });
 
-    assert.equal(result.ok, true, `plugin open should succeed: ${pluginId}`);
-    assert.equal(result.keepOpen, true, `plugin open should keep panel: ${pluginId}`);
-    assert.ok(sent.length >= 1, `plugin should emit openPanel: ${pluginId}`);
-    assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
+  try {
+    for (const pluginId of getVisiblePluginIds()) {
+      const { window, sent } = createMockWindow();
+      const result = await executePluginCommand(
+        pluginId,
+        window as never,
+        createSelectedItem(pluginId)
+      );
+
+      assert.equal(result.ok, true, `plugin open should succeed: ${pluginId}`);
+      assert.equal(result.keepOpen, true, `plugin open should keep panel: ${pluginId}`);
+      assert.ok(sent.length >= 1, `plugin should emit openPanel: ${pluginId}`);
+      assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
+    }
+  } finally {
+    setClipboardWorkbenchServiceForTest(null);
   }
 });
 

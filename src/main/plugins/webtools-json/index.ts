@@ -22,6 +22,18 @@ interface JsonCommand {
   compressed: boolean;
 }
 
+interface JsonPreviewField {
+  key: string;
+  count?: number;
+}
+
+interface JsonPreviewSummary {
+  kind: "json-object" | "json-array" | "csv" | "text" | "escaped" | "unknown";
+  summary: string;
+  fields?: JsonPreviewField[];
+  sampleRows?: Record<string, unknown>[];
+}
+
 const PLUGIN_ID = "webtools-json";
 const ACTION_OPEN: JsonAction = "open";
 const DEFAULT_EXAMPLE =
@@ -275,7 +287,120 @@ function toRowsFromJson(value: unknown): Record<string, unknown>[] {
   return [{ value }];
 }
 
+function countKeys(rows: Record<string, unknown>[]): JsonPreviewField[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .map(([key, count]) => ({ key, count }));
+}
+
+function buildPreviewSummary(
+  input: string,
+  sourceFormat: JsonFormat
+): JsonPreviewSummary {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { kind: "unknown", summary: "等待输入" };
+  }
+
+  try {
+    if (sourceFormat === "csv") {
+      const rows = parseCsv(input);
+      const fields = countKeys(rows);
+      return {
+        kind: "csv",
+        summary: `${rows.length} 行 · ${fields.length} 列`,
+        fields,
+        sampleRows: rows.slice(0, 2)
+      };
+    }
+
+    if (sourceFormat === "escaped") {
+      const unescaped = JSON.parse(input);
+      if (typeof unescaped === "string") {
+        return {
+          kind: "escaped",
+          summary: `${unescaped.length} 字符的 JSON 字符串`
+        };
+      }
+
+      const rows = toRowsFromJson(unescaped);
+      const fields = countKeys(rows);
+      return {
+        kind: Array.isArray(unescaped) ? "json-array" : "json-object",
+        summary: Array.isArray(unescaped)
+          ? `${unescaped.length} 项 · ${fields.length} 个字段`
+          : `${Object.keys(unescaped as Record<string, unknown>).length} 个键`,
+        fields,
+        sampleRows: rows.slice(0, 2)
+      };
+    }
+
+    if (sourceFormat === "json" || sourceFormat === "text") {
+      const parsed = JSON.parse(input);
+      if (Array.isArray(parsed)) {
+        const rows = toRowsFromJson(parsed);
+        const fields = countKeys(rows);
+        return {
+          kind: "json-array",
+          summary: `${parsed.length} 项 · ${fields.length} 个字段`,
+          fields,
+          sampleRows: rows.slice(0, 2)
+        };
+      }
+
+      if (parsed && typeof parsed === "object") {
+        const rows = toRowsFromJson(parsed);
+        const fields = countKeys(rows);
+        return {
+          kind: "json-object",
+          summary: `${Object.keys(parsed as Record<string, unknown>).length} 个键`,
+          fields,
+          sampleRows: rows.slice(0, 1)
+        };
+      }
+
+      return {
+        kind: "json-object",
+        summary: `值类型 ${typeof parsed}`
+      };
+    }
+  } catch {
+    if (sourceFormat === "text") {
+      return {
+        kind: "text",
+        summary: `${trimmed.length} 字符 · ${trimmed.split(/\r?\n/).length} 行`
+      };
+    }
+  }
+
+  return {
+    kind: "text",
+    summary: `${trimmed.length} 字符 · ${trimmed.split(/\r?\n/).length} 行`
+  };
+}
+
+function extractErrorPosition(message: string): number | null {
+  const match = message.match(/position\s+(\d+)/i);
+  if (!match) {
+    return null;
+  }
+  const position = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(position) ? position : null;
+}
+
 function executeValidate(input: string): ExecuteResult {
+  const preview = buildPreviewSummary(input, "json");
   try {
     const parsed = JSON.parse(input);
     const type = Array.isArray(parsed) ? "array" : typeof parsed;
@@ -292,7 +417,9 @@ function executeValidate(input: string): ExecuteResult {
       data: {
         output: "",
         info: `类型: ${type}，元素/字段数: ${size}`,
-        valid: true
+        valid: true,
+        preview,
+        errorPosition: null
       }
     };
   } catch (error) {
@@ -306,13 +433,16 @@ function executeValidate(input: string): ExecuteResult {
       data: {
         output: "",
         info: message,
-        valid: false
+        valid: false,
+        preview,
+        errorPosition: extractErrorPosition(message)
       }
     };
   }
 }
 
 function executeConvert(command: JsonCommand): ExecuteResult {
+  const preview = buildPreviewSummary(command.input, command.sourceFormat);
   try {
     if (!command.input.trim()) {
       return {
@@ -322,7 +452,9 @@ function executeConvert(command: JsonCommand): ExecuteResult {
         data: {
           output: "",
           info: "请输入要转换的内容",
-          valid: null
+          valid: null,
+          preview,
+          errorPosition: null
         }
       };
     }
@@ -384,7 +516,9 @@ function executeConvert(command: JsonCommand): ExecuteResult {
       data: {
         output,
         info: `${source.toUpperCase()} -> ${target.toUpperCase()}`,
-        valid: null
+        valid: null,
+        preview,
+        errorPosition: null
       }
     };
   } catch (error) {
@@ -397,7 +531,9 @@ function executeConvert(command: JsonCommand): ExecuteResult {
       data: {
         output: "",
         info: reason,
-        valid: false
+        valid: false,
+        preview,
+        errorPosition: extractErrorPosition(reason)
       }
     };
   }

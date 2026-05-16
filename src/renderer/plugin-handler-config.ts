@@ -10,6 +10,11 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "hardware-inspector-refresh"
   },
   {
+    pluginId: handlerConstants.CLIPBOARD_WORKBENCH_PLUGIN_ID,
+    formSelector: "form.clipboard-workbench-form",
+    enterActionKey: "clipboard-workbench-refresh"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_PASSWORD_PLUGIN_ID,
     formSelector: "form.webtools-password-form",
     enterActionKey: "password-generate"
@@ -118,5 +123,10 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     pluginId: handlerConstants.WEBTOOLS_HTTP_MOCK_PLUGIN_ID,
     formSelector: "form.webtools-http-mock-form",
     enterActionKey: "http-mock-start"
+  },
+  {
+    pluginId: handlerConstants.CODEAGENT_SWITCH_PLUGIN_ID,
+    formSelector: "form.codeagent-switch-form",
+    enterActionKey: "codeagent-switch-read"
   }
 ];

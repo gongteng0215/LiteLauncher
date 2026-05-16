@@ -1,4 +1,4 @@
-﻿import { randomInt } from "node:crypto";
+import { randomInt } from "node:crypto";
 
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
@@ -6,10 +6,20 @@ import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
 
 type CronAction = "open" | "parse" | "random";
+type CronStatus = "success" | "warning" | "error";
+type CronFieldName = "minute" | "hour" | "day" | "month" | "weekday";
 
 interface CronCommand {
   action: CronAction;
   expression: string;
+}
+
+interface CronFieldMeta {
+  key: CronFieldName;
+  label: string;
+  value: string;
+  hint: string;
+  hasError: boolean;
 }
 
 interface CronParseResult {
@@ -17,6 +27,36 @@ interface CronParseResult {
   readable: string;
   nextRun: string;
   upcoming: string[];
+  status: CronStatus;
+  errorMessage: string;
+  errorField: CronFieldName | "";
+  warnings: string[];
+  templateKey: string;
+  templateSummary: string;
+  fieldMeta: CronFieldMeta[];
+}
+
+interface CronFieldConfig {
+  key: CronFieldName;
+  label: string;
+  rangeLabel: string;
+  min: number;
+  max: number;
+}
+
+interface CronTemplate {
+  key: string;
+  expression: string;
+  summary: string;
+}
+
+class CronFieldParseError extends Error {
+  field: CronFieldName;
+
+  constructor(field: CronFieldName, message: string) {
+    super(message);
+    this.field = field;
+  }
 }
 
 const PLUGIN_ID = "webtools-cron";
@@ -24,6 +64,22 @@ const ACTION_OPEN: CronAction = "open";
 const QUERY_ALIASES = ["wt-cron", "cron-tool", "cron", "定时", "表达式"];
 const DEFAULT_EXPRESSION = "5 4 * * *";
 const MAX_SEARCH_MINUTES = 366 * 24 * 60;
+const FIELD_COUNT_ERROR = "Cron 表达式必须是 5 段（分 时 日 月 周）";
+const GENERIC_PARSE_ERROR = "Cron 解析失败";
+const CRON_FIELDS: readonly CronFieldConfig[] = [
+  { key: "minute", label: "分", rangeLabel: "0-59", min: 0, max: 59 },
+  { key: "hour", label: "时", rangeLabel: "0-23", min: 0, max: 23 },
+  { key: "day", label: "日", rangeLabel: "1-31", min: 1, max: 31 },
+  { key: "month", label: "月", rangeLabel: "1-12", min: 1, max: 12 },
+  { key: "weekday", label: "周", rangeLabel: "0-6", min: 0, max: 6 }
+];
+const CRON_TEMPLATES: readonly CronTemplate[] = [
+  { key: "weekday-9am", expression: "0 9 * * 1-5", summary: "工作日 09:00 执行" },
+  { key: "daily-noon", expression: "0 12 * * *", summary: "每天 12:00 执行" },
+  { key: "daily-midnight", expression: "0 0 * * *", summary: "每天 00:00 执行" },
+  { key: "hourly-top", expression: "0 * * * *", summary: "每小时整点执行" },
+  { key: "every-minute", expression: "* * * * *", summary: "每分钟执行" }
+];
 
 function buildTarget(action: CronAction, expression = ""): string {
   const params = new URLSearchParams();
@@ -84,9 +140,60 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
-function parseField(field: string, min: number, max: number): number[] {
+function splitExpression(expression: string): string[] {
+  const normalized = expression.trim() || DEFAULT_EXPRESSION;
+  const parts = normalized.split(/\s+/);
+  if (parts.length !== CRON_FIELDS.length) {
+    throw new Error(FIELD_COUNT_ERROR);
+  }
+  return parts;
+}
+
+function buildFieldMeta(parts: string[], errorField: CronFieldName | ""): CronFieldMeta[] {
+  return CRON_FIELDS.map((field, index) => ({
+    key: field.key,
+    label: field.label,
+    value: parts[index] ?? "",
+    hint: `${field.label} (${field.rangeLabel})`,
+    hasError: field.key === errorField
+  }));
+}
+
+function buildErrorResult(
+  expression: string,
+  errorMessage: string,
+  errorField: CronFieldName | ""
+): CronParseResult {
+  const normalized = expression.trim() || DEFAULT_EXPRESSION;
+  const rawParts = normalized.split(/\s+/);
+  const parts = rawParts.slice(0, CRON_FIELDS.length);
+  while (parts.length < CRON_FIELDS.length) {
+    parts.push("");
+  }
+
+  return {
+    expression: normalized,
+    readable: "",
+    nextRun: "",
+    upcoming: [],
+    status: "error",
+    errorMessage,
+    errorField,
+    warnings: [],
+    templateKey: "",
+    templateSummary: "",
+    fieldMeta: buildFieldMeta(parts, errorField)
+  };
+}
+
+function parseField(field: string, config: CronFieldConfig): number[] {
   const result = new Set<number>();
   const parts = field.split(",").map((item) => item.trim()).filter(Boolean);
+  const { min, max } = config;
+
+  const fail = (reason: string): never => {
+    throw new CronFieldParseError(config.key, `${config.label}字段${reason}`);
+  };
 
   for (const part of parts) {
     if (part === "*") {
@@ -100,7 +207,7 @@ function parseField(field: string, min: number, max: number): number[] {
       const [baseRaw, stepRaw] = part.split("/");
       const step = Number(stepRaw);
       if (!Number.isInteger(step) || step <= 0) {
-        throw new Error(`无效步长: ${part}`);
+        fail(`无效步长: ${part}`);
       }
 
       if (baseRaw === "*") {
@@ -118,7 +225,7 @@ function parseField(field: string, min: number, max: number): number[] {
           end > max ||
           start > end
         ) {
-          throw new Error(`无效范围: ${part}`);
+          fail(`无效范围: ${part}`);
         }
         for (let i = start; i <= end; i += step) {
           result.add(i);
@@ -126,7 +233,7 @@ function parseField(field: string, min: number, max: number): number[] {
       } else {
         const start = Number(baseRaw);
         if (!Number.isInteger(start) || start < min || start > max) {
-          throw new Error(`无效值: ${part}`);
+          fail(`无效值: ${part}`);
         }
         for (let i = start; i <= max; i += step) {
           result.add(i);
@@ -146,7 +253,7 @@ function parseField(field: string, min: number, max: number): number[] {
         end > max ||
         start > end
       ) {
-        throw new Error(`无效范围: ${part}`);
+        fail(`无效范围: ${part}`);
       }
       for (let i = start; i <= end; i += 1) {
         result.add(i);
@@ -156,13 +263,13 @@ function parseField(field: string, min: number, max: number): number[] {
 
     const value = Number(part);
     if (!Number.isInteger(value) || value < min || value > max) {
-      throw new Error(`无效值: ${part}`);
+      fail(`无效值: ${part}`);
     }
     result.add(value);
   }
 
   if (result.size === 0) {
-    throw new Error(`字段为空: ${field}`);
+    fail("为空");
   }
 
   return Array.from(result).sort((a, b) => a - b);
@@ -172,6 +279,7 @@ function buildReadable(parts: string[]): string {
   const [minute, hour, day, month, week] = parts;
 
   const isNumberToken = (value: string): boolean => /^\d+$/.test(value);
+  const isWeekdayWorkdays = (value: string): boolean => value === "1-5" || value === "1,2,3,4,5";
   const weekName = (value: string): string => {
     const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
     if (!isNumberToken(value)) {
@@ -202,6 +310,16 @@ function buildReadable(parts: string[]): string {
     week === "*"
   ) {
     return `在 ${pad2(hour)}:${pad2(minute)} 执行`;
+  }
+
+  if (
+    isNumberToken(minute) &&
+    isNumberToken(hour) &&
+    day === "*" &&
+    month === "*" &&
+    isWeekdayWorkdays(week)
+  ) {
+    return `工作日 ${pad2(hour)}:${pad2(minute)} 执行`;
   }
 
   if (
@@ -252,17 +370,23 @@ function buildReadable(parts: string[]): string {
   return `分钟:${formatToken(minute)} 小时:${formatToken(hour)} 日:${formatToken(day)} 月:${formatToken(month)} 周:${formatToken(week)}`;
 }
 
-function nextRuns(expression: string, count: number): string[] {
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) {
-    throw new Error("Cron 表达式必须是 5 段（分 时 日 月 周）");
-  }
+function matchTemplate(expression: string): CronTemplate | null {
+  return CRON_TEMPLATES.find((template) => template.expression === expression) ?? null;
+}
 
-  const minuteSet = new Set(parseField(parts[0] ?? "", 0, 59));
-  const hourSet = new Set(parseField(parts[1] ?? "", 0, 23));
-  const daySet = new Set(parseField(parts[2] ?? "", 1, 31));
-  const monthSet = new Set(parseField(parts[3] ?? "", 1, 12));
-  const weekSet = new Set(parseField(parts[4] ?? "", 0, 6));
+function buildWarnings(expression: string): string[] {
+  if (expression === "* * * * *") {
+    return ["该表达式会每分钟执行一次，频率较高，请确认是否符合预期。"];
+  }
+  return [];
+}
+
+function nextRuns(parts: string[], count: number): string[] {
+  const minuteSet = new Set(parseField(parts[0] ?? "", CRON_FIELDS[0]));
+  const hourSet = new Set(parseField(parts[1] ?? "", CRON_FIELDS[1]));
+  const daySet = new Set(parseField(parts[2] ?? "", CRON_FIELDS[2]));
+  const monthSet = new Set(parseField(parts[3] ?? "", CRON_FIELDS[3]));
+  const weekSet = new Set(parseField(parts[4] ?? "", CRON_FIELDS[4]));
 
   const upcoming: string[] = [];
   const cursor = new Date();
@@ -298,18 +422,53 @@ function nextRuns(expression: string, count: number): string[] {
 
 function parseCronExpression(expression: string): CronParseResult {
   const normalized = expression.trim() || DEFAULT_EXPRESSION;
-  const parts = normalized.split(/\s+/);
-  if (parts.length !== 5) {
-    throw new Error("Cron 表达式必须是 5 段（分 时 日 月 周）");
-  }
+  const parts = splitExpression(normalized);
+  CRON_FIELDS.forEach((field, index) => {
+    parseField(parts[index] ?? "", field);
+  });
 
-  const upcoming = nextRuns(normalized, 7);
+  const upcoming = nextRuns(parts, 7);
+  const template = matchTemplate(normalized);
+  const warnings = buildWarnings(normalized);
 
   return {
     expression: normalized,
     readable: buildReadable(parts),
     nextRun: upcoming[0] ?? "",
-    upcoming
+    upcoming,
+    status: warnings.length > 0 ? "warning" : "success",
+    errorMessage: "",
+    errorField: "",
+    warnings,
+    templateKey: template?.key ?? "",
+    templateSummary: template?.summary ?? "",
+    fieldMeta: buildFieldMeta(parts, "")
+  };
+}
+
+function tryParseCronExpression(expression: string): CronParseResult {
+  try {
+    return parseCronExpression(expression);
+  } catch (error) {
+    if (error instanceof CronFieldParseError) {
+      return buildErrorResult(expression, error.message, error.field);
+    }
+    if (error instanceof Error) {
+      return buildErrorResult(expression, error.message, "");
+    }
+    return buildErrorResult(expression, GENERIC_PARSE_ERROR, "");
+  }
+}
+
+function applyTemplate(
+  key: string
+): Pick<CronParseResult, "expression" | "templateKey" | "templateSummary"> {
+  const template = CRON_TEMPLATES.find((item) => item.key === key);
+
+  return {
+    expression: template?.expression ?? DEFAULT_EXPRESSION,
+    templateKey: template?.key ?? key,
+    templateSummary: template?.summary ?? ""
   };
 }
 
@@ -341,43 +500,30 @@ function randomExpression(): string {
 }
 
 function executeCommand(command: CronCommand): ExecuteResult {
-  try {
-    if (command.action === "random") {
-      const expression = randomExpression();
-      const parsed = parseCronExpression(expression);
-      return {
-        ok: true,
-        keepOpen: true,
-        message: "已生成随机 Cron",
-        data: {
-          action: command.action,
-          ...parsed
-        }
-      };
-    }
-
-    const parsed = parseCronExpression(command.expression);
+  if (command.action === "random") {
+    const expression = randomExpression();
+    const parsed = tryParseCronExpression(expression);
     return {
-      ok: true,
+      ok: parsed.status !== "error",
       keepOpen: true,
-      message: "Cron 解析完成",
+      message: "已生成随机 Cron",
       data: {
         action: command.action,
         ...parsed
       }
     };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "Cron 解析失败";
-    return {
-      ok: false,
-      keepOpen: true,
-      message: reason,
-      data: {
-        action: command.action,
-        expression: command.expression
-      }
-    };
   }
+
+  const parsed = tryParseCronExpression(command.expression);
+  return {
+    ok: parsed.status !== "error",
+    keepOpen: true,
+    message: parsed.status === "error" ? parsed.errorMessage : "Cron 解析完成",
+    data: {
+      action: command.action,
+      ...parsed
+    }
+  };
 }
 
 export const webtoolsCronPlugin: LauncherPlugin = {
@@ -414,4 +560,10 @@ export const webtoolsCronPlugin: LauncherPlugin = {
 
     return executeCommand(command);
   }
+};
+
+export const __cronTestUtils = {
+  parseCronExpression,
+  tryParseCronExpression,
+  applyTemplate
 };

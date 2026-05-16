@@ -55,6 +55,18 @@ interface WebtoolsPasswordResultRow {
   strength: "弱" | "中" | "强" | "很强";
 }
 
+interface WebtoolsJsonPreviewField {
+  key: string;
+  count?: number;
+}
+
+interface WebtoolsJsonPreviewSummary {
+  kind: "json-object" | "json-array" | "csv" | "text" | "escaped" | "unknown";
+  summary: string;
+  fields: WebtoolsJsonPreviewField[];
+  sampleRows: Array<Record<string, unknown>>;
+}
+
 interface WebtoolsJsonState {
   input: string;
   output: string;
@@ -63,6 +75,9 @@ interface WebtoolsJsonState {
   sourceFormat: "json" | "csv" | "text" | "escaped";
   targetFormat: "json" | "csv" | "text" | "escaped";
   compressed: boolean;
+  preview: WebtoolsJsonPreviewSummary | null;
+  errorPosition: number | null;
+  selectedFields: string[];
 }
 
 interface WebtoolsUrlQueryRow {
@@ -116,6 +131,18 @@ interface WebtoolsRegexMatchRow {
   index: number;
   match: string;
   groups: string[];
+}
+
+type WebtoolsCronStatus = "success" | "warning" | "error" | "";
+type WebtoolsCronFieldKey = "minute" | "hour" | "day" | "month" | "weekday";
+type WebtoolsCronCopyState = "" | "expression" | "readable";
+
+interface WebtoolsCronFieldMeta {
+  key: WebtoolsCronFieldKey;
+  label: string;
+  value: string;
+  hint: string;
+  hasError: boolean;
 }
 
 interface WebtoolsApiKvRow {
@@ -841,7 +868,10 @@ let webtoolsJsonState: WebtoolsJsonState = {
   valid: null,
   sourceFormat: "text",
   targetFormat: "json",
-  compressed: false
+  compressed: false,
+  preview: null,
+  errorPosition: null,
+  selectedFields: []
 };
 const DEFAULT_WEBTOOLS_URL_INPUT =
   "https://www.example.com:8080/path/to/page?name=test&id=123#section-1";
@@ -901,6 +931,14 @@ let webtoolsCronExpression = "5 4 * * *";
 let webtoolsCronReadable = "";
 let webtoolsCronNextRun = "";
 let webtoolsCronUpcoming: string[] = [];
+let webtoolsCronStatus: WebtoolsCronStatus = "";
+let webtoolsCronErrorMessage = "";
+let webtoolsCronErrorField: WebtoolsCronFieldKey | "" = "";
+let webtoolsCronWarnings: string[] = [];
+let webtoolsCronTemplateKey = "";
+let webtoolsCronTemplateSummary = "";
+let webtoolsCronFieldMeta: WebtoolsCronFieldMeta[] = [];
+let webtoolsCronCopyState: WebtoolsCronCopyState = "";
 let webtoolsJsonAutoTimer: number | null = null;
 let webtoolsCronAutoTimer: number | null = null;
 let webtoolsPasswordRequestToken = 0;
@@ -1504,6 +1542,7 @@ const PASSWORD_COUNT_MAX = 20;
 const WEBTOOLS_PASSWORD_COUNT_MAX = 50;
 const CASHFLOW_PLUGIN_ID = "cashflow-game";
 const HARDWARE_INSPECTOR_PLUGIN_ID = "hardware-inspector";
+const CLIPBOARD_WORKBENCH_PLUGIN_ID = "clipboard-workbench";
 const WEBTOOLS_PASSWORD_PLUGIN_ID = "webtools-password";
 const WEBTOOLS_JSON_PLUGIN_ID = "webtools-json";
 const WEBTOOLS_URL_PLUGIN_ID = "webtools-url-parse";
@@ -1527,6 +1566,7 @@ const WEBTOOLS_MARKDOWN_PLUGIN_ID = "webtools-markdown";
 const WEBTOOLS_UA_PLUGIN_ID = "webtools-ua";
 const WEBTOOLS_API_PLUGIN_ID = "webtools-api-client";
 const WEBTOOLS_HTTP_MOCK_PLUGIN_ID = "webtools-http-mock";
+const CODEAGENT_SWITCH_PLUGIN_ID = "codeagent-switch";
 const WEBTOOLS_SQL_DEFAULT_INPUT =
   "SELECT a,b,c FROM table_test JOIN other_table ON table_test.id = other_table.id WHERE a > 10 AND b LIKE '%test%' ORDER BY c DESC LIMIT 10";
 const WEBTOOLS_SQL_DIALECT_OPTIONS = [
@@ -1609,6 +1649,7 @@ const WEBTOOLS_REGEX_TEMPLATES = [
 const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
+  "clipboard-workbench",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -1631,7 +1672,8 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-qrcode",
   "webtools-markdown",
   "webtools-ua",
-  "webtools-api-client"
+  "webtools-api-client",
+  "codeagent-switch"
 ];
 const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#$%^&*";
 const panelImpls = window.__LL_PANEL_IMPLS__;
@@ -2592,6 +2634,235 @@ function toRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+const WEBTOOLS_CRON_FIELD_FALLBACKS: ReadonlyArray<{
+  key: WebtoolsCronFieldKey;
+  label: string;
+  hint: string;
+}> = [
+  { key: "minute", label: "Minute", hint: "Minute (0-59)" },
+  { key: "hour", label: "Hour", hint: "Hour (0-23)" },
+  { key: "day", label: "Day", hint: "Day (1-31)" },
+  { key: "month", label: "Month", hint: "Month (1-12)" },
+  { key: "weekday", label: "Weekday", hint: "Weekday (0-6)" }
+];
+
+const WEBTOOLS_CRON_TEMPLATES: ReadonlyArray<{
+  key: string;
+  expression: string;
+  summary: string;
+}> = [
+  { key: "weekday-9am", expression: "0 9 * * 1-5", summary: "工作日 09:00 执行" },
+  { key: "daily-noon", expression: "0 12 * * *", summary: "每天 12:00 执行" },
+  { key: "daily-midnight", expression: "0 0 * * *", summary: "每天 00:00 执行" },
+  { key: "hourly-top", expression: "0 * * * *", summary: "每小时整点执行" },
+  { key: "every-minute", expression: "* * * * *", summary: "每分钟执行" }
+];
+
+function normalizeWebtoolsCronStatus(value: unknown): WebtoolsCronStatus {
+  return value === "success" || value === "warning" || value === "error" ? value : "";
+}
+
+function normalizeWebtoolsCronErrorField(value: unknown): WebtoolsCronFieldKey | "" {
+  return value === "minute" ||
+    value === "hour" ||
+    value === "day" ||
+    value === "month" ||
+    value === "weekday"
+    ? value
+    : "";
+}
+
+function buildWebtoolsCronFallbackFieldMeta(
+  expression: string,
+  errorField: WebtoolsCronFieldKey | ""
+): WebtoolsCronFieldMeta[] {
+  const values = getWebtoolsCronPartValues(expression);
+  return WEBTOOLS_CRON_FIELD_FALLBACKS.map((field, index) => ({
+    key: field.key,
+    label: field.label,
+    value: values[index] ?? "*",
+    hint: field.hint,
+    hasError: field.key === errorField
+  }));
+}
+
+function parseWebtoolsCronFieldMeta(
+  value: unknown,
+  expression: string,
+  errorField: WebtoolsCronFieldKey | ""
+): WebtoolsCronFieldMeta[] {
+  if (!Array.isArray(value)) {
+    return buildWebtoolsCronFallbackFieldMeta(expression, errorField);
+  }
+
+  const items = value
+    .map((item) => {
+      const record = toRecord(item);
+      if (!record) {
+        return null;
+      }
+      const key = normalizeWebtoolsCronErrorField(record.key);
+      if (!key) {
+        return null;
+      }
+      return {
+        key,
+        label: typeof record.label === "string" ? record.label : key,
+        value: typeof record.value === "string" ? record.value : "",
+        hint: typeof record.hint === "string" ? record.hint : "",
+        hasError: typeof record.hasError === "boolean" ? record.hasError : key === errorField
+      } satisfies WebtoolsCronFieldMeta;
+    })
+    .filter((item): item is WebtoolsCronFieldMeta => item !== null);
+
+  if (items.length !== WEBTOOLS_CRON_FIELD_FALLBACKS.length) {
+    return buildWebtoolsCronFallbackFieldMeta(expression, errorField);
+  }
+
+  return items;
+}
+
+function getWebtoolsCronFieldMeta(): WebtoolsCronFieldMeta[] {
+  return webtoolsCronFieldMeta.length > 0
+    ? webtoolsCronFieldMeta
+    : buildWebtoolsCronFallbackFieldMeta(webtoolsCronExpression, webtoolsCronErrorField);
+}
+
+function getWebtoolsCronTemplates(): ReadonlyArray<{
+  key: string;
+  expression: string;
+  summary: string;
+}> {
+  return WEBTOOLS_CRON_TEMPLATES;
+}
+
+function rebuildWebtoolsCronExpressionFromFields(form: HTMLFormElement): string {
+  const keys: WebtoolsCronFieldKey[] = ["minute", "hour", "day", "month", "weekday"];
+  return keys
+    .map((key) => {
+      const node = form.elements.namedItem(`webtoolsCronField-${key}`);
+      return node instanceof HTMLInputElement && node.value.trim() ? node.value.trim() : "*";
+    })
+    .join(" ");
+}
+
+async function copyWebtoolsCronText(
+  kind: WebtoolsCronCopyState,
+  text: string,
+  form?: HTMLFormElement
+): Promise<void> {
+  if (!text.trim()) {
+    setStatus("当前没有可复制的内容");
+    return;
+  }
+  const copied =
+    kind === "expression"
+      ? await copyTextToClipboard(webtoolsCronExpression)
+      : kind === "readable"
+        ? webtoolsCronReadable.trim()
+          ? await copyTextToClipboard(webtoolsCronReadable)
+          : await copyTextToClipboard(webtoolsCronErrorMessage)
+        : await copyTextToClipboard(text);
+  webtoolsCronCopyState = copied ? kind : "";
+  setStatus(copied ? "Cron 内容已复制" : "复制失败");
+  if (form) {
+    refreshWebtoolsCronResultInForm(form);
+  }
+}
+
+function resetWebtoolsCronState(expression = webtoolsCronExpression): void {
+  webtoolsCronExpression = expression.trim() || "5 4 * * *";
+  webtoolsCronReadable = "";
+  webtoolsCronNextRun = "";
+  webtoolsCronUpcoming = [];
+  webtoolsCronStatus = "";
+  webtoolsCronErrorMessage = "";
+  webtoolsCronErrorField = "";
+  webtoolsCronWarnings = [];
+  webtoolsCronTemplateKey = "";
+  webtoolsCronTemplateSummary = "";
+  webtoolsCronFieldMeta = buildWebtoolsCronFallbackFieldMeta(webtoolsCronExpression, "");
+  webtoolsCronCopyState = "";
+}
+
+function hydrateWebtoolsCronState(data: Record<string, unknown> | null): void {
+  const nextExpression =
+    data && typeof data.expression === "string" ? data.expression : webtoolsCronExpression;
+  webtoolsCronExpression = nextExpression.trim() || "5 4 * * *";
+  webtoolsCronReadable = data && typeof data.readable === "string" ? data.readable : "";
+  webtoolsCronNextRun = data && typeof data.nextRun === "string" ? data.nextRun : "";
+  webtoolsCronUpcoming = data ? toStringArray(data.upcoming) : [];
+  webtoolsCronStatus = data ? normalizeWebtoolsCronStatus(data.status) : "";
+  webtoolsCronErrorMessage =
+    data && typeof data.errorMessage === "string" ? data.errorMessage : "";
+  webtoolsCronErrorField = data ? normalizeWebtoolsCronErrorField(data.errorField) : "";
+  webtoolsCronWarnings = data ? toStringArray(data.warnings) : [];
+  webtoolsCronTemplateKey = data && typeof data.templateKey === "string" ? data.templateKey : "";
+  webtoolsCronTemplateSummary =
+    data && typeof data.templateSummary === "string" ? data.templateSummary : "";
+  webtoolsCronFieldMeta = parseWebtoolsCronFieldMeta(
+    data?.fieldMeta,
+    webtoolsCronExpression,
+    webtoolsCronErrorField
+  );
+}
+
+function parseWebtoolsJsonPreviewSummary(value: unknown): WebtoolsJsonPreviewSummary | null {
+  const record = toRecord(value);
+  if (!record || typeof record.summary !== "string" || typeof record.kind !== "string") {
+    return null;
+  }
+
+  const fields = Array.isArray(record.fields)
+    ? record.fields
+        .map((item) => {
+          const field = toRecord(item);
+          if (!field || typeof field.key !== "string") {
+            return null;
+          }
+          const nextField: WebtoolsJsonPreviewField = {
+            key: field.key,
+          };
+          if (typeof field.count === "number") {
+            nextField.count = field.count;
+          }
+          return nextField;
+        })
+        .filter((item): item is WebtoolsJsonPreviewField => item !== null)
+    : [];
+
+  const sampleRows = Array.isArray(record.sampleRows)
+    ? record.sampleRows
+        .map((item) => toRecord(item))
+        .filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+
+  if (
+    record.kind !== "json-object" &&
+    record.kind !== "json-array" &&
+    record.kind !== "csv" &&
+    record.kind !== "text" &&
+    record.kind !== "escaped" &&
+    record.kind !== "unknown"
+  ) {
+    return null;
+  }
+
+  return {
+    kind: record.kind,
+    summary: record.summary,
+    fields,
+    sampleRows
+  };
 }
 
 function formatHardwareInspectorBytes(value: number | null | undefined): string {
@@ -5711,7 +5982,7 @@ function createWebtoolsPasswordResultTable(
 
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["序号", "密码串", "强度评估", "操作"].forEach((title) => {
+  ["#", "密码", "强度", ""].forEach((title) => {
     const th = document.createElement("th");
     th.textContent = title;
     headRow.appendChild(th);
@@ -5778,6 +6049,7 @@ function refreshWebtoolsPasswordResultInForm(form: HTMLFormElement): void {
     return;
   }
   host.replaceChildren(createWebtoolsPasswordResultTable(webtoolsPasswordRows));
+  form.dispatchEvent(new CustomEvent("webtools-password-sync"));
 }
 
 async function generateFromWebtoolsPasswordPanel(
@@ -5864,9 +6136,9 @@ async function generateFromWebtoolsPasswordPanel(
   refreshWebtoolsPasswordResultInForm(form);
 }
 
-function buildWebtoolsJsonTarget(): string {
+function buildWebtoolsJsonTarget(action: "convert" | "validate" = "convert"): string {
   const params = new URLSearchParams();
-  params.set("action", "convert");
+  params.set("action", action);
   params.set("input", webtoolsJsonState.input);
   params.set("sourceFormat", webtoolsJsonState.sourceFormat);
   params.set("targetFormat", webtoolsJsonState.targetFormat);
@@ -5915,7 +6187,11 @@ function refreshWebtoolsJsonResultInForm(form: HTMLFormElement): void {
   const errorNode = form.querySelector<HTMLDivElement>(".webtools-json-error");
   if (errorNode) {
     const hasError = webtoolsJsonState.valid === false && Boolean(webtoolsJsonState.info);
-    errorNode.textContent = hasError ? webtoolsJsonState.info : "";
+    const positionText =
+      hasError && typeof webtoolsJsonState.errorPosition === "number"
+        ? `（位置 ${webtoolsJsonState.errorPosition}）`
+        : "";
+    errorNode.textContent = hasError ? `${webtoolsJsonState.info}${positionText}` : "";
     errorNode.hidden = !hasError;
   }
 
@@ -5925,6 +6201,8 @@ function refreshWebtoolsJsonResultInForm(form: HTMLFormElement): void {
     infoNode.textContent = infoState.text;
     infoNode.dataset.state = infoState.state;
   }
+
+  form.dispatchEvent(new CustomEvent("webtools-json-sync"));
 }
 
 function scheduleWebtoolsJsonAutoConvert(
@@ -5946,7 +6224,7 @@ function scheduleWebtoolsJsonAutoConvert(
 
 async function executeWebtoolsJsonConvert(
   form: HTMLFormElement,
-  options: { render?: boolean } = {}
+  options: { render?: boolean; action?: "convert" | "validate" } = {}
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
@@ -5954,6 +6232,7 @@ async function executeWebtoolsJsonConvert(
     return;
   }
   const shouldRender = options.render ?? true;
+  const action = options.action ?? "convert";
 
   const inputNode = form.elements.namedItem("webtoolsJsonInput");
   const sourceNode = form.elements.namedItem("webtoolsJsonSource");
@@ -5987,7 +6266,7 @@ async function executeWebtoolsJsonConvert(
     type: "command",
     title: "JSON 工具",
     subtitle: "面板执行",
-    target: buildWebtoolsJsonTarget(),
+    target: buildWebtoolsJsonTarget(action),
     keywords: ["plugin", "json", "csv", "format", "convert", "实验室"]
   };
 
@@ -5997,12 +6276,23 @@ async function executeWebtoolsJsonConvert(
   }
   const data = toRecord(result.data);
 
-  webtoolsJsonState.output =
-    data && typeof data.output === "string" ? data.output : "";
+  if (action !== "validate") {
+    webtoolsJsonState.output =
+      data && typeof data.output === "string" ? data.output : "";
+  }
   webtoolsJsonState.info =
     data && typeof data.info === "string" ? data.info : "";
   webtoolsJsonState.valid =
     data && typeof data.valid === "boolean" ? data.valid : null;
+  webtoolsJsonState.preview = parseWebtoolsJsonPreviewSummary(data?.preview);
+  webtoolsJsonState.errorPosition =
+    data && typeof data.errorPosition === "number" ? data.errorPosition : null;
+  const availableFields = new Set(
+    (webtoolsJsonState.preview?.fields ?? []).map((field) => field.key)
+  );
+  webtoolsJsonState.selectedFields = webtoolsJsonState.selectedFields.filter((field) =>
+    availableFields.has(field)
+  );
 
   setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
   if (shouldRender) {
@@ -6814,25 +7104,86 @@ function refreshWebtoolsCronResultInForm(form: HTMLFormElement): void {
   const nextNode = form.querySelector(".webtools-cron-next");
   if (nextNode instanceof HTMLSpanElement) {
     nextNode.textContent = webtoolsCronNextRun
-      ? `下一次: ${webtoolsCronNextRun}`
+      ? `下一次 ${webtoolsCronNextRun}`
       : "-";
   }
 
-  const partValues = getWebtoolsCronPartValues(webtoolsCronExpression);
-  const partCells = form.querySelectorAll<HTMLTableCellElement>(
-    ".webtools-cron-part-cell"
-  );
-  partValues.forEach((value, index) => {
-    const cell = partCells.item(index);
-    if (cell) {
-      cell.textContent = value;
+  getWebtoolsCronFieldMeta().forEach((field) => {
+    const node = form.elements.namedItem(`webtoolsCronField-${field.key}`);
+    if (node instanceof HTMLInputElement) {
+      node.value = field.value;
+    }
+    const card = form.querySelector<HTMLElement>(
+      `[data-webtools-cron-field-card="${field.key}"]`
+    );
+    if (card) {
+      card.classList.toggle("is-error", field.hasError);
+    }
+    const hint = form.querySelector<HTMLElement>(`[data-webtools-cron-field-hint="${field.key}"]`);
+    if (hint) {
+      hint.textContent = field.hint;
     }
   });
+
+  form
+    .querySelectorAll<HTMLButtonElement>("[data-webtools-cron-template]")
+    .forEach((button) => {
+      const active = button.dataset.webtoolsCronTemplate === webtoolsCronTemplateKey;
+      button.classList.toggle("is-active", active);
+    });
 
   const upcomingNode = form.querySelector(".webtools-cron-upcoming-value");
   if (upcomingNode instanceof HTMLDivElement) {
     upcomingNode.textContent =
       webtoolsCronUpcoming.length > 0 ? webtoolsCronUpcoming.join("\n") : "-";
+  }
+
+  const summaryNode = form.querySelector(".webtools-cron-summary");
+  if (summaryNode instanceof HTMLDivElement) {
+    if (webtoolsCronErrorMessage) {
+      summaryNode.textContent = webtoolsCronErrorMessage;
+      summaryNode.dataset.state = "error";
+    } else if (webtoolsCronWarnings.length > 0) {
+      summaryNode.textContent = webtoolsCronWarnings.join(" ");
+      summaryNode.dataset.state = "warning";
+    } else if (webtoolsCronTemplateSummary) {
+      summaryNode.textContent = webtoolsCronTemplateSummary;
+      summaryNode.dataset.state = webtoolsCronStatus || "success";
+    } else {
+      summaryNode.textContent = webtoolsCronReadable || "编辑表达式后自动解析";
+      summaryNode.dataset.state = webtoolsCronStatus || "idle";
+    }
+  }
+
+  const statusNode = form.querySelector(".webtools-cron-status-badge");
+  if (statusNode instanceof HTMLSpanElement) {
+    const badgeText =
+      webtoolsCronStatus === "error"
+        ? "错误"
+        : webtoolsCronStatus === "warning"
+          ? "提醒"
+          : webtoolsCronReadable
+            ? "已解析"
+            : "待输入";
+    statusNode.textContent = badgeText;
+    statusNode.dataset.state =
+      webtoolsCronStatus || (webtoolsCronReadable || webtoolsCronExpression ? "success" : "idle");
+  }
+
+  const expressionCopyButton = form.querySelector<HTMLButtonElement>(
+    '[data-webtools-cron-copy="expression"]'
+  );
+  if (expressionCopyButton) {
+    expressionCopyButton.textContent =
+      webtoolsCronCopyState === "expression" ? "已复制表达式" : "复制表达式";
+  }
+
+  const readableCopyButton = form.querySelector<HTMLButtonElement>(
+    '[data-webtools-cron-copy="readable"]'
+  );
+  if (readableCopyButton) {
+    readableCopyButton.textContent =
+      webtoolsCronCopyState === "readable" ? "已复制说明" : "复制说明";
   }
 }
 
@@ -6871,6 +7222,7 @@ async function executeWebtoolsCronAction(
   const shouldRender = options.render ?? true;
 
   webtoolsCronExpression = expression;
+  webtoolsCronCopyState = "";
   const requestToken = ++webtoolsCronRequestToken;
 
   const item: LaunchItem = {
@@ -6887,25 +7239,8 @@ async function executeWebtoolsCronAction(
     return;
   }
   const data = toRecord(result.data);
-
-  webtoolsCronExpression =
-    data && typeof data.expression === "string"
-      ? data.expression
-      : webtoolsCronExpression;
-  webtoolsCronReadable =
-    data && typeof data.readable === "string" ? data.readable : "";
-  webtoolsCronNextRun =
-    data && typeof data.nextRun === "string" ? data.nextRun : "";
-
-  const nextUpcoming: string[] = [];
-  if (data && Array.isArray(data.upcoming)) {
-    for (const value of data.upcoming) {
-      if (typeof value === "string") {
-        nextUpcoming.push(value);
-      }
-    }
-  }
-  webtoolsCronUpcoming = nextUpcoming;
+  resetWebtoolsCronState(expression);
+  hydrateWebtoolsCronState(data);
 
   setStatus(result.message ?? (result.ok ? "解析完成" : "解析失败"));
   if (shouldRender) {
@@ -10564,6 +10899,13 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
       void executeHardwareInspectorRefresh();
     }
   },
+  [CLIPBOARD_WORKBENCH_PLUGIN_ID]: {
+    render: panelImplsSafe.renderClipboardWorkbenchPanel,
+    onOpen: panelImplsSafe.applyClipboardWorkbenchPanelPayload,
+    onEnter: runWithPluginForm("form.clipboard-workbench-form", () => {
+      void executeClipboardWorkbenchAction("refresh");
+    })
+  },
   [WEBTOOLS_PASSWORD_PLUGIN_ID]: {
     render: panelImplsSafe.renderWebtoolsPasswordPanel,
     onOpen: panelImplsSafe.applyWebtoolsPasswordPanelPayload,
@@ -10754,6 +11096,37 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     onOpen: panelImplsSafe.applyWebtoolsHttpMockPanelPayload,
     onEnter: runWithPluginForm("form.webtools-http-mock-form", (form) => {
       void executeWebtoolsHttpMockAction("start", form);
+    })
+  },
+  [CODEAGENT_SWITCH_PLUGIN_ID]: {
+    render: panelImplsSafe.renderCodeAgentSwitchPanel,
+    onOpen: panelImplsSafe.applyCodeAgentSwitchPanelPayload,
+    onEnter: runWithPluginForm("form.codeagent-switch-form", () => {
+      const launcher = getLauncherApi();
+      if (!launcher) {
+        setStatus("桥接层未加载，无法读取 CodeAgent Switch 配置");
+        return;
+      }
+      const configPath =
+        activePluginPanel?.data && typeof activePluginPanel.data.configPath === "string"
+          ? activePluginPanel.data.configPath
+          : "";
+      const params = new URLSearchParams();
+      params.set("action", "read");
+      if (configPath) {
+        params.set("configPath", configPath);
+      }
+      const item: LaunchItem = {
+        id: `plugin:${CODEAGENT_SWITCH_PLUGIN_ID}:read`,
+        type: "command",
+        title: "CodeAgent Switch",
+        subtitle: "重新读取",
+        target: `command:plugin:${CODEAGENT_SWITCH_PLUGIN_ID}?${params.toString()}`,
+        keywords: ["plugin", "codex", "codeagent", "switch"]
+      };
+      void launcher.execute(item).then((result) => {
+        setStatus(result.message ?? (result.ok ? "已重新读取 Codex 配置" : "读取失败"));
+      });
     })
   }
 };

@@ -9,7 +9,8 @@
 - 新增默认可见插件 `webtools-file-hash`：支持 MD5 / SHA1 / SHA256 / SHA512 文件哈希计算与期望哈希对比。
 - 新增默认可见插件 `webtools-port-helper`：支持 TCP / UDP 端口占用查询、PID 定位与释放端口。
 - 新增默认可见插件 `webtools-image-prompt`：支持 ChatGPT Images 2.0 产品模板、26 类风格预设切换、12 个智能场景模板、联动模块点选、生日照片 / 周岁模板、文字设计卡片、结构化生日文字、生成与复制图片提示词。
-- 默认可见插件从 21 个扩展到 25 个，插件列表分页链路继续沿用完整可见集合 + 渲染层分页。
+- 新增默认可见插件 `codeagent-switch`：支持 Codex `config.toml` 读取、Provider / Profile 摘要、认证 / env_key / wire_api / 会话风险诊断、环境变量命令复制、Profile 切换 diff 预览、备份后安全写入、备份列表与恢复；完整 Provider 编辑器仍在后续阶段。
+- 默认可见插件从 21 个扩展到 26 个，插件列表分页链路继续沿用完整可见集合 + 渲染层分页。
 - 插件 Enter 行为配置已补齐到 Hardware / File Hash / Port Helper 等新增插件，默认打开命令由 `test:plugins-visible` 覆盖。
 - 完成文档全量口径同步并准备发布 `v1.0.12`，统一默认可见插件为 21 个（含 `webtools-http-mock`）。
 - 调整 `HTTP Mock Server` 目录展示策略：默认插件目录仅保留单入口，动作项通过别名查询返回，避免插件分区重复占位。
@@ -52,13 +53,23 @@
 - 图片提示词新增场景级文字推荐：创建不同风格默认状态时会自动推荐更合适的文字位置和字形，例如电影海报默认底部片名、SaaS 默认顶部左侧现代黑体、旅行海报默认顶部品牌字标、人像默认底部细字重；同时补了轻量源码 UI 回归，锁住文字设计下拉使用稳定 id、设计卡片展示字形/颜色/布局/安全区，以及生日快捷模板同步结构化年龄。
 - Playwright UI smoke 新增 `加密工具` 与 `JWT 调试器` 主流程覆盖，分别验证 MD5 自动输出与示例 JWT 解析。
 - 针对 Hardware / File Hash / Port Helper 及相关渲染面板做了 mojibake 扫描，当前未发现明显乱码命中。
+- CodeAgent Switch 本轮升级为 Codex 配置管理器：面板顶部加入 Codex / Claude Code / Gemini CLI 工具分组（后两者为规划中），Codex 当前 Provider / Profile / 模型会被明确标注；Provider 支持新增、编辑、删除和 env_key 名称配置，Profile 支持新增、编辑、删除、预览和应用；所有保存/删除动作复用备份、临时文件、重读校验和替换流程，不保存真实 API Key。
+- CodeAgent Switch 继续优化配置编辑体验：TOML 解析支持 `[profiles."淘宝1"]` 这类非 ASCII/引号段 profile id，当前 Profile 匹配只比较预设中明确填写的字段，因此“淘宝1”等已选配置会正确高亮；面板改为左侧 Provider/Profile 简略列表、右侧详情页编辑，列表行提供 `selected` 与 `active` 两套状态，新增/编辑/删除都在详情页完成。
+- CodeAgent Switch 面板源码完成收尾清理：删除旧的不可达渲染实现和 V2 内未挂载的内联编辑列表构造，源码回归新增断言防止列表行再次塞回 Provider/Profile 编辑器，后续只维护 master-detail 详情页路径。
+- CodeAgent Switch 面板继续按 cc switch 方向优化：工具切换改为左侧固定宽度栏，Profile 成为中间主列表，Provider 收敛为紧凑管理条，右侧详情页按配置、切换操作、diff 预览、诊断、备份、环境变量命令和危险区分组；预览/应用/复制/恢复等动作跟随当前选中项展示，并新增源码回归锁住三栏 shell、工具侧栏、Profile 列表、Provider strip 和详情分组结构。
+- CodeAgent Switch 细化可扫描性：中间列新增“当前配置”摘要卡，右侧详情页新增只读字段概览网格，列表行和 Provider chip 用独立 `selected` / `active` badge 区分“正在查看”和“当前生效”，减少用户判断当前配置时的跳读成本。
+- CodeAgent Switch 修正切换与 Key 配置入口：Profile 列表行直接展示“预览 / 切换”按钮，当前 Profile 的切换按钮显示为“当前”并禁用；Provider 编辑器不再要求手填 `env_key` 名称，而是按 Provider ID 自动生成 `CODEAGENT_<PROVIDER>_API_KEY`，API Key 输入只用于复制本机环境变量设置命令，不会写入配置或保存到插件状态。
+- CodeAgent Switch 继续强化“怎么切换”和“不要手输入名字/Key 名”的体验：右侧 Profile 详情页顶部直接提供“预览 / 设为当前”主操作，列表行文案也统一为“设为当前”；Provider 新增时自动预填不冲突 ID，用户先填 Base URL 时会按域名联动生成 Provider ID、显示名称和 `CODEAGENT_<PROVIDER>_API_KEY`，Key 设置独立成块并使用单独复制反馈。
+- CodeAgent Switch Key 配置改为直接执行：Provider 详情页的主按钮为“写入系统 Key”，会把临时输入的 API Key 写入 Windows 用户级环境变量并同步当前 LiteLauncher 进程环境，诊断可立即识别；复制命令保留为备选，明文 Key 仍不写入 `config.toml` 或插件状态。
+- CodeAgent Switch 修正 Codex 新版 Profile 切换口径：预览和应用现在只管理顶层 `profile = "<profile-id>"`，并清理根部重复的 `model_provider`、`model`、`review_model`、`model_reasoning_effort`、`model_auto_compact_token_limit`，模型参数只保留在 `[profiles.xxx]` 模板段；同时补了中文 Provider 名回归，避免 `淘宝1`、`银河` 这类值在插件链路中再次变成乱码。本机 `C:\Users\lybly\.codex\config.toml` 已备份并清理为顶部仅保留 `profile = "OpenAI"`。
+- CodeAgent Switch 对齐官方 Codex 配置参考继续补字段：Provider 详情页新增 `env_key_instructions`、`supports_websockets`、`http_headers`、`env_http_headers`、`query_params`；Profile 详情页新增 `plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`service_tier`、`web_search`；详情页新增“运行权限”区，可保存 `approval_policy`、`sandbox_mode`、`default_permissions`、`network_access` 和 `[windows] sandbox / sandbox_private_desktop`。保存路径仍走备份、临时文件、重读校验和替换流程，并新增 parser/plugin/source 回归覆盖。
 
 ## 当前版本基线
 
 - 应用版本：`v1.0.15`
-- 默认可见插件数量：25
+- 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
-- 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`
+- 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
 - 开发模式：`pnpm dev`
 - 完整回归入口：`pnpm run test:regression:full`
 - 搜索首页布局回归：已接入 `pnpm run test:e2e:smoke`

@@ -2,6 +2,8 @@ import { BrowserWindow } from "electron";
 
 import { ExecuteResult, LaunchItem } from "../../shared/types";
 import { cashflowGamePlugin } from "./cashflow-game";
+import { clipboardWorkbenchPlugin } from "./clipboard-workbench";
+import { codeAgentSwitchPlugin } from "./codeagent-switch";
 import { hardwareInspectorPlugin } from "./hardware-inspector";
 import { LauncherPlugin } from "./types";
 import { webtoolsApiClientPlugin } from "./webtools-api-client";
@@ -31,6 +33,7 @@ import { webtoolsUrlParsePlugin } from "./webtools-url-parse";
 const ALL_PLUGINS: LauncherPlugin[] = [
   cashflowGamePlugin,
   hardwareInspectorPlugin,
+  clipboardWorkbenchPlugin,
   webtoolsPasswordPlugin,
   webtoolsCronPlugin,
   webtoolsJsonPlugin,
@@ -53,12 +56,14 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsQrcodePlugin,
   webtoolsMarkdownPlugin,
   webtoolsUaPlugin,
-  webtoolsApiClientPlugin
+  webtoolsApiClientPlugin,
+  codeAgentSwitchPlugin
 ];
 
 const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
+  "clipboard-workbench",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -81,7 +86,8 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-qrcode",
   "webtools-markdown",
   "webtools-ua",
-  "webtools-api-client"
+  "webtools-api-client",
+  "codeagent-switch"
 ] as const;
 
 const PLUGIN_ID_PREFIX = "plugin:";
