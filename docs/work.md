@@ -68,6 +68,7 @@
 - CodeAgent Switch 对齐官方 Codex 配置参考继续补字段：Provider 详情页新增 `env_key_instructions`、`supports_websockets`、`http_headers`、`env_http_headers`、`query_params`；Profile 详情页新增 `plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`service_tier`、`web_search`；详情页新增“运行权限”区，可保存 `approval_policy`、`sandbox_mode`、`default_permissions`、`network_access` 和 `[windows] sandbox / sandbox_private_desktop`。保存路径仍走备份、临时文件、重读校验和替换流程，并新增 parser/plugin/source 回归覆盖。
 
 - 插件面板窄屏布局基线继续补强：`CodeAgent Switch` 修复 `<=860px` 断点被 `<=1180px` 双列规则覆盖的问题，新增源码回归锁定“1180 过渡双列 + 860 最终单列”的顺序；`e2e-plugin-panel-layout-smoke` 现已扩展覆盖 `密码工具`、`JSON 工具`、`Cron 生成器`、`CodeAgent Switch` 的几何断言，并为相关 `waitForFunction` 补上显式 10 秒超时，避免整条 smoke 因单步未收敛而拖到 180 秒总超时。
+- 窄屏几何回归继续扩圈：`e2e-plugin-panel-layout-smoke` 新增 `正则工具`、`配置转换`、`Markdown 预览`、`Clipboard Workbench` 的真实几何断言，其中正则补到匹配卡片单列、配置补到双编辑器单列、Markdown 补到上下主布局 + HTML 区块纵向顺序、Clipboard 补到主 shell / 统计卡 / 列表卡片的窄屏单列；源码回归同步补上 `regex match list`、`config editors`、`clipboard shell`、`clipboard item list` 的响应式规则锁定。
 
 ## 当前版本基线
 

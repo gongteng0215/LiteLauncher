@@ -198,6 +198,42 @@ test(
       );
       await returnToSearch(page);
 
+      await openPluginFromSearch(
+        page,
+        "plugin:regex",
+        "\u6b63\u5219\u5de5\u5177",
+        "webtools-regex"
+      );
+      await assertFormFitsViewport(page, "form.webtools-regex-form");
+      const regexForm = page.locator("form.webtools-regex-form");
+      await regexForm.locator('input[name="webtoolsRegexPattern"]').fill("LiteLauncher");
+      await regexForm
+        .locator('textarea[name="webtoolsRegexInput"]')
+        .fill("LiteLauncher regex narrow smoke LiteLauncher");
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".webtools-regex-layout > *").length >= 2 &&
+          document.querySelectorAll(".webtools-regex-match-list > *").length >= 2 &&
+          document.querySelector(".webtools-regex-highlight-box")?.textContent?.includes(
+            "LiteLauncher"
+          ) === true
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "regex panel");
+      assertSingleColumnStack(
+        "regex panes",
+        await collectStackMetrics(page, ".webtools-regex-layout", ".webtools-regex-layout > *")
+      );
+      assertSingleColumnStack(
+        "regex match cards",
+        await collectStackMetrics(
+          page,
+          ".webtools-regex-match-list",
+          ".webtools-regex-match-list > *"
+        )
+      );
+      await returnToSearch(page);
+
       await openPluginFromSearch(page, "plugin:json", "JSON 工具", "webtools-json");
       await assertFormFitsViewport(page, "form.webtools-json-form");
       await page.waitForFunction(() => {
@@ -261,6 +297,82 @@ test(
 
       await openPluginFromSearch(
         page,
+        "plugin:config",
+        "\u914d\u7f6e\u8f6c\u6362",
+        "webtools-config-convert"
+      );
+      await assertFormFitsViewport(page, "form.webtools-config-form");
+      const configForm = page.locator("form.webtools-config-form");
+      await configForm.locator('select[name="webtoolsConfigTarget"]').selectOption("json");
+      await configForm
+        .locator('textarea[name="webtoolsConfigInput"]')
+        .fill("server:\n  port: 8080\n  host: localhost\n");
+      await page.waitForFunction(() => {
+        const output = document.querySelector(
+          'textarea[name="webtoolsConfigOutput"]'
+        ) as HTMLTextAreaElement | null;
+        return (
+          document.querySelectorAll(".webtools-config-editors > *").length >= 2 &&
+          output?.value.includes('"server"') === true &&
+          output.value.includes('"port": 8080') === true
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "config panel");
+      assertSingleColumnStack(
+        "config editors",
+        await collectStackMetrics(
+          page,
+          ".webtools-config-editors",
+          ".webtools-config-editors > *"
+        )
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "plugin:md",
+        "Markdown \u9884\u89c8",
+        "webtools-markdown"
+      );
+      await assertFormFitsViewport(page, "form.webtools-markdown-form");
+      const markdownForm = page.locator("form.webtools-markdown-form");
+      await markdownForm
+        .locator('textarea[name="webtoolsMarkdownInput"]')
+        .fill("# LiteLauncher narrow layout\n\n- alpha\n- beta");
+      await page.waitForFunction(() => {
+        const preview = document.querySelector(
+          '[data-webtools-markdown-preview="1"]'
+        ) as HTMLDivElement | null;
+        const htmlOutput = document.querySelector(
+          'textarea[name="webtoolsMarkdownHtml"]'
+        ) as HTMLTextAreaElement | null;
+        return (
+          document.querySelectorAll(".webtools-markdown-layout > *").length >= 2 &&
+          document.querySelector(".webtools-markdown-html-block") &&
+          preview?.textContent?.includes("LiteLauncher narrow layout") === true &&
+          htmlOutput?.value.includes("<h1") === true
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "markdown panel");
+      assertSingleColumnStack(
+        "markdown panes",
+        await collectStackMetrics(
+          page,
+          ".webtools-markdown-layout",
+          ".webtools-markdown-layout > *"
+        )
+      );
+      await assertStackedPair(
+        page,
+        "form.webtools-markdown-form",
+        ".webtools-markdown-layout",
+        ".webtools-markdown-html-block",
+        "markdown html block"
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
         "plugin:codeagent",
         "CodeAgent Switch",
         "codeagent-switch"
@@ -318,6 +430,80 @@ test(
           page,
           ".webtools-image-prompt-text-controls",
           ".webtools-image-prompt-text-controls > *"
+        )
+      );
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
+        "clipx",
+        "Clipboard Workbench",
+        "clipboard-workbench"
+      );
+      await assertFormFitsViewport(page, "form.clipboard-workbench-form");
+      const clipboardForm = page.locator("form.clipboard-workbench-form");
+      const alphaText = `layout smoke alpha ${Date.now()}`;
+      const betaText = `layout smoke beta ${Date.now() + 1}`;
+      const manualTextInput = clipboardForm.locator(
+        'textarea[name="clipboardWorkbenchManualText"]'
+      );
+      const saveManualButton = clipboardForm.locator(
+        '[data-clipboard-workbench-save-manual="1"]'
+      );
+      await manualTextInput.fill(alphaText);
+      await saveManualButton.click();
+      await page.waitForFunction(
+        (expectedText) => {
+          return Array.from(document.querySelectorAll(".clipboard-workbench-item")).some(
+            (node) => node.textContent?.includes(expectedText)
+          );
+        },
+        alphaText,
+        { timeout: 15000 }
+      );
+      await manualTextInput.fill(betaText);
+      await saveManualButton.click();
+      await page.waitForFunction(
+        ([firstText, secondText]) => {
+          const items = Array.from(document.querySelectorAll(".clipboard-workbench-item"));
+          return (
+            items.some((node) => node.textContent?.includes(firstText)) &&
+            items.some((node) => node.textContent?.includes(secondText))
+          );
+        },
+        [alphaText, betaText],
+        { timeout: 15000 }
+      );
+      await page.waitForFunction(() => {
+        return (
+          document.querySelectorAll(".clipboard-workbench-shell > *").length >= 4 &&
+          document.querySelectorAll(".clipboard-workbench-toolbar-stats > *").length >= 3 &&
+          document.querySelectorAll(".clipboard-workbench-item-list > *").length >= 2
+        );
+      }, undefined, { timeout: 10000 });
+      await assertPageHasNoHorizontalOverflow(page, "clipboard workbench panel");
+      assertSingleColumnStack(
+        "clipboard shell",
+        await collectStackMetrics(
+          page,
+          ".clipboard-workbench-shell",
+          ".clipboard-workbench-shell > *"
+        )
+      );
+      assertSingleColumnStack(
+        "clipboard stats",
+        await collectStackMetrics(
+          page,
+          ".clipboard-workbench-toolbar-stats",
+          ".clipboard-workbench-toolbar-stats > *"
+        )
+      );
+      assertSingleColumnStack(
+        "clipboard item cards",
+        await collectStackMetrics(
+          page,
+          ".clipboard-workbench-item-list",
+          ".clipboard-workbench-item-list > *"
         )
       );
       await returnToSearch(page);

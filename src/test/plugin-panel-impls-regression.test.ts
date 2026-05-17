@@ -631,8 +631,18 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-regex-match-list\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "regex match cards should also stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
     /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-config-bar\s*\{[\s\S]*width:\s*100%/,
     "config toolbar should fill the row instead of floating as a wide loose pill on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-config-editors\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "config editor panes should stack into one column on narrow windows"
   );
   assert.match(
     stylesSource,
@@ -868,6 +878,16 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     stylesSource,
     /@media \(max-width:\s*980px\)[\s\S]*\.clipboard-workbench-toolbar\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
     "Clipboard Workbench toolbar should collapse into a single readable column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*900px\)[\s\S]*\.clipboard-workbench-shell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Clipboard Workbench main shell should collapse into one vertical column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*900px\)[\s\S]*\.clipboard-workbench-item-list\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Clipboard Workbench item cards should stop spanning multiple columns on narrow windows"
   );
   assert.match(
     stylesSource,
