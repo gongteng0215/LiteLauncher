@@ -2918,6 +2918,884 @@ function applyHardwareInspectorCardChangeState(
   card.appendChild(summary);
 }
 
+// --- Cron state ---
+let webtoolsCronExpression = "5 4 * * *";
+let webtoolsCronReadable = "";
+let webtoolsCronNextRun = "";
+let webtoolsCronUpcoming: string[] = [];
+let webtoolsCronStatus: WebtoolsCronStatus = "";
+let webtoolsCronErrorMessage = "";
+let webtoolsCronErrorField: WebtoolsCronFieldKey | "" = "";
+let webtoolsCronWarnings: string[] = [];
+let webtoolsCronTemplateKey = "";
+let webtoolsCronTemplateSummary = "";
+let webtoolsCronFieldMeta: WebtoolsCronFieldMeta[] = [];
+let webtoolsCronCopyState: WebtoolsCronCopyState = "";
+let webtoolsCronAutoTimer: number | null = null;
+let webtoolsCronRequestToken = 0;
+
+const WEBTOOLS_CRON_FIELD_FALLBACKS: ReadonlyArray<{
+  key: WebtoolsCronFieldKey;
+  label: string;
+  hint: string;
+}> = [
+  { key: "minute", label: "Minute", hint: "Minute (0-59)" },
+  { key: "hour", label: "Hour", hint: "Hour (0-23)" },
+  { key: "day", label: "Day", hint: "Day (1-31)" },
+  { key: "month", label: "Month", hint: "Month (1-12)" },
+  { key: "weekday", label: "Weekday", hint: "Weekday (0-6)" }
+];
+
+const WEBTOOLS_CRON_TEMPLATES: ReadonlyArray<{
+  key: string;
+  expression: string;
+  summary: string;
+}> = [
+  { key: "weekday-9am", expression: "0 9 * * 1-5", summary: "工作日 09:00 执行" },
+  { key: "daily-noon", expression: "0 12 * * *", summary: "每天 12:00 执行" },
+  { key: "daily-midnight", expression: "0 0 * * *", summary: "每天 00:00 执行" },
+  { key: "hourly-top", expression: "0 * * * *", summary: "每小时整点执行" },
+  { key: "every-minute", expression: "* * * * *", summary: "每分钟执行" }
+];
+
+function normalizeWebtoolsCronStatus(value: unknown): WebtoolsCronStatus {
+  return value === "success" || value === "warning" || value === "error" ? value : "";
+}
+
+function normalizeWebtoolsCronErrorField(value: unknown): WebtoolsCronFieldKey | "" {
+  return value === "minute" ||
+    value === "hour" ||
+    value === "day" ||
+    value === "month" ||
+    value === "weekday"
+    ? value
+    : "";
+}
+
+function getWebtoolsCronPartValues(expression: string): string[] {
+  const parts = expression.trim().split(/\s+/).filter(Boolean);
+  while (parts.length < 5) {
+    parts.push("*");
+  }
+  return parts.slice(0, 5);
+}
+
+function buildWebtoolsCronFallbackFieldMeta(
+  expression: string,
+  errorField: WebtoolsCronFieldKey | ""
+): WebtoolsCronFieldMeta[] {
+  const values = getWebtoolsCronPartValues(expression);
+  return WEBTOOLS_CRON_FIELD_FALLBACKS.map((field, index) => ({
+    key: field.key,
+    label: field.label,
+    value: values[index] ?? "*",
+    hint: field.hint,
+    hasError: field.key === errorField
+  }));
+}
+
+function parseWebtoolsCronFieldMeta(
+  value: unknown,
+  expression: string,
+  errorField: WebtoolsCronFieldKey | ""
+): WebtoolsCronFieldMeta[] {
+  if (!Array.isArray(value)) {
+    return buildWebtoolsCronFallbackFieldMeta(expression, errorField);
+  }
+
+  const items = value
+    .map((item) => {
+      const record = toRecord(item);
+      if (!record) {
+        return null;
+      }
+      const key = normalizeWebtoolsCronErrorField(record.key);
+      if (!key) {
+        return null;
+      }
+      return {
+        key,
+        label: typeof record.label === "string" ? record.label : key,
+        value: typeof record.value === "string" ? record.value : "",
+        hint: typeof record.hint === "string" ? record.hint : "",
+        hasError: typeof record.hasError === "boolean" ? record.hasError : key === errorField
+      } satisfies WebtoolsCronFieldMeta;
+    })
+    .filter((item): item is WebtoolsCronFieldMeta => item !== null);
+
+  if (items.length !== WEBTOOLS_CRON_FIELD_FALLBACKS.length) {
+    return buildWebtoolsCronFallbackFieldMeta(expression, errorField);
+  }
+
+  return items;
+}
+
+function getWebtoolsCronFieldMeta(): WebtoolsCronFieldMeta[] {
+  return webtoolsCronFieldMeta.length > 0
+    ? webtoolsCronFieldMeta
+    : buildWebtoolsCronFallbackFieldMeta(webtoolsCronExpression, webtoolsCronErrorField);
+}
+
+function getWebtoolsCronTemplates(): ReadonlyArray<{
+  key: string;
+  expression: string;
+  summary: string;
+}> {
+  return WEBTOOLS_CRON_TEMPLATES;
+}
+
+function rebuildWebtoolsCronExpressionFromFields(form: HTMLFormElement): string {
+  const keys: WebtoolsCronFieldKey[] = ["minute", "hour", "day", "month", "weekday"];
+  return keys
+    .map((key) => {
+      const node = form.elements.namedItem(`webtoolsCronField-${key}`);
+      return node instanceof HTMLInputElement && node.value.trim() ? node.value.trim() : "*";
+    })
+    .join(" ");
+}
+
+async function copyWebtoolsCronText(
+  kind: WebtoolsCronCopyState,
+  text: string,
+  form?: HTMLFormElement
+): Promise<void> {
+  if (!text.trim()) {
+    setStatus("当前没有可复制的内容");
+    return;
+  }
+  const copied =
+    kind === "expression"
+      ? await copyTextToClipboard(webtoolsCronExpression)
+      : kind === "readable"
+        ? webtoolsCronReadable.trim()
+          ? await copyTextToClipboard(webtoolsCronReadable)
+          : await copyTextToClipboard(webtoolsCronErrorMessage)
+        : await copyTextToClipboard(text);
+  webtoolsCronCopyState = copied ? kind : "";
+  setStatus(copied ? "Cron 内容已复制" : "复制失败");
+  if (form) {
+    refreshWebtoolsCronResultInForm(form);
+  }
+}
+
+function resetWebtoolsCronState(expression = webtoolsCronExpression): void {
+  webtoolsCronExpression = expression.trim() || "5 4 * * *";
+  webtoolsCronReadable = "";
+  webtoolsCronNextRun = "";
+  webtoolsCronUpcoming = [];
+  webtoolsCronStatus = "";
+  webtoolsCronErrorMessage = "";
+  webtoolsCronErrorField = "";
+  webtoolsCronWarnings = [];
+  webtoolsCronTemplateKey = "";
+  webtoolsCronTemplateSummary = "";
+  webtoolsCronFieldMeta = buildWebtoolsCronFallbackFieldMeta(webtoolsCronExpression, "");
+  webtoolsCronCopyState = "";
+}
+
+function hydrateWebtoolsCronState(data: Record<string, unknown> | null): void {
+  const nextExpression =
+    data && typeof data.expression === "string" ? data.expression : webtoolsCronExpression;
+  webtoolsCronExpression = nextExpression.trim() || "5 4 * * *";
+  webtoolsCronReadable = data && typeof data.readable === "string" ? data.readable : "";
+  webtoolsCronNextRun = data && typeof data.nextRun === "string" ? data.nextRun : "";
+  webtoolsCronUpcoming = data ? toStringArray(data.upcoming) : [];
+  webtoolsCronStatus = data ? normalizeWebtoolsCronStatus(data.status) : "";
+  webtoolsCronErrorMessage =
+    data && typeof data.errorMessage === "string" ? data.errorMessage : "";
+  webtoolsCronErrorField = data ? normalizeWebtoolsCronErrorField(data.errorField) : "";
+  webtoolsCronWarnings = data ? toStringArray(data.warnings) : [];
+  webtoolsCronTemplateKey = data && typeof data.templateKey === "string" ? data.templateKey : "";
+  webtoolsCronTemplateSummary =
+    data && typeof data.templateSummary === "string" ? data.templateSummary : "";
+  webtoolsCronFieldMeta = parseWebtoolsCronFieldMeta(
+    data?.fieldMeta,
+    webtoolsCronExpression,
+    webtoolsCronErrorField
+  );
+}
+
+function buildWebtoolsCronTarget(action: "parse" | "random", expression: string): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("expression", expression);
+  return `command:plugin:${WEBTOOLS_CRON_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsCronResultInForm(form: HTMLFormElement): void {
+  const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+  if (expressionNode instanceof HTMLInputElement) {
+    expressionNode.value = webtoolsCronExpression;
+  }
+
+  const readableNode = form.querySelector(".webtools-cron-readable");
+  if (readableNode instanceof HTMLDivElement) {
+    readableNode.textContent = webtoolsCronReadable || "-";
+  }
+
+  const nextNode = form.querySelector(".webtools-cron-next");
+  if (nextNode instanceof HTMLSpanElement) {
+    nextNode.textContent = webtoolsCronNextRun
+      ? `下一次 ${webtoolsCronNextRun}`
+      : "-";
+  }
+
+  getWebtoolsCronFieldMeta().forEach((field) => {
+    const node = form.elements.namedItem(`webtoolsCronField-${field.key}`);
+    if (node instanceof HTMLInputElement) {
+      node.value = field.value;
+    }
+    const card = form.querySelector<HTMLElement>(
+      `[data-webtools-cron-field-card="${field.key}"]`
+    );
+    if (card) {
+      card.classList.toggle("is-error", field.hasError);
+    }
+    const hint = form.querySelector<HTMLElement>(`[data-webtools-cron-field-hint="${field.key}"]`);
+    if (hint) {
+      hint.textContent = field.hint;
+    }
+  });
+
+  form
+    .querySelectorAll<HTMLButtonElement>("[data-webtools-cron-template]")
+    .forEach((button) => {
+      const active = button.dataset.webtoolsCronTemplate === webtoolsCronTemplateKey;
+      button.classList.toggle("is-active", active);
+    });
+
+  const upcomingNode = form.querySelector(".webtools-cron-upcoming-value");
+  if (upcomingNode instanceof HTMLDivElement) {
+    upcomingNode.textContent =
+      webtoolsCronUpcoming.length > 0 ? webtoolsCronUpcoming.join("\n") : "-";
+  }
+
+  const summaryNode = form.querySelector(".webtools-cron-summary");
+  if (summaryNode instanceof HTMLDivElement) {
+    if (webtoolsCronErrorMessage) {
+      summaryNode.textContent = webtoolsCronErrorMessage;
+      summaryNode.dataset.state = "error";
+    } else if (webtoolsCronWarnings.length > 0) {
+      summaryNode.textContent = webtoolsCronWarnings.join(" ");
+      summaryNode.dataset.state = "warning";
+    } else if (webtoolsCronTemplateSummary) {
+      summaryNode.textContent = webtoolsCronTemplateSummary;
+      summaryNode.dataset.state = webtoolsCronStatus || "success";
+    } else {
+      summaryNode.textContent = webtoolsCronReadable || "编辑表达式后自动解析";
+      summaryNode.dataset.state = webtoolsCronStatus || "idle";
+    }
+  }
+
+  const statusNode = form.querySelector(".webtools-cron-status-badge");
+  if (statusNode instanceof HTMLSpanElement) {
+    const badgeText =
+      webtoolsCronStatus === "error"
+        ? "错误"
+        : webtoolsCronStatus === "warning"
+          ? "提醒"
+          : webtoolsCronReadable
+            ? "已解析"
+            : "待输入";
+    statusNode.textContent = badgeText;
+    statusNode.dataset.state =
+      webtoolsCronStatus || (webtoolsCronReadable || webtoolsCronExpression ? "success" : "idle");
+  }
+
+  const expressionCopyButton = form.querySelector<HTMLButtonElement>(
+    '[data-webtools-cron-copy="expression"]'
+  );
+  if (expressionCopyButton) {
+    expressionCopyButton.textContent =
+      webtoolsCronCopyState === "expression" ? "已复制表达式" : "复制表达式";
+  }
+
+  const readableCopyButton = form.querySelector<HTMLButtonElement>(
+    '[data-webtools-cron-copy="readable"]'
+  );
+  if (readableCopyButton) {
+    readableCopyButton.textContent =
+      webtoolsCronCopyState === "readable" ? "已复制说明" : "复制说明";
+  }
+}
+
+function scheduleWebtoolsCronAutoParse(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsCronAutoTimer !== null) {
+    window.clearTimeout(webtoolsCronAutoTimer);
+  }
+
+  webtoolsCronAutoTimer = window.setTimeout(() => {
+    webtoolsCronAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+    const node = form.elements.namedItem("webtoolsCronExpression");
+    const expression = node instanceof HTMLInputElement ? node.value : "";
+    void executeWebtoolsCronAction("parse", expression, {
+      render: false,
+      form
+    });
+  }, immediate ? 0 : 260);
+}
+
+async function executeWebtoolsCronAction(
+  action: "parse" | "random",
+  expression: string,
+  options: { render?: boolean; form?: HTMLFormElement } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 Cron 工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  webtoolsCronExpression = expression;
+  webtoolsCronCopyState = "";
+  const requestToken = ++webtoolsCronRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_CRON_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "Cron 生成器",
+    subtitle: "面板执行",
+    target: buildWebtoolsCronTarget(action, expression),
+    keywords: ["plugin", "cron", "schedule", "定时", "表达式"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsCronRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+  resetWebtoolsCronState(expression);
+  hydrateWebtoolsCronState(data);
+
+  setStatus(result.message ?? (result.ok ? "解析完成" : "解析失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+
+  if (options.form) {
+    refreshWebtoolsCronResultInForm(options.form);
+  }
+}
+
+// --- ImageBase64 state ---
+let webtoolsImageBase64Input = "";
+let webtoolsImageBase64DataUrl = "";
+let webtoolsImageBase64Raw = "";
+let webtoolsImageBase64Mime = "";
+let webtoolsImageBase64SizeText = "";
+let webtoolsImageBase64Info = "";
+let webtoolsImageBase64Error = "";
+let webtoolsImageBase64Dragging = false;
+let webtoolsImageBase64FileName = "";
+let webtoolsImageBase64AutoTimer: number | null = null;
+let webtoolsImageBase64RequestToken = 0;
+
+function buildWebtoolsImageBase64Target(input: string): string {
+  const params = new URLSearchParams();
+  params.set("action", "normalize");
+  params.set("input", input);
+  return `command:plugin:${WEBTOOLS_IMAGE_BASE64_PLUGIN_ID}?${params.toString()}`;
+}
+
+function getWebtoolsImageBase64DownloadName(): string {
+  if (webtoolsImageBase64FileName.trim()) {
+    return webtoolsImageBase64FileName.trim();
+  }
+  const mime = webtoolsImageBase64Mime.trim().toLowerCase();
+  if (mime === "image/jpeg") return "image.jpg";
+  if (mime === "image/webp") return "image.webp";
+  if (mime === "image/gif") return "image.gif";
+  if (mime === "image/svg+xml") return "image.svg";
+  return "image.png";
+}
+
+function refreshWebtoolsImageBase64PanelInForm(form: HTMLFormElement): void {
+  const previewHost = form.querySelector<HTMLDivElement>(".webtools-image-base64-preview-host");
+  if (previewHost) {
+    previewHost.replaceChildren();
+    if (webtoolsImageBase64DataUrl.startsWith("data:image/")) {
+      const image = document.createElement("img");
+      image.className = "webtools-image-base64-preview-image";
+      image.src = webtoolsImageBase64DataUrl;
+      image.alt = "base64 preview";
+      previewHost.appendChild(image);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "webtools-image-base64-placeholder";
+      placeholder.textContent =
+        "拖拽图片到这里，或上传本地图片；也可以在右侧粘贴 Base64 / DataURL。";
+      previewHost.appendChild(placeholder);
+    }
+  }
+
+  const outputArea = form.querySelector<HTMLTextAreaElement>("[data-webtools-image-base64-output]");
+  if (outputArea) {
+    outputArea.value = webtoolsImageBase64DataUrl;
+  }
+
+  const metaNode = form.querySelector<HTMLDivElement>(".webtools-image-base64-meta");
+  if (metaNode) {
+    const parts = [
+      webtoolsImageBase64FileName.trim() ? `文件: ${webtoolsImageBase64FileName.trim()}` : "",
+      webtoolsImageBase64Mime.trim() ? `MIME: ${webtoolsImageBase64Mime.trim()}` : "",
+      webtoolsImageBase64SizeText.trim() ? `大小: ${webtoolsImageBase64SizeText.trim()}` : ""
+    ].filter(Boolean);
+    metaNode.textContent = parts.join(" · ") || "等待图片或 Base64 输入";
+  }
+
+  const infoNode = form.querySelector<HTMLDivElement>(".webtools-tool-info");
+  if (infoNode) {
+    if (webtoolsImageBase64Error) {
+      infoNode.dataset.state = "error";
+      infoNode.textContent = webtoolsImageBase64Error;
+    } else if (webtoolsImageBase64DataUrl) {
+      infoNode.dataset.state = "ok";
+      infoNode.textContent = webtoolsImageBase64Info || "转换完成";
+    } else {
+      infoNode.dataset.state = "idle";
+      infoNode.textContent = "支持粘贴 Base64、DataURL，或直接上传图片";
+    }
+  }
+
+  const dropzone = form.querySelector<HTMLDivElement>(".webtools-image-base64-dropzone");
+  if (dropzone) {
+    dropzone.dataset.dragging = webtoolsImageBase64Dragging ? "true" : "false";
+  }
+
+  const copyRawButton = form.querySelector<HTMLButtonElement>("[data-webtools-image-copy-raw]");
+  if (copyRawButton) {
+    copyRawButton.disabled = !webtoolsImageBase64Raw.trim();
+  }
+
+  const copyDataUrlButton =
+    form.querySelector<HTMLButtonElement>("[data-webtools-image-copy-dataurl]");
+  if (copyDataUrlButton) {
+    copyDataUrlButton.disabled = !webtoolsImageBase64DataUrl.trim();
+  }
+
+  const downloadButton =
+    form.querySelector<HTMLButtonElement>("[data-webtools-image-download]");
+  if (downloadButton) {
+    downloadButton.disabled = !webtoolsImageBase64DataUrl.startsWith("data:image/");
+  }
+
+  const clearButton = form.querySelector<HTMLButtonElement>("[data-webtools-image-clear]");
+  if (clearButton) {
+    clearButton.disabled =
+      !webtoolsImageBase64Input.trim() &&
+      !webtoolsImageBase64DataUrl.trim() &&
+      !webtoolsImageBase64FileName.trim();
+  }
+}
+
+function scheduleWebtoolsImageBase64AutoNormalize(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsImageBase64AutoTimer !== null) {
+    window.clearTimeout(webtoolsImageBase64AutoTimer);
+  }
+
+  webtoolsImageBase64AutoTimer = window.setTimeout(() => {
+    webtoolsImageBase64AutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const node = form.elements.namedItem("webtoolsImageBase64Input");
+    const inputValue = node instanceof HTMLTextAreaElement ? node.value : "";
+    if (!inputValue.trim()) {
+      webtoolsImageBase64RequestToken += 1;
+      webtoolsImageBase64Input = "";
+      webtoolsImageBase64DataUrl = "";
+      webtoolsImageBase64Raw = "";
+      webtoolsImageBase64Mime = "";
+      webtoolsImageBase64SizeText = "";
+      webtoolsImageBase64Info = "";
+      webtoolsImageBase64Error = "";
+      refreshWebtoolsImageBase64PanelInForm(form);
+      setStatus("已清空图片 Base64 输入");
+      return;
+    }
+
+    void executeWebtoolsImageBase64Normalize(inputValue, { render: false, form });
+  }, immediate ? 0 : 260);
+}
+
+async function executeWebtoolsImageBase64Normalize(
+  input: string,
+  options: { render?: boolean; form?: HTMLFormElement } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行图片 Base64 工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+  const requestToken = ++webtoolsImageBase64RequestToken;
+
+  webtoolsImageBase64Input = input;
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_IMAGE_BASE64_PLUGIN_ID}:normalize`,
+    type: "command",
+    title: "图片 Base64",
+    subtitle: "面板执行",
+    target: buildWebtoolsImageBase64Target(input),
+    keywords: ["plugin", "image", "base64", "图片", "编码"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsImageBase64RequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+
+  webtoolsImageBase64DataUrl =
+    data && typeof data.dataUrl === "string" ? data.dataUrl : "";
+  webtoolsImageBase64Raw =
+    data && typeof data.rawBase64 === "string" ? data.rawBase64 : "";
+  webtoolsImageBase64Mime =
+    data && typeof data.mime === "string" ? data.mime : "";
+  webtoolsImageBase64SizeText =
+    data && typeof data.sizeText === "string" ? data.sizeText : "";
+  webtoolsImageBase64Info = result.ok ? result.message ?? "转换完成" : "";
+  webtoolsImageBase64Error = result.ok ? "" : result.message ?? "转换失败";
+
+  setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  if (options.form) {
+    refreshWebtoolsImageBase64PanelInForm(options.form);
+  }
+}
+
+// --- ImagePrompt helpers ---
+function normalizeWebtoolsImagePromptProductId(value: string): WebtoolsImagePromptProductId {
+  return value === "chatgpt-images-2" ? "chatgpt-images-2" : "chatgpt-images-2";
+}
+
+function filterWebtoolsImagePromptStateForStyle(
+  state: WebtoolsImagePromptState
+): WebtoolsImagePromptState {
+  const optionGroups = getWebtoolsImagePromptOptionGroupsForStyle(state.stylePresetId);
+  const allowed = new Map<WebtoolsImagePromptOptionGroupKey, Set<string>>();
+  optionGroups.forEach((group) => {
+    allowed.set(group.key, new Set(group.options));
+  });
+  const next = cloneWebtoolsImagePromptState(state);
+  for (const key of WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS) {
+    const groupAllowed = allowed.get(key);
+    if (!groupAllowed) {
+      continue;
+    }
+    next.selections[key] = next.selections[key].filter((item) => groupAllowed.has(item));
+  }
+  next.constraints = next.constraints.filter((item) => allowed.get("constraints")?.has(item));
+  return next;
+}
+
+function readWebtoolsImagePromptStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
+
+function normalizeWebtoolsImagePromptState(value: unknown): WebtoolsImagePromptState {
+  const data = toRecord(value);
+  const next = createDefaultWebtoolsImagePromptState();
+
+  if (!data) {
+    return next;
+  }
+  if (typeof data.productId === "string") {
+    next.productId = normalizeWebtoolsImagePromptProductId(data.productId);
+  }
+  if (typeof data.stylePresetId === "string") {
+    next.stylePresetId = normalizeWebtoolsImagePromptStylePresetId(data.stylePresetId);
+  }
+  if (typeof data.photoDescription === "string") {
+    next.photoDescription = data.photoDescription;
+  }
+
+  const selections = toRecord(data.selections);
+  if (selections) {
+    for (const key of WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS) {
+      next.selections[key] = readWebtoolsImagePromptStringList(selections[key]);
+    }
+  }
+
+  const custom = toRecord(data.custom);
+  if (custom) {
+    for (const key of WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS) {
+      if (key === "constraints") {
+        continue;
+      }
+      const customValue = custom[key];
+      if (typeof customValue === "string") {
+        next.custom[key] = customValue;
+      }
+    }
+  }
+
+  const text = toRecord(data.text);
+  if (text) {
+    if (typeof text.exact === "string") {
+      next.text.exact = text.exact;
+    }
+    if (typeof text.position === "string") {
+      next.text.position = text.position;
+    }
+    if (typeof text.style === "string") {
+      next.text.style = text.style;
+    }
+    if (typeof text.designId === "string") {
+      next.text = applyWebtoolsImagePromptTextDesign(
+        next.text,
+        findWebtoolsImagePromptTextDesign(text.designId)
+      );
+    }
+    if (typeof text.design === "string") {
+      const design = findWebtoolsImagePromptTextDesign(text.design);
+      next.text = applyWebtoolsImagePromptTextDesign(next.text, design);
+    }
+    if (typeof text.title === "string") {
+      next.text.title = text.title;
+    }
+    if (typeof text.subtitle === "string") {
+      next.text.subtitle = text.subtitle;
+    }
+    if (typeof text.label === "string") {
+      next.text.label = text.label;
+    }
+    if (typeof text.name === "string") {
+      next.text.name = text.name;
+    }
+    if (typeof text.age === "string") {
+      next.text.age = text.age;
+    }
+    if (typeof text.layout === "string") {
+      next.text.layout = text.layout;
+    }
+    if (typeof text.hierarchy === "string") {
+      next.text.hierarchy = text.hierarchy;
+    }
+    if (typeof text.color === "string") {
+      next.text.color = text.color;
+    }
+    if (typeof text.effect === "string") {
+      next.text.effect = text.effect;
+    }
+    if (typeof text.safeArea === "string") {
+      next.text.safeArea = text.safeArea;
+    }
+    next.text.flags = readWebtoolsImagePromptStringList(text.flags);
+  }
+
+  next.constraints = readWebtoolsImagePromptStringList(data.constraints);
+
+  return next;
+}
+
+function collectWebtoolsImagePromptState(form: HTMLFormElement): WebtoolsImagePromptState {
+  const readValue = (name: string): string => {
+    const node = form.elements.namedItem(name);
+    return node instanceof HTMLTextAreaElement ||
+      node instanceof HTMLInputElement ||
+      node instanceof HTMLSelectElement
+      ? node.value.trim()
+      : "";
+  };
+  const readCheckedValues = (name: string): string[] =>
+    Array.from(form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`))
+      .map((node) => node.value.trim())
+      .filter(Boolean);
+  const productNode = form.elements.namedItem("webtoolsImagePromptProduct");
+  const stylePresetValue = readCheckedValues("webtoolsImagePromptStylePreset")[0];
+  const stylePresetId = stylePresetValue
+    ? normalizeWebtoolsImagePromptStylePresetId(stylePresetValue)
+    : webtoolsImagePromptState.stylePresetId;
+  const textDesign = findWebtoolsImagePromptTextDesign(
+    readValue("webtoolsImagePromptTextDesign") || webtoolsImagePromptState.text.designId
+  );
+  const state: WebtoolsImagePromptState = {
+    productId:
+      productNode instanceof HTMLSelectElement
+        ? normalizeWebtoolsImagePromptProductId(productNode.value)
+        : "chatgpt-images-2",
+    stylePresetId,
+    photoDescription: readValue("webtoolsImagePromptPhotoDescription"),
+    selections: createEmptyWebtoolsImagePromptSelections(),
+    custom: createEmptyWebtoolsImagePromptCustom(),
+    text: createWebtoolsImagePromptTextState({
+      exact: readValue("webtoolsImagePromptTextExact"),
+      position: readValue("webtoolsImagePromptTextPosition") || "顶部居中",
+      style: readValue("webtoolsImagePromptTextStyle") || "无衬线加粗",
+      designId: textDesign.id,
+      design: textDesign.label,
+      title: readValue("webtoolsImagePromptTextTitle"),
+      subtitle: readValue("webtoolsImagePromptTextSubtitle"),
+      label: readValue("webtoolsImagePromptTextLabel"),
+      name: readValue("webtoolsImagePromptTextName"),
+      age: readValue("webtoolsImagePromptTextAge"),
+      flags: readCheckedValues("webtoolsImagePromptTextFlag")
+    }),
+    constraints: readCheckedValues("webtoolsImagePromptSelection-constraints")
+  };
+
+  for (const key of WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS) {
+    if (key === "constraints") {
+      continue;
+    }
+    state.selections[key] = readCheckedValues(`webtoolsImagePromptSelection-${key}`);
+    state.custom[key] = readValue(`webtoolsImagePromptCustom-${key}`);
+  }
+
+  return filterWebtoolsImagePromptStateForStyle(state);
+}
+
+function syncWebtoolsImagePromptForm(form: HTMLFormElement, state: WebtoolsImagePromptState): void {
+  const setValue = (name: string, value: string): void => {
+    const node = form.elements.namedItem(name);
+    if (
+      node instanceof HTMLInputElement ||
+      node instanceof HTMLSelectElement ||
+      node instanceof HTMLTextAreaElement
+    ) {
+      node.value = value;
+    }
+  };
+  const setCheckedValues = (name: string, values: string[]): void => {
+    const selected = new Set(values);
+    form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`).forEach((node) => {
+      node.checked = selected.has(node.value);
+      const label = node.closest<HTMLElement>(".webtools-image-prompt-chip");
+      if (label) {
+        label.dataset.selected = String(node.checked);
+      }
+    });
+  };
+
+  setValue("webtoolsImagePromptProduct", state.productId);
+  setCheckedValues("webtoolsImagePromptStylePreset", [state.stylePresetId]);
+  setValue("webtoolsImagePromptPhotoDescription", state.photoDescription);
+  for (const key of WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS) {
+    setCheckedValues(
+      `webtoolsImagePromptSelection-${key}`,
+      getWebtoolsImagePromptSelectedOptions(state, key)
+    );
+    if (key !== "constraints") {
+      setValue(`webtoolsImagePromptCustom-${key}`, state.custom[key]);
+    }
+  }
+  setValue("webtoolsImagePromptTextExact", state.text.exact);
+  setValue("webtoolsImagePromptTextPosition", state.text.position);
+  setValue("webtoolsImagePromptTextStyle", state.text.style);
+  setValue("webtoolsImagePromptTextDesign", state.text.designId);
+  setValue("webtoolsImagePromptTextTitle", state.text.title);
+  setValue("webtoolsImagePromptTextSubtitle", state.text.subtitle);
+  setValue("webtoolsImagePromptTextLabel", state.text.label);
+  setValue("webtoolsImagePromptTextName", state.text.name);
+  setValue("webtoolsImagePromptTextAge", state.text.age);
+  setCheckedValues("webtoolsImagePromptTextFlag", state.text.flags);
+}
+
+function createClearedWebtoolsImagePromptState(): WebtoolsImagePromptState {
+  return {
+    productId: "chatgpt-images-2",
+    stylePresetId: "ecommerce-main",
+    photoDescription: "",
+    selections: createEmptyWebtoolsImagePromptSelections(),
+    custom: createEmptyWebtoolsImagePromptCustom(),
+    text: createWebtoolsImagePromptTextState({
+      exact: "",
+      position: "顶部居中",
+      style: "无衬线加粗",
+      flags: []
+    }),
+    constraints: []
+  };
+}
+
+function buildWebtoolsImagePromptTarget(state: WebtoolsImagePromptState): string {
+  const params = new URLSearchParams();
+  params.set("action", "build");
+  params.set("state", JSON.stringify(state));
+  return `command:plugin:${WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsImagePromptPanelInForm(form: HTMLFormElement): void {
+  const output = form.elements.namedItem("webtoolsImagePromptOutput");
+  if (output instanceof HTMLTextAreaElement) {
+    output.value = webtoolsImagePromptOutput;
+  }
+  const info = form.querySelector<HTMLElement>(".webtools-image-prompt-info");
+  if (info) {
+    info.textContent =
+      webtoolsImagePromptInfo ||
+      (webtoolsImagePromptOutput.trim()
+        ? `已生成 ${webtoolsImagePromptOutput.length} 字符`
+        : "选择模块后生成提示词");
+    info.dataset.state = webtoolsImagePromptOutput.trim() ? "ok" : "idle";
+  }
+  const copyButton = form.querySelector<HTMLButtonElement>("[data-webtools-image-prompt-copy]");
+  if (copyButton) {
+    copyButton.disabled = !webtoolsImagePromptOutput.trim();
+  }
+}
+
+async function executeWebtoolsImagePromptBuild(
+  form: HTMLFormElement,
+  options: { render?: boolean; state?: WebtoolsImagePromptState } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法生成图片提示词");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+  const requestToken = ++webtoolsImagePromptRequestToken;
+  webtoolsImagePromptState = options.state
+    ? filterWebtoolsImagePromptStateForStyle(options.state)
+    : collectWebtoolsImagePromptState(form);
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID}:build`,
+    type: "command",
+    title: "图片提示词",
+    subtitle: "面板执行",
+    target: buildWebtoolsImagePromptTarget(webtoolsImagePromptState),
+    keywords: ["plugin", "prompt", "image", "提示词", "图片"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsImagePromptRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+  webtoolsImagePromptOutput =
+    data && typeof data.output === "string" ? data.output : "";
+  webtoolsImagePromptInfo = result.message ?? (result.ok ? "图片提示词已生成" : "生成失败");
+
+  setStatus(webtoolsImagePromptInfo);
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsImagePromptPanelInForm(form);
+}
+
+
 window.__LL_PANEL_IMPLS__ = {
   applyHardwareInspectorPanelPayload(panel: ActivePluginPanelState): void {
     const data = toRecord(panel.data);

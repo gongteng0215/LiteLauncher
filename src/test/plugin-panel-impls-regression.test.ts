@@ -1093,7 +1093,7 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     "Image Prompt panel should apply shared smart templates as complete states"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /state\?:\s*WebtoolsImagePromptState/,
     "Image Prompt build executor should support a direct state override for template shortcuts"
   );
@@ -1275,9 +1275,9 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
 });
 
 test("image prompt style filtering does not recurse into itself", () => {
-  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
   const filterSource = extractFunctionSource(
-    rendererSource,
+    panelImplsSource,
     "filterWebtoolsImagePromptStateForStyle"
   );
 
@@ -1290,8 +1290,8 @@ test("image prompt style filtering does not recurse into itself", () => {
 });
 
 test("image prompt keeps selected style when switching only style groups", () => {
-  const rendererSource = readRendererSource();
-  const collectSource = extractFunctionSource(rendererSource, "collectWebtoolsImagePromptState");
+  const panelImplsSource = readPanelImplsSource();
+  const collectSource = extractFunctionSource(panelImplsSource, "collectWebtoolsImagePromptState");
 
   assert.match(
     collectSource,
