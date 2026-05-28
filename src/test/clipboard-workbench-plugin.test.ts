@@ -94,11 +94,15 @@ test("Clipboard Workbench open sends plugin panel payload", async () => {
       | {
           panel?: string;
           pluginId?: string;
+          title?: string;
+          subtitle?: string;
           data?: { settings?: { maxItems?: number } };
         }
       | undefined;
     assert.equal(payload?.panel, "plugin");
     assert.equal(payload?.pluginId, "clipboard-workbench");
+    assert.equal(payload?.title, "剪贴板工作台");
+    assert.equal(payload?.subtitle, "集中采集、整理和回放文本、图片、截图与文件列表");
     assert.equal(payload?.data?.settings?.maxItems, 50);
   } finally {
     setClipboardWorkbenchServiceForTest(null);

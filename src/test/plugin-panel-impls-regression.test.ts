@@ -19,6 +19,12 @@ const panelImplsPath = path.join(
   "renderer",
   "plugin-panel-impls.ts"
 );
+const pluginRuntimeTypesPath = path.join(
+  process.cwd(),
+  "src",
+  "renderer",
+  "plugin-runtime-types.d.ts"
+);
 
 function readRendererSource(): string {
   return fs.readFileSync(rendererPath, "utf8");
@@ -26,6 +32,10 @@ function readRendererSource(): string {
 
 function readPanelImplsSource(): string {
   return fs.readFileSync(panelImplsPath, "utf8");
+}
+
+function readPluginRuntimeTypesSource(): string {
+  return fs.readFileSync(pluginRuntimeTypesPath, "utf8");
 }
 
 function readRendererHtmlSource(): string {
@@ -66,6 +76,28 @@ function extractFunctionSource(source: string, name: string): string {
   assert.fail(`${name} should have a complete function body`);
 }
 
+function extractMethodSource(source: string, name: string): string {
+  const methodIndex = source.indexOf(`${name}(): void {`);
+  assert.notEqual(methodIndex, -1, `${name} should be present`);
+  const bodyStart = source.indexOf("{", methodIndex);
+  assert.notEqual(bodyStart, -1, `${name} should have a method body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(methodIndex, index + 1);
+      }
+    }
+  }
+
+  assert.fail(`${name} should have a complete method body`);
+}
+
 test("new default plugin panels are implemented through plugin-panel-impls", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
@@ -81,28 +113,352 @@ test("new default plugin panels are implemented through plugin-panel-impls", () 
     "Port Helper render implementation should live outside renderer.ts"
   );
   assert.match(
-    rendererSource,
-    /render:\s*panelImplsSafe\.renderWebtoolsFileHashPanel/,
+    panelImplsSource,
+    /\[WEBTOOLS_FILE_HASH_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
     "File Hash handler should render through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyWebtoolsFileHashPanelPayload/,
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.applyWebtoolsFileHashPanelPayload\(panel\)/,
     "File Hash handler should apply payload through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /render:\s*panelImplsSafe\.renderWebtoolsPortHelperPanel/,
+    panelImplsSource,
+    /\[WEBTOOLS_PORT_HELPER_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
     "Port Helper handler should render through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyWebtoolsPortHelperPanelPayload/,
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.applyWebtoolsPortHelperPanelPayload\(panel\)/,
     "Port Helper handler should apply payload through panelImplsSafe"
   );
 
   assert.match(panelImplsSource, /renderWebtoolsFileHashPanel\(\): void/);
   assert.match(panelImplsSource, /renderWebtoolsPortHelperPanel\(\): void/);
+});
+
+test("standalone password and cashflow panels are implemented through plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  [
+    "let passwordPanelOptions: PasswordGeneratorOptions = {",
+    "let passwordPanelGenerated: string[] = [];",
+    "let cashflowState: CashflowState | null = null;",
+    "let cashflowReports: CashflowReports | null = null;",
+    "let cashflowJobs: CashflowJobOption[] = [];",
+    "function clampPasswordCount",
+    "function normalizePasswordOptions",
+    "function parsePasswordPanelPayload",
+    "function parseCashflowPanelPayload",
+    "function buildPasswordGenerateTarget",
+    "function extractGeneratedPasswords",
+    "function createPasswordResultRow",
+    "async function generateFromPasswordPanel",
+    "function renderPasswordPanel",
+    "function cashflowStatusSummary",
+    "async function executeCashflowAction",
+    "async function nextCashflowTurn",
+    "function createCashflowStat",
+    "function createCashflowReportList",
+    "function createCashflowMetricRow",
+    "function renderCashflowPanel",
+    "async function openCashflowPanel"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+
+  assert.match(
+    rendererSource,
+    /if \(mode === "password"\) \{\s*panelImplsSafe\.renderPasswordPanel\(\);\s*return;\s*\}/,
+    "standalone password mode should render through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /if \(mode === "cashflow"\) \{\s*panelImplsSafe\.renderCashflowPanel\(\);\s*return;\s*\}/,
+    "cashflow mode should render through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /const ok = await panelImplsSafe\.refreshCashflowPanel\(\);/,
+    "cashflow refresh should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /pushDebugLog\("renderer action: password generate"\);[\s\S]*panelImplsSafe\.handlePasswordPanelEnter\(\);/s,
+    "password Enter action should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /pushDebugLog\("renderer action: cashflow nextTurn"\);[\s\S]*panelImplsSafe\.handleCashflowPanelEnter\(\);/s,
+    "cashflow Enter action should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /const standalonePanelOpen = panelImplsSafe\.handleStandalonePanelPayload\(panelPayload\);/,
+    "standalone panel open payloads should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /function handlePanelModeKeydown\(\s*event: KeyboardEvent,\s*options: \{/,
+    "panel mode keydown routing should live in a dedicated renderer shell helper"
+  );
+  assert.match(
+    rendererSource,
+    /const handledPanelMode = handlePanelModeKeydown\(event,\s*\{/,
+    "handleKeydown should delegate panel mode branches through the dedicated helper"
+  );
+  {
+    const handleKeydownSource = extractFunctionSource(rendererSource, "handleKeydown");
+    assert.doesNotMatch(
+      handleKeydownSource,
+      /if \(mode === "password"\) \{/,
+      "handleKeydown should not inline password panel mode branching"
+    );
+    assert.doesNotMatch(
+      handleKeydownSource,
+      /if \(mode === "cashflow"\) \{/,
+      "handleKeydown should not inline cashflow panel mode branching"
+    );
+    assert.doesNotMatch(
+      handleKeydownSource,
+      /if \(mode === "plugin"\) \{/,
+      "handleKeydown should not inline plugin panel mode branching"
+    );
+  }
+
+  assert.match(
+    panelImplsSource,
+    /let passwordPanelOptions: PasswordGeneratorOptions = \{/,
+    "standalone password state should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /let cashflowState: CashflowState \| null = null;/,
+    "cashflow state should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /handleStandalonePanelPayload\(panelPayload: unknown\): string \| null \{/,
+    "panel impls should accept standalone panel open payloads"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderPasswordPanel\(\): void \{/,
+    "standalone password render should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /handlePasswordPanelEnter\(\): void \{/,
+    "standalone password Enter handler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderCashflowPanel\(\): void \{/,
+    "cashflow render should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /refreshCashflowPanel\(\): Promise<boolean> \{/,
+    "cashflow refresh should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /handleCashflowPanelEnter\(\): void \{/,
+    "cashflow Enter handler should live in plugin-panel-impls"
+  );
+});
+
+test("plugin runtime state and defaults live with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  [
+    "let webtoolsPasswordOptions: WebtoolsPasswordOptions = {",
+    "let webtoolsPasswordRows: WebtoolsPasswordResultRow[] = [];",
+    "let webtoolsJsonState: WebtoolsJsonState = {",
+    "const DEFAULT_WEBTOOLS_URL_INPUT =",
+    "function createEmptyWebtoolsUrlParts(): WebtoolsUrlParts {",
+    "let webtoolsUrlState: WebtoolsUrlState = {",
+    "let webtoolsDiffLeft = \"\";",
+    "let webtoolsDiffRight = \"\";",
+    "let webtoolsDiffIgnoreCase = false;",
+    "let webtoolsDiffIgnoreWhitespace = false;",
+    "let webtoolsDiffPrettyHtml = \"\";",
+    "let webtoolsDiffSummary: WebtoolsDiffSummary | null = null;",
+    "let webtoolsDiffAutoTimer: number | null = null;",
+    "let webtoolsDiffRequestToken = 0;",
+    "let webtoolsTimestampUnixInput = \"\";",
+    "let webtoolsTimestampDateInput = \"\";",
+    "let webtoolsTimestampDateOutput = \"\";",
+    "let webtoolsTimestampTimestampOutput = \"\";",
+    "let webtoolsTimestampUnit: \"s\" | \"ms\" = \"s\";",
+    "let webtoolsTimestampInfo = \"\";",
+    "let webtoolsTimestampAutoTimer: number | null = null;",
+    "let webtoolsTimestampClockTimer: number | null = null;",
+    "let webtoolsTimestampToDateRequestToken = 0;",
+    "let webtoolsTimestampToTimestampRequestToken = 0;",
+    "let webtoolsRegexPattern =",
+    "let webtoolsRegexFlags = \"g\";",
+    "let webtoolsRegexInput =",
+    "let webtoolsRegexReplacement = \"\";",
+    "let webtoolsRegexOutput = \"\";",
+    "let webtoolsRegexInfo = \"\";",
+    "let webtoolsRegexError = \"\";",
+    "let webtoolsRegexHighlightedHtml = \"\";",
+    "let webtoolsRegexRows: WebtoolsRegexMatchRow[] = [];",
+    "let webtoolsJsonAutoTimer: number | null = null;",
+    "let webtoolsPasswordRequestToken = 0;",
+    "let webtoolsJsonRequestToken = 0;",
+    "let webtoolsCryptoAlgorithm = \"MD5\";",
+    "let webtoolsCryptoMode: \"encrypt\" | \"decrypt\" = \"encrypt\";",
+    "let webtoolsCryptoInput = \"\";",
+    "let webtoolsCryptoOutput = \"\";",
+    "let webtoolsCryptoInfo = \"\";",
+    "let webtoolsCryptoSecret = \"\";",
+    "let webtoolsCryptoIv = \"\";",
+    "let webtoolsCryptoPublicKey = \"\";",
+    "let webtoolsCryptoPrivateKey = \"\";",
+    "let webtoolsCryptoRsaBits = 2048;",
+    "let webtoolsCryptoAutoTimer: number | null = null;",
+    "let webtoolsCryptoRequestToken = 0;",
+    "let webtoolsJwtToken = \"\";",
+    "let webtoolsJwtHeader = \"\";",
+    "let webtoolsJwtPayload = \"\";",
+    "let webtoolsJwtSecret = \"your-256-bit-secret\";",
+    "let webtoolsJwtMode: \"jws\" | \"jwe\" = \"jws\";",
+    "let webtoolsJwtAlgorithm: \"HS256\" | \"RS256\" = \"HS256\";",
+    "let webtoolsJwtJweAlg: \"dir\" | \"A256KW\" = \"dir\";",
+    "let webtoolsJwtJweEnc: \"A256GCM\" | \"A128GCM\" = \"A256GCM\";",
+    "let webtoolsJwtVerified: boolean | null = null;",
+    "let webtoolsJwtInfo = \"\";",
+    "let webtoolsJwtAutoTimer: number | null = null;",
+    "let webtoolsJwtSignTimer: number | null = null;",
+    "let webtoolsJwtRequestToken = 0;",
+    "let webtoolsStringsInput = \"hello_world_variable\";",
+    "let webtoolsStringsCaseType = \"camel\";",
+    "let webtoolsStringsOutput = \"\";",
+    "let webtoolsStringsUuidCount = 5;",
+    "let webtoolsStringsUuidItems: string[] = [];",
+    "let webtoolsColorsInput = \"#6c5ce7\";",
+    "let webtoolsColorsHex = \"#6c5ce7\";",
+    "let webtoolsColorsRgb = \"rgb(108, 92, 231)\";",
+    "let webtoolsColorsHsl = \"hsl(247, 74%, 63%)\";",
+    "let webtoolsColorsShades: string[] = [];",
+    "let webtoolsColorsAutoTimer: number | null = null;",
+    "let webtoolsColorsRequestToken = 0;",
+    "const WEBTOOLS_COLORS_PRESETS = [",
+    "const WEBTOOLS_REGEX_DEFAULT_PATTERN =",
+    "const WEBTOOLS_REGEX_DEFAULT_INPUT =",
+    "const WEBTOOLS_REGEX_SAFE_FLAGS = \"gimsuyd\";",
+    "const WEBTOOLS_REGEX_TEMPLATES = [",
+    "const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = \"!@#$%^&*\";",
+    "const WEBTOOLS_JWT_DEFAULT_SECRET = \"your-256-bit-secret\";",
+    "const WEBTOOLS_JWT_SAMPLE_TOKEN =",
+    "const WEBTOOLS_JWT_SAMPLE_HEADER = `",
+    "const WEBTOOLS_JWT_SAMPLE_PAYLOAD = `",
+    "function tryParseWebtoolsUrl(input: string): URL | null {"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+
+  [
+    /let webtoolsPasswordOptions: WebtoolsPasswordOptions = \{/,
+    /let webtoolsJsonState: WebtoolsJsonState = \{/,
+    /const DEFAULT_WEBTOOLS_URL_INPUT =/,
+    /function createEmptyWebtoolsUrlParts\(\): WebtoolsUrlParts \{/,
+    /let webtoolsUrlState: WebtoolsUrlState = \{/,
+    /let webtoolsDiffLeft = "";/,
+    /let webtoolsTimestampUnixInput = "";/,
+    /let webtoolsRegexPattern =/,
+    /let webtoolsCryptoAlgorithm = "MD5";/,
+    /let webtoolsJwtToken = "";/,
+    /let webtoolsStringsInput = "hello_world_variable";/,
+    /let webtoolsColorsInput = "#6c5ce7";/,
+    /const WEBTOOLS_COLORS_PRESETS = \[/,
+    /const WEBTOOLS_REGEX_DEFAULT_PATTERN =/,
+    /const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#\$%\^&\*";/,
+    /const WEBTOOLS_JWT_DEFAULT_SECRET = "your-256-bit-secret";/,
+    /const WEBTOOLS_JWT_SAMPLE_TOKEN =/,
+    /function tryParseWebtoolsUrl\(input: string\): URL \| null \{/
+  ].forEach((pattern) => {
+    assert.match(
+      panelImplsSource,
+      pattern,
+      `${pattern} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("plugin-specific type declarations live outside renderer.ts", () => {
+  const rendererSource = readRendererSource();
+  const pluginRuntimeTypesSource = readPluginRuntimeTypesSource();
+
+  [
+    "interface WebtoolsPasswordOptions {",
+    "interface WebtoolsJsonState {",
+    "interface WebtoolsUrlState {",
+    "type WebtoolsDiffRowType =",
+    "interface WebtoolsRegexMatchRow {",
+    "interface WebtoolsImagePromptState {",
+    "interface HardwareInspectorSnapshot {",
+    "type WebtoolsUnitTab =",
+    "interface PasswordPanelPayload {",
+    "interface GenericPluginPanelPayload {",
+    "interface ActivePluginPanelState {",
+    "interface PluginPanelHandler {",
+    "interface CashflowState {",
+    "interface CashflowReports {",
+    "interface CashflowJobOption {"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+    assert.equal(
+      pluginRuntimeTypesSource.includes(signature),
+      true,
+      `${signature} should live in plugin-runtime-types.d.ts`
+    );
+  });
+});
+
+test("renderer plugin constants are consumed from plugin-constants instead of duplicated inline", () => {
+  const rendererSource = readRendererSource();
+
+  assert.match(
+    rendererSource,
+    /const pluginConstants = window\.__LL_PLUGIN_CONSTANTS__;/,
+    "renderer should read plugin constants from the shared bootstrap global"
+  );
+  assert.match(
+    rendererSource,
+    /const \{[\s\S]*DEFAULT_VISIBLE_PLUGIN_IDS[\s\S]*\} = pluginConstants;/,
+    "renderer should destructure plugin ids and default visible plugins from the shared constant bag"
+  );
+
+  [
+    'const CASHFLOW_PLUGIN_ID = "cashflow-game";',
+    'const CLIPBOARD_WORKBENCH_PLUGIN_ID = "clipboard-workbench";',
+    'const WEBTOOLS_PASSWORD_PLUGIN_ID = "webtools-password";',
+    'const WEBTOOLS_API_PLUGIN_ID = "webtools-api-client";',
+    "const DEFAULT_VISIBLE_PLUGIN_IDS = ["
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain duplicated inline in renderer.ts`
+    );
+  });
 });
 
 test("Clipboard Workbench panel is implemented through plugin-panel-impls", () => {
@@ -111,18 +467,18 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   const stylesSource = readRendererStylesSource();
 
   assert.match(
-    rendererSource,
-    /render:\s*panelImplsSafe\.renderClipboardWorkbenchPanel/,
+    panelImplsSource,
+    /\[CLIPBOARD_WORKBENCH_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
     "Clipboard Workbench handler should render through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyClipboardWorkbenchPanelPayload/,
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.applyClipboardWorkbenchPanelPayload\(panel\)/,
     "Clipboard Workbench handler should apply payload through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /runWithPluginForm\("form\.clipboard-workbench-form"/,
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.clipboard-workbench-form"\s*\)/s,
     "Clipboard Workbench handler should wire Enter to the panel form"
   );
   assert.equal(
@@ -161,6 +517,16 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
     "Clipboard Workbench item list should render image thumbnails"
   );
   assert.match(
+    panelImplsSource,
+    /剪贴板工作台/,
+    "Clipboard Workbench panel should use localized Chinese copy"
+  );
+  assert.match(
+    panelImplsSource,
+    /label: "最近"/,
+    "Clipboard Workbench scopes should expose localized Chinese labels"
+  );
+  assert.match(
     stylesSource,
     /\.clipboard-workbench-shell/,
     "Clipboard Workbench shell styles should be present"
@@ -192,6 +558,78 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   );
 });
 
+test("Clipboard Workbench visible copy is localized for the plugin UI", () => {
+  const panelImplsSource = readPanelImplsSource();
+  const renderSource = extractMethodSource(panelImplsSource, "renderClipboardWorkbenchPanel");
+  const timeSource = extractFunctionSource(panelImplsSource, "formatClipboardWorkbenchTime");
+  const kindSource = extractFunctionSource(panelImplsSource, "getClipboardWorkbenchKindLabel");
+  const sourceLabelSource = extractFunctionSource(
+    panelImplsSource,
+    "getClipboardWorkbenchSourceLabel"
+  );
+  const previewSource = extractFunctionSource(
+    panelImplsSource,
+    "getClipboardWorkbenchItemPreview"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /const CLIPBOARD_WORKBENCH_SCOPE_OPTIONS = \[[\s\S]*key: "all", label: "全部"[\s\S]*key: "recent", label: "最近"[\s\S]*key: "favorites", label: "收藏"[\s\S]*key: "pinned", label: "置顶"[\s\S]*key: "text", label: "文本"[\s\S]*key: "image", label: "图片"[\s\S]*key: "files", label: "文件"[\s\S]*key: "screenshots", label: "截图"/,
+    "Clipboard Workbench scope filters should use Chinese labels"
+  );
+  assert.equal(
+    renderSource.includes("Image preview available"),
+    false,
+    "Clipboard Workbench should not keep English preview copy"
+  );
+  assert.equal(
+    renderSource.includes("Unknown"),
+    false,
+    "Clipboard Workbench should not keep English fallback time copy"
+  );
+  assert.match(
+    kindSource,
+    /return "图片"[\s\S]*return "文件"[\s\S]*return "文本"/,
+    "Clipboard Workbench kind labels should be localized"
+  );
+  assert.match(
+    sourceLabelSource,
+    /return "手动保存"[\s\S]*return "截图采集"[\s\S]*return "自动采集"/,
+    "Clipboard Workbench source labels should be localized"
+  );
+  assert.match(
+    previewSource,
+    /return count > 0 \? `\$\{count\} 个文件路径` : item\.summary;[\s\S]*return item\.assetUrl \? "可预览图片" : item\.summary;/,
+    "Clipboard Workbench preview summaries should be localized"
+  );
+  assert.match(
+    timeSource,
+    /return "未知时间";/,
+    "Clipboard Workbench fallback time should be localized"
+  );
+});
+
+test("Clipboard Workbench enter flow stays inside plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.clipboard-workbench-form"\s*\)/s,
+    "Clipboard Workbench Enter handler should submit the panel form instead of keeping renderer-local refresh logic"
+  );
+  assert.doesNotMatch(
+    rendererSource,
+    /\[CLIPBOARD_WORKBENCH_PLUGIN_ID\]:\s*\{[\s\S]*onEnter:\s*runWithPluginForm\("form\.clipboard-workbench-form",\s*\(\)\s*=>\s*\{[\s\S]*executeClipboardWorkbenchAction\("refresh"\);/s,
+    "Clipboard Workbench handler should not keep a renderer-local refresh action"
+  );
+  assert.match(
+    panelImplsSource,
+    /form\.addEventListener\("submit",\s*\(event\)\s*=>\s*\{[\s\S]*event\.preventDefault\(\);[\s\S]*void executeClipboardWorkbenchAction\(\s*"refresh",[\s\S]*buildClipboardWorkbenchQueryParams\(\)[\s\S]*\);[\s\S]*\}\);/s,
+    "Clipboard Workbench form submit should trigger refresh inside plugin-panel-impls"
+  );
+});
+
 test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
@@ -207,17 +645,27 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
     "CodeAgent Switch render implementation should live outside renderer.ts"
   );
   assert.match(
-    rendererSource,
-    /render:\s*panelImplsSafe\.renderCodeAgentSwitchPanel/,
-    "CodeAgent Switch handler should render through panelImplsSafe"
+    panelImplsSource,
+    /\[CODEAGENT_SWITCH_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
+    "CodeAgent Switch handler should live in plugin-panel-impls"
   );
   assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.codeagent-switch-form"\s*\)/s,
+    "CodeAgent Switch Enter handler should submit the panel form instead of keeping custom renderer-side read logic"
+  );
+  assert.doesNotMatch(
     rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyCodeAgentSwitchPanelPayload/,
-    "CodeAgent Switch handler should apply payload through panelImplsSafe"
+    /\[CODEAGENT_SWITCH_PLUGIN_ID\]:\s*\{[\s\S]*onEnter:\s*runWithPluginForm\("form\.codeagent-switch-form",\s*\(\)\s*=>\s*\{[\s\S]*const launcher = getLauncherApi\(\);/s,
+    "CodeAgent Switch handler should not keep a renderer-local launcher bridge block"
   );
   assert.match(panelImplsSource, /renderCodeAgentSwitchPanel\(\): void/);
   assert.match(panelImplsSource, /applyCodeAgentSwitchPanelPayload\(panel: unknown\): void/);
+  assert.match(
+    panelImplsSource,
+    /form\.addEventListener\("submit",\s*\(event\)\s*=>\s*\{[\s\S]*event\.preventDefault\(\);[\s\S]*void executeCodeAgentSwitchAction\("read"\);[\s\S]*\}\);/s,
+    "CodeAgent Switch form submit should trigger a read action inside plugin-panel-impls"
+  );
   assert.match(
     panelImplsSource,
     /executeCodeAgentSwitchAction\("preview", selectedProfile\.id\)/,
@@ -528,17 +976,23 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
 test("core webtools panel handlers use plugin-panel-impls without renderer delegates", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
-  const migratedPanels = ["Diff", "Config", "Sql", "Crypto", "Jwt"];
+  const migratedPanels = [
+    ["Diff", "WEBTOOLS_DIFF_PLUGIN_ID"],
+    ["Config", "WEBTOOLS_CONFIG_PLUGIN_ID"],
+    ["Sql", "WEBTOOLS_SQL_PLUGIN_ID"],
+    ["Crypto", "WEBTOOLS_CRYPTO_PLUGIN_ID"],
+    ["Jwt", "WEBTOOLS_JWT_PLUGIN_ID"]
+  ] as const;
 
-  for (const panelName of migratedPanels) {
+  for (const [panelName, pluginIdConstant] of migratedPanels) {
     assert.match(
-      rendererSource,
-      new RegExp(`render:\\s*panelImplsSafe\\.renderWebtools${panelName}Panel`),
+      panelImplsSource,
+      new RegExp(`\\[${pluginIdConstant}\\]:\\s*createSubmitPluginPanelHandler\\(`),
       `${panelName} handler should render through panelImplsSafe`
     );
     assert.match(
-      rendererSource,
-      new RegExp(`onOpen:\\s*panelImplsSafe\\.applyWebtools${panelName}PanelPayload`),
+      panelImplsSource,
+      new RegExp(`getRegisteredPanelImpls\\(\\)\\.applyWebtools${panelName}PanelPayload\\(panel\\)`),
       `${panelName} handler should apply payload through panelImplsSafe`
     );
     assert.equal(
@@ -600,6 +1054,26 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     "unit result cards should not auto-stretch across the full row"
   );
   assert.match(
+    panelImplsSource,
+    /webtools-unit-grid/,
+    "unit tool should render the dedicated storage results grid instead of only a loose input stack"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-unit-card/,
+    "unit tool should render reusable result cards for converted values"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-unit-copy-btn/,
+    "unit tool should expose per-result copy actions instead of leaving card actions unused"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-unit-screen-grid/,
+    "unit tool should render the px\/rem summary grid instead of only the raw dual input row"
+  );
+  assert.match(
     stylesSource,
     /\.webtools-ua-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(180px,\s*240px\)\)/,
     "UA cards should keep compact widths"
@@ -613,6 +1087,251 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     stylesSource,
     /\.webtools-config-bar\s*\{[\s\S]*width:\s*fit-content;/,
     "config top toolbar should hug its contents instead of spanning the full row"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-colors-layout,\s*[\s\S]*\.webtools-image-base64-layout[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "colors and image-base64 layouts should stack into one readable column on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-colors-header/,
+    "colors tool should render the dedicated header instead of a loose preview block"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-colors-layout/,
+    "colors tool should use the two-column lab layout that already has responsive support"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-colors-palette/,
+    "colors tool should render preset swatches instead of leaving palette styles unused"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-colors-output-list/,
+    "colors tool should render structured hex\/rgb\/hsl output rows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-image-base64-header/,
+    "image base64 tool should render its dedicated header instead of loose top-row buttons"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-image-base64-toolbar/,
+    "image base64 tool should group copy and download actions inside the compact toolbar"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-image-base64-layout/,
+    "image base64 tool should use the two-column preview and editor layout that already has responsive support"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-image-base64-editor/,
+    "image base64 tool should restore the structured editor column instead of loose textareas"
+  );
+  assert.match(
+    panelImplsSource,
+    /function readWebtoolsImageBase64FileAsDataUrl\(file: File\): Promise<string>/,
+    "image base64 tool should keep its local file reader helper with the panel implementation"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-markdown-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "markdown preview should collapse into a single vertical flow on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-regex-layout\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "regex editor and preview should stack when the window narrows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-regex-match-list\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "regex match cards should also stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-config-bar\s*\{[\s\S]*width:\s*100%/,
+    "config toolbar should fill the row instead of floating as a wide loose pill on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-config-editors\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "config editor panes should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-url-query-header,\s*[\s\S]*\.webtools-url-query-row\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "URL query rows should stack into one column on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /createWebtoolsUrlPartField\("协议", "protocol"\)/,
+    "URL tool should localize the protocol field label"
+  );
+  assert.match(
+    panelImplsSource,
+    /createWebtoolsUrlPartField\("主机", "host"\)/,
+    "URL tool should localize the host field label"
+  );
+  assert.match(
+    panelImplsSource,
+    /createWebtoolsUrlPartField\("端口", "port"\)/,
+    "URL tool should localize the port field label"
+  );
+  assert.match(
+    panelImplsSource,
+    /createWebtoolsUrlPartField\("锚点", "hash", true\)/,
+    "URL tool should localize the hash fragment field label"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-strings-uuid-item\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "string UUID rows should stop stretching into uneven columns on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-header/,
+    "string tool should render a real header instead of a loose textarea row"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-section/,
+    "string tool should split case conversion and UUID generation into separate sections"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-button-grid/,
+    "string tool should expose bounded case action buttons instead of a bare select"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-uuid-results/,
+    "string tool should render a visible UUID results list"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-uuid-item/,
+    "string tool should render UUID result rows with a stable layout hook"
+  );
+  assert.match(
+    panelImplsSource,
+    /convert\.textContent = "转换"/,
+    "string tool should use Chinese primary action copy instead of the leftover Convert label"
+  );
+  assert.match(
+    panelImplsSource,
+    /uuid\.textContent = "生成 UUID"/,
+    "string tool should label UUID generation clearly in Chinese"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-crypto-editors\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "crypto editors should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-jwt-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "JWT encoded and decoded panes should stack on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-api-request\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    "API request blocks should collapse into one column on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-api-request/,
+    "API tool should render its dedicated request row instead of loose method/url/button controls"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-api-preview-row/,
+    "API tool should render a labeled preview row for the resolved request URL"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-api-preview-label/,
+    "API tool should label the request preview instead of showing a bare code block"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-api-response-head/,
+    "API tool should restore the response header shell instead of scattering status metrics across the section"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-api-metrics/,
+    "API tool should keep grouped response metrics in the dedicated response header"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-qrcode-layout[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "QR setup and preview should stop trying to hold two columns on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-qrcode-header/,
+    "QR tool should render the dedicated header instead of loose title/info nodes"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-qrcode-layout/,
+    "QR tool should use the two-column setup and preview layout"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-qrcode-logo-section/,
+    "QR tool should render the structured logo settings section"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-qrcode-actions/,
+    "QR tool should group generate and download actions in the dedicated action bar"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-ua-grid,[\s\S]*?\{[\s\S]*grid-template-columns:\s*1fr/,
+    "UA detail cards should stack into one readable column on narrow windows"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-ua-header/,
+    "UA tool should render the dedicated header instead of loose top-row buttons"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-ua-actions/,
+    "UA tool should group current, clear, and copy actions in the compact action bar"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-ua-editor/,
+    "UA tool should render the editor shell instead of a bare textarea plus info block"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-ua-input-section/,
+    "UA tool should render the labeled input section"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-image-prompt-grid\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "image prompt option grid should stack into one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*\d+px\)[\s\S]*\.webtools-image-prompt-text-controls\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "image prompt text controls should stack instead of leaving wide empty side columns"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*680px\)[\s\S]*\.webtools-image-prompt-header\s*\{[\s\S]*flex-direction:\s*column/,
+    "image prompt header should switch to a vertical stack on very narrow widths"
   );
   assert.match(
     panelImplsSource,
@@ -761,6 +1480,11 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     stylesSource,
+    /@media \(max-width:\s*1180px\)[\s\S]*@media \(max-width:\s*860px\)[\s\S]*\.codeagent-switch-master-detail\s*\{[\s\S]*grid-template-columns:\s*1fr;/,
+    "CodeAgent Switch should place its final single-column collapse after the intermediate breakpoint so it wins on narrow windows"
+  );
+  assert.match(
+    stylesSource,
     /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
     "password tool should stack into one column on narrow windows"
   );
@@ -793,6 +1517,16 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     stylesSource,
     /@media \(max-width:\s*980px\)[\s\S]*\.clipboard-workbench-toolbar\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
     "Clipboard Workbench toolbar should collapse into a single readable column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*900px\)[\s\S]*\.clipboard-workbench-shell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Clipboard Workbench main shell should collapse into one vertical column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*900px\)[\s\S]*\.clipboard-workbench-item-list\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "Clipboard Workbench item cards should stop spanning multiple columns on narrow windows"
   );
   assert.match(
     stylesSource,
@@ -851,28 +1585,28 @@ test("lightweight webtools wrappers are removed from renderer handlers", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
   const directPanels = [
-    "Password",
-    "Json",
-    "Url",
-    "Timestamp",
-    "Cron",
-    "Strings",
-    "Colors",
-    "Qrcode",
-    "Ua",
-    "Api",
-    "HttpMock"
-  ];
+    ["Password", "WEBTOOLS_PASSWORD_PLUGIN_ID"],
+    ["Json", "WEBTOOLS_JSON_PLUGIN_ID"],
+    ["Url", "WEBTOOLS_URL_PLUGIN_ID"],
+    ["Timestamp", "WEBTOOLS_TIMESTAMP_PLUGIN_ID"],
+    ["Cron", "WEBTOOLS_CRON_PLUGIN_ID"],
+    ["Strings", "WEBTOOLS_STRINGS_PLUGIN_ID"],
+    ["Colors", "WEBTOOLS_COLORS_PLUGIN_ID"],
+    ["Qrcode", "WEBTOOLS_QRCODE_PLUGIN_ID"],
+    ["Ua", "WEBTOOLS_UA_PLUGIN_ID"],
+    ["Api", "WEBTOOLS_API_PLUGIN_ID"],
+    ["HttpMock", "WEBTOOLS_HTTP_MOCK_PLUGIN_ID"]
+  ] as const;
 
-  for (const panelName of directPanels) {
+  for (const [panelName, pluginIdConstant] of directPanels) {
     assert.match(
-      rendererSource,
-      new RegExp(`render:\\s*panelImplsSafe\\.renderWebtools${panelName}Panel`),
+      panelImplsSource,
+      new RegExp(`\\[${pluginIdConstant}\\]:\\s*createSubmitPluginPanelHandler\\(`),
       `${panelName} handler should render directly through panelImplsSafe`
     );
     assert.match(
-      rendererSource,
-      new RegExp(`onOpen:\\s*panelImplsSafe\\.applyWebtools${panelName}PanelPayload`),
+      panelImplsSource,
+      new RegExp(`getRegisteredPanelImpls\\(\\)\\.applyWebtools${panelName}PanelPayload\\(panel\\)`),
       `${panelName} handler should apply payload directly through panelImplsSafe`
     );
     assert.equal(
@@ -893,18 +1627,363 @@ test("lightweight webtools wrappers are removed from renderer handlers", () => {
   }
 });
 
-test("markdown panel render/apply lives in plugin-panel-impls", () => {
+test("remaining submit-driven webtools handlers enter through form submission", () => {
+  const panelImplsSource = readPanelImplsSource();
+
+  [
+    "webtools-cron",
+    "webtools-image-base64",
+    "webtools-image-prompt",
+    "webtools-config",
+    "webtools-sql",
+    "webtools-unit",
+    "webtools-file-hash",
+    "webtools-port-helper",
+    "webtools-qrcode",
+    "webtools-markdown",
+    "webtools-ua",
+    "webtools-api",
+    "webtools-http-mock",
+    "codeagent-switch"
+  ].forEach((formClass) => {
+    assert.match(
+      panelImplsSource,
+      new RegExp(
+        `createSubmitPluginPanelHandler\\([\\s\\S]*?\"form\\.${formClass}-form\"\\s*\\)`,
+        "s"
+      ),
+      `${formClass} Enter handler should submit the panel form`
+    );
+  });
+});
+
+test("plugin panel cleanup transient state is delegated through plugin-panel-impls", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();
 
   assert.match(
     rendererSource,
-    /render:\s*panelImplsSafe\.renderWebtoolsMarkdownPanel/,
-    "Markdown handler should render through panelImplsSafe"
+    /panelImplsSafe\.cleanupPluginPanelTransientState\(null\)/,
+    "setMode should delegate plugin cleanup to panelImplsSafe when leaving plugin mode"
+  );
+  assert.match(
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.cleanupPluginPanelTransientState\(\s*plugin\?\.pluginId \?\? null\s*\)/,
+    "renderActivePluginPanel should delegate transient cleanup inside plugin-panel-impls"
+  );
+  assert.equal(
+    rendererSource.includes("function clearWebtoolsTimestampAutoTimer"),
+    false,
+    "timestamp auto-timer cleanup should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function clearWebtoolsTimestampClockTimer"),
+    false,
+    "timestamp clock cleanup should not remain in renderer.ts"
+  );
+  assert.match(
+    panelImplsSource,
+    /cleanupPluginPanelTransientState\(activePluginId: string \| null\): void/,
+    "plugin-panel-impls should expose unified transient cleanup"
+  );
+});
+
+test("generic plugin panel dispatcher shell lives in plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+  const globalSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "renderer", "global.d.ts"),
+    "utf8"
+  );
+
+  [
+    "function parseGenericPluginPanelPayload",
+    "function renderPluginPanel",
+    "function runWithPluginForm",
+    "const pluginPanelHandlers:",
+    "function getPluginPanelHandler",
+    "function renderActivePluginPanel",
+    "function handleActivePluginPanelEnter",
+    "function openGenericPluginPanel"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+
+  assert.match(
+    rendererSource,
+    /if \(mode === "plugin"\) \{\s*panelImplsSafe\.renderActivePluginPanel\(\);\s*return;\s*\}/,
+    "plugin mode should render through panelImplsSafe"
   );
   assert.match(
     rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyWebtoolsMarkdownPanelPayload/,
+    /panelImplsSafe\.handleActivePluginPanelEnter\(\);/,
+    "plugin Enter action should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /const genericPluginOpen = panelImplsSafe\.handleGenericPluginPanelPayload\(panelPayload\);/,
+    "generic plugin open payloads should delegate through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /const activePluginTitle = panelImplsSafe\.getActivePluginPanelTitle\(\);/,
+    "plugin refresh status should read title through panelImplsSafe"
+  );
+  assert.match(
+    rendererSource,
+    /function handleLauncherOpenPanel\(panelPayload: unknown\): void \{/,
+    "openPanel launcher routing should live in a dedicated renderer shell helper"
+  );
+  assert.match(
+    rendererSource,
+    /launcher\.onOpenPanel\(handleLauncherOpenPanel\);/,
+    "registerEvents should wire launcher openPanel through the dedicated helper"
+  );
+  {
+    const registerEventsSource = extractFunctionSource(rendererSource, "registerEvents");
+    assert.doesNotMatch(
+      registerEventsSource,
+      /const genericPluginOpen = panelImplsSafe\.handleGenericPluginPanelPayload\(panelPayload\);/,
+      "registerEvents should not inline generic plugin open routing"
+    );
+    assert.doesNotMatch(
+      registerEventsSource,
+      /const standalonePanelOpen = panelImplsSafe\.handleStandalonePanelPayload\(panelPayload\);/,
+      "registerEvents should not inline standalone panel open routing"
+    );
+  }
+
+  assert.match(
+    panelImplsSource,
+    /function parseGenericPluginPanelPayload\(\s*payload: unknown\s*\): GenericPluginPanelPayload \| null/s,
+    "generic plugin payload parser should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function renderPluginPanelFallback\(\): void \{/,
+    "generic plugin fallback renderer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function runWithPluginForm\(\s*selector: string,\s*action: \(form: HTMLFormElement\) => void\s*\): \(\) => void/s,
+    "plugin form submit helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = \{/,
+    "plugin panel handler registry should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /handleGenericPluginPanelPayload\(panelPayload: unknown\): string \| null \{/,
+    "plugin-panel-impls should accept generic plugin open payloads"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderActivePluginPanel\(\): void \{/,
+    "plugin-panel-impls should render the active plugin panel"
+  );
+  assert.match(
+    panelImplsSource,
+    /handleActivePluginPanelEnter\(\): void \{/,
+    "plugin-panel-impls should handle plugin Enter actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /getActivePluginPanelTitle\(\): string \| null \{/,
+    "plugin-panel-impls should expose the active plugin title"
+  );
+
+  assert.match(
+    globalSource,
+    /handleGenericPluginPanelPayload\(panelPayload: unknown\): string \| null;/,
+    "RendererPanelImpls should expose generic plugin open handling"
+  );
+  assert.match(
+    globalSource,
+    /renderActivePluginPanel\(\): void;/,
+    "RendererPanelImpls should expose active plugin rendering"
+  );
+  assert.match(
+    globalSource,
+    /handleActivePluginPanelEnter\(\): void;/,
+    "RendererPanelImpls should expose active plugin Enter handling"
+  );
+  assert.match(
+    globalSource,
+    /getActivePluginPanelTitle\(\): string \| null;/,
+    "RendererPanelImpls should expose active plugin title lookup"
+  );
+});
+
+test("hardware inspector helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.hardware-inspector-form"\s*\)/s,
+    "Hardware Inspector Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function applyHardwareInspectorSnapshot"),
+    false,
+    "Hardware Inspector snapshot applier should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function getHardwareInspectorSnapshotFromData"),
+    false,
+    "Hardware Inspector snapshot reader should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function buildHardwareInspectorSummaryText"),
+    false,
+    "Hardware Inspector summary builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeHardwareInspectorRefresh"),
+    false,
+    "Hardware Inspector refresh executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeHardwareInspectorExportReport"),
+    false,
+    "Hardware Inspector export executor should not remain in renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function applyHardwareInspectorSnapshot\(\s*snapshot: HardwareInspectorSnapshot,\s*infoText\?: string\s*\): void/s,
+    "Hardware Inspector snapshot applier should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getHardwareInspectorSnapshotFromData\(\s*data: Record<string, unknown> \| null\s*\): HardwareInspectorSnapshot \| null/s,
+    "Hardware Inspector snapshot reader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildHardwareInspectorSummaryText\(snapshot: HardwareInspectorSnapshot\): string/,
+    "Hardware Inspector summary builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeHardwareInspectorRefresh\(\): Promise<void>/,
+    "Hardware Inspector refresh executor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeHardwareInspectorExportReport\(\s*format: "markdown" \| "html"\s*\): Promise<void>/s,
+    "Hardware Inspector export executor should live in plugin-panel-impls"
+  );
+});
+
+test("hardware inspector formatting and diff helpers live with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const helperNames = [
+    "formatHardwareInspectorBytes",
+    "formatHardwareInspectorClockMhz",
+    "formatHardwareInspectorRpm",
+    "formatHardwareInspectorDate",
+    "formatHardwareInspectorBoolean",
+    "formatHardwareInspectorNullableBoolean",
+    "formatHardwareInspectorText",
+    "formatHardwareInspectorSectorSize",
+    "formatHardwareInspectorTemperature",
+    "formatHardwareInspectorPercentage",
+    "formatHardwareInspectorHours",
+    "isHardwareInspectorDiskAtRisk",
+    "countHardwareInspectorRiskDisks",
+    "getHardwareInspectorCpuKey",
+    "getHardwareInspectorMemoryKey",
+    "getHardwareInspectorGpuKey",
+    "getHardwareInspectorDiskKey",
+    "normalizeHardwareInspectorComparableValue",
+    "areHardwareInspectorComparableValuesEqual",
+    "addHardwareInspectorChange",
+    "collectHardwareInspectorObjectChanges",
+    "collectHardwareInspectorEntityChanges",
+    "createHardwareInspectorInitialDiffState",
+    "buildHardwareInspectorDiffState",
+    "formatHardwareInspectorResolution"
+  ];
+
+  helperNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`function ${name}`),
+      false,
+      `Hardware Inspector helper ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`function ${name}`),
+      true,
+      `Hardware Inspector helper ${name} should live in plugin-panel-impls`
+    );
+  });
+
+  const typeNames = ["HardwareInspectorFieldSpec", "HardwareInspectorEntityEntry"];
+  typeNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`type ${name}`),
+      false,
+      `Hardware Inspector type ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`type ${name}`),
+      true,
+      `Hardware Inspector type ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("hardware inspector runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "hardwareInspectorSnapshot",
+    "hardwareInspectorLastSnapshot",
+    "hardwareInspectorDiffState",
+    "hardwareInspectorInfo",
+    "hardwareInspectorError",
+    "hardwareInspectorLoading",
+    "hardwareInspectorExporting",
+    "hardwareInspectorRequestToken",
+    "hardwareInspectorExpandedDiskKeys"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `Hardware Inspector runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `Hardware Inspector runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("markdown panel render/apply lives in plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /\[WEBTOOLS_MARKDOWN_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
+    "Markdown handler should render through panelImplsSafe"
+  );
+  assert.match(
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.applyWebtoolsMarkdownPanelPayload\(panel\)/,
     "Markdown handler should apply payload through panelImplsSafe"
   );
   assert.equal(
@@ -924,6 +2003,1715 @@ test("markdown panel render/apply lives in plugin-panel-impls", () => {
   );
 });
 
+test("image base64 helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-image-base64-form"\s*\)/s,
+    "Image Base64 Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsImageBase64Target"),
+    false,
+    "Image Base64 command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function getWebtoolsImageBase64DownloadName"),
+    false,
+    "Image Base64 download name helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsImageBase64PanelInForm"),
+    false,
+    "Image Base64 form refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsImageBase64AutoNormalize"),
+    false,
+    "Image Base64 auto-normalize scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsImageBase64Normalize"),
+    false,
+    "Image Base64 execute helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsImageBase64Normalize(inputValue)"),
+    false,
+    "Image Base64 Enter handler should not call execute helper from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsImageBase64Target\(input: string\): string/,
+    "Image Base64 command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsImageBase64DownloadName\(\): string/,
+    "Image Base64 download name helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsImageBase64PanelInForm\(form: HTMLFormElement\): void/,
+    "Image Base64 form refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsImageBase64AutoNormalize\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Image Base64 auto-normalize scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsImageBase64Normalize\(\s*input: string,\s*options: \{ render\?: boolean; form\?: HTMLFormElement \} = \{\}/s,
+    "Image Base64 execute helper should live in plugin-panel-impls"
+  );
+});
+
+test("image base64 runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "webtoolsImageBase64Input",
+    "webtoolsImageBase64DataUrl",
+    "webtoolsImageBase64Raw",
+    "webtoolsImageBase64Mime",
+    "webtoolsImageBase64SizeText",
+    "webtoolsImageBase64Info",
+    "webtoolsImageBase64Error",
+    "webtoolsImageBase64Dragging",
+    "webtoolsImageBase64FileName",
+    "webtoolsImageBase64AutoTimer",
+    "webtoolsImageBase64RequestToken"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `Image Base64 runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `Image Base64 runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("config helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-config-form"\s*\)/s,
+    "Config Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsConfigTarget"),
+    false,
+    "Config command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsConfigFormat"),
+    false,
+    "Config format normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsConfigResultInForm"),
+    false,
+    "Config result refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsConfigAutoConvert"),
+    false,
+    "Config auto-convert scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsConfigConvert"),
+    false,
+    "Config executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsConfigConvert(form)"),
+    false,
+    "Config Enter handler should not call execute helper from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsConfigTarget\(\): string/,
+    "Config command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsConfigFormat\(\s*value: string \| undefined,\s*fallback: "yaml" \| "json" \| "properties"/s,
+    "Config format normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsConfigResultInForm\(form: HTMLFormElement\): void/,
+    "Config result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsConfigAutoConvert\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Config auto-convert scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsConfigConvert\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "Config executor should live in plugin-panel-impls"
+  );
+});
+
+test("sql helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-sql-form"\s*\)/s,
+    "SQL Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsSqlDialect"),
+    false,
+    "SQL dialect normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsSqlIndent"),
+    false,
+    "SQL indent normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsSqlTarget"),
+    false,
+    "SQL command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsSqlResultInForm"),
+    false,
+    "SQL result refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsSqlAutoFormat"),
+    false,
+    "SQL auto-format scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsSqlFormat"),
+    false,
+    "SQL formatter executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsSqlFormat(form)"),
+    false,
+    "SQL Enter handler should not call execute helper from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsSqlDialect\(value: string \| undefined\): string/,
+    "SQL dialect normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsSqlIndent\(value: number \| string \| undefined\): number/,
+    "SQL indent normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsSqlTarget\(\): string/,
+    "SQL command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsSqlResultInForm\(form: HTMLFormElement\): void/,
+    "SQL result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsSqlAutoFormat\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "SQL auto-format scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsSqlFormat\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "SQL formatter executor should live in plugin-panel-impls"
+  );
+});
+
+test("qrcode helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-qrcode-form"\s*\)/s,
+    "Qrcode Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsQrcodeColor"),
+    false,
+    "Qrcode color normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function readWebtoolsQrcodeFileAsDataUrl"),
+    false,
+    "Qrcode file reader should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function loadWebtoolsQrcodeImage"),
+    false,
+    "Qrcode image loader should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function normalizeWebtoolsQrcodeLogoImage"),
+    false,
+    "Qrcode logo normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function downloadWebtoolsQrcodePng"),
+    false,
+    "Qrcode PNG downloader should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsQrcodeTarget"),
+    false,
+    "Qrcode command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsQrcodePanelInForm"),
+    false,
+    "Qrcode panel refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsQrcodeAutoGenerate"),
+    false,
+    "Qrcode auto-generate scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsQrcodeGenerateInForm"),
+    false,
+    "Qrcode generate executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsQrcodeGenerate(form)"),
+    false,
+    "Qrcode Enter handler should not call the generate executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsQrcodeColor\(value: string,\s*fallback: string\): string/,
+    "Qrcode color normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function readWebtoolsQrcodeFileAsDataUrl\(file: File\): Promise<string>/,
+    "Qrcode file reader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function loadWebtoolsQrcodeImage\(src: string\): Promise<HTMLImageElement>/,
+    "Qrcode image loader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function normalizeWebtoolsQrcodeLogoImage\(\s*file: File\s*\): Promise<\{ dataUrl: string; name: string \}>/s,
+    "Qrcode logo normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function downloadWebtoolsQrcodePng\(\): Promise<void>/,
+    "Qrcode PNG downloader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsQrcodeTarget\(\): string/,
+    "Qrcode command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsQrcodePanelInForm\(form: HTMLFormElement\): void/,
+    "Qrcode panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsQrcodeAutoGenerate\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Qrcode auto-generate scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsQrcodeGenerateInForm\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "Qrcode generate executor should live in plugin-panel-impls"
+  );
+});
+
+test("markdown helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-markdown-form"\s*\)/s,
+    "Markdown Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsMarkdownTarget"),
+    false,
+    "Markdown command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsMarkdownPanelInForm"),
+    false,
+    "Markdown panel refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsMarkdownAutoRender"),
+    false,
+    "Markdown auto-render scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsMarkdownRender"),
+    false,
+    "Markdown render executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsMarkdownRender(form)"),
+    false,
+    "Markdown Enter handler should not call the render executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsMarkdownTarget\(input: string\): string/,
+    "Markdown command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsMarkdownPanelInForm\(form: HTMLFormElement\): void/,
+    "Markdown panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsMarkdownAutoRender\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Markdown auto-render scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsMarkdownRender\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "Markdown render executor should live in plugin-panel-impls"
+  );
+});
+
+test("markdown runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "webtoolsMarkdownInput",
+    "webtoolsMarkdownHtml",
+    "webtoolsMarkdownInfo",
+    "webtoolsMarkdownAutoTimer",
+    "webtoolsMarkdownRequestToken"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `Markdown runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `Markdown runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("ua helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-ua-form"\s*\)/s,
+    "UA Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsUaTarget"),
+    false,
+    "UA command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsUaResultInForm"),
+    false,
+    "UA result refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function scheduleWebtoolsUaAutoParse"),
+    false,
+    "UA auto-parse scheduler should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsUaParse"),
+    false,
+    "UA parse executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsUaParse(ua)"),
+    false,
+    "UA Enter handler should not call the parse executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsUaTarget\(ua: string\): string/,
+    "UA command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUaResultInForm\(form: HTMLFormElement\): void/,
+    "UA result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsUaAutoParse\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "UA auto-parse scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsUaParse\(\s*ua: string,\s*options: \{ render\?: boolean; form\?: HTMLFormElement \} = \{\}/s,
+    "UA parse executor should live in plugin-panel-impls"
+  );
+});
+
+test("ua runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "webtoolsUaInput",
+    "webtoolsUaResult",
+    "webtoolsUaInfo",
+    "webtoolsUaError",
+    "webtoolsUaAutoTimer",
+    "webtoolsUaRequestToken"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `UA runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `UA runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("api helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-api-form"\s*\)/s,
+    "API Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function cloneWebtoolsApiRows",
+    "function ensureWebtoolsApiEditableRows",
+    "function buildWebtoolsApiPreviewUrl",
+    "function buildWebtoolsApiTarget",
+    "function getWebtoolsApiRowsByGroup",
+    "function setWebtoolsApiRowsByGroup",
+    "function refreshWebtoolsApiTabs",
+    "function refreshWebtoolsApiPreview",
+    "function refreshWebtoolsApiMethodUi",
+    "function refreshWebtoolsApiResponseHeadersHost",
+    "function refreshWebtoolsApiResponseInForm",
+    "function createWebtoolsApiRowsEditor",
+    "async function executeWebtoolsApiRequest"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("executeWebtoolsApiRequest(form)"),
+    false,
+    "API Enter handler should not call the request executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function cloneWebtoolsApiRows\(rows: WebtoolsApiKvRow\[\]\): WebtoolsApiKvRow\[\]/,
+    "API rows cloner should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function ensureWebtoolsApiEditableRows\(rows: WebtoolsApiKvRow\[\]\): WebtoolsApiKvRow\[\]/,
+    "API rows normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsApiPreviewUrl\(\): string/,
+    "API preview URL builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsApiTarget\(\): string/,
+    "API command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsApiRowsByGroup\(\s*group: "params" \| "headers" \| "formdata"/s,
+    "API group row getter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function setWebtoolsApiRowsByGroup\(\s*group: "params" \| "headers" \| "formdata",\s*rows: WebtoolsApiKvRow\[\]/s,
+    "API group row setter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsApiTabs\(form: HTMLFormElement\): void/,
+    "API tab refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsApiPreview\(form: HTMLFormElement\): void/,
+    "API preview refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsApiMethodUi\(form: HTMLFormElement\): void/,
+    "API method UI refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsApiResponseHeadersHost\(host: HTMLElement\): void/,
+    "API response headers refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsApiResponseInForm\(form: HTMLFormElement\): void/,
+    "API response refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsApiRowsEditor\(\s*form: HTMLFormElement,\s*group: "params" \| "headers" \| "formdata"/s,
+    "API rows editor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsApiRequest\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "API request executor should live in plugin-panel-impls"
+  );
+});
+
+test("api runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "webtoolsApiMethod",
+    "webtoolsApiUrl",
+    "webtoolsApiRequestTab",
+    "webtoolsApiResponseTab",
+    "webtoolsApiParams",
+    "webtoolsApiHeaders",
+    "webtoolsApiBodyType",
+    "webtoolsApiBodyContent",
+    "webtoolsApiFormRows",
+    "webtoolsApiResponseStatus",
+    "webtoolsApiResponseBody",
+    "webtoolsApiResponseHeaders",
+    "webtoolsApiResponseTimeMs",
+    "webtoolsApiResponseSizeText",
+    "webtoolsApiResponseUrl",
+    "webtoolsApiResponseError",
+    "webtoolsApiRequestToken",
+    "webtoolsApiHasResponse",
+    "webtoolsApiIsLoading"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `API runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `API runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("cron helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-cron-form"\s*\)/s,
+    "Cron Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function buildWebtoolsCronTarget",
+    "function refreshWebtoolsCronResultInForm",
+    "function scheduleWebtoolsCronAutoParse",
+    "async function executeWebtoolsCronAction"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsCronAction("parse", expression, {'),
+    false,
+    "Cron Enter handler should not call the parse executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsCronTarget\(action: "parse" \| "random", expression: string\): string/,
+    "Cron command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsCronResultInForm\(form: HTMLFormElement\): void/,
+    "Cron result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsCronAutoParse\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Cron auto-parse scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsCronAction\(\s*action: "parse" \| "random",\s*expression: string,\s*options: \{ render\?: boolean; form\?: HTMLFormElement \} = \{\}/s,
+    "Cron executor should live in plugin-panel-impls"
+  );
+});
+
+test("unit helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-unit-form"\s*\)/s,
+    "Unit Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function normalizeWebtoolsUnitNumber",
+    "function updateWebtoolsUnitStorageFrom",
+    "function updateWebtoolsUnitFromPixel",
+    "function updateWebtoolsUnitFromRem",
+    "function formatWebtoolsUnitStorageValue",
+    "function refreshWebtoolsUnitStorageInputs",
+    "function refreshWebtoolsUnitScreenInputs",
+    "function refreshWebtoolsUnitInfo",
+    "function refreshWebtoolsUnitPanelInForm"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("refreshWebtoolsUnitPanelInForm(form);"),
+    false,
+    "Unit Enter handler should not refresh the panel through renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsUnitNumber\(value: number,\s*fallback: number\): number/,
+    "Unit number normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function updateWebtoolsUnitStorageFrom\(\s*sourceUnit: WebtoolsUnitStorageKey,\s*rawValue: number\s*\): void/s,
+    "Unit storage conversion helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function updateWebtoolsUnitFromPixel\(pixelValue: number,\s*basePxValue: number\): void/,
+    "Unit pixel conversion helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function updateWebtoolsUnitFromRem\(remValue: number,\s*basePxValue: number\): void/,
+    "Unit rem conversion helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function formatWebtoolsUnitStorageValue\(value: number\): string/,
+    "Unit storage formatter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUnitStorageInputs\(form: HTMLFormElement\): void/,
+    "Unit storage refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUnitScreenInputs\(form: HTMLFormElement\): void/,
+    "Unit screen refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUnitInfo\(form: HTMLFormElement\): void/,
+    "Unit info refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUnitPanelInForm\(form: HTMLFormElement\): void/,
+    "Unit panel refresh helper should live in plugin-panel-impls"
+  );
+});
+
+test("file hash helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-file-hash-form"\s*\)/s,
+    "File Hash Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function normalizeWebtoolsFileHashAlgorithm",
+    "function buildWebtoolsFileHashTarget",
+    "function refreshWebtoolsFileHashPanelInForm",
+    "async function executeWebtoolsFileHashCalculate"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("executeWebtoolsFileHashCalculate(form)"),
+    false,
+    "File Hash Enter handler should not call the calculate executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsFileHashAlgorithm\(value: string\): WebtoolsFileHashAlgorithm/,
+    "File Hash algorithm normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsFileHashTarget\(action: "hash"\): string/,
+    "File Hash command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsFileHashPanelInForm\(form: HTMLFormElement\): void/,
+    "File Hash panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsFileHashCalculate\(form: HTMLFormElement\): Promise<void>/,
+    "File Hash executor should live in plugin-panel-impls"
+  );
+});
+
+test("port helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-port-helper-form"\s*\)/s,
+    "Port Helper Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function normalizeWebtoolsPortHelperProtocol",
+    "function parseWebtoolsPortHelperRecords",
+    "function buildWebtoolsPortHelperTarget",
+    "function refreshWebtoolsPortHelperPanelInForm",
+    "async function executeWebtoolsPortHelperAction"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsPortHelperAction("query", form)'),
+    false,
+    "Port Helper Enter handler should not call the query executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsPortHelperProtocol\(value: string\): WebtoolsPortHelperProtocol/,
+    "Port Helper protocol normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function parseWebtoolsPortHelperRecords\(value: unknown\): WebtoolsPortHelperRecord\[\]/,
+    "Port Helper record parser should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsPortHelperTarget\(\s*action: "query" \| "kill",\s*pidOverride\?: string \| null/s,
+    "Port Helper command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsPortHelperPanelInForm\(form: HTMLFormElement\): void/,
+    "Port Helper panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsPortHelperAction\(\s*action: "query" \| "kill",\s*form\?: HTMLFormElement,\s*pidOverride\?: string \| null/s,
+    "Port Helper executor should live in plugin-panel-impls"
+  );
+});
+
+test("http mock helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-http-mock-form"\s*\)/s,
+    "HTTP Mock Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function normalizeWebtoolsHttpMockMethod",
+    "function normalizeWebtoolsHttpMockPath",
+    "function buildWebtoolsHttpMockTarget",
+    "function refreshWebtoolsHttpMockPanelInForm",
+    "async function executeWebtoolsHttpMockAction"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsHttpMockAction("start", form)'),
+    false,
+    "HTTP Mock Enter handler should not call the start executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsHttpMockMethod\(value: string\): WebtoolsHttpMockMethod/,
+    "HTTP Mock method normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsHttpMockPath\(value: string\): string/,
+    "HTTP Mock path normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsHttpMockTarget\(action: "open" \| "start" \| "stop" \| "status"\): string/,
+    "HTTP Mock command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsHttpMockPanelInForm\(form: HTMLFormElement\): void/,
+    "HTTP Mock panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsHttpMockAction\(\s*action: "start" \| "stop" \| "status",\s*form\?: HTMLFormElement/s,
+    "HTTP Mock executor should live in plugin-panel-impls"
+  );
+});
+
+test("image prompt helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-image-prompt-form"\s*\)/s,
+    "Image Prompt Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsImagePromptProductId"),
+    false,
+    "Image Prompt product id normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function filterWebtoolsImagePromptStateForStyle"),
+    false,
+    "Image Prompt style filter helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function readWebtoolsImagePromptStringList"),
+    false,
+    "Image Prompt list reader should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function normalizeWebtoolsImagePromptState"),
+    false,
+    "Image Prompt payload normalizer should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function collectWebtoolsImagePromptState"),
+    false,
+    "Image Prompt form collector should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function syncWebtoolsImagePromptForm"),
+    false,
+    "Image Prompt form sync helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function createClearedWebtoolsImagePromptState"),
+    false,
+    "Image Prompt clear-state helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsImagePromptTarget"),
+    false,
+    "Image Prompt command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("function refreshWebtoolsImagePromptPanelInForm"),
+    false,
+    "Image Prompt panel refresh helper should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsImagePromptBuild"),
+    false,
+    "Image Prompt build executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("executeWebtoolsImagePromptBuild(form, { render: false })"),
+    false,
+    "Image Prompt Enter handler should not call the build executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsImagePromptProductId\(value: string\): WebtoolsImagePromptProductId/,
+    "Image Prompt product id normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function filterWebtoolsImagePromptStateForStyle\(\s*state: WebtoolsImagePromptState\s*\): WebtoolsImagePromptState/s,
+    "Image Prompt style filter helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function readWebtoolsImagePromptStringList\(value: unknown\): string\[\]/,
+    "Image Prompt list reader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsImagePromptState\(value: unknown\): WebtoolsImagePromptState/,
+    "Image Prompt payload normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function collectWebtoolsImagePromptState\(form: HTMLFormElement\): WebtoolsImagePromptState/,
+    "Image Prompt form collector should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function syncWebtoolsImagePromptForm\(form: HTMLFormElement,\s*state: WebtoolsImagePromptState\): void/,
+    "Image Prompt form sync helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createClearedWebtoolsImagePromptState\(\): WebtoolsImagePromptState/,
+    "Image Prompt clear-state helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsImagePromptTarget\(state: WebtoolsImagePromptState\): string/,
+    "Image Prompt command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsImagePromptPanelInForm\(form: HTMLFormElement\): void/,
+    "Image Prompt panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsImagePromptBuild\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean; state\?: WebtoolsImagePromptState \} = \{\}/s,
+    "Image Prompt build executor should live in plugin-panel-impls"
+  );
+});
+
+test("image prompt runtime state lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  const stateNames = [
+    "webtoolsImagePromptState",
+    "webtoolsImagePromptOutput",
+    "webtoolsImagePromptInfo",
+    "webtoolsImagePromptRequestToken"
+  ];
+
+  stateNames.forEach((name) => {
+    assert.equal(
+      rendererSource.includes(`let ${name}`),
+      false,
+      `Image Prompt runtime state ${name} should not remain in renderer.ts`
+    );
+    assert.equal(
+      panelImplsSource.includes(`let ${name}`),
+      true,
+      `Image Prompt runtime state ${name} should live in plugin-panel-impls`
+    );
+  });
+});
+
+test("strings helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-strings-form"\s*\)/s,
+    "Strings Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("function buildWebtoolsStringsTarget"),
+    false,
+    "Strings command target builder should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("async function executeWebtoolsStringsAction"),
+    false,
+    "Strings executor should not remain in renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes('executeWebtoolsStringsAction("convert", form)'),
+    false,
+    "Strings Enter handler should not call the convert executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsStringsTarget\(action: "convert" \| "uuid"\): string/,
+    "Strings command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsStringsAction\(\s*action: "convert" \| "uuid",\s*form: HTMLFormElement,\s*options: \{ caseType\?: string \} = \{\}/s,
+    "Strings executor should live in plugin-panel-impls"
+  );
+});
+
+test("colors helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-colors-form"\s*\)/s,
+    "Colors Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function buildWebtoolsColorsTarget",
+    "function getWebtoolsColorsPreviewTextColor",
+    "function refreshWebtoolsColorsPanelInForm",
+    "function scheduleWebtoolsColorsAutoConvert",
+    "async function executeWebtoolsColorsConvert"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("executeWebtoolsColorsConvert(color)"),
+    false,
+    "Colors Enter handler should not call the converter from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsColorsTarget\(color: string\): string/,
+    "Colors command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsColorsPreviewTextColor\(\): string/,
+    "Colors preview text helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsColorsPanelInForm\(form: HTMLFormElement\): void/,
+    "Colors panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsColorsAutoConvert\(\s*form: HTMLFormElement,\s*color: string,\s*immediate = false/s,
+    "Colors auto-convert scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsColorsConvert\(\s*color: string,\s*options: \{ render\?: boolean; form\?: HTMLFormElement \} = \{\}/s,
+    "Colors converter should live in plugin-panel-impls"
+  );
+});
+
+test("diff helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-diff-form"\s*\)/s,
+    "Diff Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function buildWebtoolsDiffTarget",
+    "function createWebtoolsDiffStatCard",
+    "function refreshWebtoolsDiffResultInForm",
+    "function scheduleWebtoolsDiffAutoCompare",
+    "async function executeWebtoolsDiffCompare"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("executeWebtoolsDiffCompare(form)"),
+    false,
+    "Diff Enter handler should not call the comparer from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsDiffTarget\(\): string/,
+    "Diff command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsDiffStatCard\(label: string,\s*value: string\): HTMLDivElement/,
+    "Diff stat card helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsDiffResultInForm\(form: HTMLFormElement\): void/,
+    "Diff result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsDiffAutoCompare\(\s*form: HTMLFormElement,\s*immediate = false/s,
+    "Diff auto-compare scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsDiffCompare\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "Diff comparer should live in plugin-panel-impls"
+  );
+});
+
+test("timestamp helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-timestamp-form"\s*\)/s,
+    "Timestamp Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function buildWebtoolsTimestampTarget",
+    "function refreshWebtoolsTimestampResultInForm",
+    "function scheduleWebtoolsTimestampAutoConvert",
+    "async function executeWebtoolsTimestampAction",
+    "function normalizeWebtoolsTimestampUnit",
+    "function formatWebtoolsTimestampDate",
+    "function getWebtoolsTimestampNowUnix",
+    "function ensureWebtoolsTimestampDefaults"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsTimestampAction("toDate", input, { render: false, form })'),
+    false,
+    "Timestamp Enter handler should not call the converter from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsTimestampTarget\(\s*action: "toDate" \| "toTimestamp",\s*input: string\s*\): string/s,
+    "Timestamp command target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsTimestampResultInForm\(form: HTMLFormElement\): void/,
+    "Timestamp result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsTimestampAutoConvert\(\s*form: HTMLFormElement,\s*action: "toDate" \| "toTimestamp",\s*immediate = false/s,
+    "Timestamp auto-convert scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsTimestampAction\(\s*action: "toDate" \| "toTimestamp",\s*input: string,\s*options: \{ render\?: boolean; form\?: HTMLFormElement \} = \{\}/s,
+    "Timestamp converter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsTimestampUnit\(value: unknown\): "s" \| "ms"/,
+    "Timestamp unit normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function formatWebtoolsTimestampDate\(value: Date\): string/,
+    "Timestamp date formatter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsTimestampNowUnix\(unit: "s" \| "ms"\): string/,
+    "Timestamp current-unix helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function ensureWebtoolsTimestampDefaults\(\): void/,
+    "Timestamp default-state initializer should live in plugin-panel-impls"
+  );
+});
+
+test("url helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-url-form"\s*\)/s,
+    "URL Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function parseWebtoolsUrlInput",
+    "function rebuildWebtoolsUrlFromQueryRows",
+    "function refreshWebtoolsUrlPartsInForm",
+    "function renderWebtoolsUrlQueryEditor",
+    "function refreshWebtoolsUrlInfoInForm",
+    "function refreshWebtoolsUrlPanelInForm",
+    "function createWebtoolsUrlPartField"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("parseWebtoolsUrlInput(input)"),
+    false,
+    "URL Enter handler should not parse URL directly from renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes('setStatus(webtoolsUrlState.valid === false ? webtoolsUrlState.info : "URL 解析完成")'),
+    false,
+    "URL Enter handler should not own URL status updates in renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function parseWebtoolsUrlInput\(input: string\): void/,
+    "URL parser should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function rebuildWebtoolsUrlFromQueryRows\(\): boolean/,
+    "URL query-row rebuild helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUrlPartsInForm\(form: HTMLFormElement\): void/,
+    "URL part refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function renderWebtoolsUrlQueryEditor\(\s*form: HTMLFormElement,\s*host: HTMLElement,\s*inputArea: HTMLTextAreaElement\s*\): void/s,
+    "URL query editor renderer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUrlInfoInForm\(form: HTMLFormElement\): void/,
+    "URL info refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsUrlPanelInForm\(\s*form: HTMLFormElement,\s*options: \{ rebuildQueryRows\?: boolean; syncInput\?: boolean \} = \{\}\s*\): void/s,
+    "URL panel refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsUrlPartField\(\s*labelText: string,\s*partKey: keyof WebtoolsUrlParts,\s*full = false\s*\): HTMLLabelElement/s,
+    "URL part field factory should live in plugin-panel-impls"
+  );
+});
+
+test("password helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-password-form"\s*\)/s,
+    "Password Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  assert.equal(
+    rendererSource.includes("async function generateFromWebtoolsPasswordPanel"),
+    false,
+    "Password generator executor should not remain in renderer.ts"
+  );
+  [
+    "function buildWebtoolsPasswordGenerateTarget",
+    "function createWebtoolsPasswordResultTable",
+    "function normalizeWebtoolsPasswordOptions"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("generateFromWebtoolsPasswordPanel(form, { render: false })"),
+    false,
+    "Password Enter handler should not call the generator from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsPasswordGenerateTarget\(\s*options: WebtoolsPasswordOptions\s*\): string/s,
+    "Password target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsPasswordResultTable\(\s*rows: WebtoolsPasswordResultRow\[\]\s*\): HTMLDivElement/s,
+    "Password result table renderer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsPasswordOptions\(\s*inputOptions: Partial<WebtoolsPasswordOptions>,\s*base: WebtoolsPasswordOptions = webtoolsPasswordOptions\s*\): WebtoolsPasswordOptions/s,
+    "Password option normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function generateFromWebtoolsPasswordPanel\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}/s,
+    "Password generator executor should live in plugin-panel-impls"
+  );
+});
+
+test("json helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-json-form"\s*\)/s,
+    "JSON Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function buildWebtoolsJsonTarget",
+    "function buildWebtoolsJsonInfoState",
+    "function refreshWebtoolsJsonResultInForm",
+    "function scheduleWebtoolsJsonAutoConvert",
+    "async function executeWebtoolsJsonConvert",
+    "function parseWebtoolsJsonPreviewSummary"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsJsonConvert(form, { render: false })'),
+    false,
+    "JSON Enter handler should not call the converter from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsJsonTarget\(action: "convert" \| "validate" = "convert"\): string/,
+    "JSON target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsJsonInfoState\(\): \{\s*text: string;\s*state: "ok" \| "error" \| "idle";\s*\}/s,
+    "JSON info-state helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsJsonResultInForm\(form: HTMLFormElement\): void/,
+    "JSON result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsJsonAutoConvert\(\s*form: HTMLFormElement,\s*immediate = false\s*\): void/s,
+    "JSON auto-convert scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsJsonConvert\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean; action\?: "convert" \| "validate" \} = \{\}\s*\): Promise<void>/s,
+    "JSON converter should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function parseWebtoolsJsonPreviewSummary\(value: unknown\): WebtoolsJsonPreviewSummary \| null/,
+    "JSON preview summary parser should live in plugin-panel-impls"
+  );
+});
+
+test("regex helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-regex-form"\s*\)/s,
+    "Regex Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function escapeWebtoolsRegexHtml",
+    "function sanitizeWebtoolsRegexFlags",
+    "function refreshWebtoolsRegexState",
+    "function refreshWebtoolsRegexPreviewInForm"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes("refreshWebtoolsRegexState();"),
+    false,
+    "Regex Enter handler should not refresh state from renderer.ts"
+  );
+  assert.equal(
+    rendererSource.includes("refreshWebtoolsRegexPreviewInForm(form);"),
+    false,
+    "Regex Enter handler should not refresh preview from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function escapeWebtoolsRegexHtml\(value: string\): string/,
+    "Regex HTML escape helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function sanitizeWebtoolsRegexFlags\(flags: string\): string/,
+    "Regex flag sanitizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsRegexState\(\): void/,
+    "Regex state refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsRegexPreviewInForm\(form: HTMLFormElement\): void/,
+    "Regex preview refresh helper should live in plugin-panel-impls"
+  );
+});
+
+test("crypto helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-crypto-form"\s*\)/s,
+    "Crypto Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+  [
+    "function normalizeWebtoolsCryptoAlgorithm",
+    "function webtoolsCryptoSupportsDecrypt",
+    "function isWebtoolsCryptoSymmetricAlgorithm",
+    "function isWebtoolsCryptoAsymmetricAlgorithm",
+    "function refreshWebtoolsCryptoResultInForm",
+    "function buildWebtoolsCryptoTarget",
+    "function scheduleWebtoolsCryptoAutoProcess",
+    "async function executeWebtoolsCryptoProcess",
+    "async function executeWebtoolsCryptoGenerateKeys"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+  assert.equal(
+    rendererSource.includes('executeWebtoolsCryptoProcess(form, { render: false })'),
+    false,
+    "Crypto Enter handler should not call the processor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsCryptoAlgorithm\(value: string\): string/,
+    "Crypto algorithm normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function webtoolsCryptoSupportsDecrypt\(algorithm: string\): boolean/,
+    "Crypto decrypt-support helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function isWebtoolsCryptoSymmetricAlgorithm\(algorithm: string\): boolean/,
+    "Crypto symmetric helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function isWebtoolsCryptoAsymmetricAlgorithm\(algorithm: string\): boolean/,
+    "Crypto asymmetric helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsCryptoResultInForm\(form: HTMLFormElement\): void/,
+    "Crypto result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsCryptoTarget\(action: "process" \| "generateKeys"\): string/,
+    "Crypto target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsCryptoAutoProcess\(\s*form: HTMLFormElement,\s*immediate = false\s*\): void/s,
+    "Crypto auto-process scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsCryptoProcess\(\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}\s*\): Promise<void>/s,
+    "Crypto processor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsCryptoGenerateKeys\(\s*form: HTMLFormElement,\s*options: \{ autoEncryptAfterRsaKeys\?: boolean \} = \{\}\s*\): Promise<void>/s,
+    "Crypto key generator should live in plugin-panel-impls"
+  );
+});
+
+test("jwt helper flow lives with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /createSubmitPluginPanelHandler\([\s\S]*?"form\.webtools-jwt-form"\s*\)/s,
+    "JWT Enter handler should submit the panel form instead of calling renderer-local helpers"
+  );
+
+  [
+    "function buildWebtoolsJwtTarget",
+    "function getWebtoolsJwtSecretLabel",
+    "function getWebtoolsJwtSecretPlaceholder",
+    "function getWebtoolsJwtStatusContent",
+    "function refreshWebtoolsJwtModeUi",
+    "function refreshWebtoolsJwtResultInForm",
+    "function scheduleWebtoolsJwtAutoParse",
+    "function scheduleWebtoolsJwtAutoSign",
+    "async function executeWebtoolsJwtAction"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+
+  assert.equal(
+    rendererSource.includes('executeWebtoolsJwtAction("parse", form, { render: false })'),
+    false,
+    "JWT Enter handler should not call the executor from renderer.ts"
+  );
+
+  assert.match(
+    panelImplsSource,
+    /function buildWebtoolsJwtTarget\(action: "parse" \| "sign" \| "verify"\): string/,
+    "JWT target builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsJwtSecretLabel\(mode: "jws" \| "jwe", algorithm: "HS256" \| "RS256"\): string/,
+    "JWT secret label helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsJwtSecretPlaceholder\(\s*mode: "jws" \| "jwe",\s*algorithm: "HS256" \| "RS256",\s*jweAlg: "dir" \| "A256KW"\s*\): string/s,
+    "JWT secret placeholder helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsJwtStatusContent\(\): \{\s*text: string;\s*state: "ok" \| "error" \| "idle";\s*\}/s,
+    "JWT status helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsJwtModeUi\(form: HTMLFormElement\): void/,
+    "JWT mode refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function refreshWebtoolsJwtResultInForm\(form: HTMLFormElement\): void/,
+    "JWT result refresh helper should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsJwtAutoParse\(form: HTMLFormElement, immediate = false\): void/,
+    "JWT auto-parse scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function scheduleWebtoolsJwtAutoSign\(form: HTMLFormElement, immediate = false\): void/,
+    "JWT auto-sign scheduler should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsJwtAction\(\s*action: "parse" \| "sign" \| "verify",\s*form: HTMLFormElement,\s*options: \{ render\?: boolean \} = \{\}\s*\): Promise<void>/s,
+    "JWT executor should live in plugin-panel-impls"
+  );
+});
+
 test("image prompt panel render/apply lives in plugin-panel-impls", () => {
   const rendererSource = readRendererSource();
   const rendererHtmlSource = readRendererHtmlSource();
@@ -931,11 +3719,12 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
   const sharedImagePromptBuilderSource = readSharedImagePromptBuilderSource();
   const copyAssetsSource = readCopyAssetsSource();
   const panelImplsSource = readPanelImplsSource();
+  const pluginRuntimeTypesSource = readPluginRuntimeTypesSource();
 
   assert.match(
     rendererSource,
-    /WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID = "webtools-image-prompt"/,
-    "renderer should know the image prompt plugin id"
+    /const \{[\s\S]*WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID[\s\S]*\} = pluginConstants;/,
+    "renderer should read the image prompt plugin id from shared plugin constants"
   );
   assert.match(
     rendererHtmlSource,
@@ -953,29 +3742,39 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     "asset copy step should expose shared Image Prompt smart templates to the renderer"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /__LL_IMAGE_PROMPT_DATA__/,
-    "renderer should read Image Prompt config from the generated shared data global"
+    "panel impls should read Image Prompt config from the generated shared data global"
+  );
+  assert.equal(
+    rendererSource.includes("smartTemplates"),
+    false,
+    "renderer should not keep Image Prompt smart template data inline"
+  );
+  assert.equal(
+    rendererSource.includes("WebtoolsImagePromptTextDesign"),
+    false,
+    "renderer should not keep Image Prompt text design type declarations inline"
   );
   assert.match(
-    rendererSource,
-    /smartTemplates/,
-    "renderer Image Prompt data should include smart templates"
+    panelImplsSource,
+    /WEBTOOLS_IMAGE_PROMPT_SMART_TEMPLATES = imagePromptData\.smartTemplates/,
+    "plugin-panel-impls should hydrate Image Prompt smart templates from shared data"
   );
   assert.match(
-    rendererSource,
-    /designs:\s*WebtoolsImagePromptTextDesign\[\]/,
-    "renderer Image Prompt text options should include scene-aware text designs"
+    pluginRuntimeTypesSource,
+    /designs: WebtoolsImagePromptTextDesign\[\];/,
+    "plugin runtime types should declare scene-aware Image Prompt text designs"
   );
   assert.match(
-    rendererSource,
-    /design:\s*string/,
-    "renderer Image Prompt text state should track the selected text design"
+    pluginRuntimeTypesSource,
+    /design: string;/,
+    "plugin runtime types should track the selected Image Prompt text design"
   );
   assert.match(
-    rendererSource,
-    /designId:\s*string/,
-    "renderer Image Prompt text state should track a stable text design id"
+    pluginRuntimeTypesSource,
+    /designId: string;/,
+    "plugin runtime types should track a stable Image Prompt text design id"
   );
   assert.match(
     rendererSource,
@@ -1018,13 +3817,13 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     "shared Image Prompt data should preserve birthday photo options"
   );
   assert.match(
-    rendererSource,
-    /render:\s*panelImplsSafe\.renderWebtoolsImagePromptPanel/,
+    panelImplsSource,
+    /\[WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
     "Image Prompt handler should render through panelImplsSafe"
   );
   assert.match(
-    rendererSource,
-    /onOpen:\s*panelImplsSafe\.applyWebtoolsImagePromptPanelPayload/,
+    panelImplsSource,
+    /getRegisteredPanelImpls\(\)\.applyWebtoolsImagePromptPanelPayload\(panel\)/,
     "Image Prompt handler should apply payload through panelImplsSafe"
   );
   assert.equal(
@@ -1243,22 +4042,22 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     "shared Image Prompt data should include birthday-specific text design"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /WEBTOOLS_IMAGE_PROMPT_BIRTHDAY_EXAMPLES/,
-    "renderer should define birthday example templates"
+    "panel impls should define birthday example templates"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /age:\s*"1周岁"/,
     "birthday example templates should sync one-year age into structured text state"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /age:\s*"6周岁"/,
     "birthday example templates should sync older child age into structured text state"
   );
   assert.match(
-    rendererSource,
+    panelImplsSource,
     /1周岁宝宝|长辈温馨/,
     "birthday example templates should cover different birthday scenarios"
   );
@@ -1271,6 +4070,171 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     panelImplsSource.includes("webtoolsImagePromptSubject"),
     false,
     "Image Prompt panel should not fall back to the old manual subject textarea"
+  );
+});
+
+test("image prompt base state helpers live with plugin-panel-impls instead of renderer", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  [
+    "const imagePromptData",
+    "const WEBTOOLS_IMAGE_PROMPT_PRODUCTS",
+    "const WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS",
+    "const WEBTOOLS_IMAGE_PROMPT_OPTION_GROUPS",
+    "const WEBTOOLS_IMAGE_PROMPT_STYLE_PRESETS_FROM_SHARED",
+    "const WEBTOOLS_IMAGE_PROMPT_SMART_TEMPLATES",
+    "const WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS",
+    "function findWebtoolsImagePromptTextDesign",
+    "function createWebtoolsImagePromptTextState",
+    "function applyWebtoolsImagePromptTextDesign",
+    "function createEmptyWebtoolsImagePromptSelections",
+    "function createEmptyWebtoolsImagePromptCustom",
+    "function compactWebtoolsImagePromptOptions",
+    "function normalizeWebtoolsImagePromptStylePresetId",
+    "function getWebtoolsImagePromptStylePreset",
+    "function createWebtoolsImagePromptSelectionStateFromPreset",
+    "function getWebtoolsImagePromptOptionGroupsForStyle",
+    "function createDefaultWebtoolsImagePromptState",
+    "function normalizeWebtoolsImagePromptSmartTemplateId",
+    "function getWebtoolsImagePromptSmartTemplate",
+    "function createWebtoolsImagePromptSmartTemplateState",
+    "function cloneWebtoolsImagePromptState",
+    "function getWebtoolsImagePromptSelectedOptions",
+    "const WEBTOOLS_IMAGE_PROMPT_EXAMPLE",
+    "const WEBTOOLS_IMAGE_PROMPT_BIRTHDAY_EXAMPLES"
+  ].forEach((signature) => {
+    assert.equal(
+      rendererSource.includes(signature),
+      false,
+      `${signature} should not remain in renderer.ts`
+    );
+  });
+
+  assert.match(
+    panelImplsSource,
+    /const imagePromptData = window\.__LL_IMAGE_PROMPT_DATA__ as WebtoolsImagePromptData \| undefined;/,
+    "Image Prompt shared data bootstrap should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_PRODUCTS = imagePromptData\.products;/,
+    "Image Prompt product definitions should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS: WebtoolsImagePromptOptionGroupKey\[\] = \[/,
+    "Image Prompt option-group keys should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_OPTION_GROUPS = imagePromptData\.optionGroups;/,
+    "Image Prompt option groups should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_STYLE_PRESETS_FROM_SHARED = imagePromptData\.stylePresets;/,
+    "Image Prompt style presets should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_SMART_TEMPLATES = imagePromptData\.smartTemplates;/,
+    "Image Prompt smart templates should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS = imagePromptData\.textOptions;/,
+    "Image Prompt text options should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function findWebtoolsImagePromptTextDesign\(idOrLabel: string \| undefined\): WebtoolsImagePromptTextDesign/,
+    "Image Prompt text design lookup should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsImagePromptTextState\(\s*defaults: Partial<WebtoolsImagePromptTextState> = \{\}/s,
+    "Image Prompt text state builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function applyWebtoolsImagePromptTextDesign\(\s*text: WebtoolsImagePromptTextState,\s*design: WebtoolsImagePromptTextDesign/s,
+    "Image Prompt text design applier should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createEmptyWebtoolsImagePromptSelections\(\): Record<[\s\S]*WebtoolsImagePromptOptionGroupKey,\s*string\[\]/,
+    "Image Prompt empty selection factory should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createEmptyWebtoolsImagePromptCustom\(\): Record<[\s\S]*Exclude<WebtoolsImagePromptOptionGroupKey, "constraints">,\s*string/s,
+    "Image Prompt empty custom-value factory should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function compactWebtoolsImagePromptOptions\(options: string\[\]\): string\[\]/,
+    "Image Prompt option compactor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsImagePromptStylePresetId\(\s*value: string \| undefined\s*\): WebtoolsImagePromptStylePresetId/s,
+    "Image Prompt style preset normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsImagePromptStylePreset\(\s*id: WebtoolsImagePromptStylePresetId\s*\): WebtoolsImagePromptStylePreset/s,
+    "Image Prompt style preset accessor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsImagePromptSelectionStateFromPreset\(\s*stylePresetId: WebtoolsImagePromptStylePresetId\s*\): Record<[\s\S]*WebtoolsImagePromptOptionGroupKey,\s*string\[\]/,
+    "Image Prompt preset selection builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsImagePromptOptionGroupsForStyle\(\s*stylePresetId: WebtoolsImagePromptStylePresetId\s*\): WebtoolsImagePromptOptionGroup\[\]/,
+    "Image Prompt style option-group accessor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createDefaultWebtoolsImagePromptState\(\s*stylePresetId: WebtoolsImagePromptStylePresetId = "ecommerce-main"\s*\): WebtoolsImagePromptState/s,
+    "Image Prompt default state builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function normalizeWebtoolsImagePromptSmartTemplateId\(\s*value: string \| undefined\s*\): WebtoolsImagePromptSmartTemplateId/s,
+    "Image Prompt smart-template normalizer should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsImagePromptSmartTemplate\(\s*templateId: WebtoolsImagePromptSmartTemplateId\s*\): WebtoolsImagePromptSmartTemplate/s,
+    "Image Prompt smart-template accessor should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function createWebtoolsImagePromptSmartTemplateState\(\s*templateId: WebtoolsImagePromptSmartTemplateId\s*\): WebtoolsImagePromptState/s,
+    "Image Prompt smart-template state builder should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function cloneWebtoolsImagePromptState\(\s*state: WebtoolsImagePromptState\s*\): WebtoolsImagePromptState/s,
+    "Image Prompt state cloner should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /function getWebtoolsImagePromptSelectedOptions\(\s*state: WebtoolsImagePromptState,\s*key: WebtoolsImagePromptOptionGroupKey\s*\): string\[\]/,
+    "Image Prompt selected-option reader should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_EXAMPLE: WebtoolsImagePromptState = \{/,
+    "Image Prompt example state should live in plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /const WEBTOOLS_IMAGE_PROMPT_BIRTHDAY_EXAMPLES: Array<\{/,
+    "Image Prompt birthday examples should live in plugin-panel-impls"
   );
 });
 

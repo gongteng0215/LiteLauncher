@@ -34,7 +34,8 @@ test(
       await returnToSearch(page);
       await openPluginFromSearch(page, "plugin:json", "JSON 工具", "webtools-json");
       await page
-        .locator(".settings-title", { hasText: "JSON & CSV 实验室" })
+        .locator(".webtools-tool-title, .settings-title")
+        .filter({ hasText: "JSON & CSV 实验室" })
         .waitFor({ state: "visible", timeout: 10000 });
 
       await assert.doesNotReject(() =>

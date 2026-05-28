@@ -1,7 +1,7 @@
 # LiteLauncher 产品需求文档（PRD）
 
-更新时间：2026-05-12
-适用版本：LiteLauncher `v1.0.15`
+更新时间：2026-05-28
+适用版本：LiteLauncher `v1.0.16`
 
 ## 1. 产品目标
 

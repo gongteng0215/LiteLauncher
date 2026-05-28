@@ -9,3 +9,4 @@ tmp-*
 pnpm-debug.log*
 release
 .superpowers/
+.codex-recovery/

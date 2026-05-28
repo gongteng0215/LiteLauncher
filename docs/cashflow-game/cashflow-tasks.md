@@ -1,8 +1,8 @@
 # Cashflow Lite 开发任务清单
 
-更新时间：2026-05-12
+更新时间：2026-05-28
 来源：`docs/cashflow-game/cashflow-prd.md`
-适用版本：LiteLauncher `v1.0.15`
+适用版本：LiteLauncher `v1.0.16`
 
 状态：`待办` / `进行中` / `完成`  
 优先级：`P0` / `P1` / `P2`

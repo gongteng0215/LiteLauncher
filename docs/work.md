@@ -1,11 +1,38 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-05-16
+更新时间：2026-05-28
 
 ## 最近完成
+- 继续收口 `renderer.ts` 分发壳层：本轮把 `launcher.onOpenPanel(...)` 的内联路由从 `registerEvents()` 中抽成独立的 `handleLauncherOpenPanel(...)` helper，并进一步把 `handleKeydown()` 里 `password / cashflow / plugin` 三段面板模式分支抽成 `handlePanelModeKeydown(...)`；行为保持不变，但 `renderer.ts` 的事件注册与主键盘分发职责继续变薄，后续再拆剩余搜索 / 列表键盘逻辑会更顺手。同步为 `plugin-panel-impls-regression` 增补源码护栏，防止 `openPanel` 路由和 panel-mode keydown 分支回流到大函数内联；本轮仍按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js`，结果 53/53 通过。
+- 恢复并完成 `panel-baseline-round2` worktree 收尾：在误删后先从 branch `codex/panel-baseline-round2` 重建 worktree，并把归档的 `working-tree.patch` 重新 apply 回恢复出的 worktree，复核已提交增量与未提交现场；确认其中布局/测试等有效内容已经回填到主线、其余主要是已被主线后续修改覆盖或不再保留的 `renderer.ts` / `plugin-panel-impls.ts` / 测试大块 WIP 后，在 `main` 上补记 merge 关系 `merge: reconcile codex/panel-baseline-round2 into main`，再移除 worktree。最终归档仍保留在 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/`，当前 `git worktree list` 与磁盘 `.worktrees` 均只剩主仓库 `main`。
+- 清理 worktree 残留目录并统一文档口径：确认 `.worktrees/renderer-plugin-state-extraction` 只是磁盘残留目录、并非 `git worktree list` 注册中的有效 worktree，已安全删除，避免后续再出现“列表里没有、磁盘上还有旧目录”的混乱状态。
+- 安全回填 `Image Base64` round2 结构与轻量 smoke 断言：主线 `src/renderer/plugin-panel-impls.ts` 已把 `图片 Base64` 面板从旧的平铺按钮 + 文本域结构补回为带头部工具条、预览/编辑双栏、上传按钮、拖拽态与本地文件读取 helper 的 round2 结构；同时补齐 `plugin-panel-impls-regression` 对 `webtools-image-base64-header / toolbar / layout / editor / readWebtoolsImageBase64FileAsDataUrl` 的源码护栏，以及 `e2e-plugin-panels-smoke` 对 `ImageBase64 / Colors / Unit / Strings / API / QRCode / UA` 结构可见性的轻量断言；本轮按约定先完成 `pnpm run build`，再串行执行 `node dist/test/plugin-panel-impls-regression.test.js`、`node dist/test/clipboard-workbench-plugin.test.js` 与 `node dist/test/clipboard-workbench-service.test.js`，结果均通过。
+- 收口 `renderer.ts` 壳层职责并同步文档口径：本轮再次核对 `src/renderer/index.html` 仍按 `plugin-panel-impls.js` 在前、`renderer.js` 在后的顺序加载；`src/renderer/renderer.ts` 已移除重复的 standalone/password/cashflow 与 WebTools / Hardware 旧实现块，当前主要保留搜索 / 设置壳层、`panelImplsSafe` 分发、通用 DOM / status helper 与少量剩余共享状态；最近又把 `openPanel` 路由与 panel-mode keydown 分支抽成独立 helper。`src/test/plugin-panel-impls-regression.test.ts` 当前共有 53 个源码回归用例，最近一次完成的串行验证仍为 `pnpm run build` 后执行 `node dist/test/plugin-panel-impls-regression.test.js`，结果 53/53 通过。
+- 安全回填 `renderer.ts` 插件类型 / runtime state 下沉批次：新增 `src/renderer/plugin-runtime-types.d.ts` 承接 WebTools / Hardware / Cashflow / plugin panel 专属类型声明，并把 `webtools-password / json / url / diff / timestamp / regex / crypto / jwt / strings / colors` 这批已仅供插件面板实现层使用的 runtime state、默认常量与 `tryParseWebtoolsUrl` 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`；同时把 `plugin-panel-impls-regression` 扩展为校验这些类型和状态不再回流主渲染文件，已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证，当前该回归集为 51/51 通过；`renderer.ts` 当前行数已进一步降到约 3,499 行。
+- 安全回填 `Colors / QRCode / UA / API / Unit / Strings / URL` 共用面板结构批次：将 `颜色工具`、`二维码生成`、`UA 解析`、`API 调试`、`单位换算`、`字符串工具` 的成熟 round2 面板结构手工回填到主线，包括 `Unit` 结果卡与复制动作、`Strings` 分区与中文动作文案、`Colors` 色板实验室布局、`QRCode` 两栏配置与 Logo 区、`UA` 头部与编辑区、`API` 请求 / 预览 / 响应头壳，以及 `URL` 字段标签中文本地化；同时补齐对应源码回归护栏，防止这些面板回退到旧的松散结构；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Clipboard Workbench / CodeAgent Switch` 收口批次：将 `Clipboard Workbench` 的插件 Enter 行为从 `renderer.ts` 里的旧 refresh 分支收口为 `form.requestSubmit()`，继续让提交逻辑留在 `plugin-panel-impls` 内部；同时为 `Clipboard Workbench` 补齐可见中文文案与 submit 链路源码回归，为 `CodeAgent Switch` 补齐 Enter -> submit 与 form submit -> read 的源码回归；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证，当前该回归集为 48/48 通过。
+- 安全回填 `plugin-panel-impls-regression` 覆盖批次：把主线里已经完成下沉、但此前还没被源码回归锁住的 `ImageBase64 / Config / SQL / QRCode / Markdown / UA / API / Cron / Unit / FileHash / PortHelper / HttpMock / Image Prompt` helper 与 runtime state 归属断言补齐到 `src/test/plugin-panel-impls-regression.test.ts`，确保这些实现继续稳定留在 `src/renderer/plugin-panel-impls.ts` 而不是回流 `src/renderer/renderer.ts`；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证，当前该回归集为 46/46 通过。
+- 安全回填 `Image Prompt` 基础状态批次：将 `window.__LL_IMAGE_PROMPT_DATA__` 引导、共享产品 / 分组 / 风格 / 智能模板 / 文字设计常量、默认示例状态与生日示例模板，从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，并补齐 `image prompt base state helpers live with plugin-panel-impls instead of renderer` 源码回归，确保 `Image Prompt` 的基础状态和示例数据不再回流主渲染文件；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Hardware Inspector` 小批次 helper / state 迁移：将硬件检测面板的运行时状态、格式化与 diff helper、snapshot apply、refresh / export 执行链路从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把 Enter 行为统一为 `form.requestSubmit()`，继续压平 `renderer.ts` 的插件分发边界；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 收尾下沉插件面板临时状态清理：将 `renderActivePluginPanel` / `setMode` 中分散的 JSON / Diff / Timestamp / Cron / Crypto / JWT / Colors / ImageBase64 / ImagePrompt / Config / SQL / QRCode / Markdown / UA 等 timer / request cleanup 统一收进 `window.__LL_PANEL_IMPLS__.cleanupPluginPanelTransientState(...)`，并把 `Password`、`JSON`、`Timestamp` 剩余共享 helper 一并迁入 `src/renderer/plugin-panel-impls.ts`；`CodeAgent Switch` 的 Enter 也改为 `form.requestSubmit()`，让主渲染继续只保留轻量分发；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 收尾统一剩余 submit-driven 插件 Enter 入口：将 `Cron`、`ImageBase64`、`ImagePrompt`、`Config`、`SQL`、`Unit`、`FileHash`、`PortHelper`、`QRCode`、`Markdown`、`UA`、`API`、`HttpMock` 等仍由 `renderer.ts` 直接调 executor 的 `onEnter`，统一改为 `form.requestSubmit()`，让提交逻辑回到各自面板内部的 submit handler，进一步压平 `renderer.ts` 的插件入口分叉；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `JSON / Regex / Crypto` 与 `Password` 残留 helper 批次迁移：将 JSON 工具的 target / info-state / 结果刷新 / 自动转换 / executor，Regex 工具的 HTML 转义 / flags 规整 / 状态刷新 / 预览刷新，Crypto 工具的算法规整 / 模式判断 / 结果刷新 / target / 自动处理 / process / generateKeys，以及 Password 剩余的 target / 结果表格 helper，从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`；同时把 `JSON`、`Regex`、`Crypto` 插件面板 Enter 动作统一改为 `form.requestSubmit()`，继续保留状态、常量与 timer cleanup 在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `JWT` 小批次 helper 迁移：将 JWT 工具的 command target / 秘钥文案 / 状态文案 / 模式刷新 / 结果刷新 / 自动 parse / 自动 sign / executor 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，继续保留定时器 cleanup 留在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Password` 小批次渲染 helper 迁移：将随机密码工具的结果刷新 helper 与面板生成执行器从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，保持已有 submit handler 入口不变；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
 
+- 安全回填 `URL` 小批次渲染 helper 迁移：将 URL 解析工具的本地解析 / query rows 回写 / 表单刷新 / 字段工厂等 helper 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，继续保持 `tryParseWebtoolsUrl` 与基础 URL state 常量留在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Timestamp` 小批次渲染 helper 迁移：将时间戳工具的 command target / 结果刷新 / 自动转换 / executor 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，继续保持默认值初始化、时钟刷新与 timer cleanup 留在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Diff` 小批次渲染 helper 迁移：将文本对比工具的 command target / 结果卡片 / 结果刷新 / 自动对比 / executor 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，继续保持计时器清理逻辑留在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Colors` 小批次渲染 helper 迁移：将颜色工具的 command target / preview 刷新 / 自动转换 / executor 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，继续保持计时器清理逻辑留在 `renderer.ts` 不扩批；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Strings` 小批次渲染 helper 迁移：将字符串工具的 command target / executor 从 `src/renderer/renderer.ts` 迁入 `src/renderer/plugin-panel-impls.ts`，同时把插件面板 Enter 动作改为 `form.requestSubmit()`，并补齐源码回归锁定 helper 不再回流；已按串行顺序完成 `pnpm run build` 与 `node dist/test/plugin-panel-impls-regression.test.js` 验证。
+- 安全回填 `Clipboard Workbench` 小批次本地化：将原 `codex/panel-baseline-round2` 里相对独立的剪贴板工作台标题、说明、状态消息、面板可见文案与对应测试手工回填到 `main`，避免这部分价值继续埋在大块未提交 WIP 里；已完成 `pnpm run build`、`node dist/test/clipboard-workbench-plugin.test.js`、`node dist/test/clipboard-workbench-service.test.js` 与 `node dist/test/plugin-panel-impls-regression.test.js` 定向验证。
+- 完成 `panel-baseline-round2` 剩余改动第二轮复核：在 `Clipboard Workbench` 本地化、`Hardware Inspector` helper/state 下沉，以及 `Image Prompt` 基础状态回填之后，确认剩余 diff 主要集中在 `src/renderer/plugin-panel-impls.ts`、`src/renderer/renderer.ts` 与相关测试的大块未提交 WIP，已随 worktree 现场一起归档，不再继续保留该 worktree。
+- 渲染层拆分第六刀落地（7 批次）：将 Cron / ImageBase64 / ImagePrompt / Config / SQL / Unit / Markdown / UA / API / HttpMock / QRCode / FileHash / PortHelper 等插件的状态变量与辅助函数从 `renderer.ts` 迁出到 `plugin-panel-impls.ts`，`renderer.ts` 从约 12,747 行缩减至约 9,049 行（减少约 3,700 行），全量回归与 E2E smoke 持续通过。
+
+- 完成 round 2 已提交增量回填：把原 `codex/panel-baseline-round2` 中已确认有价值的第二轮窄窗口 / 高 DPI 样式与测试改动手工回填到 `main`，包括 `CodeAgent Switch` 1180/860 断点顺序修正、`e2e-launcher-smoke` 的 JSON 标题兼容定位、`e2e-plugin-panels-smoke` 的多插件窄窗口覆盖、`plugin-panel-impls-regression` 的紧凑布局断言补强，以及新增 `src/test/e2e-plugin-panel-layout-smoke.test.ts` 并接入 `test:e2e:smoke`。
+- 完成文档与 worktree 再盘点：临时 `codex/panel-baseline-reconcile` worktree 已完成安全回填使命；`panel-baseline-round2` 也已按“恢复核对 -> 补记 merge -> 删除 worktree”的顺序收尾，后续不再作为活跃 worktree 保留。
 - 完成插件面板高 DPI / 小窗口首轮基线：为搜索首页补齐收缩与换行样式约束，给 `codeagent-switch`、`clipboard-workbench`、`webtools-password`、`webtools-json`、`webtools-cron` 增加窄窗口断点回归，并把搜索首页与重点插件面板的小窗口不横向溢出检查接入源码断言与 Electron smoke。
-- 准备发布 `v1.0.15` 热修版，应用版本已同步到 `package.json`；修复老用户升级后图片提示词插件被旧可见插件白名单隐藏的问题。
+- 准备发布 `v1.0.16` 收敛版，应用版本已同步到 `package.json`；本轮主要覆盖插件面板 round2 回填、`renderer.ts` 壳层继续收口、回归护栏扩展，以及发布前完整回归 / smoke 验证。
 - 新增默认可见插件 `hardware-inspector`：支持主板、CPU、内存、显卡、硬盘等硬件信息采集，提供变化对比、复制摘要 / JSON、Markdown / HTML 报告导出。
 - 新增默认可见插件 `webtools-file-hash`：支持 MD5 / SHA1 / SHA256 / SHA512 文件哈希计算与期望哈希对比。
 - 新增默认可见插件 `webtools-port-helper`：支持 TCP / UDP 端口占用查询、PID 定位与释放端口。
@@ -67,7 +94,7 @@
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.15`
+- 应用版本：`v1.0.16`
 - 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
@@ -77,18 +104,27 @@
 - 新增默认插件与 Crypto / JWT UI smoke：已接入 `pnpm run test:e2e:smoke`
 - Windows 应用别名（如 `codex`）已支持搜索与启动
 
+## 当前 worktree 状态
+
+- `E:\AI\LiteLauncher` -> `main`：当前主线 worktree，已经纳入本轮 round 2 已提交的样式 / 测试回填增量，以及新近回填的 `Clipboard Workbench` 本地化批次、`Hardware Inspector` helper/state 下沉批次、`Clipboard Workbench / CodeAgent Switch` Enter 收口批次、`Colors / QRCode / UA / API / Unit / Strings / URL` 共用结构回填批次和 `plugin-panel-impls-regression` 护栏补齐批次；最近一次完成的串行验证结果仍为 `pnpm run build` 通过，随后 `node dist/test/plugin-panel-impls-regression.test.js` 53/53 通过。
+- `E:\AI\LiteLauncher` -> `main`：本轮又额外回填了 `Image Base64` 的 round2 面板结构与上传/拖拽链路，并把 `Colors / Unit / Strings / API / QRCode / UA / ImageBase64` 的轻量结构 smoke 断言补进主线测试；这些增量已经通过本轮串行 `build + dist tests` 验证。
+- `E:\AI\LiteLauncher` -> `main`：当前主线 `renderer.ts` 已进一步收口为渲染壳层，插件与 standalone 面板实现统一以 `src/renderer/plugin-panel-impls.ts` 为主；`renderer.ts` 当前主要保留搜索 / 设置壳层、`panelImplsSafe` 分发、通用 DOM / status helper 与少量共享状态，行数约 3,499。
+- 当前状态结论：`codex/panel-baseline-round2` 已按“恢复现场 -> 复核 branch / patch -> 在 \`main\` 补记 merge 关系 -> 删除 worktree”的顺序完成收尾；其最终现场仍归档在 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/`，包含 `status.txt`、`branch-divergence.txt`、`working-tree.patch` 与 worktree 内备份文件。当前 `git worktree list` 与磁盘 `.worktrees` 都只剩主仓库 `main`。
+
 ## 当前主要风险
 
-1. 插件面板高 DPI 布局已建立首轮基线，但仍缺少对更多历史插件和更细截图层级的覆盖。
-2. 渲染层执行 helper 与共享状态仍然集中在 `src/renderer/renderer.ts`。
+1. round 2 已提交且可验证的样式 / 测试增量，以及 `Clipboard Workbench` 可独立回填的本地化批次、`Hardware Inspector` 可独立回填的 helper/state 下沉批次，已回填到 `main`；`codex/panel-baseline-round2` 也已在 `main` 上补记 merge 关系并完成 worktree 清理，剩余未提交的 `renderer` / `plugin-panel-impls` 大块 WIP 仅保留归档现场，后续若要追查需基于归档 patch 或主线继续收口。
+2. 渲染层执行 helper 与共享状态已大幅迁出，`renderer.ts` 当前剩余的插件尾巴已进一步收敛到状态变量、少量共享常量与 Cashflow / Clipboard 等尚未拆完区域，但仍未完全清空所有历史状态定义。
 3. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
-4. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
-5. Cashflow `cash review` 复盘能力还未真正落地。
+4. 基于 `dist` 的定向测试如果与 `pnpm run build` 并行执行，会读到旧产物并产生假阳性；后续验证必须采用串行顺序：先 build，再逐个运行 `node dist/test/...`。
+5. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
+6. Cashflow `cash review` 复盘能力还未真正落地。
 
 ## 下一步建议
 
-1. 继续拆分 `src/renderer/renderer.ts` 中剩余执行 helper 与共享状态逻辑。
-2. 在现有首轮基线之上继续扩展插件面板高 DPI 专项回归，补更细的截图/布局断言。
-3. 继续做非新增插件范围的 UI 文案与历史编码巡检。
-4. 推进 Cashflow `cash review` 复盘模块。
-5. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。
+1. 继续直接在 `main` 上拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与共享边界，把 `panel-baseline-round2` 时代遗留但未继续保留的拆分目标转成主线上的持续收口工作；如需追溯旧现场，可参考 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/working-tree.patch`。
+2. 继续拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与尚未迁出的 Clipboard / Cashflow 等区域，参考 `docs/superpowers/plans/2026-05-26-renderer-plugin-state-extraction.md`。
+3. 后续继续优先做源码回归 + `pnpm run build`，凡依赖 `dist` 的定向测试都串行执行，smoke / E2E 放到相关批次收尾。
+4. 继续做非新增插件范围的 UI 文案与历史编码巡检。
+5. 推进 Cashflow `cash review` 复盘模块。
+6. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。

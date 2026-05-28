@@ -21,9 +21,8 @@ export interface ClipboardWorkbenchServiceLike {
 }
 
 const PLUGIN_ID = "clipboard-workbench";
-const TITLE = "Clipboard Workbench";
-const SUBTITLE =
-  "Capture, organize, and replay text, images, screenshots, and file lists";
+const TITLE = "剪贴板工作台";
+const SUBTITLE = "集中采集、整理和回放文本、图片、截图与文件列表";
 const QUERY_ALIASES = ["clipx", "clipboard", "cb", "workbench", "cbw"];
 const VALID_ACTIONS = new Set<ClipboardWorkbenchActionName>([
   "open",
@@ -84,7 +83,7 @@ function createCatalogItem(): LaunchItem {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: TITLE,
-    subtitle: "Clipboard history for text, images, screenshots, and file paths",
+    subtitle: "面向文本、图片、截图与文件路径的剪贴板工作台",
     iconPath: getIconDataUrl(),
     target: buildTarget("open"),
     keywords: [
@@ -156,7 +155,7 @@ function parseCommand(
   if (!VALID_ACTIONS.has(actionRaw as ClipboardWorkbenchActionName)) {
     return {
       ok: false,
-      message: `Unsupported Clipboard Workbench action: ${actionRaw || "(empty)"}`
+      message: `不支持的剪贴板工作台操作：${actionRaw || "空操作"}`
     };
   }
 
@@ -230,7 +229,7 @@ export const clipboardWorkbenchPlugin: LauncherPlugin = {
       return {
         ok: false,
         keepOpen: true,
-        message: "Clipboard Workbench service is unavailable."
+        message: "剪贴板工作台服务暂不可用。"
       };
     }
 
