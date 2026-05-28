@@ -162,6 +162,17 @@ interface RendererImagePromptData {
 }
 
 interface RendererPanelImpls {
+  handleStandalonePanelPayload(panelPayload: unknown): string | null;
+  handleGenericPluginPanelPayload(panelPayload: unknown): string | null;
+  renderPasswordPanel(): void;
+  handlePasswordPanelEnter(): void;
+  renderCashflowPanel(): void;
+  refreshCashflowPanel(): Promise<boolean>;
+  handleCashflowPanelEnter(): void;
+  renderActivePluginPanel(): void;
+  handleActivePluginPanelEnter(): void;
+  getActivePluginPanelTitle(): string | null;
+  cleanupPluginPanelTransientState(activePluginId: string | null): void;
   applyHardwareInspectorPanelPayload(panel: unknown): void;
   renderHardwareInspectorPanel(): void;
   applyClipboardWorkbenchPanelPayload(panel: unknown): void;

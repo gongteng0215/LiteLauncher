@@ -388,7 +388,7 @@ export class ClipboardWorkbenchService {
     query: Partial<ClipboardWorkbenchQueryState> = {}
   ): Promise<ClipboardWorkbenchActionResult> {
     return this.buildActionResult(
-      "Clipboard Workbench refreshed.",
+      "剪贴板工作台已刷新。",
       normalizeQueryState(query)
     );
   }
@@ -431,14 +431,14 @@ export class ClipboardWorkbenchService {
   public async saveCurrentClipboard(): Promise<ClipboardWorkbenchActionResult> {
     const snapshot = collectClipboardWorkbenchSnapshot(this.runtime, this.settings);
     if (!snapshot) {
-      return this.buildActionResult("Nothing to save from the clipboard.");
+      return this.buildActionResult("当前剪贴板没有可保存的内容。");
     }
 
     const saved = await this.requireStore().saveItem(
       this.toManualStoredInput(snapshot)
     );
     await this.applyRetention();
-    return this.buildActionResult(`Saved current clipboard: ${saved.summary}`);
+    return this.buildActionResult(`已保存当前剪贴板：${saved.summary}`);
   }
 
   public async saveManualText(
@@ -446,7 +446,7 @@ export class ClipboardWorkbenchService {
   ): Promise<ClipboardWorkbenchActionResult> {
     const normalized = normalizeClipboardWorkbenchText(text);
     if (!normalized) {
-      return this.buildActionResult("Nothing to save.");
+      return this.buildActionResult("没有可保存的内容。");
     }
 
     const saved = await this.requireStore().saveItem({
@@ -459,7 +459,7 @@ export class ClipboardWorkbenchService {
       sensitive: this.settings.sensitiveMode ? 1 : 0
     });
     await this.applyRetention();
-    return this.buildActionResult(`Saved manual text: ${saved.summary}`);
+    return this.buildActionResult(`已保存手动文本：${saved.summary}`);
   }
 
   public async setAutoCollect(
@@ -470,7 +470,7 @@ export class ClipboardWorkbenchService {
       autoCollect: enabled
     });
     return this.buildActionResult(
-      enabled ? "Clipboard collection enabled." : "Clipboard collection paused."
+      enabled ? "已开启剪贴板采集。" : "已暂停剪贴板采集。"
     );
   }
 
@@ -482,7 +482,7 @@ export class ClipboardWorkbenchService {
       sensitiveMode: enabled
     });
     return this.buildActionResult(
-      enabled ? "Sensitive mode enabled." : "Sensitive mode disabled."
+      enabled ? "已开启敏感模式。" : "已关闭敏感模式。"
     );
   }
 
@@ -492,14 +492,14 @@ export class ClipboardWorkbenchService {
     const items = await this.requireStore().getItemsByIds(itemId ? [itemId] : []);
     const item = items[0];
     if (!item) {
-      return this.buildActionResult("Item not found.");
+      return this.buildActionResult("未找到对应记录。");
     }
 
     const restored = await this.restoreStoredItemToClipboard(item);
     return this.buildActionResult(
       restored
-        ? `Restored to the clipboard: ${item.summary}`
-        : `Could not restore: ${item.summary}`
+        ? `已恢复到剪贴板：${item.summary}`
+        : `恢复失败：${item.summary}`
     );
   }
 
@@ -511,7 +511,7 @@ export class ClipboardWorkbenchService {
   ): Promise<ClipboardWorkbenchActionResult> {
     const items = await this.requireStore().getItemsByIds(ids);
     if (items.length === 0) {
-      return this.buildActionResult("No items selected.");
+      return this.buildActionResult("尚未选择任何记录。");
     }
 
     if (mode === "merge-once") {
@@ -521,7 +521,7 @@ export class ClipboardWorkbenchService {
     for (const item of items) {
       const restored = await this.restoreStoredItemToClipboard(item);
       if (!restored) {
-        return this.buildActionResult(`Could not restore: ${item.summary}`);
+        return this.buildActionResult(`恢复失败：${item.summary}`);
       }
 
       const result = await performClipboardWorkbenchSequentialPaste(
@@ -531,15 +531,13 @@ export class ClipboardWorkbenchService {
       );
       if (!result.ok) {
         return this.buildActionResult(
-          "Restored to the clipboard. Use Ctrl+V manually."
+          "已恢复到剪贴板，请手动使用 Ctrl+V 粘贴。"
         );
       }
     }
 
     return this.buildActionResult(
-      items.length === 1
-        ? "Pasted 1 item sequentially."
-        : `Pasted ${items.length} items sequentially.`
+      items.length === 1 ? "已顺序粘贴 1 条记录。" : `已顺序粘贴 ${items.length} 条记录。`
     );
   }
 
@@ -558,7 +556,7 @@ export class ClipboardWorkbenchService {
         customSeparator
       );
       this.runtime.writeText(merged);
-      return this.buildActionResult("Merged text restored to the clipboard.");
+      return this.buildActionResult("已将合并文本恢复到剪贴板。");
     }
 
     if (fileItems.length === items.length) {
@@ -568,11 +566,11 @@ export class ClipboardWorkbenchService {
         customSeparator
       );
       this.runtime.writeText(merged);
-      return this.buildActionResult("Merged file paths restored to the clipboard.");
+      return this.buildActionResult("已将合并文件路径恢复到剪贴板。");
     }
 
     return this.buildActionResult(
-      "Merge once currently supports only text or file path selections."
+      "合并粘贴目前仅支持纯文本或纯文件路径记录。"
     );
   }
 
@@ -797,7 +795,7 @@ export class ClipboardWorkbenchService {
 
   private requireStore(): ClipboardWorkbenchStore {
     if (!this.store) {
-      throw new Error("Clipboard Workbench store is not initialized.");
+      throw new Error("剪贴板工作台存储尚未初始化。");
     }
     return this.store;
   }

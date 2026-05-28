@@ -1,3 +1,38 @@
+(() => {
+const pluginConstants = window.__LL_PLUGIN_CONSTANTS__;
+if (!pluginConstants) {
+  throw new Error("renderer plugin constants not initialized");
+}
+const {
+  CASHFLOW_PLUGIN_ID,
+  HARDWARE_INSPECTOR_PLUGIN_ID,
+  CLIPBOARD_WORKBENCH_PLUGIN_ID,
+  WEBTOOLS_PASSWORD_PLUGIN_ID,
+  WEBTOOLS_JSON_PLUGIN_ID,
+  WEBTOOLS_URL_PLUGIN_ID,
+  WEBTOOLS_DIFF_PLUGIN_ID,
+  WEBTOOLS_TIMESTAMP_PLUGIN_ID,
+  WEBTOOLS_REGEX_PLUGIN_ID,
+  WEBTOOLS_CRON_PLUGIN_ID,
+  WEBTOOLS_CRYPTO_PLUGIN_ID,
+  WEBTOOLS_JWT_PLUGIN_ID,
+  WEBTOOLS_STRINGS_PLUGIN_ID,
+  WEBTOOLS_COLORS_PLUGIN_ID,
+  WEBTOOLS_IMAGE_BASE64_PLUGIN_ID,
+  WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID,
+  WEBTOOLS_CONFIG_PLUGIN_ID,
+  WEBTOOLS_SQL_PLUGIN_ID,
+  WEBTOOLS_UNIT_PLUGIN_ID,
+  WEBTOOLS_FILE_HASH_PLUGIN_ID,
+  WEBTOOLS_PORT_HELPER_PLUGIN_ID,
+  WEBTOOLS_QRCODE_PLUGIN_ID,
+  WEBTOOLS_MARKDOWN_PLUGIN_ID,
+  WEBTOOLS_UA_PLUGIN_ID,
+  WEBTOOLS_API_PLUGIN_ID,
+  WEBTOOLS_HTTP_MOCK_PLUGIN_ID,
+  CODEAGENT_SWITCH_PLUGIN_ID
+} = pluginConstants;
+
 function createHardwareInspectorMetricGrid(
   items: Array<{ label: string; value: string; changed?: boolean }>
 ): HTMLDivElement {
@@ -21,6 +56,1819 @@ function createHardwareInspectorMetricGrid(
   });
 
   return grid;
+}
+
+const CURRENCY_FORMATTER = new Intl.NumberFormat("zh-CN", {
+  style: "currency",
+  currency: "CNY",
+  maximumFractionDigits: 0
+});
+let activePluginPanel: ActivePluginPanelState | null = null;
+let webtoolsPasswordOptions: WebtoolsPasswordOptions = {
+  length: 16,
+  count: 10,
+  includeLowercase: true,
+  includeUppercase: true,
+  includeDigits: true,
+  includeSymbols: true,
+  symbolChars: "!@#$%^&*",
+  excludeSimilar: false
+};
+let webtoolsPasswordRows: WebtoolsPasswordResultRow[] = [];
+let webtoolsJsonState: WebtoolsJsonState = {
+  input:
+    '{"project":"WebTools","version":1.0,"features":["JSON","CSV","Cron"],"active":true}',
+  output: "",
+  info: "",
+  valid: null,
+  sourceFormat: "text",
+  targetFormat: "json",
+  compressed: false,
+  preview: null,
+  errorPosition: null,
+  selectedFields: []
+};
+const DEFAULT_WEBTOOLS_URL_INPUT =
+  "https://www.example.com:8080/path/to/page?name=test&id=123#section-1";
+function createEmptyWebtoolsUrlParts(): WebtoolsUrlParts {
+  return {
+    protocol: "",
+    host: "",
+    port: "",
+    pathname: "",
+    search: "",
+    hash: ""
+  };
+}
+let webtoolsUrlState: WebtoolsUrlState = {
+  input: DEFAULT_WEBTOOLS_URL_INPUT,
+  info: "",
+  valid: null,
+  parts: createEmptyWebtoolsUrlParts(),
+  queryRows: []
+};
+let webtoolsDiffLeft = "";
+let webtoolsDiffRight = "";
+let webtoolsDiffIgnoreCase = false;
+let webtoolsDiffIgnoreWhitespace = false;
+let webtoolsDiffPrettyHtml = "";
+let webtoolsDiffSummary: WebtoolsDiffSummary | null = null;
+let webtoolsDiffAutoTimer: number | null = null;
+let webtoolsDiffRequestToken = 0;
+let webtoolsTimestampUnixInput = "";
+let webtoolsTimestampDateInput = "";
+let webtoolsTimestampDateOutput = "";
+let webtoolsTimestampTimestampOutput = "";
+let webtoolsTimestampUnit: "s" | "ms" = "s";
+let webtoolsTimestampInfo = "";
+let webtoolsTimestampAutoTimer: number | null = null;
+let webtoolsTimestampClockTimer: number | null = null;
+let webtoolsTimestampToDateRequestToken = 0;
+let webtoolsTimestampToTimestampRequestToken = 0;
+let webtoolsRegexPattern = "([a-z0-9_.-]+)@([a-z0-9.-]+)\\.([a-z.]{2,6})";
+let webtoolsRegexFlags = "g";
+let webtoolsRegexInput =
+  "My emails are test@example.com and dev.ops-123@google.co.uk. Please feel free to match them!";
+let webtoolsRegexReplacement = "";
+let webtoolsRegexOutput = "";
+let webtoolsRegexInfo = "";
+let webtoolsRegexError = "";
+let webtoolsRegexHighlightedHtml = "";
+let webtoolsRegexRows: WebtoolsRegexMatchRow[] = [];
+let webtoolsJsonAutoTimer: number | null = null;
+let webtoolsPasswordRequestToken = 0;
+let webtoolsJsonRequestToken = 0;
+let webtoolsCryptoAlgorithm = "MD5";
+let webtoolsCryptoMode: "encrypt" | "decrypt" = "encrypt";
+let webtoolsCryptoInput = "";
+let webtoolsCryptoOutput = "";
+let webtoolsCryptoInfo = "";
+let webtoolsCryptoSecret = "";
+let webtoolsCryptoIv = "";
+let webtoolsCryptoPublicKey = "";
+let webtoolsCryptoPrivateKey = "";
+let webtoolsCryptoRsaBits = 2048;
+let webtoolsCryptoAutoTimer: number | null = null;
+let webtoolsCryptoRequestToken = 0;
+let webtoolsJwtToken = "";
+let webtoolsJwtHeader = "";
+let webtoolsJwtPayload = "";
+let webtoolsJwtSecret = "your-256-bit-secret";
+let webtoolsJwtMode: "jws" | "jwe" = "jws";
+let webtoolsJwtAlgorithm: "HS256" | "RS256" = "HS256";
+let webtoolsJwtJweAlg: "dir" | "A256KW" = "dir";
+let webtoolsJwtJweEnc: "A256GCM" | "A128GCM" = "A256GCM";
+let webtoolsJwtVerified: boolean | null = null;
+let webtoolsJwtInfo = "";
+let webtoolsJwtAutoTimer: number | null = null;
+let webtoolsJwtSignTimer: number | null = null;
+let webtoolsJwtRequestToken = 0;
+let webtoolsStringsInput = "hello_world_variable";
+let webtoolsStringsCaseType = "camel";
+let webtoolsStringsOutput = "";
+let webtoolsStringsUuidCount = 5;
+let webtoolsStringsUuidItems: string[] = [];
+let webtoolsColorsInput = "#6c5ce7";
+let webtoolsColorsHex = "#6c5ce7";
+let webtoolsColorsRgb = "rgb(108, 92, 231)";
+let webtoolsColorsHsl = "hsl(247, 74%, 63%)";
+let webtoolsColorsShades: string[] = [];
+let webtoolsColorsAutoTimer: number | null = null;
+let webtoolsColorsRequestToken = 0;
+const WEBTOOLS_COLORS_PRESETS = [
+  "#f44336",
+  "#e91e63",
+  "#9c27b0",
+  "#673ab7",
+  "#3f51b5",
+  "#2196f3",
+  "#03a9f4",
+  "#00bcd4",
+  "#009688",
+  "#4caf50",
+  "#8bc34a",
+  "#cddc39",
+  "#ffeb3b",
+  "#ffc107",
+  "#ff9800",
+  "#ff5722",
+  "#795548",
+  "#9e9e9e",
+  "#607d8b",
+  "#2d3436",
+  "#6c5ce7",
+  "#00b894",
+  "#0984e3",
+  "#fd79a8"
+] as const;
+const WEBTOOLS_REGEX_DEFAULT_PATTERN = "([a-z0-9_.-]+)@([a-z0-9.-]+)\\.([a-z.]{2,6})";
+const WEBTOOLS_REGEX_DEFAULT_INPUT =
+  "My emails are test@example.com and dev.ops-123@google.co.uk. Please feel free to match them!";
+const WEBTOOLS_REGEX_SAFE_FLAGS = "gimsuyd";
+const WEBTOOLS_REGEX_TEMPLATES = [
+  {
+    label: "邮箱地址",
+    pattern: "([a-z0-9_.-]+)@([a-z0-9.-]+)\\.([a-z.]{2,6})",
+    flags: "g"
+  },
+  {
+    label: "手机号",
+    pattern: "1[3-9]\\d{9}",
+    flags: "g"
+  },
+  {
+    label: "IP 地址",
+    pattern:
+      "((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})(\\.((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})){3}",
+    flags: "g"
+  },
+  {
+    label: "提取 URL",
+    pattern: "https?://[\\w.-]+(?:\\.[\\w.-]+)+[\\w\\-_~:/?#[\\]@!$&'()*+,;=.]+",
+    flags: "g"
+  }
+] as const;
+const WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS = "!@#$%^&*";
+const WEBTOOLS_JWT_DEFAULT_SECRET = "your-256-bit-secret";
+const WEBTOOLS_JWT_SAMPLE_TOKEN =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+  "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ." +
+  "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+const WEBTOOLS_JWT_SAMPLE_HEADER = `{
+  "alg": "HS256",
+  "typ": "JWT"
+}`;
+const WEBTOOLS_JWT_SAMPLE_PAYLOAD = `{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "iat": 1516239022
+}`;
+const PASSWORD_LENGTH_MIN = 4;
+const PASSWORD_LENGTH_MAX = 64;
+const PASSWORD_COUNT_MIN = 1;
+const PASSWORD_COUNT_MAX = 20;
+const WEBTOOLS_PASSWORD_COUNT_MAX = 50;
+
+let passwordPanelOptions: PasswordGeneratorOptions = {
+  length: 16,
+  includeSymbols: true,
+  count: 1
+};
+let passwordPanelGenerated: string[] = [];
+let cashflowState: CashflowState | null = null;
+let cashflowReports: CashflowReports | null = null;
+let cashflowJobs: CashflowJobOption[] = [];
+
+function clampPasswordLength(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded < PASSWORD_LENGTH_MIN) {
+    return PASSWORD_LENGTH_MIN;
+  }
+  if (rounded > PASSWORD_LENGTH_MAX) {
+    return PASSWORD_LENGTH_MAX;
+  }
+  return rounded;
+}
+
+function clampPasswordCount(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded < PASSWORD_COUNT_MIN) {
+    return PASSWORD_COUNT_MIN;
+  }
+  if (rounded > PASSWORD_COUNT_MAX) {
+    return PASSWORD_COUNT_MAX;
+  }
+  return rounded;
+}
+
+function clampWebtoolsPasswordCount(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded < PASSWORD_COUNT_MIN) {
+    return PASSWORD_COUNT_MIN;
+  }
+  if (rounded > WEBTOOLS_PASSWORD_COUNT_MAX) {
+    return WEBTOOLS_PASSWORD_COUNT_MAX;
+  }
+  return rounded;
+}
+
+function normalizePasswordOptions(
+  inputOptions: Partial<PasswordGeneratorOptions>,
+  base: PasswordGeneratorOptions = passwordPanelOptions
+): PasswordGeneratorOptions {
+  const includeSymbols =
+    typeof inputOptions.includeSymbols === "boolean"
+      ? inputOptions.includeSymbols
+      : base.includeSymbols;
+
+  const requiredLength = includeSymbols ? 4 : 3;
+  const length = Math.max(
+    requiredLength,
+    clampPasswordLength(inputOptions.length ?? base.length, base.length)
+  );
+
+  return {
+    length,
+    includeSymbols,
+    count: clampPasswordCount(inputOptions.count ?? base.count, base.count)
+  };
+}
+
+function parsePasswordPanelPayload(payload: unknown): PasswordPanelPayload | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (record.panel !== "password") {
+    return null;
+  }
+
+  const draftRaw = record.draft;
+  let draft: Partial<PasswordGeneratorOptions> | undefined;
+  if (draftRaw && typeof draftRaw === "object") {
+    const draftRecord = draftRaw as Record<string, unknown>;
+    draft = {
+      length:
+        typeof draftRecord.length === "number"
+          ? draftRecord.length
+          : undefined,
+      count:
+        typeof draftRecord.count === "number"
+          ? draftRecord.count
+          : undefined,
+      includeSymbols:
+        typeof draftRecord.includeSymbols === "boolean"
+          ? draftRecord.includeSymbols
+          : undefined
+    };
+  }
+
+  return {
+    panel: "password",
+    draft
+  };
+}
+
+function parseCashflowPanelPayload(payload: unknown): CashflowPanelPayload | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (record.panel !== "cashflow") {
+    return null;
+  }
+
+  return {
+    panel: "cashflow",
+    reset: typeof record.reset === "boolean" ? record.reset : undefined,
+    role: typeof record.role === "string" ? record.role : undefined
+  };
+}
+
+function formatMoney(value: number): string {
+  return CURRENCY_FORMATTER.format(value);
+}
+
+function formatPercent(value: number): string {
+  const percent = value * 100;
+  return `${percent.toFixed(1)}%`;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function tryParseWebtoolsUrl(input: string): URL | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const hasExplicitProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  const looksLikeUrl =
+    hasExplicitProtocol ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("localhost") ||
+    /^[\w.-]+\.[a-z]{2,}/i.test(trimmed) ||
+    /^\d{1,3}(?:\.\d{1,3}){3}/.test(trimmed) ||
+    /[/?#:]/.test(trimmed);
+
+  if (!looksLikeUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmed);
+  } catch {
+    try {
+      return new URL(`https://${trimmed}`);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function buildPasswordGenerateTarget(options: PasswordGeneratorOptions): string {
+  const params = new URLSearchParams();
+  params.set("action", "generate");
+  params.set("length", String(options.length));
+  params.set("symbols", options.includeSymbols ? "1" : "0");
+  params.set("count", String(options.count));
+  return `command:plugin:password-generator?${params.toString()}`;
+}
+
+function extractGeneratedPasswords(result: ExecuteResult): string[] {
+  const raw = result.data?.passwords;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+}
+
+function createPasswordResultRow(passwords: string[]): HTMLDivElement {
+  const outputRow = document.createElement("div");
+  outputRow.className = "password-output-row";
+
+  const outputLabel = document.createElement("div");
+  outputLabel.className = "settings-row-label";
+  outputLabel.textContent = "\u751f\u6210\u7ed3\u679c";
+
+  const resultList = document.createElement("div");
+  resultList.className = "password-result-list";
+
+  if (passwords.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "password-result-empty";
+    empty.textContent = "\u70b9\u51fb\u751f\u6210\u540e\uff0c\u7ed3\u679c\u4f1a\u663e\u793a\u5728\u8fd9\u91cc";
+    resultList.appendChild(empty);
+  } else {
+    passwords.forEach((password, index) => {
+      const row = document.createElement("div");
+      row.className = "password-result-item";
+
+      const value = document.createElement("input");
+      value.className = "password-result-value";
+      value.type = "text";
+      value.readOnly = true;
+      value.value = password;
+      value.title = password;
+      value.addEventListener("focus", () => {
+        value.select();
+      });
+      value.addEventListener("click", () => {
+        value.select();
+      });
+
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className =
+        "settings-btn settings-btn-secondary password-result-copy";
+      copyButton.textContent = "\u590d\u5236";
+      copyButton.addEventListener("click", () => {
+        void (async () => {
+          const copied = await copyTextToClipboard(password);
+          if (copied) {
+            setStatus(`\u5df2\u590d\u5236\u7b2c ${index + 1} \u6761\u5bc6\u7801`);
+            return;
+          }
+          setStatus("\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u590d\u5236");
+        })();
+      });
+
+      row.append(value, copyButton);
+      resultList.appendChild(row);
+    });
+  }
+
+  outputRow.append(outputLabel, resultList);
+  return outputRow;
+}
+
+async function generateFromPasswordPanel(form: HTMLFormElement): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u65e0\u6cd5\u751f\u6210\u5bc6\u7801");
+    return;
+  }
+
+  const lengthNode = form.elements.namedItem("passwordLength");
+  const countNode = form.elements.namedItem("passwordCount");
+  const symbolsNode = form.elements.namedItem("passwordSymbols");
+
+  const inputOptions: Partial<PasswordGeneratorOptions> = {
+    length:
+      lengthNode instanceof HTMLInputElement ? Number(lengthNode.value) : undefined,
+    count:
+      countNode instanceof HTMLInputElement ? Number(countNode.value) : undefined,
+    includeSymbols:
+      symbolsNode instanceof HTMLInputElement ? symbolsNode.checked : undefined
+  };
+
+  const normalized = normalizePasswordOptions(inputOptions);
+  passwordPanelOptions = normalized;
+
+  const item: LaunchItem = {
+    id: "plugin:password-generator",
+    type: "command",
+    title: "\u5bc6\u7801\u751f\u6210\u5668",
+    subtitle: "\u9762\u677f\u751f\u6210",
+    target: buildPasswordGenerateTarget(normalized),
+    keywords: ["plugin", "password", "pwd"]
+  };
+
+  const result = await launcher.execute(item);
+  if (!result.ok) {
+    setStatus(result.message ?? "\u5bc6\u7801\u751f\u6210\u5931\u8d25");
+    return;
+  }
+
+  passwordPanelGenerated = extractGeneratedPasswords(result);
+  setStatus(result.message ?? "\u5bc6\u7801\u5df2\u751f\u6210\u5e76\u590d\u5236");
+  renderList();
+}
+
+function renderStandalonePasswordPanelView(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel";
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = "\u5bc6\u7801\u751f\u6210\u5668";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent =
+    "\u8bbe\u7f6e\u957f\u5ea6\u3001\u6570\u91cf\u3001\u662f\u5426\u5305\u542b\u7279\u6b8a\u7b26\u53f7\uff0c\u70b9\u51fb\u751f\u6210\u540e\u5c06\u81ea\u52a8\u590d\u5236\u5230\u526a\u8d34\u677f\u3002";
+
+  const form = document.createElement("form");
+  form.className = "settings-form password-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void generateFromPasswordPanel(form);
+  });
+
+  const lengthRow = document.createElement("label");
+  lengthRow.className = "settings-row";
+  const lengthLabel = document.createElement("span");
+  lengthLabel.className = "settings-row-label";
+  lengthLabel.textContent = "\u5bc6\u7801\u957f\u5ea6";
+  const lengthInput = document.createElement("input");
+  lengthInput.className = "settings-number";
+  lengthInput.type = "number";
+  lengthInput.name = "passwordLength";
+  lengthInput.min = String(PASSWORD_LENGTH_MIN);
+  lengthInput.max = String(PASSWORD_LENGTH_MAX);
+  lengthInput.step = "1";
+  lengthInput.value = String(passwordPanelOptions.length);
+  const lengthHint = document.createElement("span");
+  lengthHint.className = "settings-row-hint";
+  lengthHint.textContent = `${PASSWORD_LENGTH_MIN}-${PASSWORD_LENGTH_MAX}`;
+  lengthRow.append(lengthLabel, lengthInput, lengthHint);
+
+  const countRow = document.createElement("label");
+  countRow.className = "settings-row";
+  const countLabel = document.createElement("span");
+  countLabel.className = "settings-row-label";
+  countLabel.textContent = "\u751f\u6210\u6570\u91cf";
+  const countInput = document.createElement("input");
+  countInput.className = "settings-number";
+  countInput.type = "number";
+  countInput.name = "passwordCount";
+  countInput.min = String(PASSWORD_COUNT_MIN);
+  countInput.max = String(PASSWORD_COUNT_MAX);
+  countInput.step = "1";
+  countInput.value = String(passwordPanelOptions.count);
+  const countHint = document.createElement("span");
+  countHint.className = "settings-row-hint";
+  countHint.textContent = `${PASSWORD_COUNT_MIN}-${PASSWORD_COUNT_MAX}`;
+  countRow.append(countLabel, countInput, countHint);
+
+  const symbolsRow = document.createElement("label");
+  symbolsRow.className = "settings-row";
+  const symbolsLabel = document.createElement("span");
+  symbolsLabel.className = "settings-row-label";
+  symbolsLabel.textContent = "\u7279\u6b8a\u7b26\u53f7";
+  const symbolsWrap = document.createElement("div");
+  symbolsWrap.className = "password-checkbox-wrap";
+  const symbolsInput = document.createElement("input");
+  symbolsInput.type = "checkbox";
+  symbolsInput.name = "passwordSymbols";
+  symbolsInput.className = "password-checkbox";
+  symbolsInput.checked = passwordPanelOptions.includeSymbols;
+  const symbolsText = document.createElement("span");
+  symbolsText.className = "settings-row-hint";
+  symbolsText.textContent = "\u542f\u7528";
+  symbolsWrap.append(symbolsInput, symbolsText);
+  const symbolsHint = document.createElement("span");
+  symbolsHint.className = "settings-row-hint";
+  symbolsHint.textContent = "\u4f8b\uff1a!@#$%";
+  symbolsRow.append(symbolsLabel, symbolsWrap, symbolsHint);
+
+  const outputRow = createPasswordResultRow(passwordPanelGenerated);
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "settings-btn settings-btn-secondary";
+  clearButton.textContent = "\u6e05\u7a7a\u7ed3\u679c";
+  clearButton.addEventListener("click", () => {
+    passwordPanelGenerated = [];
+    renderList();
+  });
+
+  const generateButton = document.createElement("button");
+  generateButton.type = "submit";
+  generateButton.className = "settings-btn settings-btn-primary";
+  generateButton.textContent = "\u751f\u6210\u5e76\u590d\u5236";
+
+  actions.append(clearButton, generateButton);
+
+  form.append(lengthRow, countRow, symbolsRow, outputRow, actions);
+  panel.append(title, description, form);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+}
+
+function openStandalonePasswordPanel(
+  draft?: Partial<PasswordGeneratorOptions>
+): void {
+  passwordPanelOptions = normalizePasswordOptions(draft ?? {}, passwordPanelOptions);
+  passwordPanelGenerated = [];
+  setMode("password");
+  void refreshEntries("");
+}
+
+function cashflowPhaseLabel(phase: CashflowPhase): string {
+  return phase === "freedom-phase"
+    ? "\u8d22\u5bcc\u81ea\u7531\u9636\u6bb5"
+    : "\u8001\u9f20\u8d5b\u8dd1\u9636\u6bb5";
+}
+
+function parseCashflowOpportunity(value: unknown): CashflowOpportunity | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.id !== "string" ||
+    typeof record.key !== "string" ||
+    typeof record.title !== "string" ||
+    typeof record.description !== "string" ||
+    typeof record.cost !== "number" ||
+    typeof record.cashflow !== "number"
+  ) {
+    return null;
+  }
+
+  const tier =
+    record.tier === "small" || record.tier === "medium" || record.tier === "big"
+      ? record.tier
+      : undefined;
+  const dealClass =
+    record.dealClass === "big-deal" || record.dealClass === "normal"
+      ? record.dealClass
+      : undefined;
+
+  return {
+    id: record.id,
+    key: record.key,
+    tier,
+    dealClass,
+    title: record.title,
+    description: record.description,
+    cost: record.cost,
+    cashflow: record.cashflow
+  };
+}
+
+function parseCashflowAsset(value: unknown): CashflowAsset | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.key !== "string" ||
+    typeof record.title !== "string" ||
+    typeof record.totalCost !== "number" ||
+    typeof record.totalCashflow !== "number" ||
+    typeof record.count !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    key: record.key,
+    title: record.title,
+    totalCost: record.totalCost,
+    totalCashflow: record.totalCashflow,
+    count: record.count
+  };
+}
+
+function parseCashflowAiPlayer(value: unknown): CashflowAiPlayer | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.id !== "string" ||
+    typeof record.profileKey !== "string" ||
+    typeof record.name !== "string" ||
+    typeof record.profileDescription !== "string" ||
+    typeof record.turn !== "number" ||
+    typeof record.role !== "string" ||
+    typeof record.salary !== "number" ||
+    typeof record.expenses !== "number" ||
+    typeof record.passiveIncome !== "number" ||
+    typeof record.cash !== "number" ||
+    typeof record.won !== "boolean"
+  ) {
+    return null;
+  }
+
+  const jobKey = typeof record.jobKey === "string" ? record.jobKey : "";
+  const phase: CashflowPhase =
+    record.phase === "freedom-phase" ? "freedom-phase" : "rat-race";
+  const taxRate =
+    typeof record.taxRate === "number" && Number.isFinite(record.taxRate)
+      ? record.taxRate
+      : 0;
+  const debt =
+    typeof record.debt === "number" && Number.isFinite(record.debt)
+      ? record.debt
+      : 0;
+  const debtPayment =
+    typeof record.debtPayment === "number" && Number.isFinite(record.debtPayment)
+      ? record.debtPayment
+      : 0;
+  const lost = typeof record.lost === "boolean" ? record.lost : false;
+  const lossReason =
+    typeof record.lossReason === "string" && record.lossReason.trim()
+      ? record.lossReason
+      : null;
+  const lastDecision =
+    typeof record.lastDecision === "string" && record.lastDecision.trim()
+      ? record.lastDecision
+      : null;
+
+  const currentOpportunity =
+    record.currentOpportunity === null
+      ? null
+      : parseCashflowOpportunity(record.currentOpportunity);
+  if (record.currentOpportunity !== null && !currentOpportunity) {
+    return null;
+  }
+
+  if (!Array.isArray(record.assets) || !Array.isArray(record.logs)) {
+    return null;
+  }
+
+  const assets: CashflowAsset[] = [];
+  for (const item of record.assets) {
+    const parsed = parseCashflowAsset(item);
+    if (!parsed) {
+      return null;
+    }
+    assets.push(parsed);
+  }
+
+  const logs = record.logs.filter(
+    (item): item is string => typeof item === "string"
+  );
+
+  return {
+    id: record.id,
+    profileKey: record.profileKey,
+    name: record.name,
+    profileDescription: record.profileDescription,
+    jobKey,
+    turn: record.turn,
+    phase,
+    role: record.role,
+    taxRate,
+    debt,
+    debtPayment,
+    salary: record.salary,
+    expenses: record.expenses,
+    passiveIncome: record.passiveIncome,
+    cash: record.cash,
+    currentOpportunity,
+    assets,
+    logs,
+    won: record.won,
+    lost,
+    lossReason,
+    lastDecision
+  };
+}
+
+function parseCashflowState(value: unknown): CashflowState | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.turn !== "number" ||
+    typeof record.role !== "string" ||
+    typeof record.salary !== "number" ||
+    typeof record.expenses !== "number" ||
+    typeof record.passiveIncome !== "number" ||
+    typeof record.cash !== "number" ||
+    typeof record.won !== "boolean"
+  ) {
+    return null;
+  }
+
+  const jobKey = typeof record.jobKey === "string" ? record.jobKey : "";
+  const phase: CashflowPhase =
+    record.phase === "freedom-phase" ? "freedom-phase" : "rat-race";
+  const taxRate =
+    typeof record.taxRate === "number" && Number.isFinite(record.taxRate)
+      ? record.taxRate
+      : 0;
+  const debt =
+    typeof record.debt === "number" && Number.isFinite(record.debt)
+      ? record.debt
+      : 0;
+  const debtPayment =
+    typeof record.debtPayment === "number" && Number.isFinite(record.debtPayment)
+      ? record.debtPayment
+      : 0;
+  const lost = typeof record.lost === "boolean" ? record.lost : false;
+  const lossReason =
+    typeof record.lossReason === "string" && record.lossReason.trim()
+      ? record.lossReason
+      : null;
+
+  const currentOpportunity =
+    record.currentOpportunity === null
+      ? null
+      : parseCashflowOpportunity(record.currentOpportunity);
+  if (record.currentOpportunity !== null && !currentOpportunity) {
+    return null;
+  }
+
+  if (!Array.isArray(record.assets) || !Array.isArray(record.logs)) {
+    return null;
+  }
+
+  const assets: CashflowAsset[] = [];
+  for (const item of record.assets) {
+    const parsed = parseCashflowAsset(item);
+    if (!parsed) {
+      return null;
+    }
+    assets.push(parsed);
+  }
+
+  const logs = record.logs.filter(
+    (item): item is string => typeof item === "string"
+  );
+  const aiEnabled = typeof record.aiEnabled === "boolean" ? record.aiEnabled : false;
+  const aiPlayersRaw = Array.isArray(record.aiPlayers) ? record.aiPlayers : [];
+  const aiPlayers: CashflowAiPlayer[] = [];
+  for (const item of aiPlayersRaw) {
+    const parsed = parseCashflowAiPlayer(item);
+    if (!parsed) {
+      return null;
+    }
+    aiPlayers.push(parsed);
+  }
+
+  return {
+    jobKey,
+    turn: record.turn,
+    phase,
+    aiEnabled,
+    aiPlayers,
+    role: record.role,
+    taxRate,
+    debt,
+    debtPayment,
+    salary: record.salary,
+    expenses: record.expenses,
+    passiveIncome: record.passiveIncome,
+    cash: record.cash,
+    currentOpportunity,
+    assets,
+    logs,
+    won: record.won,
+    lost,
+    lossReason
+  };
+}
+
+function parseCashflowAmountItem(
+  value: unknown
+): CashflowIncomeReportItem | CashflowExpenseReportItem | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (typeof record.name !== "string" || typeof record.amount !== "number") {
+    return null;
+  }
+
+  return {
+    name: record.name,
+    amount: record.amount
+  };
+}
+
+function parseCashflowBalanceSheetReport(
+  value: unknown
+): CashflowBalanceSheetReport | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.cash !== "number" ||
+    typeof record.assetsTotal !== "number" ||
+    typeof record.debtsTotal !== "number" ||
+    typeof record.netWorth !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    cash: record.cash,
+    assetsTotal: record.assetsTotal,
+    debtsTotal: record.debtsTotal,
+    netWorth: record.netWorth
+  };
+}
+
+function parseCashflowMetricsReport(value: unknown): CashflowMetricsReport | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.monthlyNet !== "number" ||
+    typeof record.passiveIncomeRatio !== "number" ||
+    typeof record.debtRatio !== "number" ||
+    typeof record.cashReserveMonths !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    monthlyNet: record.monthlyNet,
+    passiveIncomeRatio: record.passiveIncomeRatio,
+    debtRatio: record.debtRatio,
+    cashReserveMonths: record.cashReserveMonths
+  };
+}
+
+function parseCashflowReports(value: unknown): CashflowReports | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (!Array.isArray(record.income) || !Array.isArray(record.expenses)) {
+    return null;
+  }
+
+  const income: CashflowIncomeReportItem[] = [];
+  for (const item of record.income) {
+    const parsed = parseCashflowAmountItem(item);
+    if (!parsed) {
+      return null;
+    }
+    income.push(parsed);
+  }
+
+  const expenses: CashflowExpenseReportItem[] = [];
+  for (const item of record.expenses) {
+    const parsed = parseCashflowAmountItem(item);
+    if (!parsed) {
+      return null;
+    }
+    expenses.push(parsed);
+  }
+
+  const balanceSheet = parseCashflowBalanceSheetReport(record.balanceSheet);
+  const metrics = parseCashflowMetricsReport(record.metrics);
+  if (!balanceSheet || !metrics) {
+    return null;
+  }
+
+  return {
+    income,
+    expenses,
+    balanceSheet,
+    metrics
+  };
+}
+
+function parseCashflowJobOption(value: unknown): CashflowJobOption | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    typeof record.key !== "string" ||
+    typeof record.role !== "string" ||
+    typeof record.salary !== "number" ||
+    typeof record.expenses !== "number" ||
+    typeof record.taxRate !== "number" ||
+    typeof record.initialDebt !== "number" ||
+    typeof record.debtPayment !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    key: record.key,
+    role: record.role,
+    salary: record.salary,
+    expenses: record.expenses,
+    taxRate: record.taxRate,
+    initialDebt: record.initialDebt,
+    debtPayment: record.debtPayment
+  };
+}
+
+function extractCashflowState(result: ExecuteResult): CashflowState | null {
+  const data = toRecord(result.data);
+  if (!data) {
+    return null;
+  }
+  return parseCashflowState(data.cashflowState);
+}
+
+function extractCashflowReports(result: ExecuteResult): CashflowReports | null {
+  const data = toRecord(result.data);
+  if (!data) {
+    return null;
+  }
+  return parseCashflowReports(data.cashflowReports);
+}
+
+function extractCashflowJobs(result: ExecuteResult): CashflowJobOption[] | null {
+  const data = toRecord(result.data);
+  if (!data) {
+    return null;
+  }
+
+  if (!Array.isArray(data.cashflowJobs)) {
+    return null;
+  }
+
+  const jobs: CashflowJobOption[] = [];
+  for (const item of data.cashflowJobs) {
+    const parsed = parseCashflowJobOption(item);
+    if (!parsed) {
+      return null;
+    }
+    jobs.push(parsed);
+  }
+  return jobs;
+}
+
+function buildCashflowTarget(
+  action: CashflowAction,
+  options?: { roleKey?: string }
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  if (options?.roleKey) {
+    params.set("role", options.roleKey);
+  }
+  return `command:plugin:${CASHFLOW_PLUGIN_ID}?${params.toString()}`;
+}
+
+function createCashflowActionItem(
+  action: CashflowAction,
+  options?: { roleKey?: string }
+): LaunchItem {
+  return {
+    id: `plugin:${CASHFLOW_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "\u5bcc\u7238\u7238\u73b0\u91d1\u6d41",
+    subtitle: `\u6e38\u620f\u52a8\u4f5c\uff1a${action}`,
+    target: buildCashflowTarget(action, options),
+    keywords: ["plugin", "cashflow", "cash", "cf", "\u73b0\u91d1\u6d41"]
+  };
+}
+
+function cashflowStatusSummary(state: CashflowState): string {
+  const totalExpenses = state.expenses + state.debtPayment;
+  if (state.lost) {
+    return state.lossReason ?? "\u672c\u5c40\u5df2\u5931\u8d25\uff0c\u8bf7\u65b0\u5f00\u4e00\u5c40";
+  }
+  if (state.won) {
+    return `\u5df2\u8fbe\u6210\u8d22\u52a1\u81ea\u7531\uff08${cashflowPhaseLabel(state.phase)}\uff09\uff01${formatMoney(
+      state.passiveIncome
+    )} >= ${formatMoney(totalExpenses)}`;
+  }
+  return `${cashflowPhaseLabel(state.phase)} \u00b7 \u73b0\u91d1 ${formatMoney(state.cash)} \u00b7 \u88ab\u52a8\u6536\u5165 ${formatMoney(
+    state.passiveIncome
+  )}/\u6708 \u00b7 \u503a\u52a1 ${formatMoney(state.debt)}`;
+}
+
+async function executeCashflowAction(
+  action: CashflowAction,
+  options?: { roleKey?: string }
+): Promise<ExecuteResult | null> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u65e0\u6cd5\u6267\u884c\u73b0\u91d1\u6d41\u64cd\u4f5c");
+    return null;
+  }
+
+  const item = createCashflowActionItem(action, options);
+  const result = await launcher.execute(item);
+  if (!result.ok) {
+    setStatus(result.message ?? "\u73b0\u91d1\u6d41\u64cd\u4f5c\u5931\u8d25");
+    return null;
+  }
+
+  const nextState = extractCashflowState(result);
+  if (nextState) {
+    cashflowState = nextState;
+  }
+  const nextReports = extractCashflowReports(result);
+  cashflowReports = nextReports;
+  const nextJobs = extractCashflowJobs(result);
+  if (nextJobs) {
+    cashflowJobs = nextJobs;
+  }
+
+  if (result.message) {
+    setStatus(result.message);
+  } else if (cashflowState) {
+    setStatus(cashflowStatusSummary(cashflowState));
+  }
+
+  return result;
+}
+
+async function nextCashflowTurn(): Promise<void> {
+  const result = await executeCashflowAction("next-turn");
+  if (!result) {
+    return;
+  }
+  renderList();
+}
+
+async function buyCashflowOpportunity(): Promise<void> {
+  const result = await executeCashflowAction("buy");
+  if (!result) {
+    return;
+  }
+  renderList();
+}
+
+async function buyCashflowOpportunityWithLoan(): Promise<void> {
+  const result = await executeCashflowAction("buy-loan");
+  if (!result) {
+    return;
+  }
+  renderList();
+}
+
+async function skipCashflowOpportunity(): Promise<void> {
+  const result = await executeCashflowAction("skip");
+  if (!result) {
+    return;
+  }
+  renderList();
+}
+
+async function resetCashflowGame(roleKey?: string): Promise<void> {
+  const result = await executeCashflowAction("reset", { roleKey });
+  if (!result) {
+    return;
+  }
+  renderList();
+}
+
+function createCashflowStat(
+  label: string,
+  value: string,
+  emphasize = false
+): HTMLDivElement {
+  const node = document.createElement("div");
+  node.className = "cashflow-stat";
+  if (emphasize) {
+    node.classList.add("cashflow-stat-emphasis");
+  }
+
+  const labelNode = document.createElement("div");
+  labelNode.className = "cashflow-stat-label";
+  labelNode.textContent = label;
+
+  const valueNode = document.createElement("div");
+  valueNode.className = "cashflow-stat-value";
+  valueNode.textContent = value;
+
+  node.append(labelNode, valueNode);
+  return node;
+}
+
+function createCashflowReportList(
+  title: string,
+  items: Array<{ name: string; amount: number }>
+): HTMLDivElement {
+  const block = document.createElement("div");
+  block.className = "cashflow-report-item";
+
+  const head = document.createElement("div");
+  head.className = "cashflow-report-item-title";
+  head.textContent = title;
+  block.appendChild(head);
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "cashflow-empty";
+    empty.textContent = "\u6682\u65e0\u6761\u76ee";
+    block.appendChild(empty);
+    return block;
+  }
+
+  const listNode = document.createElement("ul");
+  listNode.className = "cashflow-report-list";
+  for (const item of items) {
+    const row = document.createElement("li");
+    row.className = "cashflow-report-row";
+
+    const name = document.createElement("span");
+    name.className = "cashflow-report-name";
+    name.textContent = item.name;
+
+    const amount = document.createElement("span");
+    amount.className = "cashflow-report-amount";
+    amount.textContent = formatMoney(item.amount);
+
+    row.append(name, amount);
+    listNode.appendChild(row);
+  }
+  block.appendChild(listNode);
+  return block;
+}
+
+function createCashflowMetricRow(label: string, value: string): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "cashflow-metric-row";
+
+  const name = document.createElement("span");
+  name.className = "cashflow-metric-label";
+  name.textContent = label;
+
+  const val = document.createElement("span");
+  val.className = "cashflow-metric-value";
+  val.textContent = value;
+
+  row.append(name, val);
+  return row;
+}
+
+function createCashflowBadge(
+  text: string,
+  tone: "info" | "success" | "warning" | "danger" = "info"
+): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = `cashflow-badge cashflow-badge-${tone}`;
+  badge.textContent = text;
+  return badge;
+}
+
+function renderStandaloneCashflowPanelView(): void {
+  const state = cashflowState;
+  const reports = cashflowReports;
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel cashflow-panel";
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = "\u5bcc\u7238\u7238\u73b0\u91d1\u6d41\uff08\u63d2\u4ef6\u6e38\u620f\uff09";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent =
+    "\u76ee\u6807\uff1a\u628a\u88ab\u52a8\u6536\u5165\u63d0\u9ad8\u5230\u4e0d\u4f4e\u4e8e\u603b\u652f\u51fa\uff0c\u8fbe\u6210\u8d22\u52a1\u81ea\u7531\u3002";
+
+  if (!state) {
+    const loading = document.createElement("div");
+    loading.className = "cashflow-empty";
+    loading.textContent = "\u6b63\u5728\u52a0\u8f7d\u6e38\u620f\u6570\u636e...";
+    panel.append(title, description, loading);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+    return;
+  }
+
+  const salaryAfterTax = Math.max(0, Math.round(state.salary * (1 - state.taxRate)));
+  const totalExpenses = state.expenses + state.debtPayment;
+  const monthlyNet = salaryAfterTax + state.passiveIncome - totalExpenses;
+  const freedomTarget = Math.max(1, totalExpenses);
+  const freedomProgress = Math.max(0, Math.min(1, state.passiveIncome / freedomTarget));
+  const freedomGap = Math.max(0, totalExpenses - state.passiveIncome);
+
+  const hud = document.createElement("section");
+  hud.className = "cashflow-hud";
+
+  const hudTop = document.createElement("div");
+  hudTop.className = "cashflow-hud-top";
+  const hudTitle = document.createElement("div");
+  hudTitle.className = "cashflow-hud-title";
+  hudTitle.textContent = "\u8d22\u52a1\u81ea\u7531\u6311\u6218";
+
+  const hudBadges = document.createElement("div");
+  hudBadges.className = "cashflow-hud-badges";
+  hudBadges.append(
+    createCashflowBadge(cashflowPhaseLabel(state.phase), "info"),
+    createCashflowBadge(`M${state.turn}`, "warning"),
+    createCashflowBadge(
+      state.won
+        ? "\u5df2\u901a\u5173"
+        : state.lost
+          ? "\u672c\u5c40\u5931\u8d25"
+          : "\u6e38\u620f\u4e2d",
+      state.won ? "success" : state.lost ? "danger" : "info"
+    )
+  );
+  hudTop.append(hudTitle, hudBadges);
+
+  const progressLabel = document.createElement("div");
+  progressLabel.className = "cashflow-progress-label";
+  progressLabel.textContent = `\u8d22\u52a1\u81ea\u7531\u8fdb\u5ea6 ${Math.round(
+    freedomProgress * 100
+  )}%`;
+
+  const progressTrack = document.createElement("div");
+  progressTrack.className = "cashflow-progress-track";
+  const progressFill = document.createElement("div");
+  progressFill.className = "cashflow-progress-fill";
+  progressFill.style.width = `${Math.round(freedomProgress * 100)}%`;
+  progressTrack.appendChild(progressFill);
+
+  const progressHint = document.createElement("div");
+  progressHint.className = "cashflow-progress-hint";
+  progressHint.textContent = state.won
+    ? `\u5df2\u8fbe\u6210\uff1a${formatMoney(state.passiveIncome)} \u2265 ${formatMoney(
+        totalExpenses
+      )}`
+    : state.lost
+      ? "\u5f53\u524d\u5bf9\u5c40\u5df2\u7ed3\u675f\uff0c\u53ef\u76f4\u63a5\u65b0\u5f00\u4e00\u5c40"
+      : `\u8ddd\u79bb\u901a\u5173\u8fd8\u5dee ${formatMoney(freedomGap)}/\u6708 \u88ab\u52a8\u6536\u5165`;
+
+  hud.append(hudTop, progressLabel, progressTrack, progressHint);
+
+  const statGrid = document.createElement("div");
+  statGrid.className = "cashflow-stats";
+  statGrid.append(
+    createCashflowStat("\u73b0\u91d1", formatMoney(state.cash), true),
+    createCashflowStat(
+      "\u88ab\u52a8\u6536\u5165",
+      `${formatMoney(state.passiveIncome)}/\u6708`,
+      true
+    ),
+    createCashflowStat(
+      "\u6708\u51c0\u73b0\u91d1\u6d41",
+      `${monthlyNet >= 0 ? "+" : ""}${formatMoney(monthlyNet)}/\u6708`,
+      monthlyNet >= 0
+    ),
+    createCashflowStat("\u5269\u4f59\u503a\u52a1", formatMoney(state.debt)),
+    createCashflowStat(
+      "\u7a0e\u540e\u5de5\u8d44",
+      `${formatMoney(salaryAfterTax)}/\u6708`
+    ),
+    createCashflowStat("\u603b\u652f\u51fa", `${formatMoney(totalExpenses)}/\u6708`),
+    createCashflowStat("\u804c\u4e1a", state.role),
+    createCashflowStat(
+      "\u72b6\u6001",
+      state.won
+        ? "\u5df2\u8fbe\u6210\u8d22\u52a1\u81ea\u7531"
+        : state.lost
+          ? "\u672c\u5c40\u5931\u8d25"
+          : "\u7a33\u6b65\u7d2f\u79ef\u4e2d",
+      state.won || state.lost
+    )
+  );
+
+  const roleBlock = document.createElement("section");
+  roleBlock.className = "cashflow-block";
+  roleBlock.classList.add("cashflow-block-role");
+  const roleTitle = document.createElement("h4");
+  roleTitle.className = "cashflow-block-title";
+  roleTitle.textContent = "\u5f00\u5c40\u804c\u4e1a";
+  roleBlock.appendChild(roleTitle);
+
+  if (cashflowJobs.length === 0) {
+    const emptyJobs = document.createElement("div");
+    emptyJobs.className = "cashflow-empty";
+    emptyJobs.textContent = "\u804c\u4e1a\u5217\u8868\u52a0\u8f7d\u4e2d...";
+    roleBlock.appendChild(emptyJobs);
+  } else {
+    const roleForm = document.createElement("div");
+    roleForm.className = "cashflow-role-picker";
+
+    const roleSelect = document.createElement("select");
+    roleSelect.className = "cashflow-role-select";
+    for (const job of cashflowJobs) {
+      const option = document.createElement("option");
+      option.value = job.key;
+      option.textContent =
+        `${job.role} \u00b7 \u7a0e\u7387 ${formatPercent(job.taxRate)} \u00b7 \u503a\u52a1 ${formatMoney(job.initialDebt)}`;
+      if (job.key === state.jobKey) {
+        option.selected = true;
+      }
+      roleSelect.appendChild(option);
+    }
+
+    const roleResetButton = document.createElement("button");
+    roleResetButton.type = "button";
+    roleResetButton.className = "settings-btn settings-btn-secondary";
+    roleResetButton.textContent = "\u4ee5\u8be5\u804c\u4e1a\u65b0\u5f00";
+    roleResetButton.addEventListener("click", () => {
+      void resetCashflowGame(roleSelect.value);
+    });
+
+    roleForm.append(roleSelect, roleResetButton);
+    roleBlock.appendChild(roleForm);
+  }
+
+  if (state.lost) {
+    const lostNote = document.createElement("div");
+    lostNote.className = "cashflow-failed-note";
+    lostNote.textContent = state.lossReason ?? "\u672c\u5c40\u5931\u8d25\uff0c\u8bf7\u65b0\u5f00\u4e00\u5c40\u3002";
+    roleBlock.appendChild(lostNote);
+  }
+
+  const aiBlock = document.createElement("section");
+  aiBlock.className = "cashflow-block";
+  aiBlock.classList.add("cashflow-block-ai");
+  const aiTitle = document.createElement("h4");
+  aiTitle.className = "cashflow-block-title";
+  aiTitle.textContent = "AI \u5bf9\u624b";
+  aiBlock.appendChild(aiTitle);
+
+  if (!state.aiEnabled || state.aiPlayers.length === 0) {
+    const emptyAi = document.createElement("div");
+    emptyAi.className = "cashflow-empty";
+    emptyAi.textContent =
+      "\u5f53\u524d\u4e3a\u5355\u4eba\u6a21\u5f0f\uff0c\u53ef\u5728\u4e0b\u65b9\u6309\u94ae\u5f00\u542f AI \u5bf9\u6218\u3002";
+    aiBlock.appendChild(emptyAi);
+  } else {
+    const aiList = document.createElement("div");
+    aiList.className = "cashflow-ai-list";
+    for (const aiPlayer of state.aiPlayers) {
+      const card = document.createElement("article");
+      card.className = "cashflow-ai-card";
+
+      const head = document.createElement("div");
+      head.className = "cashflow-ai-head";
+      const nameNode = document.createElement("div");
+      nameNode.className = "cashflow-ai-name";
+      nameNode.textContent = `${aiPlayer.name}\uff08${aiPlayer.role}\uff09`;
+      const phaseNode = document.createElement("div");
+      phaseNode.className = "cashflow-ai-phase";
+      phaseNode.textContent = cashflowPhaseLabel(aiPlayer.phase);
+      head.append(nameNode, phaseNode);
+
+      const totalExpensesAi = aiPlayer.expenses + aiPlayer.debtPayment;
+      const salaryAfterTaxAi = Math.max(
+        0,
+        Math.round(aiPlayer.salary * (1 - aiPlayer.taxRate))
+      );
+      const monthlyNetAi =
+        salaryAfterTaxAi + aiPlayer.passiveIncome - totalExpensesAi;
+      const assetsCount = aiPlayer.assets.reduce((sum, asset) => sum + asset.count, 0);
+
+      const stats = document.createElement("div");
+      stats.className = "cashflow-ai-stats";
+      stats.textContent =
+        `\u73b0\u91d1 ${formatMoney(aiPlayer.cash)} \u00b7 ` +
+        `\u88ab\u52a8\u6536\u5165 ${formatMoney(aiPlayer.passiveIncome)}/\u6708 \u00b7 ` +
+        `\u503a\u52a1 ${formatMoney(aiPlayer.debt)} \u00b7 ` +
+        `\u6708\u51c0\u73b0\u91d1\u6d41 ${monthlyNetAi >= 0 ? "+" : ""}${formatMoney(monthlyNetAi)}/\u6708 \u00b7 ` +
+        `\u8d44\u4ea7 ${assetsCount} \u9879`;
+
+      const decision = document.createElement("div");
+      decision.className = "cashflow-ai-decision";
+      if (aiPlayer.won) {
+        decision.textContent = "\u72b6\u6001\uff1a\u5df2\u8fbe\u6210\u8d22\u52a1\u81ea\u7531";
+      } else if (aiPlayer.lost) {
+        decision.textContent = `\u72b6\u6001\uff1a\u5931\u8d25\uff08${aiPlayer.lossReason ?? "\u672a\u77e5\u539f\u56e0"}\uff09`;
+      } else {
+        decision.textContent = `\u6700\u8fd1\u51b3\u7b56\uff1a${aiPlayer.lastDecision ?? "\u6682\u65e0"}`;
+      }
+
+      card.append(head, stats, decision);
+      aiList.appendChild(card);
+    }
+    aiBlock.appendChild(aiList);
+  }
+
+  const opportunityBlock = document.createElement("section");
+  opportunityBlock.className = "cashflow-block";
+  opportunityBlock.classList.add("cashflow-block-opportunity");
+  const opportunityTitle = document.createElement("h4");
+  opportunityTitle.className = "cashflow-block-title";
+  opportunityTitle.textContent = "\u5f53\u524d\u673a\u4f1a";
+  opportunityBlock.appendChild(opportunityTitle);
+  if (state.currentOpportunity) {
+    const opportunityCard = document.createElement("article");
+    opportunityCard.className = "cashflow-opportunity-card";
+
+    const nameNode = document.createElement("div");
+    nameNode.className = "cashflow-opportunity-title";
+    nameNode.textContent =
+      state.currentOpportunity.dealClass === "big-deal"
+        ? `[Big Deal] ${state.currentOpportunity.title}`
+        : state.currentOpportunity.title;
+
+    const descNode = document.createElement("div");
+    descNode.className = "cashflow-opportunity-desc";
+    descNode.textContent = state.currentOpportunity.description;
+
+    const tags = document.createElement("div");
+    tags.className = "cashflow-opportunity-tags";
+    const tierText =
+      state.currentOpportunity.tier === "big"
+        ? "\u9ad8\u7ea7\u673a\u4f1a"
+        : state.currentOpportunity.tier === "medium"
+          ? "\u4e2d\u7b49\u673a\u4f1a"
+          : "\u57fa\u7840\u673a\u4f1a";
+    tags.append(
+      createCashflowBadge(tierText, "info"),
+      createCashflowBadge(
+        `\u6295\u5165 ${formatMoney(state.currentOpportunity.cost)}`,
+        "warning"
+      ),
+      createCashflowBadge(
+        `+\u73b0\u91d1\u6d41 ${formatMoney(state.currentOpportunity.cashflow)}/\u6708`,
+        "success"
+      )
+    );
+
+    if (state.currentOpportunity.cashflow > 0) {
+      const paybackMonths =
+        state.currentOpportunity.cost / state.currentOpportunity.cashflow;
+      tags.append(
+        createCashflowBadge(`\u56de\u672c ${paybackMonths.toFixed(1)} \u6708`, "info")
+      );
+    }
+
+    const quickActions = document.createElement("div");
+    quickActions.className = "cashflow-opportunity-actions";
+
+    const buyButton = document.createElement("button");
+    buyButton.type = "button";
+    buyButton.className = "settings-btn settings-btn-primary";
+    buyButton.textContent = "\u73b0\u91d1\u4e70\u5165";
+    buyButton.disabled = state.won || state.lost;
+    buyButton.addEventListener("click", () => {
+      void buyCashflowOpportunity();
+    });
+
+    const buyWithLoanButton = document.createElement("button");
+    buyWithLoanButton.type = "button";
+    buyWithLoanButton.className = "settings-btn settings-btn-secondary";
+    buyWithLoanButton.textContent = "\u8d37\u6b3e\u4e70\u5165";
+    buyWithLoanButton.disabled =
+      state.won || state.lost || state.cash >= state.currentOpportunity.cost;
+    buyWithLoanButton.addEventListener("click", () => {
+      void buyCashflowOpportunityWithLoan();
+    });
+
+    const skipButton = document.createElement("button");
+    skipButton.type = "button";
+    skipButton.className = "settings-btn settings-btn-secondary";
+    skipButton.textContent = "\u8df3\u8fc7\u673a\u4f1a";
+    skipButton.disabled = state.won || state.lost;
+    skipButton.addEventListener("click", () => {
+      void skipCashflowOpportunity();
+    });
+    quickActions.append(buyButton, buyWithLoanButton, skipButton);
+
+    opportunityCard.append(nameNode, descNode, tags, quickActions);
+    opportunityBlock.appendChild(opportunityCard);
+
+    if (state.currentOpportunity.dealClass === "big-deal") {
+      const riskNode = document.createElement("div");
+      riskNode.className = "cashflow-opportunity-big-deal";
+      riskNode.textContent =
+        "Big Deal\uff1a\u4f4e\u6982\u7387\u51fa\u73b0\uff0c\u9ad8\u5f71\u54cd\u9ad8\u98ce\u9669\uff0c\u4e70\u5165\u524d\u8bf7\u5148\u9884\u7b97\u73b0\u91d1\u7f13\u51b2\u3002";
+      opportunityBlock.appendChild(riskNode);
+    }
+
+    if (state.cash < state.currentOpportunity.cost) {
+      const shortfallNode = document.createElement("div");
+      shortfallNode.className = "cashflow-opportunity-shortfall";
+      shortfallNode.textContent = `\u8d44\u91d1\u7f3a\u53e3 ${formatMoney(
+        state.currentOpportunity.cost - state.cash
+      )}\uff0c\u53ef\u9009\u62e9\u8d37\u6b3e\u4e70\u5165`;
+      opportunityBlock.appendChild(shortfallNode);
+    }
+  } else {
+    const emptyNode = document.createElement("div");
+    emptyNode.className = "cashflow-empty";
+    emptyNode.textContent = state.lost
+      ? "\u672c\u5c40\u5df2\u5931\u8d25\uff0c\u8bf7\u5148\u65b0\u5f00\u4e00\u5c40\u3002"
+      : "\u6682\u65e0\u673a\u4f1a\uff0c\u53ef\u4ee5\u5148\u70b9\u201c\u63a8\u8fdb\u4e00\u56de\u5408\u201d\u5237\u65b0\u5e02\u573a\u3002";
+    opportunityBlock.appendChild(emptyNode);
+  }
+
+  const assetsBlock = document.createElement("section");
+  assetsBlock.className = "cashflow-block";
+  assetsBlock.classList.add("cashflow-block-assets");
+  const assetsTitle = document.createElement("h4");
+  assetsTitle.className = "cashflow-block-title";
+  assetsTitle.textContent = "\u8d44\u4ea7\u7ec4\u5408";
+  assetsBlock.appendChild(assetsTitle);
+  if (state.assets.length === 0) {
+    const emptyNode = document.createElement("div");
+    emptyNode.className = "cashflow-empty";
+    emptyNode.textContent =
+      "\u8fd8\u6ca1\u6709\u8d44\u4ea7\uff0c\u5148\u4ece\u201c\u5f53\u524d\u673a\u4f1a\u201d\u5f00\u59cb\u8d2d\u4e70\u3002";
+    assetsBlock.appendChild(emptyNode);
+  } else {
+    const totalAssetCashflow = state.assets.reduce(
+      (sum, asset) => sum + asset.totalCashflow,
+      0
+    );
+    const summary = document.createElement("div");
+    summary.className = "cashflow-opportunity-meta";
+    summary.textContent = `\u5df2\u6301\u6709 ${state.assets.length} \u7c7b\u8d44\u4ea7 \u00b7 \u8d21\u732e\u73b0\u91d1\u6d41 +${formatMoney(
+      totalAssetCashflow
+    )}/\u6708`;
+    assetsBlock.appendChild(summary);
+
+    const assetList = document.createElement("ul");
+    assetList.className = "cashflow-assets-list";
+    for (const asset of state.assets) {
+      const item = document.createElement("li");
+      item.className = "cashflow-assets-item";
+
+      const nameNode = document.createElement("span");
+      nameNode.className = "cashflow-assets-name";
+      nameNode.textContent = `${asset.title} x${asset.count}`;
+
+      const costNode = document.createElement("span");
+      costNode.className = "cashflow-assets-cost";
+      costNode.textContent = `\u6210\u672c ${formatMoney(asset.totalCost)}`;
+
+      const cashflowNode = document.createElement("span");
+      cashflowNode.className = "cashflow-assets-cashflow";
+      cashflowNode.textContent = `+\u73b0\u91d1\u6d41 ${formatMoney(asset.totalCashflow)}/\u6708`;
+
+      item.append(nameNode, costNode, cashflowNode);
+      assetList.appendChild(item);
+    }
+    assetsBlock.appendChild(assetList);
+  }
+
+  const reportsBlock = document.createElement("section");
+  reportsBlock.className = "cashflow-block";
+  reportsBlock.classList.add("cashflow-block-reports");
+  const reportsTitle = document.createElement("h4");
+  reportsTitle.className = "cashflow-block-title";
+  reportsTitle.textContent = "\u8d22\u52a1\u62a5\u8868";
+  reportsBlock.appendChild(reportsTitle);
+  if (!reports) {
+    const empty = document.createElement("div");
+    empty.className = "cashflow-empty";
+    empty.textContent = "\u62a5\u8868\u52a0\u8f7d\u4e2d...";
+    reportsBlock.appendChild(empty);
+  } else {
+    const reportGrid = document.createElement("div");
+    reportGrid.className = "cashflow-report-grid";
+    reportGrid.append(
+      createCashflowReportList("\u6536\u5165", reports.income),
+      createCashflowReportList("\u652f\u51fa", reports.expenses)
+    );
+
+    const balance = document.createElement("div");
+    balance.className = "cashflow-report-item";
+    const balanceTitle = document.createElement("div");
+    balanceTitle.className = "cashflow-report-item-title";
+    balanceTitle.textContent = "\u8d44\u4ea7\u8d1f\u503a";
+    balance.append(
+      balanceTitle,
+      createCashflowMetricRow("\u73b0\u91d1", formatMoney(reports.balanceSheet.cash)),
+      createCashflowMetricRow("\u8d44\u4ea7", formatMoney(reports.balanceSheet.assetsTotal)),
+      createCashflowMetricRow("\u8d1f\u503a", formatMoney(reports.balanceSheet.debtsTotal)),
+      createCashflowMetricRow("\u51c0\u8d44\u4ea7", formatMoney(reports.balanceSheet.netWorth))
+    );
+
+    const metrics = document.createElement("div");
+    metrics.className = "cashflow-report-item";
+    const metricsTitle = document.createElement("div");
+    metricsTitle.className = "cashflow-report-item-title";
+    metricsTitle.textContent = "\u5173\u952e\u6307\u6807";
+    metrics.append(
+      metricsTitle,
+      createCashflowMetricRow(
+        "\u6708\u51c0\u73b0\u91d1\u6d41",
+        `${reports.metrics.monthlyNet >= 0 ? "+" : ""}${formatMoney(
+          reports.metrics.monthlyNet
+        )}/\u6708`
+      ),
+      createCashflowMetricRow(
+        "\u88ab\u52a8\u6536\u5165\u8986\u76d6\u7387",
+        formatPercent(reports.metrics.passiveIncomeRatio)
+      ),
+      createCashflowMetricRow("\u8d1f\u503a\u7387", formatPercent(reports.metrics.debtRatio)),
+      createCashflowMetricRow(
+        "\u73b0\u91d1\u50a8\u5907\u6708\u6570",
+        `${reports.metrics.cashReserveMonths.toFixed(1)} \u4e2a\u6708`
+      )
+    );
+    reportGrid.append(balance, metrics);
+    reportsBlock.appendChild(reportGrid);
+  }
+
+  const logsBlock = document.createElement("section");
+  logsBlock.className = "cashflow-block";
+  logsBlock.classList.add("cashflow-block-logs");
+  const logsTitle = document.createElement("h4");
+  logsTitle.className = "cashflow-block-title";
+  logsTitle.textContent = "\u56de\u5408\u8bb0\u5f55";
+  logsBlock.appendChild(logsTitle);
+  const logList = document.createElement("ul");
+  logList.className = "cashflow-log-list";
+  for (const [index, entry] of state.logs.entries()) {
+    const item = document.createElement("li");
+    item.className = "cashflow-log-item";
+    const logIndex = document.createElement("span");
+    logIndex.className = "cashflow-log-index";
+    logIndex.textContent = `#${state.logs.length - index}`;
+    const logText = document.createElement("span");
+    logText.className = "cashflow-log-text";
+    logText.textContent = entry;
+    item.append(logIndex, logText);
+    logList.appendChild(item);
+  }
+  if (state.logs.length === 0) {
+    const emptyLog = document.createElement("li");
+    emptyLog.className = "cashflow-empty";
+    emptyLog.textContent = "\u6682\u65e0\u56de\u5408\u8bb0\u5f55";
+    logList.appendChild(emptyLog);
+  }
+  logsBlock.appendChild(logList);
+
+  const board = document.createElement("div");
+  board.className = "cashflow-board";
+  const mainColumn = document.createElement("div");
+  mainColumn.className = "cashflow-column cashflow-column-main";
+  mainColumn.append(opportunityBlock, roleBlock, assetsBlock);
+
+  const sideColumn = document.createElement("div");
+  sideColumn.className = "cashflow-column cashflow-column-side";
+  sideColumn.append(aiBlock, reportsBlock);
+
+  board.append(mainColumn, sideColumn, logsBlock);
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions cashflow-actions";
+
+  const nextTurnButton = document.createElement("button");
+  nextTurnButton.type = "button";
+  nextTurnButton.className = "settings-btn settings-btn-primary cashflow-action-main";
+  nextTurnButton.textContent = "\u63a8\u8fdb\u4e00\u56de\u5408";
+  nextTurnButton.addEventListener("click", () => {
+    void nextCashflowTurn();
+  });
+
+  const resetButton = document.createElement("button");
+  resetButton.type = "button";
+  resetButton.className = "settings-btn settings-btn-secondary";
+  resetButton.textContent = "\u65b0\u5f00\u4e00\u5c40";
+  resetButton.addEventListener("click", () => {
+    void resetCashflowGame();
+  });
+
+  const aiButton = document.createElement("button");
+  aiButton.type = "button";
+  aiButton.className = "settings-btn settings-btn-secondary";
+  aiButton.textContent = state.aiEnabled ? "AI \u5df2\u5f00\u542f" : "\u5f00\u542f AI \u5bf9\u6218";
+  aiButton.disabled = state.aiEnabled;
+  aiButton.addEventListener("click", () => {
+    void executeCashflowAction("ai").then((result) => {
+      if (result) {
+        renderList();
+      }
+    });
+  });
+
+  nextTurnButton.disabled = state.won || state.lost;
+  actions.append(nextTurnButton, aiButton, resetButton);
+
+  panel.append(title, description, hud, statGrid, board, actions);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+}
+
+async function refreshStandaloneCashflowPanel(): Promise<boolean> {
+  const result = await executeCashflowAction("state");
+  return Boolean(result || cashflowState);
+}
+
+async function openStandaloneCashflowPanel(reset = false): Promise<void> {
+  setMode("cashflow");
+  if (reset) {
+    await executeCashflowAction("reset");
+  } else {
+    await executeCashflowAction("state");
+    if (cashflowState?.lost) {
+      const roleKey = cashflowState.jobKey.trim() || undefined;
+      const roleName = cashflowState.role;
+      const restarted = await executeCashflowAction("reset", { roleKey });
+      if (restarted) {
+        setStatus(
+          `\u68c0\u6d4b\u5230\u4e0a\u5c40\u5df2\u7ed3\u675f\uff0c\u5df2\u81ea\u52a8\u65b0\u5f00\u4e00\u5c40${roleKey ? `\uff08${roleName}\uff09` : ""}`
+        );
+      }
+    }
+  }
+  renderList();
 }
 
 type CodeAgentSwitchDiagnosticView = {
@@ -1530,6 +3378,7 @@ function renderCodeAgentSwitchPanelV2(): void {
   form.className = "settings-form codeagent-switch-form webtools-tool-panel";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    void executeCodeAgentSwitchAction("read");
   });
 
   const header = document.createElement("div");
@@ -2219,6 +4068,25 @@ function formatCodeAgentSwitchBackupTime(createdAtMs: number | undefined): strin
 }
 
 const WEBTOOLS_IMAGE_PROMPT_VISIBLE_OPTION_LIMIT = 8;
+const imagePromptData = window.__LL_IMAGE_PROMPT_DATA__ as WebtoolsImagePromptData | undefined;
+if (!imagePromptData) {
+  throw new Error("renderer image prompt data not initialized");
+}
+const WEBTOOLS_IMAGE_PROMPT_PRODUCTS = imagePromptData.products;
+const WEBTOOLS_IMAGE_PROMPT_GROUP_KEYS: WebtoolsImagePromptOptionGroupKey[] = [
+  "subject",
+  "style",
+  "composition",
+  "lighting",
+  "materials",
+  "environment",
+  "mood",
+  "constraints"
+];
+const WEBTOOLS_IMAGE_PROMPT_OPTION_GROUPS = imagePromptData.optionGroups;
+const WEBTOOLS_IMAGE_PROMPT_STYLE_PRESETS_FROM_SHARED = imagePromptData.stylePresets;
+const WEBTOOLS_IMAGE_PROMPT_SMART_TEMPLATES = imagePromptData.smartTemplates;
+const WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS = imagePromptData.textOptions;
 const webtoolsImagePromptExpandedGroups = new Set<WebtoolsImagePromptOptionGroupKey>();
 let webtoolsImagePromptStyleGroup: WebtoolsImagePromptStylePresetGroup | "" = "";
 let webtoolsImagePromptSmartTemplateId: WebtoolsImagePromptSmartTemplateId | "" = "";
@@ -2266,14 +4134,14 @@ interface ClipboardWorkbenchPanelData {
 }
 
 const CLIPBOARD_WORKBENCH_SCOPE_OPTIONS = [
-  { key: "all", label: "All" },
-  { key: "recent", label: "Recent" },
-  { key: "favorites", label: "Favorites" },
-  { key: "pinned", label: "Pinned" },
-  { key: "text", label: "Text" },
-  { key: "image", label: "Images" },
-  { key: "files", label: "Files" },
-  { key: "screenshots", label: "Screenshots" }
+  { key: "all", label: "全部" },
+  { key: "recent", label: "最近" },
+  { key: "favorites", label: "收藏" },
+  { key: "pinned", label: "置顶" },
+  { key: "text", label: "文本" },
+  { key: "image", label: "图片" },
+  { key: "files", label: "文件" },
+  { key: "screenshots", label: "截图" }
 ] as const;
 
 let clipboardWorkbenchPanelData: ClipboardWorkbenchPanelData =
@@ -2589,7 +4457,7 @@ function formatClipboardWorkbenchBytes(value: number): string {
 
 function formatClipboardWorkbenchTime(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
-    return "Unknown";
+    return "未知时间";
   }
   return new Date(value).toLocaleString();
 }
@@ -2597,11 +4465,11 @@ function formatClipboardWorkbenchTime(value: number): string {
 function getClipboardWorkbenchKindLabel(kind: ClipboardWorkbenchPanelKind): string {
   switch (kind) {
     case "image":
-      return "Image";
+      return "图片";
     case "files":
-      return "Files";
+      return "文件";
     default:
-      return "Text";
+      return "文本";
   }
 }
 
@@ -2610,11 +4478,11 @@ function getClipboardWorkbenchSourceLabel(
 ): string {
   switch (source) {
     case "manual":
-      return "Manual";
+      return "手动保存";
     case "screenshot":
-      return "Screenshot";
+      return "截图采集";
     default:
-      return "Auto";
+      return "自动采集";
   }
 }
 
@@ -2623,10 +4491,10 @@ function getClipboardWorkbenchItemPreview(
 ): string {
   if (item.kind === "files") {
     const count = item.filePaths?.length ?? 0;
-    return count > 0 ? `${count} file path${count === 1 ? "" : "s"}` : item.summary;
+    return count > 0 ? `${count} 个文件路径` : item.summary;
   }
   if (item.kind === "image") {
-    return item.assetUrl ? "Image preview available" : item.summary;
+    return item.assetUrl ? "可预览图片" : item.summary;
   }
   return item.previewText ?? item.summary;
 }
@@ -2637,7 +4505,7 @@ async function executeClipboardWorkbenchAction(
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
-    setStatus("Launcher bridge is unavailable.");
+    setStatus("启动器桥接暂不可用。");
     return;
   }
 
@@ -2662,14 +4530,14 @@ async function executeClipboardWorkbenchAction(
   const result = await launcher.execute({
     id: `plugin:${CLIPBOARD_WORKBENCH_PLUGIN_ID}:${action}`,
     type: "command",
-    title: "Clipboard Workbench",
-    subtitle: "panel action",
+    title: "剪贴板工作台",
+    subtitle: "面板操作",
     target: `command:plugin:${CLIPBOARD_WORKBENCH_PLUGIN_ID}?${params.toString()}`,
     keywords: ["plugin", "clipboard", "workbench"]
   });
 
   if (!result.ok) {
-    setStatus(result.message ?? "Clipboard Workbench action failed.");
+    setStatus(result.message ?? "剪贴板工作台操作失败。");
     return;
   }
 
@@ -2685,7 +4553,7 @@ async function executeClipboardWorkbenchAction(
     renderList();
   }
 
-  setStatus(result.message ?? "Clipboard Workbench updated.");
+  setStatus(result.message ?? "剪贴板工作台已更新。");
 }
 
 function syncWebtoolsImagePromptSmartTemplateSelection(container: HTMLElement): void {
@@ -2694,6 +4562,600 @@ function syncWebtoolsImagePromptSmartTemplateSelection(container: HTMLElement): 
     .forEach((button) => {
       button.dataset.selected = String(button.value === webtoolsImagePromptSmartTemplateId);
     });
+}
+
+let hardwareInspectorSnapshot: HardwareInspectorSnapshot | null = null;
+let hardwareInspectorLastSnapshot: HardwareInspectorSnapshot | null = null;
+let hardwareInspectorDiffState: HardwareInspectorDiffState | null = null;
+let hardwareInspectorInfo = "";
+let hardwareInspectorError = "";
+let hardwareInspectorLoading = false;
+let hardwareInspectorExporting = false;
+let hardwareInspectorRequestToken = 0;
+let hardwareInspectorExpandedDiskKeys = new Set<string>();
+
+function formatHardwareInspectorBytes(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "未知";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+
+  const digits = size >= 100 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(digits)} ${units[index]}`;
+}
+
+function formatHardwareInspectorClockMhz(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "未知";
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)} GHz`;
+  }
+  return `${value} MHz`;
+}
+
+function formatHardwareInspectorRpm(value: number | null | undefined): string {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value >= 4294967295
+  ) {
+    return "未知";
+  }
+
+  return `${Math.round(value)} RPM`;
+}
+
+function formatHardwareInspectorDate(value: string | null | undefined): string {
+  if (!value) {
+    return "未知";
+  }
+
+  const trimmed = value.trim();
+  const dotNetMatch = trimmed.match(/^\/Date\((\d+)(?:[+-]\d+)?\)\/$/);
+  if (dotNetMatch) {
+    const timestamp = Number(dotNetMatch[1]);
+    if (Number.isFinite(timestamp)) {
+      return new Date(timestamp).toLocaleString("zh-CN", {
+        hour12: false
+      });
+    }
+  }
+
+  const dmtfMatch = trimmed.match(
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.(\d+))?(?:([+-])(\d{3}))?$/
+  );
+  if (dmtfMatch) {
+    const [, year, month, day, hour, minute, second] = dmtfMatch;
+    const parsedDmtf = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+    if (!Number.isNaN(parsedDmtf.getTime())) {
+      return parsedDmtf.toLocaleString("zh-CN", {
+        hour12: false
+      });
+    }
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed;
+  }
+
+  return parsed.toLocaleString("zh-CN", {
+    hour12: false
+  });
+}
+
+function formatHardwareInspectorBoolean(value: boolean | null | undefined): string {
+  if (typeof value !== "boolean") {
+    return "未知";
+  }
+  return value ? "支持" : "不支持";
+}
+
+function formatHardwareInspectorNullableBoolean(
+  value: boolean | null | undefined,
+  trueText: string,
+  falseText: string
+): string {
+  if (typeof value !== "boolean") {
+    return "未知";
+  }
+
+  return value ? trueText : falseText;
+}
+
+function formatHardwareInspectorText(value: string | null | undefined): string {
+  return value && value.trim() ? value.trim() : "未知";
+}
+
+function formatHardwareInspectorSectorSize(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "未知";
+  }
+
+  return `${value} B`;
+}
+
+function formatHardwareInspectorTemperature(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "不可用";
+  }
+
+  return `${value} °C`;
+}
+
+function formatHardwareInspectorPercentage(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "不可用";
+  }
+
+  return `${value}%`;
+}
+
+function formatHardwareInspectorHours(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "不可用";
+  }
+
+  return `${value} 小时`;
+}
+
+function isHardwareInspectorDiskAtRisk(disk: HardwareInspectorDisk): boolean {
+  const health = formatHardwareInspectorText(disk.healthStatus);
+  const operational = formatHardwareInspectorText(disk.operationalStatus);
+  return (
+    disk.smartPredictFailure === true ||
+    health.includes("警告") ||
+    health.includes("故障") ||
+    operational.includes("预测故障") ||
+    operational.includes("错误") ||
+    operational.includes("降级")
+  );
+}
+
+function countHardwareInspectorRiskDisks(snapshot: HardwareInspectorSnapshot): number {
+  return snapshot.disks.filter((disk) => isHardwareInspectorDiskAtRisk(disk)).length;
+}
+
+function getHardwareInspectorCpuKey(cpu: HardwareInspectorCpu, index: number): string {
+  return cpu.processorId || cpu.socketDesignation || cpu.name || `cpu-${index}`;
+}
+
+function getHardwareInspectorMemoryKey(
+  memory: HardwareInspectorMemoryModule,
+  index: number
+): string {
+  return (
+    memory.serialNumber ||
+    memory.deviceLocator ||
+    memory.bankLabel ||
+    memory.partNumber ||
+    `memory-${index}`
+  );
+}
+
+function getHardwareInspectorGpuKey(gpu: HardwareInspectorGpu, index: number): string {
+  return gpu.pnpDeviceId || gpu.name || `gpu-${index}`;
+}
+
+function getHardwareInspectorDiskKey(
+  disk: HardwareInspectorDisk,
+  index: number
+): string {
+  return (
+    disk.deviceId ||
+    disk.serialNumber ||
+    [disk.model, String(index)].filter(Boolean).join("#") ||
+    `disk-${index}`
+  );
+}
+
+type HardwareInspectorFieldSpec<T> = {
+  label: string;
+  get: (item: T) => unknown;
+};
+
+type HardwareInspectorEntityEntry<T> = {
+  item: T;
+  index: number;
+  name: string;
+};
+
+function normalizeHardwareInspectorComparableValue(
+  value: unknown
+): string | number | boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function areHardwareInspectorComparableValuesEqual(a: unknown, b: unknown): boolean {
+  return (
+    normalizeHardwareInspectorComparableValue(a) ===
+    normalizeHardwareInspectorComparableValue(b)
+  );
+}
+
+function addHardwareInspectorChange(
+  target: Record<string, string[]>,
+  key: string,
+  labels: string[]
+): void {
+  if (labels.length === 0) {
+    return;
+  }
+
+  target[key] = labels;
+}
+
+function collectHardwareInspectorObjectChanges<T>(
+  previous: T,
+  current: T,
+  specs: HardwareInspectorFieldSpec<T>[]
+): string[] {
+  const labels: string[] = [];
+  specs.forEach((spec) => {
+    if (!areHardwareInspectorComparableValuesEqual(spec.get(previous), spec.get(current))) {
+      labels.push(spec.label);
+    }
+  });
+  return labels;
+}
+
+function collectHardwareInspectorEntityChanges<T>(
+  previousItems: T[],
+  currentItems: T[],
+  keyOf: (item: T, index: number) => string,
+  nameOf: (item: T, index: number) => string,
+  specs: HardwareInspectorFieldSpec<T>[],
+  prefix: string
+): { changes: Record<string, string[]>; summary: string[] } {
+  const previousMap = new Map<string, HardwareInspectorEntityEntry<T>>();
+  previousItems.forEach((item, index) => {
+    previousMap.set(keyOf(item, index), {
+      item,
+      index,
+      name: nameOf(item, index)
+    });
+  });
+
+  const currentMap = new Map<string, HardwareInspectorEntityEntry<T>>();
+  currentItems.forEach((item, index) => {
+    currentMap.set(keyOf(item, index), {
+      item,
+      index,
+      name: nameOf(item, index)
+    });
+  });
+
+  const allKeys = new Set<string>([...previousMap.keys(), ...currentMap.keys()]);
+  const changes: Record<string, string[]> = {};
+  const summary: string[] = [];
+
+  allKeys.forEach((key) => {
+    const previousEntry = previousMap.get(key);
+    const currentEntry = currentMap.get(key);
+    const labels: string[] = [];
+    const name = currentEntry?.name || previousEntry?.name || key;
+
+    if (!previousEntry && currentEntry) {
+      labels.push("新增");
+    } else if (previousEntry && !currentEntry) {
+      labels.push("移除");
+    } else if (previousEntry && currentEntry) {
+      labels.push(
+        ...collectHardwareInspectorObjectChanges(
+          previousEntry.item,
+          currentEntry.item,
+          specs
+        )
+      );
+    }
+
+    if (labels.length > 0) {
+      addHardwareInspectorChange(changes, key, labels);
+      summary.push(`${prefix}${name}：${labels.join("、")}`);
+    }
+  });
+
+  return { changes, summary };
+}
+
+function createHardwareInspectorInitialDiffState(
+  snapshot: HardwareInspectorSnapshot
+): HardwareInspectorDiffState {
+  return {
+    hasBaseline: false,
+    hasChanges: false,
+    summary: ["首次采集，下一次刷新将显示变化对比"],
+    overviewChangedKeys: [],
+    computerSystemChanges: [],
+    operatingSystemChanges: [],
+    baseBoardChanges: [],
+    biosChanges: [],
+    cpuChanges: {},
+    memoryChanges: {},
+    gpuChanges: {},
+    diskChanges: {},
+    previousCollectedAt: null,
+    currentCollectedAt: snapshot.collectedAt
+  };
+}
+
+function buildHardwareInspectorDiffState(
+  previous: HardwareInspectorSnapshot | null,
+  current: HardwareInspectorSnapshot
+): HardwareInspectorDiffState {
+  if (!previous) {
+    return createHardwareInspectorInitialDiffState(current);
+  }
+
+  const overviewChangedKeys = new Set<string>();
+  const summary: string[] = [];
+
+  const currentRiskDisks = countHardwareInspectorRiskDisks(current);
+  const previousRiskDisks = countHardwareInspectorRiskDisks(previous);
+  if (
+    !areHardwareInspectorComparableValuesEqual(
+      [previous.computerSystem.manufacturer, previous.computerSystem.model].join(" "),
+      [current.computerSystem.manufacturer, current.computerSystem.model].join(" ")
+    )
+  ) {
+    overviewChangedKeys.add("device");
+    summary.push("设备信息已变化");
+  }
+  if (
+    !areHardwareInspectorComparableValuesEqual(
+      [previous.operatingSystem.caption, previous.operatingSystem.buildNumber].join(" / "),
+      [current.operatingSystem.caption, current.operatingSystem.buildNumber].join(" / ")
+    )
+  ) {
+    overviewChangedKeys.add("system");
+    summary.push("系统版本已变化");
+  }
+  if (
+    !areHardwareInspectorComparableValuesEqual(previous.cpus[0]?.name, current.cpus[0]?.name)
+  ) {
+    overviewChangedKeys.add("cpu");
+    summary.push("CPU 摘要已变化");
+  }
+  if (
+    !areHardwareInspectorComparableValuesEqual(
+      previous.computerSystem.totalPhysicalMemory,
+      current.computerSystem.totalPhysicalMemory
+    )
+  ) {
+    overviewChangedKeys.add("totalMemory");
+    summary.push("总内存已变化");
+  }
+  if (!areHardwareInspectorComparableValuesEqual(previous.gpus.length, current.gpus.length)) {
+    overviewChangedKeys.add("gpuCount");
+    summary.push(`显卡数量 ${previous.gpus.length} -> ${current.gpus.length}`);
+  }
+  if (!areHardwareInspectorComparableValuesEqual(previous.disks.length, current.disks.length)) {
+    overviewChangedKeys.add("diskCount");
+    summary.push(`磁盘数量 ${previous.disks.length} -> ${current.disks.length}`);
+  }
+  if (!areHardwareInspectorComparableValuesEqual(previousRiskDisks, currentRiskDisks)) {
+    overviewChangedKeys.add("riskDiskCount");
+    summary.push(`风险磁盘 ${previousRiskDisks} -> ${currentRiskDisks}`);
+  }
+
+  const computerSystemChanges = collectHardwareInspectorObjectChanges(
+    previous.computerSystem,
+    current.computerSystem,
+    [
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "型号", get: (item) => item.model },
+      { label: "系统类型", get: (item) => item.systemType },
+      { label: "总内存", get: (item) => item.totalPhysicalMemory }
+    ]
+  );
+  if (computerSystemChanges.length > 0) {
+    summary.push(`设备信息：${computerSystemChanges.join("、")}`);
+  }
+
+  const operatingSystemChanges = collectHardwareInspectorObjectChanges(
+    previous.operatingSystem,
+    current.operatingSystem,
+    [
+      { label: "系统名称", get: (item) => item.caption },
+      { label: "版本", get: (item) => item.version },
+      { label: "构建号", get: (item) => item.buildNumber },
+      { label: "架构", get: (item) => item.architecture },
+      { label: "启动时间", get: (item) => item.lastBootUpTime }
+    ]
+  );
+  if (operatingSystemChanges.length > 0) {
+    summary.push(`系统信息：${operatingSystemChanges.join("、")}`);
+  }
+
+  const baseBoardChanges = collectHardwareInspectorObjectChanges(
+    previous.baseBoard,
+    current.baseBoard,
+    [
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "型号", get: (item) => item.product },
+      { label: "版本", get: (item) => item.version },
+      { label: "序列号", get: (item) => item.serialNumber }
+    ]
+  );
+  if (baseBoardChanges.length > 0) {
+    summary.push(`主板信息：${baseBoardChanges.join("、")}`);
+  }
+
+  const biosChanges = collectHardwareInspectorObjectChanges(previous.bios, current.bios, [
+    { label: "厂商", get: (item) => item.manufacturer },
+    { label: "版本", get: (item) => item.smbiosBiosVersion || item.version },
+    { label: "发布日期", get: (item) => item.releaseDate },
+    { label: "序列号", get: (item) => item.serialNumber }
+  ]);
+  if (biosChanges.length > 0) {
+    summary.push(`BIOS：${biosChanges.join("、")}`);
+  }
+
+  const cpuDiff = collectHardwareInspectorEntityChanges(
+    previous.cpus,
+    current.cpus,
+    getHardwareInspectorCpuKey,
+    (item, index) => item.name || `处理器 ${index + 1}`,
+    [
+      { label: "型号", get: (item) => item.name },
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "插槽", get: (item) => item.socketDesignation },
+      {
+        label: "核心 / 线程",
+        get: (item) => `${item.numberOfCores}/${item.numberOfLogicalProcessors}`
+      },
+      { label: "最大频率", get: (item) => item.maxClockSpeed },
+      { label: "温度(可选)", get: (item) => item.temperatureCelsius },
+      { label: "温度来源", get: (item) => item.temperatureSource },
+      { label: "架构", get: (item) => item.architecture },
+      { label: "虚拟化", get: (item) => item.virtualizationFirmwareEnabled },
+      { label: "SLAT", get: (item) => item.secondLevelAddressTranslationExtensions }
+    ],
+    "CPU "
+  );
+
+  const memoryDiff = collectHardwareInspectorEntityChanges(
+    previous.memoryModules,
+    current.memoryModules,
+    getHardwareInspectorMemoryKey,
+    (item, index) => item.deviceLocator || item.bankLabel || `内存 ${index + 1}`,
+    [
+      { label: "容量", get: (item) => item.capacity },
+      { label: "频率", get: (item) => item.configuredClockSpeed || item.speed },
+      { label: "类型", get: (item) => item.memoryType },
+      { label: "形态", get: (item) => item.formFactor },
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "型号", get: (item) => item.partNumber },
+      { label: "序列号", get: (item) => item.serialNumber }
+    ],
+    "内存 "
+  );
+
+  const gpuDiff = collectHardwareInspectorEntityChanges(
+    previous.gpus,
+    current.gpus,
+    getHardwareInspectorGpuKey,
+    (item, index) => item.name || `显卡 ${index + 1}`,
+    [
+      { label: "名称", get: (item) => item.name },
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "显存", get: (item) => item.adapterRam },
+      { label: "驱动版本", get: (item) => item.driverVersion },
+      { label: "驱动日期", get: (item) => item.driverDate },
+      { label: "视频处理器", get: (item) => item.videoProcessor },
+      { label: "温度(可选)", get: (item) => item.temperatureCelsius },
+      { label: "温度来源", get: (item) => item.temperatureSource },
+      {
+        label: "分辨率",
+        get: (item) =>
+          `${item.horizontalResolution ?? ""}x${item.verticalResolution ?? ""}@${item.refreshRate ?? ""}`
+      },
+      { label: "状态", get: (item) => item.status }
+    ],
+    "显卡 "
+  );
+
+  const diskDiff = collectHardwareInspectorEntityChanges(
+    previous.disks,
+    current.disks,
+    getHardwareInspectorDiskKey,
+    (item, index) => item.model || `磁盘 ${index + 1}`,
+    [
+      { label: "厂商", get: (item) => item.manufacturer },
+      { label: "容量", get: (item) => item.size },
+      { label: "媒体类型", get: (item) => item.storageMediaType || item.mediaType },
+      { label: "总线", get: (item) => item.busType || item.interfaceType },
+      { label: "固件", get: (item) => item.firmwareVersion || item.firmwareRevision },
+      { label: "健康状态", get: (item) => item.healthStatus },
+      { label: "运行状态", get: (item) => item.operationalStatus },
+      { label: "预测故障", get: (item) => item.smartPredictFailure },
+      { label: "预测原因", get: (item) => item.smartReason },
+      { label: "逻辑扇区", get: (item) => item.logicalSectorSize },
+      { label: "物理扇区", get: (item) => item.physicalSectorSize },
+      { label: "温度", get: (item) => item.temperatureCelsius },
+      { label: "最高温度", get: (item) => item.temperatureMaxCelsius },
+      { label: "磨损", get: (item) => item.wearPercentage },
+      { label: "通电时长", get: (item) => item.powerOnHours },
+      { label: "槽位", get: (item) => item.slotNumber },
+      { label: "机箱槽", get: (item) => item.enclosureNumber },
+      { label: "用途", get: (item) => item.usage },
+      { label: "可加入存储池", get: (item) => item.canPool },
+      { label: "序列号", get: (item) => item.serialNumber },
+      { label: "分区数", get: (item) => item.partitionCount }
+    ],
+    "磁盘 "
+  );
+
+  summary.push(...cpuDiff.summary, ...memoryDiff.summary, ...gpuDiff.summary, ...diskDiff.summary);
+
+  const limitedSummary = summary.slice(0, 10);
+  return {
+    hasBaseline: true,
+    hasChanges:
+      overviewChangedKeys.size > 0 ||
+      computerSystemChanges.length > 0 ||
+      operatingSystemChanges.length > 0 ||
+      baseBoardChanges.length > 0 ||
+      biosChanges.length > 0 ||
+      Object.keys(cpuDiff.changes).length > 0 ||
+      Object.keys(memoryDiff.changes).length > 0 ||
+      Object.keys(gpuDiff.changes).length > 0 ||
+      Object.keys(diskDiff.changes).length > 0,
+    summary: limitedSummary.length > 0 ? limitedSummary : ["与上次采集一致"],
+    overviewChangedKeys: [...overviewChangedKeys],
+    computerSystemChanges,
+    operatingSystemChanges,
+    baseBoardChanges,
+    biosChanges,
+    cpuChanges: cpuDiff.changes,
+    memoryChanges: memoryDiff.changes,
+    gpuChanges: gpuDiff.changes,
+    diskChanges: diskDiff.changes,
+    previousCollectedAt: previous.collectedAt,
+    currentCollectedAt: current.collectedAt
+  };
+}
+
+function formatHardwareInspectorResolution(gpu: HardwareInspectorGpu): string {
+  if (!gpu.horizontalResolution || !gpu.verticalResolution) {
+    return "未知";
+  }
+
+  const base = `${gpu.horizontalResolution} × ${gpu.verticalResolution}`;
+  return gpu.refreshRate ? `${base} @ ${gpu.refreshRate}Hz` : base;
 }
 
 function createHardwareInspectorSection(
@@ -2916,6 +5378,165 @@ function applyHardwareInspectorCardChangeState(
   summary.className = "hardware-inspector-card-change";
   summary.textContent = `变化：${labels.join("、")}`;
   card.appendChild(summary);
+}
+
+function applyHardwareInspectorSnapshot(
+  snapshot: HardwareInspectorSnapshot,
+  infoText?: string
+): void {
+  hardwareInspectorSnapshot = snapshot;
+  hardwareInspectorDiffState = buildHardwareInspectorDiffState(
+    hardwareInspectorLastSnapshot,
+    snapshot
+  );
+  hardwareInspectorLastSnapshot = snapshot;
+  hardwareInspectorInfo =
+    infoText && infoText.trim() ? infoText : buildHardwareInspectorSummaryText(snapshot);
+}
+
+function getHardwareInspectorSnapshotFromData(
+  data: Record<string, unknown> | null
+): HardwareInspectorSnapshot | null {
+  const snapshot = data?.snapshot;
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+  return snapshot as HardwareInspectorSnapshot;
+}
+
+function buildHardwareInspectorSummaryText(snapshot: HardwareInspectorSnapshot): string {
+  const systemName = [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+    .filter(Boolean)
+    .join(" ");
+  const cpuName = snapshot.cpus[0]?.name ?? "未知 CPU";
+  const memoryText = formatHardwareInspectorBytes(
+    snapshot.computerSystem.totalPhysicalMemory
+  );
+  return [
+    systemName || "未知设备",
+    cpuName,
+    `内存 ${memoryText}`,
+    `显卡 ${snapshot.gpus.length} 张`,
+    `磁盘 ${snapshot.disks.length} 块`
+  ].join(" / ");
+}
+
+async function executeHardwareInspectorRefresh(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行硬件检测");
+    return;
+  }
+
+  const requestToken = ++hardwareInspectorRequestToken;
+  hardwareInspectorLoading = true;
+  hardwareInspectorError = "";
+  hardwareInspectorInfo = "正在采集硬件信息...";
+  if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+    renderList();
+  }
+  setStatus("正在采集硬件信息...");
+
+  const item: LaunchItem = {
+    id: `plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}:refresh`,
+    type: "command",
+    title: "硬件检测",
+    subtitle: "刷新硬件信息",
+    target: `command:plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}?action=refresh`,
+    keywords: ["plugin", "hardware", "systeminfo", "硬件", "刷新"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== hardwareInspectorRequestToken) {
+    return;
+  }
+
+  hardwareInspectorLoading = false;
+  const data = toRecord(result.data);
+  const snapshot = getHardwareInspectorSnapshotFromData(data);
+  if (snapshot) {
+    applyHardwareInspectorSnapshot(
+      snapshot,
+      typeof data?.info === "string" ? data.info : ""
+    );
+  } else {
+    hardwareInspectorSnapshot = null;
+    hardwareInspectorInfo = typeof data?.info === "string" ? data.info : "";
+  }
+
+  hardwareInspectorError =
+    typeof data?.error === "string" && data.error.trim()
+      ? data.error
+      : result.ok
+        ? ""
+        : result.message ?? "硬件信息采集失败";
+
+  setStatus(
+    result.message ??
+      (result.ok ? "硬件信息采集完成" : hardwareInspectorError || "硬件信息采集失败")
+  );
+  if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+    renderList();
+  }
+}
+
+async function executeHardwareInspectorExportReport(
+  format: "markdown" | "html"
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus(`桥接层未加载，无法导出${format === "html" ? "HTML" : "Markdown"}报告`);
+    return;
+  }
+
+  hardwareInspectorExporting = true;
+  hardwareInspectorError = "";
+  beginPluginNativeInteraction();
+  if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+    renderList();
+  }
+  setStatus(`正在导出${format === "html" ? "HTML" : "Markdown"}报告...`);
+
+  const item: LaunchItem = {
+    id: `plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}:${format === "html" ? "export-html" : "export-report"}`,
+    type: "command",
+    title: "硬件检测",
+    subtitle: `导出硬件${format === "html" ? " HTML" : " Markdown"}报告`,
+    target: `command:plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}?action=${format === "html" ? "export-html" : "export-report"}`,
+    keywords: ["plugin", "hardware", "report", "导出", "硬件报告", format]
+  };
+
+  try {
+    const result = await launcher.execute(item);
+    const data = toRecord(result.data);
+    const snapshot = getHardwareInspectorSnapshotFromData(data);
+    if (snapshot) {
+      applyHardwareInspectorSnapshot(
+        snapshot,
+        typeof data?.info === "string" ? data.info : ""
+      );
+    }
+
+    hardwareInspectorError =
+      typeof data?.error === "string" && data.error.trim()
+        ? data.error
+        : result.ok
+          ? ""
+          : result.message ?? `导出${format === "html" ? "HTML" : "Markdown"}报告失败`;
+
+    setStatus(
+      result.message ??
+        (result.ok
+          ? `${format === "html" ? "HTML" : "Markdown"}报告已导出`
+          : hardwareInspectorError || `导出${format === "html" ? "HTML" : "Markdown"}报告失败`)
+    );
+  } finally {
+    hardwareInspectorExporting = false;
+    schedulePluginNativeInteractionRelease();
+    if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+      renderList();
+    }
+  }
 }
 
 // --- Cron state ---
@@ -3315,6 +5936,23 @@ function getWebtoolsImageBase64DownloadName(): string {
   if (mime === "image/gif") return "image.gif";
   if (mime === "image/svg+xml") return "image.svg";
   return "image.png";
+}
+
+function readWebtoolsImageBase64FileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => {
+      reject(new Error("读取图片失败"));
+    };
+    reader.onload = () => {
+      if (typeof reader.result === "string" && reader.result.startsWith("data:image/")) {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("图片格式无效"));
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function refreshWebtoolsImageBase64PanelInForm(form: HTMLFormElement): void {
@@ -3728,6 +6366,149 @@ function getWebtoolsImagePromptSelectedOptions(
     ? [...state.selections.constraints, ...state.constraints]
     : state.selections[key];
 }
+
+const WEBTOOLS_IMAGE_PROMPT_EXAMPLE: WebtoolsImagePromptState = {
+  productId: "chatgpt-images-2",
+  stylePresetId: "ecommerce-main",
+  photoDescription: "",
+  selections: {
+    subject: ["一款无线蓝牙耳机悬浮在画面中央"],
+    style: ["商业摄影风格"],
+    composition: ["居中构图", "产品占画面70%", "顶部留白用于文字", "3:4比例"],
+    lighting: ["柔光棚拍", "均匀阴影"],
+    materials: ["磨砂塑料材质带细腻反光"],
+    environment: ["白色渐变背景"],
+    mood: ["高级质感", "整体干净专业氛围"],
+    constraints: []
+  },
+  custom: createEmptyWebtoolsImagePromptCustom(),
+  text: {
+    exact: "降噪黑科技",
+    position: "顶部居中",
+    style: "无衬线加粗",
+    designId: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.id ?? "",
+    design: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.label ?? "",
+    title: "",
+    subtitle: "",
+    label: "",
+    name: "",
+    age: "",
+    layout: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.layout ?? "",
+    hierarchy: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.hierarchy ?? "",
+    color: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.color ?? "",
+    effect: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.effect ?? "",
+    safeArea: WEBTOOLS_IMAGE_PROMPT_TEXT_OPTIONS.designs[0]?.safeArea ?? "",
+    flags: ["高对比", "仅出现一次"]
+  },
+  constraints: ["无水印", "无logo", "无额外文字"]
+};
+
+const WEBTOOLS_IMAGE_PROMPT_BIRTHDAY_EXAMPLES: Array<{
+  label: string;
+  state: WebtoolsImagePromptState;
+}> = [
+  {
+    label: "1周岁宝宝",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "1岁宝宝，圆脸，笑着看镜头，穿浅色生日服",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "1周岁生日",
+        age: "1周岁"
+      },
+      selections: {
+        ...createWebtoolsImagePromptSelectionStateFromPreset("birthday-party"),
+        style: ["宝宝周岁生日海报风格"],
+        mood: ["可爱治愈氛围", "温暖家庭氛围"]
+      }
+    }
+  },
+  {
+    label: "3周岁儿童",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "3岁儿童，笑容自然，穿浅色毛衣，看向镜头",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "3周岁生日",
+        age: "3周岁"
+      }
+    }
+  },
+  {
+    label: "公主风女孩",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "6岁小女孩，穿公主裙，笑着看镜头，发型整洁",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "6周岁生日",
+        age: "6周岁"
+      },
+      selections: {
+        ...createWebtoolsImagePromptSelectionStateFromPreset("birthday-party"),
+        style: ["梦幻气球派对视觉风格"],
+        environment: ["柔和粉色渐变背景", "彩色气球和彩带布置"],
+        mood: ["梦幻甜美氛围", "欢乐庆祝氛围"]
+      }
+    }
+  },
+  {
+    label: "宇航员男孩",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "5岁小男孩，穿蓝色上衣，活泼笑容，看向镜头",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "5周岁生日",
+        age: "5周岁"
+      },
+      selections: {
+        ...createWebtoolsImagePromptSelectionStateFromPreset("birthday-party"),
+        style: ["儿童生日派对摄影风格"],
+        lighting: ["彩色氛围灯", "轻微闪光点缀"],
+        mood: ["生日惊喜感", "轻松派对感"]
+      }
+    }
+  },
+  {
+    label: "成人简约",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "成年人半身照片，笑容自然，穿简洁服装，背景干净",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "生日快乐",
+        age: ""
+      },
+      selections: {
+        ...createWebtoolsImagePromptSelectionStateFromPreset("birthday-party"),
+        style: ["生日邀请函视觉风格"],
+        environment: ["柔和粉色渐变背景"],
+        mood: ["精致高级庆生氛围", "温暖家庭氛围"]
+      }
+    }
+  },
+  {
+    label: "长辈温馨",
+    state: {
+      ...createDefaultWebtoolsImagePromptState("birthday-party"),
+      photoDescription: "长辈半身照片，神态慈祥，穿得体服装，笑容温和",
+      text: {
+        ...createDefaultWebtoolsImagePromptState("birthday-party").text,
+        exact: "生日快乐",
+        age: ""
+      },
+      selections: {
+        ...createWebtoolsImagePromptSelectionStateFromPreset("birthday-party"),
+        style: ["温暖家庭庆生摄影风格"],
+        environment: ["温暖家居庆生背景"],
+        mood: ["温暖家庭氛围", "精致高级庆生氛围"]
+      }
+    }
+  }
+];
 
 // --- ImagePrompt state ---
 let webtoolsImagePromptState: WebtoolsImagePromptState =
@@ -4545,6 +7326,25 @@ function refreshWebtoolsUnitScreenInputs(form: HTMLFormElement): void {
   }
 }
 
+function refreshWebtoolsUnitCards(form: HTMLFormElement): void {
+  const setCardValue = (key: string, value: string): void => {
+    form.querySelectorAll<HTMLElement>(`[data-webtools-unit-card="${key}"]`).forEach((node) => {
+      node.textContent = value;
+    });
+  };
+
+  if (webtoolsUnitActiveTab === "storage") {
+    (["B", "KB", "MB", "GB", "TB"] as WebtoolsUnitStorageKey[]).forEach((unit) => {
+      setCardValue(unit, `${formatWebtoolsUnitStorageValue(webtoolsUnitStorageValues[unit])} ${unit}`);
+    });
+    return;
+  }
+
+  setCardValue("pixel", `${Number(webtoolsUnitPixel.toFixed(4))} px`);
+  setCardValue("rem", `${Number(webtoolsUnitRem.toFixed(4))} rem`);
+  setCardValue("basePx", `${Number(webtoolsUnitBasePx.toFixed(4))} px`);
+}
+
 function refreshWebtoolsUnitInfo(form: HTMLFormElement): void {
   const infoNode = form.querySelector<HTMLElement>(".webtools-unit-info");
   if (!infoNode) {
@@ -4560,6 +7360,7 @@ function refreshWebtoolsUnitInfo(form: HTMLFormElement): void {
 function refreshWebtoolsUnitPanelInForm(form: HTMLFormElement): void {
   refreshWebtoolsUnitStorageInputs(form);
   refreshWebtoolsUnitScreenInputs(form);
+  refreshWebtoolsUnitCards(form);
   refreshWebtoolsUnitInfo(form);
 }
 
@@ -4703,6 +7504,909 @@ async function executeWebtoolsMarkdownRender(
     return;
   }
   refreshWebtoolsMarkdownPanelInForm(form);
+}
+
+function buildWebtoolsStringsTarget(action: "convert" | "uuid"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("input", webtoolsStringsInput);
+  params.set("caseType", webtoolsStringsCaseType);
+  params.set("count", String(webtoolsStringsUuidCount));
+  return `command:plugin:${WEBTOOLS_STRINGS_PLUGIN_ID}?${params.toString()}`;
+}
+
+async function executeWebtoolsStringsAction(
+  action: "convert" | "uuid",
+  form: HTMLFormElement,
+  options: { caseType?: string } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行字符串工具");
+    return;
+  }
+
+  const inputNode = form.elements.namedItem("webtoolsStringsInput");
+  const caseNode = form.elements.namedItem("webtoolsStringsCaseType");
+  const countNode = form.elements.namedItem("webtoolsStringsCount");
+
+  webtoolsStringsInput =
+    inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
+  webtoolsStringsCaseType =
+    typeof options.caseType === "string"
+      ? options.caseType
+      : caseNode instanceof HTMLSelectElement
+        ? caseNode.value
+        : webtoolsStringsCaseType;
+  webtoolsStringsUuidCount =
+    countNode instanceof HTMLInputElement ? Number(countNode.value) : 5;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_STRINGS_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "字符串工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsStringsTarget(action),
+    keywords: ["plugin", "string", "uuid", "case", "字符串", "转换"]
+  };
+
+  const result = await launcher.execute(item);
+  const data = toRecord(result.data);
+
+  webtoolsStringsOutput =
+    data && typeof data.output === "string" ? data.output : "";
+  webtoolsStringsUuidItems = [];
+  if (data && Array.isArray(data.items)) {
+    for (const value of data.items) {
+      if (typeof value === "string") {
+        webtoolsStringsUuidItems.push(value);
+      }
+    }
+  }
+  if (action === "convert" && webtoolsStringsOutput.trim()) {
+    webtoolsStringsInput = webtoolsStringsOutput;
+  }
+
+  setStatus(result.message ?? (result.ok ? "执行完成" : "执行失败"));
+  renderList();
+}
+
+function buildWebtoolsColorsTarget(color: string): string {
+  const params = new URLSearchParams();
+  params.set("action", "convert");
+  params.set("color", color);
+  return `command:plugin:${WEBTOOLS_COLORS_PLUGIN_ID}?${params.toString()}`;
+}
+
+function getWebtoolsColorsPreviewTextColor(): string {
+  const match = webtoolsColorsHex.trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!match) {
+    return "#f4f8ff";
+  }
+
+  const value = match[1] ?? "6c5ce7";
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  return brightness > 152 ? "#0f172a" : "#f8fbff";
+}
+
+function refreshWebtoolsColorsPanelInForm(form: HTMLFormElement): void {
+  const preview = form.querySelector("[data-webtools-colors-preview]");
+  if (preview instanceof HTMLDivElement) {
+    preview.style.background = webtoolsColorsHex || "#6c5ce7";
+  }
+
+  const previewText = form.querySelector("[data-webtools-colors-preview-text]");
+  if (previewText instanceof HTMLSpanElement) {
+    previewText.textContent = webtoolsColorsHex || "#6c5ce7";
+    previewText.style.color = getWebtoolsColorsPreviewTextColor();
+  }
+
+  const picker = form.elements.namedItem("webtoolsColorsPicker");
+  if (picker instanceof HTMLInputElement) {
+    picker.value = /^#([0-9a-f]{6})$/i.test(webtoolsColorsHex) ? webtoolsColorsHex : "#6c5ce7";
+  }
+
+  const hexOutput = form.querySelector("[data-webtools-colors-output='hex']");
+  if (hexOutput instanceof HTMLDivElement) {
+    hexOutput.textContent = webtoolsColorsHex || "-";
+  }
+  const rgbOutput = form.querySelector("[data-webtools-colors-output='rgb']");
+  if (rgbOutput instanceof HTMLDivElement) {
+    rgbOutput.textContent = webtoolsColorsRgb || "-";
+  }
+  const hslOutput = form.querySelector("[data-webtools-colors-output='hsl']");
+  if (hslOutput instanceof HTMLDivElement) {
+    hslOutput.textContent = webtoolsColorsHsl || "-";
+  }
+
+  form.querySelectorAll<HTMLElement>("[data-webtools-colors-preset]").forEach((node) => {
+    node.dataset.active =
+      node.dataset.webtoolsColorsPreset?.toLowerCase() === webtoolsColorsHex.toLowerCase()
+        ? "true"
+        : "false";
+  });
+
+  const shadesWrap = form.querySelector("[data-webtools-colors-shades]");
+  if (shadesWrap instanceof HTMLDivElement) {
+    shadesWrap.textContent = "";
+    const shades = webtoolsColorsShades.length > 0 ? webtoolsColorsShades : [webtoolsColorsHex];
+    shades.forEach((color) => {
+      const shade = document.createElement("button");
+      shade.type = "button";
+      shade.className = "webtools-colors-shade-item";
+      shade.title = color;
+      shade.style.background = color;
+      shade.addEventListener("click", () => {
+        const inputNode = form.elements.namedItem("webtoolsColorsInput");
+        if (inputNode instanceof HTMLInputElement) {
+          inputNode.value = color;
+        }
+        void executeWebtoolsColorsConvert(color, { render: false, form });
+      });
+      shadesWrap.appendChild(shade);
+    });
+  }
+}
+
+function scheduleWebtoolsColorsAutoConvert(
+  form: HTMLFormElement,
+  color: string,
+  immediate = false
+): void {
+  if (webtoolsColorsAutoTimer !== null) {
+    window.clearTimeout(webtoolsColorsAutoTimer);
+  }
+
+  webtoolsColorsAutoTimer = window.setTimeout(() => {
+    webtoolsColorsAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+    void executeWebtoolsColorsConvert(color, { render: false, form });
+  }, immediate ? 0 : 160);
+}
+
+async function executeWebtoolsColorsConvert(
+  color: string,
+  options: { render?: boolean; form?: HTMLFormElement } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行颜色工具");
+    return;
+  }
+
+  webtoolsColorsInput = color;
+  const requestToken = ++webtoolsColorsRequestToken;
+  const shouldRender = options.render ?? true;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_COLORS_PLUGIN_ID}:convert`,
+    type: "command",
+    title: "颜色工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsColorsTarget(color),
+    keywords: ["plugin", "color", "hex", "rgb", "hsl", "颜色"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsColorsRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+
+  webtoolsColorsHex =
+    data && typeof data.hex === "string" ? data.hex : webtoolsColorsHex;
+  webtoolsColorsRgb = data && typeof data.rgb === "string" ? data.rgb : "";
+  webtoolsColorsHsl = data && typeof data.hsl === "string" ? data.hsl : "";
+
+  const shades: string[] = [];
+  if (data && Array.isArray(data.shades)) {
+    for (const value of data.shades) {
+      if (typeof value === "string") {
+        shades.push(value);
+      }
+    }
+  }
+  webtoolsColorsShades = shades;
+
+  setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  if (options.form) {
+    refreshWebtoolsColorsPanelInForm(options.form);
+  }
+}
+
+function buildWebtoolsDiffTarget(): string {
+  const params = new URLSearchParams();
+  params.set("action", "compare");
+  params.set("left", webtoolsDiffLeft);
+  params.set("right", webtoolsDiffRight);
+  params.set("ignoreCase", webtoolsDiffIgnoreCase ? "1" : "0");
+  params.set("ignoreWhitespace", webtoolsDiffIgnoreWhitespace ? "1" : "0");
+  return `command:plugin:${WEBTOOLS_DIFF_PLUGIN_ID}?${params.toString()}`;
+}
+
+function createWebtoolsDiffStatCard(label: string, value: string): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "webtools-diff-stat";
+
+  const valueNode = document.createElement("div");
+  valueNode.className = "webtools-diff-stat-value";
+  valueNode.textContent = value;
+
+  const labelNode = document.createElement("div");
+  labelNode.className = "webtools-diff-stat-label";
+  labelNode.textContent = label;
+
+  card.append(valueNode, labelNode);
+  return card;
+}
+
+function refreshWebtoolsDiffResultInForm(form: HTMLFormElement): void {
+  const summaryNode = form.querySelector(".webtools-diff-summary");
+  if (summaryNode instanceof HTMLDivElement) {
+    summaryNode.replaceChildren();
+
+    const status = document.createElement("div");
+    status.className = "webtools-diff-summary-status";
+
+    const cards = document.createElement("div");
+    cards.className = "webtools-diff-stats";
+
+    const leftEmpty = !webtoolsDiffLeft.trim();
+    const rightEmpty = !webtoolsDiffRight.trim();
+    if (leftEmpty && rightEmpty) {
+      status.textContent = "输入左右文本后自动生成差异视图";
+      status.dataset.state = "idle";
+      summaryNode.append(status);
+    } else if (webtoolsDiffSummary) {
+      status.textContent = webtoolsDiffSummary.identical
+        ? webtoolsDiffSummary.rawIdentical
+          ? "两侧文本一致"
+          : "按当前忽略规则，两侧文本一致"
+        : "已检测到文本差异";
+      status.dataset.state = webtoolsDiffSummary.identical ? "same" : "changed";
+
+      cards.append(
+        createWebtoolsDiffStatCard("新增", String(webtoolsDiffSummary.added)),
+        createWebtoolsDiffStatCard("删除", String(webtoolsDiffSummary.removed)),
+        createWebtoolsDiffStatCard("相同", String(webtoolsDiffSummary.same)),
+        createWebtoolsDiffStatCard(
+          "编辑距离",
+          String(webtoolsDiffSummary.levenshtein ?? 0)
+        ),
+        createWebtoolsDiffStatCard(
+          "A 行数",
+          String(webtoolsDiffSummary.leftLines ?? 0)
+        ),
+        createWebtoolsDiffStatCard(
+          "B 行数",
+          String(webtoolsDiffSummary.rightLines ?? 0)
+        )
+      );
+      summaryNode.append(status, cards);
+    } else {
+      status.textContent = "暂未生成差异结果";
+      status.dataset.state = "idle";
+      summaryNode.append(status);
+    }
+  }
+
+  const viewerNode = form.querySelector(".webtools-diff-viewer");
+  if (viewerNode instanceof HTMLDivElement) {
+    if (webtoolsDiffPrettyHtml.trim()) {
+      viewerNode.innerHTML = webtoolsDiffPrettyHtml;
+    } else if (!webtoolsDiffLeft.trim() && !webtoolsDiffRight.trim()) {
+      viewerNode.textContent = "等待输入左右文本";
+    } else if (webtoolsDiffSummary?.identical) {
+      viewerNode.textContent = "两侧文本一致，没有可展示的差异片段";
+    } else {
+      viewerNode.textContent = "暂无差异结果";
+    }
+  }
+}
+
+function scheduleWebtoolsDiffAutoCompare(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsDiffAutoTimer !== null) {
+    window.clearTimeout(webtoolsDiffAutoTimer);
+  }
+
+  webtoolsDiffAutoTimer = window.setTimeout(() => {
+    webtoolsDiffAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+    void executeWebtoolsDiffCompare(form, { render: false });
+  }, immediate ? 0 : 220);
+}
+
+async function executeWebtoolsDiffCompare(
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行文本对比");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  const leftNode = form.elements.namedItem("webtoolsDiffLeft");
+  const rightNode = form.elements.namedItem("webtoolsDiffRight");
+  const ignoreCaseNode = form.elements.namedItem("webtoolsDiffIgnoreCase");
+  const ignoreWhitespaceNode = form.elements.namedItem("webtoolsDiffIgnoreWhitespace");
+
+  webtoolsDiffLeft = leftNode instanceof HTMLTextAreaElement ? leftNode.value : "";
+  webtoolsDiffRight = rightNode instanceof HTMLTextAreaElement ? rightNode.value : "";
+  webtoolsDiffIgnoreCase =
+    ignoreCaseNode instanceof HTMLInputElement ? ignoreCaseNode.checked : false;
+  webtoolsDiffIgnoreWhitespace =
+    ignoreWhitespaceNode instanceof HTMLInputElement
+      ? ignoreWhitespaceNode.checked
+      : false;
+  const requestToken = ++webtoolsDiffRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_DIFF_PLUGIN_ID}:compare`,
+    type: "command",
+    title: "文本对比",
+    subtitle: "面板执行",
+    target: buildWebtoolsDiffTarget(),
+    keywords: ["plugin", "diff", "compare", "文本", "对比", "差异"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsDiffRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+  webtoolsDiffPrettyHtml =
+    data && typeof data.prettyHtml === "string" ? data.prettyHtml : "";
+
+  const summaryRecord = toRecord(data?.summary);
+  if (
+    summaryRecord &&
+    typeof summaryRecord.same === "number" &&
+    typeof summaryRecord.added === "number" &&
+    typeof summaryRecord.removed === "number" &&
+    typeof summaryRecord.changed === "number" &&
+    typeof summaryRecord.total === "number" &&
+    typeof summaryRecord.shown === "number"
+  ) {
+    webtoolsDiffSummary = {
+      same: summaryRecord.same,
+      added: summaryRecord.added,
+      removed: summaryRecord.removed,
+      changed: summaryRecord.changed,
+      total: summaryRecord.total,
+      shown: summaryRecord.shown,
+      identical:
+        typeof summaryRecord.identical === "boolean"
+          ? summaryRecord.identical
+          : undefined,
+      rawIdentical:
+        typeof summaryRecord.rawIdentical === "boolean"
+          ? summaryRecord.rawIdentical
+          : undefined,
+      leftLength:
+        typeof summaryRecord.leftLength === "number"
+          ? summaryRecord.leftLength
+          : undefined,
+      rightLength:
+        typeof summaryRecord.rightLength === "number"
+          ? summaryRecord.rightLength
+          : undefined,
+      leftLines:
+        typeof summaryRecord.leftLines === "number"
+          ? summaryRecord.leftLines
+          : undefined,
+      rightLines:
+        typeof summaryRecord.rightLines === "number"
+          ? summaryRecord.rightLines
+          : undefined,
+      levenshtein:
+        typeof summaryRecord.levenshtein === "number"
+          ? summaryRecord.levenshtein
+          : undefined
+    };
+  } else {
+    webtoolsDiffSummary = null;
+  }
+
+  setStatus(result.message ?? (result.ok ? "对比完成" : "对比失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsDiffResultInForm(form);
+}
+
+function parseWebtoolsUrlInput(input: string): void {
+  webtoolsUrlState.input = input;
+
+  const trimmed = input.trim();
+  if (!trimmed) {
+    webtoolsUrlState.valid = null;
+    webtoolsUrlState.info = "输入 URL 后自动解析";
+    webtoolsUrlState.parts = createEmptyWebtoolsUrlParts();
+    webtoolsUrlState.queryRows = [];
+    return;
+  }
+
+  const parsed = tryParseWebtoolsUrl(trimmed);
+  if (!parsed) {
+    webtoolsUrlState.valid = false;
+    webtoolsUrlState.info = "当前输入不是有效 URL，请输入完整链接或域名";
+    webtoolsUrlState.parts = createEmptyWebtoolsUrlParts();
+    webtoolsUrlState.queryRows = [];
+    return;
+  }
+
+  const queryRows = Array.from(parsed.searchParams.entries()).map(([key, value]) => ({
+    key,
+    value
+  }));
+  const defaultPort = parsed.protocol === "https:" ? "443" : "80";
+
+  webtoolsUrlState.valid = true;
+  webtoolsUrlState.parts = {
+    protocol: parsed.protocol,
+    host: parsed.host,
+    port: parsed.port || defaultPort,
+    pathname: parsed.pathname,
+    search: parsed.search,
+    hash: parsed.hash
+  };
+  webtoolsUrlState.queryRows = queryRows;
+  webtoolsUrlState.info = `已解析 ${queryRows.length} 个查询参数`;
+}
+
+function rebuildWebtoolsUrlFromQueryRows(): boolean {
+  const parsed = tryParseWebtoolsUrl(webtoolsUrlState.input);
+  if (!parsed) {
+    webtoolsUrlState.valid = false;
+    webtoolsUrlState.info = "当前输入不是有效 URL，无法回写参数";
+    return false;
+  }
+
+  parsed.search = "";
+  for (const row of webtoolsUrlState.queryRows) {
+    if (!row.key.trim()) {
+      continue;
+    }
+    parsed.searchParams.append(row.key, row.value);
+  }
+
+  webtoolsUrlState.input = parsed.toString();
+  parseWebtoolsUrlInput(webtoolsUrlState.input);
+  return true;
+}
+
+function refreshWebtoolsUrlPartsInForm(form: HTMLFormElement): void {
+  form.querySelectorAll<HTMLInputElement>("[data-webtools-url-part]").forEach((node) => {
+    const key = node.dataset.webtoolsUrlPart as keyof WebtoolsUrlParts | undefined;
+    if (!key) {
+      return;
+    }
+    node.value = webtoolsUrlState.parts[key] ?? "";
+  });
+}
+
+function renderWebtoolsUrlQueryEditor(
+  form: HTMLFormElement,
+  host: HTMLElement,
+  inputArea: HTMLTextAreaElement
+): void {
+  host.textContent = "";
+
+  const table = document.createElement("div");
+  table.className = "webtools-url-query-table";
+
+  const header = document.createElement("div");
+  header.className = "webtools-url-query-header";
+  ["键", "值", "操作"].forEach((titleText) => {
+    const node = document.createElement("div");
+    node.textContent = titleText;
+    header.appendChild(node);
+  });
+  table.appendChild(header);
+
+  if (webtoolsUrlState.queryRows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "webtools-url-query-empty";
+    empty.textContent = "当前没有查询参数";
+    table.appendChild(empty);
+    host.appendChild(table);
+    return;
+  }
+
+  webtoolsUrlState.queryRows.forEach((row, index) => {
+    const line = document.createElement("div");
+    line.className = "webtools-url-query-row";
+
+    const keyInput = document.createElement("input");
+    keyInput.className = "settings-value webtools-tool-input";
+    keyInput.value = row.key;
+    keyInput.placeholder = "键";
+    keyInput.addEventListener("input", () => {
+      webtoolsUrlState.queryRows[index].key = keyInput.value;
+      rebuildWebtoolsUrlFromQueryRows();
+      inputArea.value = webtoolsUrlState.input;
+      refreshWebtoolsUrlPartsInForm(form);
+      refreshWebtoolsUrlInfoInForm(form);
+    });
+
+    const valueInput = document.createElement("input");
+    valueInput.className = "settings-value webtools-tool-input";
+    valueInput.value = row.value;
+    valueInput.placeholder = "值";
+    valueInput.addEventListener("input", () => {
+      webtoolsUrlState.queryRows[index].value = valueInput.value;
+      rebuildWebtoolsUrlFromQueryRows();
+      inputArea.value = webtoolsUrlState.input;
+      refreshWebtoolsUrlPartsInForm(form);
+      refreshWebtoolsUrlInfoInForm(form);
+    });
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "settings-btn settings-btn-secondary webtools-url-remove-btn";
+    removeButton.textContent = "×";
+    removeButton.addEventListener("click", () => {
+      webtoolsUrlState.queryRows.splice(index, 1);
+      rebuildWebtoolsUrlFromQueryRows();
+      inputArea.value = webtoolsUrlState.input;
+      refreshWebtoolsUrlPanelInForm(form, { rebuildQueryRows: true });
+    });
+
+    line.append(keyInput, valueInput, removeButton);
+    table.appendChild(line);
+  });
+
+  host.appendChild(table);
+}
+
+function refreshWebtoolsUrlInfoInForm(form: HTMLFormElement): void {
+  const infoNode = form.querySelector<HTMLElement>(".webtools-url-info");
+  if (!infoNode) {
+    return;
+  }
+
+  infoNode.textContent = webtoolsUrlState.info;
+  infoNode.dataset.state =
+    webtoolsUrlState.valid === false
+      ? "error"
+      : webtoolsUrlState.valid === true
+        ? "ok"
+        : "idle";
+}
+
+function refreshWebtoolsUrlPanelInForm(
+  form: HTMLFormElement,
+  options: { rebuildQueryRows?: boolean; syncInput?: boolean } = {}
+): void {
+  const inputArea = form.elements.namedItem("webtoolsUrlInput");
+  if (inputArea instanceof HTMLTextAreaElement && options.syncInput) {
+    inputArea.value = webtoolsUrlState.input;
+  }
+
+  refreshWebtoolsUrlPartsInForm(form);
+  refreshWebtoolsUrlInfoInForm(form);
+
+  if (options.rebuildQueryRows) {
+    const queryHost = form.querySelector<HTMLElement>(".webtools-url-query-host");
+    const textarea = form.elements.namedItem("webtoolsUrlInput");
+    if (queryHost && textarea instanceof HTMLTextAreaElement) {
+      renderWebtoolsUrlQueryEditor(form, queryHost, textarea);
+    }
+  }
+}
+
+function createWebtoolsUrlPartField(
+  labelText: string,
+  partKey: keyof WebtoolsUrlParts,
+  full = false
+): HTMLLabelElement {
+  const field = document.createElement("label");
+  field.className = full ? "webtools-url-part webtools-url-part-full" : "webtools-url-part";
+
+  const label = document.createElement("div");
+  label.className = "webtools-url-part-label";
+  label.textContent = labelText;
+  const input = document.createElement("input");
+  input.className = "settings-value webtools-tool-input webtools-url-part-input";
+  input.readOnly = true;
+  input.dataset.webtoolsUrlPart = partKey;
+  field.append(label, input);
+  return field;
+}
+
+function buildWebtoolsTimestampTarget(
+  action: "toDate" | "toTimestamp",
+  input: string
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("input", input);
+  params.set("unit", webtoolsTimestampUnit);
+  return `command:plugin:${WEBTOOLS_TIMESTAMP_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsTimestampResultInForm(form: HTMLFormElement): void {
+  const dateOutputNode = form.elements.namedItem("webtoolsTimestampDateOutput");
+  if (dateOutputNode instanceof HTMLInputElement) {
+    dateOutputNode.value = webtoolsTimestampDateOutput;
+  }
+
+  const tsOutputNode = form.elements.namedItem("webtoolsTimestampTimestampOutput");
+  if (tsOutputNode instanceof HTMLInputElement) {
+    tsOutputNode.value = webtoolsTimestampTimestampOutput;
+  }
+
+  const infoNode = form.querySelector(".webtools-timestamp-info-value");
+  if (infoNode instanceof HTMLSpanElement) {
+    infoNode.textContent = webtoolsTimestampInfo || "-";
+  }
+
+  const tsUnitNode = form.querySelector("[data-webtools-timestamp-unit-label]");
+  if (tsUnitNode instanceof HTMLSpanElement) {
+    tsUnitNode.textContent = webtoolsTimestampUnit === "s" ? "秒 (s)" : "毫秒 (ms)";
+  }
+}
+
+function refreshWebtoolsPasswordResultInForm(form: HTMLFormElement): void {
+  const host = form.querySelector(".webtools-password-result-host");
+  if (!(host instanceof HTMLDivElement)) {
+    return;
+  }
+  host.replaceChildren(createWebtoolsPasswordResultTable(webtoolsPasswordRows));
+  form.dispatchEvent(new CustomEvent("webtools-password-sync"));
+}
+
+async function generateFromWebtoolsPasswordPanel(
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("妗ユ帴灞傛湭鍔犺浇锛屾棤娉曠敓鎴愬瘑鐮?");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  const lengthNode = form.elements.namedItem("webtoolsLength");
+  const countNode = form.elements.namedItem("webtoolsCount");
+  const lowerNode = form.elements.namedItem("webtoolsLowercase");
+  const upperNode = form.elements.namedItem("webtoolsUppercase");
+  const digitsNode = form.elements.namedItem("webtoolsDigits");
+  const symbolsNode = form.elements.namedItem("webtoolsSymbols");
+  const symbolCharsNode = form.elements.namedItem("webtoolsSymbolChars");
+  const excludeSimilarNode = form.elements.namedItem("webtoolsExcludeSimilar");
+  const readNumberField = (
+    node: Element | RadioNodeList | null,
+    fallback: number
+  ): number => {
+    if (node instanceof HTMLInputElement || node instanceof HTMLSelectElement) {
+      const parsed = Number(node.value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return fallback;
+  };
+
+  const inputOptions: Partial<WebtoolsPasswordOptions> = {
+    length: readNumberField(lengthNode, webtoolsPasswordOptions.length),
+    count: readNumberField(countNode, webtoolsPasswordOptions.count),
+    includeLowercase: lowerNode instanceof HTMLInputElement ? lowerNode.checked : undefined,
+    includeUppercase: upperNode instanceof HTMLInputElement ? upperNode.checked : undefined,
+    includeDigits: digitsNode instanceof HTMLInputElement ? digitsNode.checked : undefined,
+    includeSymbols: symbolsNode instanceof HTMLInputElement ? symbolsNode.checked : undefined,
+    symbolChars:
+      symbolCharsNode instanceof HTMLInputElement
+        ? symbolCharsNode.value
+        : undefined,
+    excludeSimilar:
+      excludeSimilarNode instanceof HTMLInputElement
+        ? excludeSimilarNode.checked
+        : undefined
+  };
+
+  const normalized = normalizeWebtoolsPasswordOptions(
+    inputOptions,
+    webtoolsPasswordOptions
+  );
+  webtoolsPasswordOptions = normalized;
+  const requestToken = ++webtoolsPasswordRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_PASSWORD_PLUGIN_ID}`,
+    type: "command",
+    title: "瀵嗙爜宸ュ叿",
+    subtitle: "闈㈡澘鐢熸垚",
+    target: buildWebtoolsPasswordGenerateTarget(normalized),
+    keywords: ["plugin", "password", "pwd", "瀵嗙爜", "闅忔満瀵嗙爜"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsPasswordRequestToken) {
+    return;
+  }
+  if (!result.ok) {
+    setStatus(result.message ?? "瀵嗙爜鐢熸垚澶辫触");
+    return;
+  }
+
+  webtoolsPasswordRows = extractWebtoolsPasswordRows(result);
+  setStatus("瀵嗙爜宸茬敓鎴?");
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+
+  refreshWebtoolsPasswordResultInForm(form);
+}
+
+function scheduleWebtoolsTimestampAutoConvert(
+  form: HTMLFormElement,
+  action: "toDate" | "toTimestamp",
+  immediate = false
+): void {
+  clearWebtoolsTimestampAutoTimer();
+
+  webtoolsTimestampAutoTimer = window.setTimeout(() => {
+    webtoolsTimestampAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const input =
+      action === "toDate" ? webtoolsTimestampUnixInput : webtoolsTimestampDateInput;
+    if (!input.trim()) {
+      if (action === "toDate") {
+        webtoolsTimestampDateOutput = "";
+      } else {
+        webtoolsTimestampTimestampOutput = "";
+      }
+      webtoolsTimestampInfo = "等待输入";
+      refreshWebtoolsTimestampResultInForm(form);
+      return;
+    }
+
+    void executeWebtoolsTimestampAction(action, input, { render: false, form });
+  }, immediate ? 0 : 220);
+}
+
+function normalizeWebtoolsTimestampUnit(value: unknown): "s" | "ms" {
+  return value === "ms" ? "ms" : "s";
+}
+
+function formatWebtoolsTimestampDate(value: Date): string {
+  const yyyy = String(value.getFullYear());
+  const mm = String(value.getMonth() + 1).padStart(2, "0");
+  const dd = String(value.getDate()).padStart(2, "0");
+  const hh = String(value.getHours()).padStart(2, "0");
+  const mi = String(value.getMinutes()).padStart(2, "0");
+  const ss = String(value.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function getWebtoolsTimestampNowUnix(unit: "s" | "ms"): string {
+  const nowMs = Date.now();
+  if (unit === "ms") {
+    return String(nowMs);
+  }
+  return String(Math.floor(nowMs / 1000));
+}
+
+function clearWebtoolsTimestampAutoTimer(): void {
+  if (webtoolsTimestampAutoTimer !== null) {
+    window.clearTimeout(webtoolsTimestampAutoTimer);
+    webtoolsTimestampAutoTimer = null;
+  }
+}
+
+function clearWebtoolsTimestampClockTimer(): void {
+  if (webtoolsTimestampClockTimer !== null) {
+    window.clearInterval(webtoolsTimestampClockTimer);
+    webtoolsTimestampClockTimer = null;
+  }
+}
+
+function ensureWebtoolsTimestampDefaults(): void {
+  if (!webtoolsTimestampDateInput.trim()) {
+    webtoolsTimestampDateInput = formatWebtoolsTimestampDate(new Date());
+  }
+  if (!webtoolsTimestampUnixInput.trim()) {
+    webtoolsTimestampUnixInput = getWebtoolsTimestampNowUnix(webtoolsTimestampUnit);
+  }
+}
+
+async function executeWebtoolsTimestampAction(
+  action: "toDate" | "toTimestamp",
+  input: string,
+  options: { render?: boolean; form?: HTMLFormElement } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行时间戳工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  if (action === "toDate") {
+    webtoolsTimestampUnixInput = input;
+  } else {
+    webtoolsTimestampDateInput = input;
+  }
+
+  const requestToken =
+    action === "toDate"
+      ? ++webtoolsTimestampToDateRequestToken
+      : ++webtoolsTimestampToTimestampRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_TIMESTAMP_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "时间戳工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsTimestampTarget(action, input),
+    keywords: ["plugin", "timestamp", "time", "date", "时间戳", "日期", "转换"]
+  };
+
+  const result = await launcher.execute(item);
+  if (
+    (action === "toDate" && requestToken !== webtoolsTimestampToDateRequestToken) ||
+    (action === "toTimestamp" &&
+      requestToken !== webtoolsTimestampToTimestampRequestToken)
+  ) {
+    return;
+  }
+
+  const data = toRecord(result.data);
+  if (data && typeof data.unit === "string") {
+    webtoolsTimestampUnit = normalizeWebtoolsTimestampUnit(data.unit);
+  }
+
+  if (action === "toDate") {
+    webtoolsTimestampDateOutput =
+      (data && typeof data.date === "string" && data.date) ||
+      (data && typeof data.output === "string" && data.output) ||
+      "";
+    if (!result.ok) {
+      webtoolsTimestampDateOutput = "";
+    }
+  } else {
+    webtoolsTimestampTimestampOutput =
+      (data && typeof data.timestamp === "string" && data.timestamp) ||
+      (data && typeof data.output === "string" && data.output) ||
+      "";
+    if (!result.ok) {
+      webtoolsTimestampTimestampOutput = "";
+    }
+  }
+
+  webtoolsTimestampInfo =
+    (data && typeof data.info === "string" && data.info) || result.message || "";
+
+  setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  if (options.form) {
+    refreshWebtoolsTimestampResultInForm(options.form);
+  }
 }
 
 function buildWebtoolsUaTarget(ua: string): string {
@@ -6358,7 +10062,1722 @@ async function executeWebtoolsPortHelperAction(
   }
 }
 
+function buildWebtoolsJwtTarget(action: "parse" | "sign" | "verify"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("mode", webtoolsJwtMode);
+  params.set("algorithm", webtoolsJwtAlgorithm);
+  params.set("jweAlg", webtoolsJwtJweAlg);
+  params.set("jweEnc", webtoolsJwtJweEnc);
+  params.set("token", webtoolsJwtToken);
+  params.set("header", webtoolsJwtHeader);
+  params.set("payload", webtoolsJwtPayload);
+  params.set("secret", webtoolsJwtSecret);
+  return `command:plugin:${WEBTOOLS_JWT_PLUGIN_ID}?${params.toString()}`;
+}
+
+function getWebtoolsJwtSecretLabel(mode: "jws" | "jwe", algorithm: "HS256" | "RS256"): string {
+  if (mode === "jwe") {
+    return "密钥 / 解密密钥";
+  }
+  if (algorithm === "RS256") {
+    return "密钥 / PEM 密钥";
+  }
+  return "密钥 / Secret";
+}
+
+function getWebtoolsJwtSecretPlaceholder(
+  mode: "jws" | "jwe",
+  algorithm: "HS256" | "RS256",
+  jweAlg: "dir" | "A256KW"
+): string {
+  if (mode === "jwe") {
+    return jweAlg === "A256KW"
+      ? "输入 A256KW 密钥，生成与解密都使用同一包装密钥"
+      : "输入 JWE Secret，系统会按长度自动补零/截断";
+  }
+  if (algorithm === "RS256") {
+    return "签名时填 PKCS8 私钥，解析/校验时填 SPKI 公钥";
+  }
+  return "输入 HS256 Secret";
+}
+
+function getWebtoolsJwtStatusContent(): {
+  text: string;
+  state: "ok" | "error" | "idle";
+} {
+  if (webtoolsJwtVerified === true) {
+    return {
+      text: webtoolsJwtMode === "jwe" ? "解密 / 校验通过" : "签名验证通过",
+      state: "ok"
+    };
+  }
+  if (webtoolsJwtVerified === false) {
+    return {
+      text: webtoolsJwtMode === "jwe" ? "解密 / 校验失败" : "签名验证失败",
+      state: "error"
+    };
+  }
+  if (webtoolsJwtInfo.trim()) {
+    return {
+      text: webtoolsJwtInfo,
+      state: "idle"
+    };
+  }
+  return {
+    text: "等待输入 Token 或编辑 Header / Payload",
+    state: "idle"
+  };
+}
+
+function refreshWebtoolsJwtModeUi(form: HTMLFormElement): void {
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const mode = modeNode instanceof HTMLInputElement && modeNode.value === "jwe" ? "jwe" : "jws";
+
+  const jwsBtn = form.querySelector('.webtools-jwt-mode-btn[data-mode=\"jws\"]');
+  const jweBtn = form.querySelector('.webtools-jwt-mode-btn[data-mode=\"jwe\"]');
+  if (jwsBtn instanceof HTMLButtonElement) {
+    jwsBtn.classList.toggle("active", mode === "jws");
+  }
+  if (jweBtn instanceof HTMLButtonElement) {
+    jweBtn.classList.toggle("active", mode === "jwe");
+  }
+
+  const jwsControls = form.querySelector(".webtools-jwt-jws-controls");
+  const jweControls = form.querySelector(".webtools-jwt-jwe-controls");
+  if (jwsControls instanceof HTMLDivElement) {
+    jwsControls.style.display = mode === "jws" ? "" : "none";
+  }
+  if (jweControls instanceof HTMLDivElement) {
+    jweControls.style.display = mode === "jwe" ? "" : "none";
+  }
+
+  const secretLabelNode = form.querySelector(".webtools-jwt-secret-caption");
+  if (secretLabelNode instanceof HTMLSpanElement) {
+    secretLabelNode.textContent = getWebtoolsJwtSecretLabel(mode, webtoolsJwtAlgorithm);
+  }
+
+  const secretInput = form.elements.namedItem("webtoolsJwtSecret");
+  if (secretInput instanceof HTMLInputElement) {
+    secretInput.placeholder = getWebtoolsJwtSecretPlaceholder(
+      mode,
+      webtoolsJwtAlgorithm,
+      webtoolsJwtJweAlg
+    );
+  }
+}
+
+function refreshWebtoolsJwtResultInForm(form: HTMLFormElement): void {
+  const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+  const headerNode = form.elements.namedItem("webtoolsJwtHeader");
+  const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
+  const secretNode = form.elements.namedItem("webtoolsJwtSecret");
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const algorithmNode = form.elements.namedItem("webtoolsJwtAlgorithm");
+  const jweAlgNode = form.elements.namedItem("webtoolsJwtJweAlg");
+  const jweEncNode = form.elements.namedItem("webtoolsJwtJweEnc");
+
+  if (tokenNode instanceof HTMLTextAreaElement) {
+    tokenNode.value = webtoolsJwtToken;
+  }
+  if (headerNode instanceof HTMLTextAreaElement) {
+    headerNode.value = webtoolsJwtHeader;
+  }
+  if (payloadNode instanceof HTMLTextAreaElement) {
+    payloadNode.value = webtoolsJwtPayload;
+  }
+  if (secretNode instanceof HTMLInputElement) {
+    secretNode.value = webtoolsJwtSecret;
+  }
+  if (modeNode instanceof HTMLInputElement) {
+    modeNode.value = webtoolsJwtMode;
+  }
+  if (algorithmNode instanceof HTMLSelectElement) {
+    algorithmNode.value = webtoolsJwtAlgorithm;
+  }
+  if (jweAlgNode instanceof HTMLSelectElement) {
+    jweAlgNode.value = webtoolsJwtJweAlg;
+  }
+  if (jweEncNode instanceof HTMLSelectElement) {
+    jweEncNode.value = webtoolsJwtJweEnc;
+  }
+  refreshWebtoolsJwtModeUi(form);
+
+  const status = getWebtoolsJwtStatusContent();
+  const statusNode = form.querySelector(".webtools-jwt-status");
+  if (statusNode instanceof HTMLDivElement) {
+    statusNode.dataset.state = status.state;
+  }
+  const statusTextNode = form.querySelector(".webtools-jwt-status-text");
+  if (statusTextNode instanceof HTMLSpanElement) {
+    statusTextNode.textContent = status.text;
+  }
+
+  const copyButton = form.querySelector(".webtools-jwt-copy-btn");
+  if (copyButton instanceof HTMLButtonElement) {
+    copyButton.disabled = webtoolsJwtToken.trim().length === 0;
+  }
+
+  const infoNode = form.querySelector(".webtools-jwt-info");
+  if (infoNode instanceof HTMLDivElement) {
+    infoNode.textContent = webtoolsJwtInfo;
+    infoNode.style.display =
+      webtoolsJwtInfo && webtoolsJwtInfo !== status.text ? "" : "none";
+  }
+}
+
+function scheduleWebtoolsJwtAutoParse(form: HTMLFormElement, immediate = false): void {
+  if (webtoolsJwtAutoTimer !== null) {
+    window.clearTimeout(webtoolsJwtAutoTimer);
+  }
+
+  webtoolsJwtAutoTimer = window.setTimeout(() => {
+    webtoolsJwtAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+    if (!(tokenNode instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (tokenNode.value.trim().length === 0) {
+      webtoolsJwtToken = "";
+      webtoolsJwtVerified = null;
+      webtoolsJwtInfo = "";
+      refreshWebtoolsJwtResultInForm(form);
+      setStatus("就绪");
+      return;
+    }
+
+    void executeWebtoolsJwtAction("parse", form, { render: false });
+  }, immediate ? 0 : 260);
+}
+
+function scheduleWebtoolsJwtAutoSign(form: HTMLFormElement, immediate = false): void {
+  if (webtoolsJwtSignTimer !== null) {
+    window.clearTimeout(webtoolsJwtSignTimer);
+  }
+
+  webtoolsJwtSignTimer = window.setTimeout(() => {
+    webtoolsJwtSignTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const headerNode = form.elements.namedItem("webtoolsJwtHeader");
+    const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
+    const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+
+    const hasHeader = headerNode instanceof HTMLTextAreaElement && headerNode.value.trim().length > 0;
+    const hasPayload =
+      payloadNode instanceof HTMLTextAreaElement && payloadNode.value.trim().length > 0;
+    const hasToken = tokenNode instanceof HTMLTextAreaElement && tokenNode.value.trim().length > 0;
+
+    if (!hasHeader && !hasPayload && !hasToken) {
+      return;
+    }
+
+    void executeWebtoolsJwtAction("sign", form, { render: false });
+  }, immediate ? 0 : 280);
+}
+
+async function executeWebtoolsJwtAction(
+  action: "parse" | "sign" | "verify",
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 JWT 工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  const tokenNode = form.elements.namedItem("webtoolsJwtToken");
+  const headerNode = form.elements.namedItem("webtoolsJwtHeader");
+  const payloadNode = form.elements.namedItem("webtoolsJwtPayload");
+  const secretNode = form.elements.namedItem("webtoolsJwtSecret");
+  const modeNode = form.elements.namedItem("webtoolsJwtMode");
+  const algorithmNode = form.elements.namedItem("webtoolsJwtAlgorithm");
+  const jweAlgNode = form.elements.namedItem("webtoolsJwtJweAlg");
+  const jweEncNode = form.elements.namedItem("webtoolsJwtJweEnc");
+
+  webtoolsJwtToken = tokenNode instanceof HTMLTextAreaElement ? tokenNode.value : "";
+  webtoolsJwtHeader =
+    headerNode instanceof HTMLTextAreaElement ? headerNode.value : "";
+  webtoolsJwtPayload =
+    payloadNode instanceof HTMLTextAreaElement ? payloadNode.value : "";
+  webtoolsJwtSecret = secretNode instanceof HTMLInputElement ? secretNode.value : "";
+  webtoolsJwtMode = modeNode instanceof HTMLInputElement && modeNode.value === "jwe" ? "jwe" : "jws";
+  webtoolsJwtAlgorithm =
+    algorithmNode instanceof HTMLSelectElement && algorithmNode.value === "RS256"
+      ? "RS256"
+      : "HS256";
+  webtoolsJwtJweAlg =
+    jweAlgNode instanceof HTMLSelectElement && jweAlgNode.value === "A256KW"
+      ? "A256KW"
+      : "dir";
+  webtoolsJwtJweEnc =
+    jweEncNode instanceof HTMLSelectElement && jweEncNode.value === "A128GCM"
+      ? "A128GCM"
+      : "A256GCM";
+  if (!webtoolsJwtSecret.trim()) {
+    webtoolsJwtSecret = WEBTOOLS_JWT_DEFAULT_SECRET;
+  }
+  const requestToken = ++webtoolsJwtRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_JWT_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "JWT 工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsJwtTarget(action),
+    keywords: ["plugin", "jwt", "token", "verify", "sign", "鉴权"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsJwtRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+
+  if (data && typeof data.token === "string") {
+    webtoolsJwtToken = data.token;
+  }
+  if (data && typeof data.header === "string") {
+    webtoolsJwtHeader = data.header;
+  }
+  if (data && typeof data.payload === "string") {
+    webtoolsJwtPayload = data.payload;
+  }
+  if (data && typeof data.mode === "string") {
+    webtoolsJwtMode = data.mode === "jwe" ? "jwe" : "jws";
+  }
+  if (data && typeof data.algorithm === "string") {
+    webtoolsJwtAlgorithm = data.algorithm === "RS256" ? "RS256" : "HS256";
+  }
+  if (data && typeof data.jweAlg === "string") {
+    webtoolsJwtJweAlg = data.jweAlg === "A256KW" ? "A256KW" : "dir";
+  }
+  if (data && typeof data.jweEnc === "string") {
+    webtoolsJwtJweEnc = data.jweEnc === "A128GCM" ? "A128GCM" : "A256GCM";
+  }
+  webtoolsJwtVerified =
+    data && typeof data.verified === "boolean" ? data.verified : null;
+  webtoolsJwtInfo =
+    data && typeof data.info === "string" ? data.info : "";
+
+  setStatus(result.message ?? (result.ok ? "执行完成" : "执行失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsJwtResultInForm(form);
+}
+
+function buildWebtoolsPasswordGenerateTarget(
+  options: WebtoolsPasswordOptions
+): string {
+  const params = new URLSearchParams();
+  params.set("action", "generate");
+  params.set("copy", "0");
+  params.set("length", String(options.length));
+  params.set("count", String(options.count));
+  params.set("lower", options.includeLowercase ? "1" : "0");
+  params.set("upper", options.includeUppercase ? "1" : "0");
+  params.set("digits", options.includeDigits ? "1" : "0");
+  params.set("symbols", options.includeSymbols ? "1" : "0");
+  params.set("symbolChars", options.symbolChars);
+  params.set("excludeSimilar", options.excludeSimilar ? "1" : "0");
+  return `command:plugin:${WEBTOOLS_PASSWORD_PLUGIN_ID}?${params.toString()}`;
+}
+
+function extractWebtoolsPasswordOptionsFromUnknown(
+  value: unknown
+): Partial<WebtoolsPasswordOptions> {
+  const record = toRecord(value);
+  if (!record) {
+    return {};
+  }
+
+  return {
+    length: typeof record.length === "number" ? record.length : undefined,
+    count: typeof record.count === "number" ? record.count : undefined,
+    includeLowercase:
+      typeof record.includeLowercase === "boolean"
+        ? record.includeLowercase
+        : undefined,
+    includeUppercase:
+      typeof record.includeUppercase === "boolean"
+        ? record.includeUppercase
+        : undefined,
+    includeDigits:
+      typeof record.includeDigits === "boolean" ? record.includeDigits : undefined,
+    includeSymbols:
+      typeof record.includeSymbols === "boolean" ? record.includeSymbols : undefined,
+    symbolChars:
+      typeof record.symbolChars === "string" ? record.symbolChars : undefined,
+    excludeSimilar:
+      typeof record.excludeSimilar === "boolean"
+        ? record.excludeSimilar
+        : undefined
+  };
+}
+
+function normalizeWebtoolsPasswordOptions(
+  inputOptions: Partial<WebtoolsPasswordOptions>,
+  base: WebtoolsPasswordOptions = webtoolsPasswordOptions
+): WebtoolsPasswordOptions {
+  let includeLowercase =
+    typeof inputOptions.includeLowercase === "boolean"
+      ? inputOptions.includeLowercase
+      : base.includeLowercase;
+  let includeUppercase =
+    typeof inputOptions.includeUppercase === "boolean"
+      ? inputOptions.includeUppercase
+      : base.includeUppercase;
+  let includeDigits =
+    typeof inputOptions.includeDigits === "boolean"
+      ? inputOptions.includeDigits
+      : base.includeDigits;
+  const includeSymbols =
+    typeof inputOptions.includeSymbols === "boolean"
+      ? inputOptions.includeSymbols
+      : base.includeSymbols;
+  const excludeSimilar =
+    typeof inputOptions.excludeSimilar === "boolean"
+      ? inputOptions.excludeSimilar
+      : base.excludeSimilar;
+
+  if (!includeLowercase && !includeUppercase && !includeDigits && !includeSymbols) {
+    includeLowercase = true;
+    includeUppercase = true;
+    includeDigits = true;
+  }
+
+  const symbolCharsRaw =
+    typeof inputOptions.symbolChars === "string"
+      ? inputOptions.symbolChars
+      : base.symbolChars;
+  const symbolChars = (symbolCharsRaw || WEBTOOLS_PASSWORD_DEFAULT_SYMBOLS).trim();
+
+  const selectedGroupsCount =
+    Number(includeLowercase) +
+    Number(includeUppercase) +
+    Number(includeDigits) +
+    Number(includeSymbols);
+  const requiredLength = Math.max(1, selectedGroupsCount);
+  const length = Math.max(
+    requiredLength,
+    clampPasswordLength(inputOptions.length ?? base.length, base.length)
+  );
+
+  return {
+    length,
+    count: clampWebtoolsPasswordCount(inputOptions.count ?? base.count, base.count),
+    includeLowercase,
+    includeUppercase,
+    includeDigits,
+    includeSymbols,
+    symbolChars,
+    excludeSimilar
+  };
+}
+
+function normalizeStrength(value: string | undefined): WebtoolsPasswordResultRow["strength"] {
+  if (value === "弱" || value === "中" || value === "强" || value === "很强") {
+    return value;
+  }
+  return "中";
+}
+
+function extractWebtoolsPasswordRows(result: ExecuteResult): WebtoolsPasswordResultRow[] {
+  const rawRows = result.data?.rows;
+  if (Array.isArray(rawRows)) {
+    const parsed: WebtoolsPasswordResultRow[] = [];
+    for (const item of rawRows) {
+      const record = toRecord(item);
+      if (!record) {
+        continue;
+      }
+
+      if (typeof record.password !== "string") {
+        continue;
+      }
+
+      const password = record.password.trim();
+      if (!password) {
+        continue;
+      }
+
+      parsed.push({
+        password,
+        strength: normalizeStrength(
+          typeof record.strength === "string" ? record.strength : undefined
+        )
+      });
+    }
+
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  return extractGeneratedPasswords(result).map((password) => ({
+    password,
+    strength: "中"
+  }));
+}
+
+function parseWebtoolsJsonPreviewSummary(value: unknown): WebtoolsJsonPreviewSummary | null {
+  const record = toRecord(value);
+  if (!record || typeof record.summary !== "string" || typeof record.kind !== "string") {
+    return null;
+  }
+
+  const fields = Array.isArray(record.fields)
+    ? record.fields
+        .map((item) => {
+          const field = toRecord(item);
+          if (!field || typeof field.key !== "string") {
+            return null;
+          }
+          const nextField: WebtoolsJsonPreviewField = {
+            key: field.key,
+          };
+          if (typeof field.count === "number") {
+            nextField.count = field.count;
+          }
+          return nextField;
+        })
+        .filter((item): item is WebtoolsJsonPreviewField => item !== null)
+    : [];
+
+  const sampleRows = Array.isArray(record.sampleRows)
+    ? record.sampleRows
+        .map((item) => toRecord(item))
+        .filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+
+  if (
+    record.kind !== "json-object" &&
+    record.kind !== "json-array" &&
+    record.kind !== "csv" &&
+    record.kind !== "text" &&
+    record.kind !== "escaped" &&
+    record.kind !== "unknown"
+  ) {
+    return null;
+  }
+
+  return {
+    kind: record.kind,
+    summary: record.summary,
+    fields,
+    sampleRows
+  };
+}
+
+function createWebtoolsPasswordResultTable(
+  rows: WebtoolsPasswordResultRow[]
+): HTMLDivElement {
+  const outputRow = document.createElement("div");
+  outputRow.className = "password-output-row";
+
+  const outputLabel = document.createElement("div");
+  outputLabel.className = "settings-row-label";
+  outputLabel.textContent = "生成结果";
+
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "webtools-password-table-wrap";
+
+  if (rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "password-result-empty";
+    empty.textContent = "点击“生成密码”后，结果会显示在这里";
+    tableWrap.appendChild(empty);
+    outputRow.append(outputLabel, tableWrap);
+    return outputRow;
+  }
+
+  const table = document.createElement("table");
+  table.className = "webtools-password-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["#", "密码", "强度", ""].forEach((title) => {
+    const th = document.createElement("th");
+    th.textContent = title;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbody = document.createElement("tbody");
+  rows.forEach((row, index) => {
+    const tr = document.createElement("tr");
+
+    const indexCell = document.createElement("td");
+    indexCell.textContent = String(index + 1);
+
+    const passwordCell = document.createElement("td");
+    passwordCell.className = "webtools-password-cell-value";
+    passwordCell.textContent = row.password;
+    passwordCell.title = row.password;
+
+    const strengthCell = document.createElement("td");
+    const strengthBadge = document.createElement("span");
+    strengthBadge.className = "webtools-password-strength";
+    if (row.strength === "弱") {
+      strengthBadge.classList.add("webtools-password-strength-weak");
+    } else if (row.strength === "中") {
+      strengthBadge.classList.add("webtools-password-strength-medium");
+    } else if (row.strength === "强") {
+      strengthBadge.classList.add("webtools-password-strength-strong");
+    } else {
+      strengthBadge.classList.add("webtools-password-strength-very-strong");
+    }
+    strengthBadge.textContent = row.strength;
+    strengthCell.appendChild(strengthBadge);
+
+    const actionCell = document.createElement("td");
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary webtools-password-copy-btn";
+    copyButton.textContent = "复制";
+    copyButton.addEventListener("click", () => {
+      void (async () => {
+        const copied = await copyTextToClipboard(row.password);
+        if (copied) {
+          setStatus(`已复制第 ${index + 1} 条密码`);
+          return;
+        }
+        setStatus("复制失败，请手动复制");
+      })();
+    });
+    actionCell.appendChild(copyButton);
+
+    tr.append(indexCell, passwordCell, strengthCell, actionCell);
+    tbody.appendChild(tr);
+  });
+
+  table.append(thead, tbody);
+  tableWrap.appendChild(table);
+  outputRow.append(outputLabel, tableWrap);
+  return outputRow;
+}
+
+function buildWebtoolsJsonTarget(action: "convert" | "validate" = "convert"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("input", webtoolsJsonState.input);
+  params.set("sourceFormat", webtoolsJsonState.sourceFormat);
+  params.set("targetFormat", webtoolsJsonState.targetFormat);
+  params.set("compressed", webtoolsJsonState.compressed ? "1" : "0");
+  return `command:plugin:${WEBTOOLS_JSON_PLUGIN_ID}?${params.toString()}`;
+}
+
+function buildWebtoolsJsonInfoState(): {
+  text: string;
+  state: "ok" | "error" | "idle";
+} {
+  if (webtoolsJsonState.valid === true) {
+    return {
+      text: `校验通过${webtoolsJsonState.info ? ` · ${webtoolsJsonState.info}` : ""}`,
+      state: "ok"
+    };
+  }
+  if (webtoolsJsonState.valid === false) {
+    return {
+      text: `处理失败${webtoolsJsonState.info ? ` · ${webtoolsJsonState.info}` : ""}`,
+      state: "error"
+    };
+  }
+  return {
+    text: webtoolsJsonState.info || "请选择格式并输入，结果会自动转换",
+    state: "idle"
+  };
+}
+
+function refreshWebtoolsJsonResultInForm(form: HTMLFormElement): void {
+  const outputNode = form.elements.namedItem("webtoolsJsonOutput");
+  if (outputNode instanceof HTMLTextAreaElement) {
+    outputNode.value = webtoolsJsonState.output;
+  }
+
+  const inputMetaNode = form.querySelector<HTMLElement>(".webtools-json-input-meta");
+  if (inputMetaNode) {
+    inputMetaNode.textContent = webtoolsJsonState.sourceFormat.toUpperCase();
+  }
+
+  const outputMetaNode = form.querySelector<HTMLElement>(".webtools-json-output-meta");
+  if (outputMetaNode) {
+    outputMetaNode.textContent = webtoolsJsonState.targetFormat.toUpperCase();
+  }
+
+  const errorNode = form.querySelector<HTMLDivElement>(".webtools-json-error");
+  if (errorNode) {
+    const hasError = webtoolsJsonState.valid === false && Boolean(webtoolsJsonState.info);
+    const positionText =
+      hasError && typeof webtoolsJsonState.errorPosition === "number"
+        ? `（位置 ${webtoolsJsonState.errorPosition}）`
+        : "";
+    errorNode.textContent = hasError ? `${webtoolsJsonState.info}${positionText}` : "";
+    errorNode.hidden = !hasError;
+  }
+
+  const infoNode = form.querySelector(".webtools-json-info");
+  if (infoNode instanceof HTMLDivElement) {
+    const infoState = buildWebtoolsJsonInfoState();
+    infoNode.textContent = infoState.text;
+    infoNode.dataset.state = infoState.state;
+  }
+
+  form.dispatchEvent(new CustomEvent("webtools-json-sync"));
+}
+
+function scheduleWebtoolsJsonAutoConvert(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsJsonAutoTimer !== null) {
+    window.clearTimeout(webtoolsJsonAutoTimer);
+  }
+
+  webtoolsJsonAutoTimer = window.setTimeout(() => {
+    webtoolsJsonAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+    void executeWebtoolsJsonConvert(form, { render: false });
+  }, immediate ? 0 : 220);
+}
+
+async function executeWebtoolsJsonConvert(
+  form: HTMLFormElement,
+  options: { render?: boolean; action?: "convert" | "validate" } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 JSON 工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+  const action = options.action ?? "convert";
+
+  const inputNode = form.elements.namedItem("webtoolsJsonInput");
+  const sourceNode = form.elements.namedItem("webtoolsJsonSource");
+  const targetNode = form.elements.namedItem("webtoolsJsonTarget");
+  const compressedNode = form.elements.namedItem("webtoolsJsonCompressed");
+
+  webtoolsJsonState.input =
+    inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
+  webtoolsJsonState.sourceFormat =
+    sourceNode instanceof HTMLSelectElement &&
+    (sourceNode.value === "json" ||
+      sourceNode.value === "csv" ||
+      sourceNode.value === "text" ||
+      sourceNode.value === "escaped")
+      ? sourceNode.value
+      : "text";
+  webtoolsJsonState.targetFormat =
+    targetNode instanceof HTMLSelectElement &&
+    (targetNode.value === "json" ||
+      targetNode.value === "csv" ||
+      targetNode.value === "text" ||
+      targetNode.value === "escaped")
+      ? targetNode.value
+      : "json";
+  webtoolsJsonState.compressed =
+    compressedNode instanceof HTMLInputElement ? compressedNode.checked : false;
+  const requestToken = ++webtoolsJsonRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_JSON_PLUGIN_ID}:convert`,
+    type: "command",
+    title: "JSON 工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsJsonTarget(action),
+    keywords: ["plugin", "json", "csv", "format", "convert", "实验室"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsJsonRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+
+  if (action !== "validate") {
+    webtoolsJsonState.output =
+      data && typeof data.output === "string" ? data.output : "";
+  }
+  webtoolsJsonState.info =
+    data && typeof data.info === "string" ? data.info : "";
+  webtoolsJsonState.valid =
+    data && typeof data.valid === "boolean" ? data.valid : null;
+  webtoolsJsonState.preview = parseWebtoolsJsonPreviewSummary(data?.preview);
+  webtoolsJsonState.errorPosition =
+    data && typeof data.errorPosition === "number" ? data.errorPosition : null;
+  const availableFields = new Set(
+    (webtoolsJsonState.preview?.fields ?? []).map((field) => field.key)
+  );
+  webtoolsJsonState.selectedFields = webtoolsJsonState.selectedFields.filter((field) =>
+    availableFields.has(field)
+  );
+
+  setStatus(result.message ?? (result.ok ? "转换完成" : "转换失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsJsonResultInForm(form);
+}
+
+function escapeWebtoolsRegexHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function sanitizeWebtoolsRegexFlags(flags: string): string {
+  const normalized = flags
+    .split("")
+    .filter((flag, index, list) => list.indexOf(flag) === index)
+    .filter((flag) => WEBTOOLS_REGEX_SAFE_FLAGS.includes(flag))
+    .join("");
+
+  return normalized || "g";
+}
+
+function refreshWebtoolsRegexState(): void {
+  webtoolsRegexFlags = sanitizeWebtoolsRegexFlags(webtoolsRegexFlags);
+  webtoolsRegexRows = [];
+  webtoolsRegexInfo = "";
+  webtoolsRegexError = "";
+  webtoolsRegexHighlightedHtml = escapeWebtoolsRegexHtml(webtoolsRegexInput);
+  webtoolsRegexOutput = "";
+
+  if (!webtoolsRegexInput) {
+    webtoolsRegexInfo = "请输入测试文本";
+    return;
+  }
+
+  if (!webtoolsRegexPattern.trim()) {
+    webtoolsRegexInfo = "请输入正则表达式";
+    return;
+  }
+
+  try {
+    const directRegex = new RegExp(webtoolsRegexPattern, webtoolsRegexFlags);
+    const searchFlags = webtoolsRegexFlags.includes("g")
+      ? webtoolsRegexFlags
+      : sanitizeWebtoolsRegexFlags(`${webtoolsRegexFlags}g`);
+    const searchRegex = new RegExp(webtoolsRegexPattern, searchFlags);
+    const rows: WebtoolsRegexMatchRow[] = [];
+    const parts: string[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null = searchRegex.exec(webtoolsRegexInput);
+
+    while (match) {
+      if (match.index > lastIndex) {
+        parts.push(escapeWebtoolsRegexHtml(webtoolsRegexInput.slice(lastIndex, match.index)));
+      }
+      parts.push(
+        `<span class="webtools-regex-highlight">${escapeWebtoolsRegexHtml(match[0] ?? "")}</span>`
+      );
+      rows.push({
+        index: match.index,
+        match: match[0] ?? "",
+        groups: match.slice(1).map((item) => item ?? "")
+      });
+      lastIndex = searchRegex.lastIndex;
+
+      if ((match[0] ?? "") === "") {
+        searchRegex.lastIndex += 1;
+        lastIndex = searchRegex.lastIndex;
+      }
+
+      match = searchRegex.exec(webtoolsRegexInput);
+    }
+
+    if (lastIndex < webtoolsRegexInput.length) {
+      parts.push(escapeWebtoolsRegexHtml(webtoolsRegexInput.slice(lastIndex)));
+    }
+
+    webtoolsRegexRows = rows;
+    webtoolsRegexHighlightedHtml = parts.join("") || escapeWebtoolsRegexHtml(webtoolsRegexInput);
+    webtoolsRegexInfo = rows.length > 0 ? `匹配数: ${rows.length}` : "未匹配到结果";
+
+    if (webtoolsRegexReplacement) {
+      webtoolsRegexOutput = webtoolsRegexInput.replace(directRegex, webtoolsRegexReplacement);
+    }
+  } catch (error) {
+    webtoolsRegexRows = [];
+    webtoolsRegexHighlightedHtml = escapeWebtoolsRegexHtml(webtoolsRegexInput);
+    webtoolsRegexError =
+      error instanceof Error && error.message ? error.message : "正则表达式无效";
+    webtoolsRegexInfo = "表达式存在错误";
+  }
+}
+
+function refreshWebtoolsRegexPreviewInForm(form: HTMLFormElement): void {
+  const flagsNode = form.elements.namedItem("webtoolsRegexFlags");
+  if (flagsNode instanceof HTMLInputElement) {
+    flagsNode.value = webtoolsRegexFlags;
+  }
+
+  const errorNode = form.querySelector<HTMLDivElement>(".webtools-regex-error");
+  if (errorNode) {
+    errorNode.textContent = webtoolsRegexError;
+    errorNode.hidden = !webtoolsRegexError;
+  }
+
+  const infoNode = form.querySelector<HTMLDivElement>(".webtools-regex-info");
+  if (infoNode) {
+    infoNode.textContent = webtoolsRegexInfo || "等待输入";
+    infoNode.dataset.state = webtoolsRegexError
+      ? "error"
+      : webtoolsRegexRows.length > 0
+        ? "ok"
+        : "idle";
+  }
+
+  const previewNode = form.querySelector<HTMLDivElement>(".webtools-regex-highlight-box");
+  if (previewNode) {
+    previewNode.innerHTML = webtoolsRegexHighlightedHtml || "&nbsp;";
+  }
+
+  const rowsNode = form.querySelector<HTMLDivElement>(".webtools-regex-match-list");
+  if (rowsNode) {
+    rowsNode.replaceChildren();
+    if (webtoolsRegexRows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "webtools-regex-match-empty";
+      empty.textContent = webtoolsRegexError ? "表达式错误" : "暂无匹配明细";
+      rowsNode.appendChild(empty);
+    } else {
+      webtoolsRegexRows.forEach((row, index) => {
+        const item = document.createElement("div");
+        item.className = "webtools-regex-match-item";
+        const title = document.createElement("div");
+        title.className = "webtools-regex-match-title";
+        title.textContent = `#${index + 1} @ ${row.index}`;
+        const value = document.createElement("div");
+        value.className = "webtools-regex-match-value";
+        value.textContent = row.match;
+        item.append(title, value);
+
+        if (row.groups.length > 0) {
+          const groups = document.createElement("div");
+          groups.className = "webtools-regex-match-groups";
+          groups.textContent = row.groups.join(" | ");
+          item.appendChild(groups);
+        }
+
+        rowsNode.appendChild(item);
+      });
+    }
+  }
+}
+
+function normalizeWebtoolsCryptoAlgorithm(value: string): string {
+  const normalized = value.trim();
+  return [
+    "MD5",
+    "SHA1",
+    "SHA256",
+    "SHA512",
+    "AES",
+    "DES",
+    "RSA",
+    "Ed25519",
+    "Base64",
+    "URL"
+  ].includes(normalized)
+    ? normalized
+    : "MD5";
+}
+
+function webtoolsCryptoSupportsDecrypt(algorithm: string): boolean {
+  return ["AES", "DES", "Base64", "URL", "RSA"].includes(algorithm);
+}
+
+function isWebtoolsCryptoSymmetricAlgorithm(algorithm: string): boolean {
+  return algorithm === "AES" || algorithm === "DES";
+}
+
+function isWebtoolsCryptoAsymmetricAlgorithm(algorithm: string): boolean {
+  return algorithm === "RSA" || algorithm === "Ed25519";
+}
+
+function refreshWebtoolsCryptoResultInForm(form: HTMLFormElement): void {
+  const outputNode = form.elements.namedItem("webtoolsCryptoOutput");
+  if (outputNode instanceof HTMLTextAreaElement) {
+    outputNode.value = webtoolsCryptoOutput;
+  }
+  const infoNode = form.querySelector(".webtools-crypto-info");
+  if (infoNode instanceof HTMLDivElement) {
+    infoNode.textContent = webtoolsCryptoInfo;
+    infoNode.style.display = webtoolsCryptoInfo ? "" : "none";
+  }
+  const copyButton = form.querySelector(".webtools-crypto-copy-btn");
+  if (copyButton instanceof HTMLButtonElement) {
+    copyButton.disabled = webtoolsCryptoOutput.trim().length === 0;
+  }
+}
+
+function buildWebtoolsCryptoTarget(action: "process" | "generateKeys"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("algorithm", webtoolsCryptoAlgorithm);
+  params.set("mode", webtoolsCryptoMode);
+  params.set("input", webtoolsCryptoInput);
+  params.set("secretKey", webtoolsCryptoSecret);
+  params.set("iv", webtoolsCryptoIv);
+  params.set("publicKey", webtoolsCryptoPublicKey);
+  params.set("privateKey", webtoolsCryptoPrivateKey);
+  params.set("rsaBits", String(webtoolsCryptoRsaBits));
+  return `command:plugin:${WEBTOOLS_CRYPTO_PLUGIN_ID}?${params.toString()}`;
+}
+
+function scheduleWebtoolsCryptoAutoProcess(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsCryptoAutoTimer !== null) {
+    window.clearTimeout(webtoolsCryptoAutoTimer);
+  }
+
+  webtoolsCryptoAutoTimer = window.setTimeout(() => {
+    webtoolsCryptoAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+
+    const inputNode = form.elements.namedItem("webtoolsCryptoInput");
+    if (
+      inputNode instanceof HTMLTextAreaElement &&
+      inputNode.value.trim().length === 0
+    ) {
+      webtoolsCryptoInput = "";
+      webtoolsCryptoOutput = "";
+      webtoolsCryptoInfo = "";
+      refreshWebtoolsCryptoResultInForm(form);
+      setStatus("就绪");
+      return;
+    }
+
+    void executeWebtoolsCryptoProcess(form, { render: false });
+  }, immediate ? 0 : 260);
+}
+
+async function executeWebtoolsCryptoProcess(
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行加密工具");
+    return;
+  }
+  const shouldRender = options.render ?? true;
+
+  const algorithmNode = form.elements.namedItem("webtoolsCryptoAlgorithm");
+  const modeNode = form.elements.namedItem("webtoolsCryptoMode");
+  const inputNode = form.elements.namedItem("webtoolsCryptoInput");
+  const secretNode = form.elements.namedItem("webtoolsCryptoSecret");
+  const ivNode = form.elements.namedItem("webtoolsCryptoIv");
+  const publicNode = form.elements.namedItem("webtoolsCryptoPublicKey");
+  const privateNode = form.elements.namedItem("webtoolsCryptoPrivateKey");
+  const rsaBitsNode = form.elements.namedItem("webtoolsCryptoRsaBits");
+
+  webtoolsCryptoAlgorithm =
+    algorithmNode instanceof HTMLSelectElement || algorithmNode instanceof HTMLInputElement
+      ? normalizeWebtoolsCryptoAlgorithm(algorithmNode.value)
+      : "MD5";
+  webtoolsCryptoMode =
+    modeNode instanceof HTMLInputElement && modeNode.value === "decrypt"
+      ? "decrypt"
+      : "encrypt";
+  if (!webtoolsCryptoSupportsDecrypt(webtoolsCryptoAlgorithm)) {
+    webtoolsCryptoMode = "encrypt";
+  }
+  webtoolsCryptoInput = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
+  webtoolsCryptoSecret = secretNode instanceof HTMLInputElement ? secretNode.value : "";
+  webtoolsCryptoIv = ivNode instanceof HTMLInputElement ? ivNode.value : "";
+  webtoolsCryptoPublicKey =
+    publicNode instanceof HTMLTextAreaElement ? publicNode.value : "";
+  webtoolsCryptoPrivateKey =
+    privateNode instanceof HTMLTextAreaElement ? privateNode.value : "";
+  webtoolsCryptoRsaBits =
+    rsaBitsNode instanceof HTMLSelectElement
+      ? Number(rsaBitsNode.value) || 2048
+      : 2048;
+  const requestToken = ++webtoolsCryptoRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_CRYPTO_PLUGIN_ID}:process`,
+    type: "command",
+    title: "加密工具",
+    subtitle: "面板执行",
+    target: buildWebtoolsCryptoTarget("process"),
+    keywords: ["plugin", "crypto", "hash", "aes", "rsa", "加密"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsCryptoRequestToken) {
+    return;
+  }
+  const data = toRecord(result.data);
+
+  webtoolsCryptoOutput =
+    data && typeof data.output === "string" ? data.output : "";
+  webtoolsCryptoInfo =
+    data && typeof data.info === "string" ? data.info : "";
+
+  setStatus(result.message ?? (result.ok ? "处理完成" : "处理失败"));
+  if (shouldRender) {
+    renderList();
+    return;
+  }
+  refreshWebtoolsCryptoResultInForm(form);
+}
+
+async function executeWebtoolsCryptoGenerateKeys(
+  form: HTMLFormElement,
+  options: { autoEncryptAfterRsaKeys?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法生成密钥");
+    return;
+  }
+
+  const algorithmNode = form.elements.namedItem("webtoolsCryptoAlgorithm");
+  const rsaBitsNode = form.elements.namedItem("webtoolsCryptoRsaBits");
+  webtoolsCryptoAlgorithm =
+    algorithmNode instanceof HTMLSelectElement || algorithmNode instanceof HTMLInputElement
+      ? normalizeWebtoolsCryptoAlgorithm(algorithmNode.value)
+      : "MD5";
+  webtoolsCryptoRsaBits =
+    rsaBitsNode instanceof HTMLSelectElement
+      ? Number(rsaBitsNode.value) || 2048
+      : 2048;
+
+  if (!isWebtoolsCryptoAsymmetricAlgorithm(webtoolsCryptoAlgorithm)) {
+    setStatus("当前算法不支持生成密钥");
+    return;
+  }
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_CRYPTO_PLUGIN_ID}:generateKeys`,
+    type: "command",
+    title: "加密工具",
+    subtitle: "生成密钥",
+    target: buildWebtoolsCryptoTarget("generateKeys"),
+    keywords: ["plugin", "crypto", "rsa", "ed25519", "keys", "加密"]
+  };
+
+  const result = await launcher.execute(item);
+  const data = toRecord(result.data);
+  if (data && typeof data.publicKey === "string") {
+    webtoolsCryptoPublicKey = data.publicKey;
+  }
+  if (data && typeof data.privateKey === "string") {
+    webtoolsCryptoPrivateKey = data.privateKey;
+  }
+  if (
+    data &&
+    typeof data.rsaBits === "number" &&
+    (data.rsaBits === 1024 || data.rsaBits === 2048 || data.rsaBits === 4096)
+  ) {
+    webtoolsCryptoRsaBits = data.rsaBits;
+  }
+  webtoolsCryptoInfo =
+    data && typeof data.info === "string" ? data.info : webtoolsCryptoInfo;
+
+  const publicNode = form.elements.namedItem("webtoolsCryptoPublicKey");
+  if (publicNode instanceof HTMLTextAreaElement) {
+    publicNode.value = webtoolsCryptoPublicKey;
+  }
+  const privateNode = form.elements.namedItem("webtoolsCryptoPrivateKey");
+  if (privateNode instanceof HTMLTextAreaElement) {
+    privateNode.value = webtoolsCryptoPrivateKey;
+  }
+  refreshWebtoolsCryptoResultInForm(form);
+  setStatus(result.message ?? (result.ok ? "密钥生成完成" : "密钥生成失败"));
+
+  if (!result.ok || !options.autoEncryptAfterRsaKeys || webtoolsCryptoAlgorithm !== "RSA") {
+    return;
+  }
+
+  const inputNode = form.elements.namedItem("webtoolsCryptoInput");
+  if (!(inputNode instanceof HTMLTextAreaElement) || inputNode.value.trim().length === 0) {
+    return;
+  }
+
+  const modeNode = form.elements.namedItem("webtoolsCryptoMode");
+  if (modeNode instanceof HTMLInputElement) {
+    modeNode.value = "encrypt";
+  }
+  webtoolsCryptoMode = "encrypt";
+
+  await executeWebtoolsCryptoProcess(form, { render: false });
+}
+
+function getRegisteredPanelImpls(): NonNullable<Window["__LL_PANEL_IMPLS__"]> {
+  const impls = window.__LL_PANEL_IMPLS__;
+  if (!impls) {
+    throw new Error("renderer plugin panel impls not initialized");
+  }
+  return impls;
+}
+
+function parseGenericPluginPanelPayload(
+  payload: unknown
+): GenericPluginPanelPayload | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (record.panel !== "plugin") {
+    return null;
+  }
+
+  if (typeof record.pluginId !== "string") {
+    return null;
+  }
+
+  const pluginId = record.pluginId.trim();
+  if (!pluginId) {
+    return null;
+  }
+
+  return {
+    panel: "plugin",
+    pluginId,
+    title: typeof record.title === "string" ? record.title : undefined,
+    subtitle: typeof record.subtitle === "string" ? record.subtitle : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    data:
+      record.data && typeof record.data === "object"
+        ? (record.data as Record<string, unknown>)
+        : undefined
+  };
+}
+
+function renderPluginPanelFallback(): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel";
+
+  const plugin = activePluginPanel;
+  const titleText = plugin?.title || "\u63d2\u4ef6\u9762\u677f";
+  const subtitleText =
+    plugin?.subtitle ||
+    "\u8be5\u63d2\u4ef6\u5df2\u63a5\u5165\uff0c\u53ef\u89c6\u5316\u9875\u9762\u6b63\u5728\u5b9e\u88c5";
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = titleText;
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent = subtitleText;
+
+  const info = document.createElement("div");
+  info.className = "settings-value settings-wrap";
+  info.textContent = plugin
+    ? `\u63d2\u4ef6 ID\uff1a${plugin.pluginId}`
+    : "\u672a\u9009\u4e2d\u63d2\u4ef6";
+
+  const hint = document.createElement("p");
+  hint.className = "settings-description";
+  hint.textContent = plugin?.message
+    ? plugin.message
+    : "\u5f53\u524d\u4e3a\u7edf\u4e00\u63d2\u4ef6\u9762\u677f\u9aa8\u67b6\uff0c\u4e0b\u4e00\u6b65\u5c06\u9010\u4e2a\u8865\u9f50\u529f\u80fd\u754c\u9762\u3002";
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+
+  const backButton = document.createElement("button");
+  backButton.type = "button";
+  backButton.className = "settings-btn settings-btn-primary";
+  backButton.textContent = "\u8fd4\u56de\u641c\u7d22";
+  backButton.addEventListener("click", () => {
+    backToSearch();
+  });
+
+  actions.append(backButton);
+  panel.append(title, description, info, hint, actions);
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+}
+
+function runWithPluginForm(
+  selector: string,
+  action: (form: HTMLFormElement) => void
+): () => void {
+  return () => {
+    const form = list.querySelector(selector);
+    if (form instanceof HTMLFormElement) {
+      action(form);
+    }
+  };
+}
+
+function createSubmitPluginPanelHandler(
+  render: () => void,
+  onOpen: (panel: ActivePluginPanelState) => void,
+  formSelector: string
+): PluginPanelHandler {
+  return {
+    render,
+    onOpen,
+    onEnter: runWithPluginForm(formSelector, (form) => {
+      form.requestSubmit();
+    })
+  };
+}
+
+const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
+  [HARDWARE_INSPECTOR_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderHardwareInspectorPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyHardwareInspectorPanelPayload(panel);
+    },
+    "form.hardware-inspector-form"
+  ),
+  [CLIPBOARD_WORKBENCH_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderClipboardWorkbenchPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyClipboardWorkbenchPanelPayload(panel);
+    },
+    "form.clipboard-workbench-form"
+  ),
+  [WEBTOOLS_PASSWORD_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsPasswordPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsPasswordPanelPayload(panel);
+    },
+    "form.webtools-password-form"
+  ),
+  [WEBTOOLS_JSON_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsJsonPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsJsonPanelPayload(panel);
+    },
+    "form.webtools-json-form"
+  ),
+  [WEBTOOLS_URL_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsUrlPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsUrlPanelPayload(panel);
+    },
+    "form.webtools-url-form"
+  ),
+  [WEBTOOLS_DIFF_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsDiffPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsDiffPanelPayload(panel);
+    },
+    "form.webtools-diff-form"
+  ),
+  [WEBTOOLS_TIMESTAMP_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsTimestampPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsTimestampPanelPayload(panel);
+    },
+    "form.webtools-timestamp-form"
+  ),
+  [WEBTOOLS_REGEX_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsRegexPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsRegexPanelPayload(panel);
+    },
+    "form.webtools-regex-form"
+  ),
+  [WEBTOOLS_CRON_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsCronPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsCronPanelPayload(panel);
+    },
+    "form.webtools-cron-form"
+  ),
+  [WEBTOOLS_CRYPTO_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsCryptoPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsCryptoPanelPayload(panel);
+    },
+    "form.webtools-crypto-form"
+  ),
+  [WEBTOOLS_JWT_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsJwtPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsJwtPanelPayload(panel);
+    },
+    "form.webtools-jwt-form"
+  ),
+  [WEBTOOLS_STRINGS_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsStringsPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsStringsPanelPayload(panel);
+    },
+    "form.webtools-strings-form"
+  ),
+  [WEBTOOLS_COLORS_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsColorsPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsColorsPanelPayload(panel);
+    },
+    "form.webtools-colors-form"
+  ),
+  [WEBTOOLS_IMAGE_BASE64_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsImageBase64Panel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsImageBase64PanelPayload(panel);
+    },
+    "form.webtools-image-base64-form"
+  ),
+  [WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsImagePromptPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsImagePromptPanelPayload(panel);
+    },
+    "form.webtools-image-prompt-form"
+  ),
+  [WEBTOOLS_CONFIG_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsConfigPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsConfigPanelPayload(panel);
+    },
+    "form.webtools-config-form"
+  ),
+  [WEBTOOLS_SQL_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsSqlPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsSqlPanelPayload(panel);
+    },
+    "form.webtools-sql-form"
+  ),
+  [WEBTOOLS_UNIT_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsUnitPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsUnitPanelPayload(panel);
+    },
+    "form.webtools-unit-form"
+  ),
+  [WEBTOOLS_FILE_HASH_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsFileHashPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsFileHashPanelPayload(panel);
+    },
+    "form.webtools-file-hash-form"
+  ),
+  [WEBTOOLS_PORT_HELPER_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsPortHelperPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsPortHelperPanelPayload(panel);
+    },
+    "form.webtools-port-helper-form"
+  ),
+  [WEBTOOLS_QRCODE_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsQrcodePanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsQrcodePanelPayload(panel);
+    },
+    "form.webtools-qrcode-form"
+  ),
+  [WEBTOOLS_MARKDOWN_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsMarkdownPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsMarkdownPanelPayload(panel);
+    },
+    "form.webtools-markdown-form"
+  ),
+  [WEBTOOLS_UA_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsUaPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsUaPanelPayload(panel);
+    },
+    "form.webtools-ua-form"
+  ),
+  [WEBTOOLS_API_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsApiPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsApiPanelPayload(panel);
+    },
+    "form.webtools-api-form"
+  ),
+  [WEBTOOLS_HTTP_MOCK_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsHttpMockPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsHttpMockPanelPayload(panel);
+    },
+    "form.webtools-http-mock-form"
+  ),
+  [CODEAGENT_SWITCH_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderCodeAgentSwitchPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyCodeAgentSwitchPanelPayload(panel);
+    },
+    "form.codeagent-switch-form"
+  )
+};
+
+function getPluginPanelHandler(pluginId: string): PluginPanelHandler | null {
+  return pluginPanelHandlers[pluginId] ?? null;
+}
+
+function openGenericPluginPanel(payload: GenericPluginPanelPayload): void {
+  activePluginPanel = {
+    pluginId: payload.pluginId,
+    title: (payload.title ?? "").trim() || payload.pluginId,
+    subtitle: (payload.subtitle ?? "").trim() || "\u63d2\u4ef6\u9762\u677f",
+    message: (payload.message ?? "").trim() || undefined,
+    data: payload.data
+  };
+
+  const handler = getPluginPanelHandler(activePluginPanel.pluginId);
+  handler?.onOpen?.(activePluginPanel);
+
+  setMode("plugin");
+  void refreshEntries("");
+}
+
 window.__LL_PANEL_IMPLS__ = {
+  handleStandalonePanelPayload(panelPayload: unknown): string | null {
+    const passwordPayload = parsePasswordPanelPayload(panelPayload);
+    if (passwordPayload) {
+      openStandalonePasswordPanel(passwordPayload.draft);
+      return "password";
+    }
+
+    const cashflowPayload = parseCashflowPanelPayload(panelPayload);
+    if (cashflowPayload) {
+      void openStandaloneCashflowPanel(Boolean(cashflowPayload.reset));
+      return "cashflow";
+    }
+
+    const panel =
+      typeof panelPayload === "string" ? panelPayload.trim() : "";
+    if (panel === "password") {
+      openStandalonePasswordPanel();
+      return "password";
+    }
+    if (panel === "cashflow") {
+      void openStandaloneCashflowPanel();
+      return "cashflow";
+    }
+    return null;
+  },
+
+  handleGenericPluginPanelPayload(panelPayload: unknown): string | null {
+    const genericPluginPayload = parseGenericPluginPanelPayload(panelPayload);
+    if (!genericPluginPayload) {
+      return null;
+    }
+
+    openGenericPluginPanel(genericPluginPayload);
+    return genericPluginPayload.pluginId;
+  },
+
+  renderPasswordPanel(): void {
+    renderStandalonePasswordPanelView();
+  },
+
+  handlePasswordPanelEnter(): void {
+    const form = list.querySelector("form.password-form");
+    if (form instanceof HTMLFormElement) {
+      void generateFromPasswordPanel(form);
+    }
+  },
+
+  renderCashflowPanel(): void {
+    renderStandaloneCashflowPanelView();
+  },
+
+  async refreshCashflowPanel(): Promise<boolean> {
+    return refreshStandaloneCashflowPanel();
+  },
+
+  handleCashflowPanelEnter(): void {
+    void nextCashflowTurn();
+  },
+
+  renderActivePluginPanel(): void {
+    const plugin = activePluginPanel;
+    getRegisteredPanelImpls().cleanupPluginPanelTransientState(
+      plugin?.pluginId ?? null
+    );
+    if (!plugin) {
+      delete document.body.dataset.activePluginId;
+      renderPluginPanelFallback();
+      return;
+    }
+
+    document.body.dataset.activePluginId = plugin.pluginId;
+
+    const handler = getPluginPanelHandler(plugin.pluginId);
+    if (!handler) {
+      renderPluginPanelFallback();
+      return;
+    }
+
+    handler.render();
+  },
+
+  handleActivePluginPanelEnter(): void {
+    const plugin = activePluginPanel;
+    if (!plugin) {
+      setStatus("\u672a\u9009\u4e2d\u63d2\u4ef6");
+      return;
+    }
+
+    const handler = getPluginPanelHandler(plugin.pluginId);
+    if (!handler?.onEnter) {
+      setStatus(
+        "\u5f53\u524d\u63d2\u4ef6\u9762\u677f\u4e0d\u652f\u6301 Enter\uff0c\u8bf7\u4f7f\u7528 Esc \u8fd4\u56de"
+      );
+      return;
+    }
+
+    handler.onEnter();
+  },
+
+  getActivePluginPanelTitle(): string | null {
+    return activePluginPanel?.title ?? null;
+  },
+
+  cleanupPluginPanelTransientState(activePluginId: string | null): void {
+    if (activePluginId !== WEBTOOLS_JSON_PLUGIN_ID && webtoolsJsonAutoTimer !== null) {
+      window.clearTimeout(webtoolsJsonAutoTimer);
+      webtoolsJsonAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_DIFF_PLUGIN_ID && webtoolsDiffAutoTimer !== null) {
+      window.clearTimeout(webtoolsDiffAutoTimer);
+      webtoolsDiffAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_TIMESTAMP_PLUGIN_ID) {
+      clearWebtoolsTimestampAutoTimer();
+      clearWebtoolsTimestampClockTimer();
+    }
+    if (activePluginId !== WEBTOOLS_CRON_PLUGIN_ID && webtoolsCronAutoTimer !== null) {
+      window.clearTimeout(webtoolsCronAutoTimer);
+      webtoolsCronAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_CRYPTO_PLUGIN_ID && webtoolsCryptoAutoTimer !== null) {
+      window.clearTimeout(webtoolsCryptoAutoTimer);
+      webtoolsCryptoAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_JWT_PLUGIN_ID) {
+      if (webtoolsJwtAutoTimer !== null) {
+        window.clearTimeout(webtoolsJwtAutoTimer);
+        webtoolsJwtAutoTimer = null;
+      }
+      if (webtoolsJwtSignTimer !== null) {
+        window.clearTimeout(webtoolsJwtSignTimer);
+        webtoolsJwtSignTimer = null;
+      }
+    }
+    if (activePluginId !== WEBTOOLS_COLORS_PLUGIN_ID && webtoolsColorsAutoTimer !== null) {
+      window.clearTimeout(webtoolsColorsAutoTimer);
+      webtoolsColorsAutoTimer = null;
+    }
+    if (
+      activePluginId !== WEBTOOLS_IMAGE_BASE64_PLUGIN_ID &&
+      webtoolsImageBase64AutoTimer !== null
+    ) {
+      window.clearTimeout(webtoolsImageBase64AutoTimer);
+      webtoolsImageBase64AutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_IMAGE_PROMPT_PLUGIN_ID) {
+      webtoolsImagePromptRequestToken += 1;
+    }
+    if (activePluginId !== WEBTOOLS_CONFIG_PLUGIN_ID && webtoolsConfigAutoTimer !== null) {
+      window.clearTimeout(webtoolsConfigAutoTimer);
+      webtoolsConfigAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_SQL_PLUGIN_ID && webtoolsSqlAutoTimer !== null) {
+      window.clearTimeout(webtoolsSqlAutoTimer);
+      webtoolsSqlAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_QRCODE_PLUGIN_ID && webtoolsQrAutoTimer !== null) {
+      window.clearTimeout(webtoolsQrAutoTimer);
+      webtoolsQrAutoTimer = null;
+    }
+    if (
+      activePluginId !== WEBTOOLS_MARKDOWN_PLUGIN_ID &&
+      webtoolsMarkdownAutoTimer !== null
+    ) {
+      window.clearTimeout(webtoolsMarkdownAutoTimer);
+      webtoolsMarkdownAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_UA_PLUGIN_ID && webtoolsUaAutoTimer !== null) {
+      window.clearTimeout(webtoolsUaAutoTimer);
+      webtoolsUaAutoTimer = null;
+    }
+  },
+
   applyHardwareInspectorPanelPayload(panel: ActivePluginPanelState): void {
     const data = toRecord(panel.data);
     hardwareInspectorSnapshot = getHardwareInspectorSnapshotFromData(data);
@@ -7102,12 +12521,12 @@ window.__LL_PANEL_IMPLS__ = {
     toolbarHead.className = "clipboard-workbench-toolbar-head";
     const title = document.createElement("h3");
     title.className = "settings-title";
-    title.textContent = activePluginPanel?.title || "Clipboard Workbench";
+    title.textContent = activePluginPanel?.title || "剪贴板工作台";
     const description = document.createElement("p");
     description.className = "settings-description";
     description.textContent =
       activePluginPanel?.subtitle ||
-      "Search and inspect captured clipboard items across text, images, and file lists.";
+      "搜索并查看文本、图片与文件列表的剪贴板记录。";
     toolbarHead.append(title, description);
 
     const toolbarMeta = document.createElement("div");
@@ -7115,18 +12534,18 @@ window.__LL_PANEL_IMPLS__ = {
     toolbarMeta.append(
       createClipboardWorkbenchBadge(
         clipboardWorkbenchPanelData.settings.autoCollect
-          ? "Auto collect on"
-          : "Auto collect paused",
+          ? "自动采集开启"
+          : "自动采集暂停",
         clipboardWorkbenchPanelData.settings.autoCollect ? "success" : "warning"
       ),
       createClipboardWorkbenchBadge(
         clipboardWorkbenchPanelData.settings.sensitiveMode
-          ? "Sensitive mode"
-          : "Sensitive mode off",
+          ? "敏感模式开启"
+          : "敏感模式关闭",
         clipboardWorkbenchPanelData.settings.sensitiveMode ? "warning" : "neutral"
       ),
       createClipboardWorkbenchBadge(
-        `Limit ${clipboardWorkbenchPanelData.settings.maxItems}`,
+        `上限 ${clipboardWorkbenchPanelData.settings.maxItems}`,
         "accent"
       )
     );
@@ -7135,18 +12554,18 @@ window.__LL_PANEL_IMPLS__ = {
     toolbarStats.className = "clipboard-workbench-toolbar-stats";
     [
       {
-        label: "Items",
+        label: "条目",
         value: String(clipboardWorkbenchPanelData.stats.totalItems)
       },
       {
-        label: "Bytes",
+        label: "容量",
         value: formatClipboardWorkbenchBytes(
           clipboardWorkbenchPanelData.stats.totalBytes
         )
       },
       {
-        label: "Search",
-        value: clipboardWorkbenchPanelData.query.search.trim() || "None"
+        label: "搜索",
+        value: clipboardWorkbenchPanelData.query.search.trim() || "无"
       }
     ].forEach((entry) => {
       const card = document.createElement("div");
@@ -7170,7 +12589,7 @@ window.__LL_PANEL_IMPLS__ = {
     searchInput.className = "settings-value clipboard-workbench-search-input";
     searchInput.name = "clipboardWorkbenchSearch";
     searchInput.type = "text";
-    searchInput.placeholder = "Search summaries, notes, tags, and file paths";
+    searchInput.placeholder = "搜索摘要、备注、标签和文件路径";
     searchInput.value = clipboardWorkbenchSearchDraft;
     searchInput.addEventListener("input", () => {
       clipboardWorkbenchSearchDraft = searchInput.value;
@@ -7178,11 +12597,11 @@ window.__LL_PANEL_IMPLS__ = {
     const searchButton = document.createElement("button");
     searchButton.type = "submit";
     searchButton.className = "settings-btn settings-btn-primary";
-    searchButton.textContent = "Search";
+    searchButton.textContent = "搜索";
     const clearSearchButton = document.createElement("button");
     clearSearchButton.type = "button";
     clearSearchButton.className = "settings-btn settings-btn-secondary";
-    clearSearchButton.textContent = "Clear";
+    clearSearchButton.textContent = "清空";
     clearSearchButton.addEventListener("click", () => {
       clipboardWorkbenchSearchDraft = "";
       void executeClipboardWorkbenchAction(
@@ -7198,7 +12617,7 @@ window.__LL_PANEL_IMPLS__ = {
     const refreshButton = document.createElement("button");
     refreshButton.type = "button";
     refreshButton.className = "settings-btn settings-btn-secondary";
-    refreshButton.textContent = "Refresh";
+    refreshButton.textContent = "刷新";
     refreshButton.addEventListener("click", () => {
       void executeClipboardWorkbenchAction(
         "refresh",
@@ -7209,7 +12628,7 @@ window.__LL_PANEL_IMPLS__ = {
     const saveCurrentButton = document.createElement("button");
     saveCurrentButton.type = "button";
     saveCurrentButton.className = "settings-btn settings-btn-secondary";
-    saveCurrentButton.textContent = "Save clipboard";
+    saveCurrentButton.textContent = "保存当前剪贴板";
     saveCurrentButton.addEventListener("click", () => {
       void executeClipboardWorkbenchAction("save-current");
     });
@@ -7218,8 +12637,8 @@ window.__LL_PANEL_IMPLS__ = {
     toggleCollectButton.type = "button";
     toggleCollectButton.className = "settings-btn settings-btn-secondary";
     toggleCollectButton.textContent = clipboardWorkbenchPanelData.settings.autoCollect
-      ? "Pause collect"
-      : "Resume collect";
+      ? "暂停采集"
+      : "恢复采集";
     toggleCollectButton.addEventListener("click", () => {
       void executeClipboardWorkbenchAction("toggle-collect");
     });
@@ -7228,8 +12647,8 @@ window.__LL_PANEL_IMPLS__ = {
     toggleSensitiveButton.type = "button";
     toggleSensitiveButton.className = "settings-btn settings-btn-secondary";
     toggleSensitiveButton.textContent = clipboardWorkbenchPanelData.settings.sensitiveMode
-      ? "Disable sensitive"
-      : "Enable sensitive";
+      ? "关闭敏感模式"
+      : "开启敏感模式";
     toggleSensitiveButton.addEventListener("click", () => {
       void executeClipboardWorkbenchAction("toggle-sensitive");
     });
@@ -7245,12 +12664,12 @@ window.__LL_PANEL_IMPLS__ = {
     composer.className = "clipboard-workbench-composer";
     const composerTitle = document.createElement("div");
     composerTitle.className = "clipboard-workbench-section-title";
-    composerTitle.textContent = "Manual text draft";
+    composerTitle.textContent = "手动文本草稿";
 
     const manualTextInput = document.createElement("textarea");
     manualTextInput.className = "settings-textarea clipboard-workbench-manual-text";
     manualTextInput.name = "clipboardWorkbenchManualText";
-    manualTextInput.placeholder = "Type or paste text here, then save it into the workbench.";
+    manualTextInput.placeholder = "输入或粘贴文本后保存到工作台。";
     manualTextInput.value = clipboardWorkbenchManualTextDraft;
 
     const composerRow = document.createElement("div");
@@ -7259,7 +12678,7 @@ window.__LL_PANEL_IMPLS__ = {
     saveManualButton.type = "button";
     saveManualButton.className = "settings-btn settings-btn-primary";
     saveManualButton.dataset.clipboardWorkbenchSaveManual = "1";
-    saveManualButton.textContent = "Save draft";
+    saveManualButton.textContent = "保存草稿";
     saveManualButton.disabled = clipboardWorkbenchManualTextDraft.trim().length === 0;
 
     manualTextInput.addEventListener("input", () => {
@@ -7281,7 +12700,7 @@ window.__LL_PANEL_IMPLS__ = {
     rail.className = "clipboard-workbench-rail";
     const railTitle = document.createElement("div");
     railTitle.className = "clipboard-workbench-section-title";
-    railTitle.textContent = "Views";
+    railTitle.textContent = "视图";
     rail.appendChild(railTitle);
 
     const scopeList = document.createElement("div");
@@ -7308,7 +12727,7 @@ window.__LL_PANEL_IMPLS__ = {
 
     const groupTitle = document.createElement("div");
     groupTitle.className = "clipboard-workbench-section-title";
-    groupTitle.textContent = "Groups";
+    groupTitle.textContent = "分组";
     rail.appendChild(groupTitle);
 
     const groupList = document.createElement("div");
@@ -7316,7 +12735,7 @@ window.__LL_PANEL_IMPLS__ = {
     if (clipboardWorkbenchPanelData.groups.length === 0) {
       const empty = document.createElement("div");
       empty.className = "clipboard-workbench-empty";
-      empty.textContent = "No groups yet.";
+      empty.textContent = "暂无分组。";
       groupList.appendChild(empty);
     } else {
       clipboardWorkbenchPanelData.groups.forEach((group) => {
@@ -7346,13 +12765,13 @@ window.__LL_PANEL_IMPLS__ = {
     listHeader.className = "clipboard-workbench-list-head";
     const listTitle = document.createElement("div");
     listTitle.className = "clipboard-workbench-section-title";
-    listTitle.textContent = "Items";
+    listTitle.textContent = "记录";
     const listMeta = document.createElement("div");
     listMeta.className = "clipboard-workbench-list-meta";
     listMeta.textContent =
       selectedItems.length > 0
-        ? `${clipboardWorkbenchPanelData.items.length} visible - ${selectedItems.length} selected`
-        : `${clipboardWorkbenchPanelData.items.length} visible`;
+        ? `${clipboardWorkbenchPanelData.items.length} 条可见 · ${selectedItems.length} 条已选`
+        : `${clipboardWorkbenchPanelData.items.length} 条可见`;
     listHeader.append(listTitle, listMeta);
     listSection.appendChild(listHeader);
 
@@ -7361,7 +12780,7 @@ window.__LL_PANEL_IMPLS__ = {
     if (clipboardWorkbenchPanelData.items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "clipboard-workbench-empty";
-      empty.textContent = "No clipboard items are available yet.";
+      empty.textContent = "暂时还没有剪贴板记录。";
       itemList.appendChild(empty);
     } else {
       clipboardWorkbenchPanelData.items.forEach((item) => {
@@ -7377,13 +12796,13 @@ window.__LL_PANEL_IMPLS__ = {
         itemTop.className = "clipboard-workbench-item-top";
         const itemSelectHint = document.createElement("div");
         itemSelectHint.className = "clipboard-workbench-item-select-hint";
-        itemSelectHint.textContent = selected ? "Selected for batch" : "Add to batch";
+        itemSelectHint.textContent = selected ? "已加入批量" : "加入批量";
         const toggleButton = document.createElement("button");
         toggleButton.type = "button";
         toggleButton.className = "clipboard-workbench-item-toggle";
         toggleButton.dataset.clipboardWorkbenchItemToggle = item.id;
         toggleButton.dataset.selected = String(selected);
-        toggleButton.textContent = selected ? "Selected" : "Select";
+        toggleButton.textContent = selected ? "已选" : "选择";
         toggleButton.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -7421,13 +12840,13 @@ window.__LL_PANEL_IMPLS__ = {
           createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(item.source))
         );
         if (item.favorite) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("Favorite", "success"));
+          badgeRow.appendChild(createClipboardWorkbenchBadge("收藏", "success"));
         }
         if (item.pinned) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("Pinned", "accent"));
+          badgeRow.appendChild(createClipboardWorkbenchBadge("置顶", "accent"));
         }
         if (item.sensitive) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("Sensitive", "warning"));
+          badgeRow.appendChild(createClipboardWorkbenchBadge("敏感", "warning"));
         }
         itemHead.append(itemTitle, badgeRow);
 
@@ -7456,7 +12875,7 @@ window.__LL_PANEL_IMPLS__ = {
 
       const bulkMeta = document.createElement("div");
       bulkMeta.className = "clipboard-workbench-bulk-meta";
-      bulkMeta.textContent = `${selectedItems.length} selected`;
+      bulkMeta.textContent = `${selectedItems.length} 条已选`;
 
       const bulkActions = document.createElement("div");
       bulkActions.className = "clipboard-workbench-bulk-actions";
@@ -7465,7 +12884,7 @@ window.__LL_PANEL_IMPLS__ = {
       sequentialButton.type = "button";
       sequentialButton.className = "settings-btn settings-btn-primary";
       sequentialButton.dataset.clipboardWorkbenchBulkAction = "sequential";
-      sequentialButton.textContent = "Paste sequentially";
+      sequentialButton.textContent = "顺序粘贴";
       sequentialButton.addEventListener("click", () => {
         void executeClipboardWorkbenchAction("paste-batch", {
           itemIds: selectedItemIds,
@@ -7477,7 +12896,7 @@ window.__LL_PANEL_IMPLS__ = {
       mergeButton.type = "button";
       mergeButton.className = "settings-btn settings-btn-secondary";
       mergeButton.dataset.clipboardWorkbenchBulkAction = "merge-once";
-      mergeButton.textContent = "Merge once";
+      mergeButton.textContent = "合并一次";
       mergeButton.disabled = !canMergeSelectedItems;
       mergeButton.addEventListener("click", () => {
         void executeClipboardWorkbenchAction("paste-batch", {
@@ -7490,7 +12909,7 @@ window.__LL_PANEL_IMPLS__ = {
       const clearSelectionButton = document.createElement("button");
       clearSelectionButton.type = "button";
       clearSelectionButton.className = "settings-btn settings-btn-secondary";
-      clearSelectionButton.textContent = "Clear selection";
+      clearSelectionButton.textContent = "清空选择";
       clearSelectionButton.addEventListener("click", () => {
         clearClipboardWorkbenchSelection();
       });
@@ -7506,7 +12925,7 @@ window.__LL_PANEL_IMPLS__ = {
         const bulkNote = document.createElement("div");
         bulkNote.className = "clipboard-workbench-note";
         bulkNote.textContent =
-          "Merge once currently supports text-only or file-list-only selections.";
+          "合并粘贴目前仅支持纯文本或纯文件路径记录。";
         bulkBar.appendChild(bulkNote);
       }
 
@@ -7517,14 +12936,14 @@ window.__LL_PANEL_IMPLS__ = {
     detail.className = "clipboard-workbench-detail";
     const detailTitle = document.createElement("div");
     detailTitle.className = "clipboard-workbench-section-title";
-    detailTitle.textContent = "Details";
+    detailTitle.textContent = "详情";
     detail.appendChild(detailTitle);
 
     const activeItem = getClipboardWorkbenchActiveItem();
     if (!activeItem) {
       const empty = document.createElement("div");
       empty.className = "clipboard-workbench-empty";
-      empty.textContent = "Select an item to inspect its detail view.";
+      empty.textContent = "选择一条记录查看详情。";
       detail.appendChild(empty);
     } else {
       const hero = document.createElement("div");
@@ -7570,7 +12989,7 @@ window.__LL_PANEL_IMPLS__ = {
       } else {
         const placeholder = document.createElement("div");
         placeholder.className = "clipboard-workbench-image-placeholder";
-        placeholder.textContent = "No preview image is available.";
+        placeholder.textContent = "当前没有可预览图片。";
         preview.appendChild(placeholder);
       }
       detail.appendChild(preview);
@@ -7578,12 +12997,12 @@ window.__LL_PANEL_IMPLS__ = {
       const metaGrid = document.createElement("div");
       metaGrid.className = "clipboard-workbench-detail-grid";
       [
-        { label: "Summary", value: activeItem.summary },
-        { label: "Updated", value: formatClipboardWorkbenchTime(activeItem.updatedAt) },
-        { label: "Created", value: formatClipboardWorkbenchTime(activeItem.createdAt) },
+        { label: "摘要", value: activeItem.summary },
+        { label: "更新时间", value: formatClipboardWorkbenchTime(activeItem.updatedAt) },
+        { label: "创建时间", value: formatClipboardWorkbenchTime(activeItem.createdAt) },
         {
-          label: "Tags",
-          value: activeItem.tags.length > 0 ? activeItem.tags.join(", ") : "None"
+          label: "标签",
+          value: activeItem.tags.length > 0 ? activeItem.tags.join(", ") : "无"
         }
       ].forEach((entry) => {
         const row = document.createElement("div");
@@ -7601,7 +13020,7 @@ window.__LL_PANEL_IMPLS__ = {
 
       const note = document.createElement("div");
       note.className = "clipboard-workbench-note";
-      note.textContent = activeItem.note || "No note saved for this item yet.";
+      note.textContent = activeItem.note || "暂未为这条记录保存备注。";
       detail.appendChild(note);
 
       const detailActions = document.createElement("div");
@@ -7610,7 +13029,7 @@ window.__LL_PANEL_IMPLS__ = {
       const restoreButton = document.createElement("button");
       restoreButton.type = "button";
       restoreButton.className = "settings-btn settings-btn-primary";
-      restoreButton.textContent = "Restore to clipboard";
+      restoreButton.textContent = "恢复到剪贴板";
       restoreButton.addEventListener("click", () => {
         void executeClipboardWorkbenchAction("restore-item", {
           itemId: activeItem.id
@@ -7621,8 +13040,8 @@ window.__LL_PANEL_IMPLS__ = {
       batchButton.type = "button";
       batchButton.className = "settings-btn settings-btn-secondary";
       batchButton.textContent = isClipboardWorkbenchItemSelected(activeItem.id)
-        ? "Remove from batch"
-        : "Add to batch";
+        ? "移出批量"
+        : "加入批量";
       batchButton.addEventListener("click", () => {
         toggleClipboardWorkbenchItemSelection(activeItem.id);
       });
@@ -9979,12 +15398,12 @@ window.__LL_PANEL_IMPLS__ = {
     const partsGrid = document.createElement("div");
     partsGrid.className = "webtools-url-parts-grid";
     partsGrid.append(
-      createWebtoolsUrlPartField("Protocol", "protocol"),
-      createWebtoolsUrlPartField("Host", "host"),
-      createWebtoolsUrlPartField("Port", "port"),
+      createWebtoolsUrlPartField("协议", "protocol"),
+      createWebtoolsUrlPartField("主机", "host"),
+      createWebtoolsUrlPartField("端口", "port"),
       createWebtoolsUrlPartField("路径", "pathname", true),
       createWebtoolsUrlPartField("查询串", "search", true),
-      createWebtoolsUrlPartField("Hash", "hash", true)
+      createWebtoolsUrlPartField("锚点", "hash", true)
     );
 
     const querySection = document.createElement("section");
@@ -10321,6 +15740,12 @@ window.__LL_PANEL_IMPLS__ = {
     form.className = "settings-form webtools-regex-form webtools-tool-panel";
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      const patternNode = form.elements.namedItem("webtoolsRegexPattern");
+      const flagsNode = form.elements.namedItem("webtoolsRegexFlags");
+      const inputNode = form.elements.namedItem("webtoolsRegexInput");
+      webtoolsRegexPattern = patternNode instanceof HTMLInputElement ? patternNode.value : "";
+      webtoolsRegexFlags = flagsNode instanceof HTMLInputElement ? flagsNode.value : "g";
+      webtoolsRegexInput = inputNode instanceof HTMLTextAreaElement ? inputNode.value : "";
       refreshWebtoolsRegexState();
       refreshWebtoolsRegexPreviewInForm(form);
       setStatus(webtoolsRegexError || webtoolsRegexInfo || "已刷新正则结果");
@@ -11413,6 +16838,26 @@ window.__LL_PANEL_IMPLS__ = {
 
     const form = document.createElement("form");
     form.className = "settings-form webtools-image-base64-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeWebtoolsImageBase64Normalize(input.value, { render: false, form });
+    });
+
+    const header = document.createElement("div");
+    header.className = "webtools-image-base64-header";
+
+    const headerText = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "settings-title webtools-image-base64-title";
+    title.textContent = activePluginPanel?.title || "图片 Base64";
+    const description = document.createElement("p");
+    description.className = "settings-description webtools-image-base64-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "拖入图片或粘贴 Base64 / DataURL，实时转换、预览与导出。";
+    headerText.append(title, description);
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "webtools-image-base64-toolbar";
 
     const previewHost = document.createElement("div");
     previewHost.className = "webtools-image-base64-preview-host";
@@ -11423,16 +16868,37 @@ window.__LL_PANEL_IMPLS__ = {
     const dropzone = document.createElement("div");
     dropzone.className = "webtools-image-base64-dropzone";
 
+    const dropzoneTitle = document.createElement("div");
+    dropzoneTitle.className = "webtools-image-base64-dropzone-title";
+    dropzoneTitle.textContent = "拖拽图片到这里";
+
+    const dropzoneHint = document.createElement("div");
+    dropzoneHint.className = "webtools-image-base64-dropzone-hint";
+    dropzoneHint.textContent = "支持 PNG、JPG、WebP、GIF、SVG，也可以直接粘贴 DataURL。";
+
+    const uploadButton = document.createElement("label");
+    uploadButton.className = "settings-btn settings-btn-secondary webtools-image-base64-upload";
+    uploadButton.textContent = "选择图片";
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/*";
+    fileInput.className = "webtools-image-base64-file-input";
+    uploadButton.appendChild(fileInput);
+    dropzone.append(dropzoneTitle, dropzoneHint, uploadButton);
+
     const input = document.createElement("textarea");
     input.className = "settings-value webtools-textarea webtools-image-base64-textarea";
     input.name = "webtoolsImageBase64Input";
     input.value = webtoolsImageBase64Input;
+    input.placeholder = "粘贴 Base64 或 DataURL，或从左侧拖入图片。";
 
     const output = document.createElement("textarea");
     output.className = "settings-value webtools-textarea webtools-image-base64-textarea";
     output.readOnly = true;
     output.value = webtoolsImageBase64DataUrl;
     output.setAttribute("data-webtools-image-base64-output", "1");
+    output.placeholder = "转换后会在这里输出完整 DataURL。";
 
     const info = document.createElement("div");
     info.className = "webtools-tool-info";
@@ -11440,50 +16906,107 @@ window.__LL_PANEL_IMPLS__ = {
     const copyRaw = document.createElement("button");
     copyRaw.type = "button";
     copyRaw.className = "settings-btn settings-btn-secondary";
-    copyRaw.textContent = "Copy Base64";
+    copyRaw.textContent = "复制 Base64";
     copyRaw.setAttribute("data-webtools-image-copy-raw", "1");
 
     const copyDataUrl = document.createElement("button");
     copyDataUrl.type = "button";
     copyDataUrl.className = "settings-btn settings-btn-secondary";
-    copyDataUrl.textContent = "Copy DataURL";
+    copyDataUrl.textContent = "复制 DataURL";
     copyDataUrl.setAttribute("data-webtools-image-copy-dataurl", "1");
 
     const download = document.createElement("button");
     download.type = "button";
     download.className = "settings-btn settings-btn-primary";
-    download.textContent = "Download";
+    download.textContent = "下载图片";
     download.setAttribute("data-webtools-image-download", "1");
 
     const clear = document.createElement("button");
     clear.type = "button";
     clear.className = "settings-btn settings-btn-secondary";
-    clear.textContent = "Clear";
+    clear.textContent = "清空";
     clear.setAttribute("data-webtools-image-clear", "1");
+
+    toolbar.append(copyRaw, copyDataUrl, download, clear);
+    header.append(headerText, toolbar);
+
+    const layout = document.createElement("div");
+    layout.className = "webtools-image-base64-layout";
+
+    const previewPane = document.createElement("section");
+    previewPane.className = "webtools-image-base64-preview";
+    previewPane.append(previewHost, meta, dropzone);
+
+    const editorPane = document.createElement("section");
+    editorPane.className = "webtools-image-base64-editor";
+
+    const inputWrap = document.createElement("label");
+    inputWrap.className = "webtools-colors-section";
+    const inputLabel = document.createElement("span");
+    inputLabel.className = "webtools-image-base64-input-label";
+    inputLabel.textContent = "输入内容";
+    inputWrap.append(inputLabel, input);
+
+    const outputWrap = document.createElement("label");
+    outputWrap.className = "webtools-colors-section";
+    const outputLabel = document.createElement("span");
+    outputLabel.className = "webtools-image-base64-input-label";
+    outputLabel.textContent = "标准化输出";
+    outputWrap.append(outputLabel, output);
+
+    editorPane.append(inputWrap, info, outputWrap);
+    layout.append(previewPane, editorPane);
+
+    const loadImageFile = async (file: File): Promise<void> => {
+      if (!file.type.startsWith("image/")) {
+        setStatus("请选择图片文件");
+        return;
+      }
+      try {
+        const dataUrl = await readWebtoolsImageBase64FileAsDataUrl(file);
+        webtoolsImageBase64Dragging = false;
+        webtoolsImageBase64FileName = file.name;
+        webtoolsImageBase64Input = dataUrl;
+        input.value = dataUrl;
+        refreshWebtoolsImageBase64PanelInForm(form);
+        await executeWebtoolsImageBase64Normalize(dataUrl, { render: false, form });
+      } catch (error) {
+        webtoolsImageBase64Dragging = false;
+        webtoolsImageBase64DataUrl = "";
+        webtoolsImageBase64Raw = "";
+        webtoolsImageBase64Mime = "";
+        webtoolsImageBase64SizeText = "";
+        webtoolsImageBase64Info = "";
+        webtoolsImageBase64Error =
+          error instanceof Error && error.message.trim() ? error.message : "读取图片失败";
+        refreshWebtoolsImageBase64PanelInForm(form);
+        setStatus(webtoolsImageBase64Error);
+      }
+    };
 
     copyRaw.addEventListener("click", async () => {
       if (!webtoolsImageBase64Raw.trim()) {
-        setStatus("No Base64 to copy");
+        setStatus("没有可复制的 Base64");
         return;
       }
       await navigator.clipboard.writeText(webtoolsImageBase64Raw);
-      setStatus("Copied Base64");
+      setStatus("已复制 Base64");
     });
 
     copyDataUrl.addEventListener("click", async () => {
       if (!webtoolsImageBase64DataUrl.trim()) {
-        setStatus("No DataURL to copy");
+        setStatus("没有可复制的 DataURL");
         return;
       }
       await navigator.clipboard.writeText(webtoolsImageBase64DataUrl);
-      setStatus("Copied DataURL");
+      setStatus("已复制 DataURL");
     });
 
     download.addEventListener("click", () => {
       beginPluginNativeInteraction(1500);
       if (!webtoolsImageBase64DataUrl.startsWith("data:image/")) {
         schedulePluginNativeInteractionRelease();
-        setStatus("No image available");
+        setStatus("当前没有可下载的图片");
         return;
       }
       const link = document.createElement("a");
@@ -11491,7 +17014,7 @@ window.__LL_PANEL_IMPLS__ = {
       link.download = getWebtoolsImageBase64DownloadName();
       link.click();
       schedulePluginNativeInteractionRelease();
-      setStatus("Download started");
+      setStatus("已开始下载图片");
     });
 
     clear.addEventListener("click", () => {
@@ -11509,21 +17032,56 @@ window.__LL_PANEL_IMPLS__ = {
       webtoolsImageBase64Error = "";
       webtoolsImageBase64FileName = "";
       input.value = "";
+      fileInput.value = "";
       refreshWebtoolsImageBase64PanelInForm(form);
-      setStatus("Cleared");
+      setStatus("已清空");
     });
 
     input.addEventListener("input", () => {
       webtoolsImageBase64Input = input.value;
+      webtoolsImageBase64FileName = "";
       scheduleWebtoolsImageBase64AutoNormalize(form);
     });
 
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void executeWebtoolsImageBase64Normalize(input.value, { render: false, form });
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (!file) {
+        return;
+      }
+      void loadImageFile(file);
+      fileInput.value = "";
     });
 
-    form.append(copyRaw, copyDataUrl, download, clear, previewHost, meta, dropzone, input, info, output);
+    dropzone.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+      webtoolsImageBase64Dragging = true;
+      refreshWebtoolsImageBase64PanelInForm(form);
+    });
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if (!webtoolsImageBase64Dragging) {
+        webtoolsImageBase64Dragging = true;
+        refreshWebtoolsImageBase64PanelInForm(form);
+      }
+    });
+    dropzone.addEventListener("dragleave", (event) => {
+      event.preventDefault();
+      webtoolsImageBase64Dragging = false;
+      refreshWebtoolsImageBase64PanelInForm(form);
+    });
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      webtoolsImageBase64Dragging = false;
+      refreshWebtoolsImageBase64PanelInForm(form);
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) {
+        setStatus("未检测到图片文件");
+        return;
+      }
+      void loadImageFile(file);
+    });
+
+    form.append(header, layout);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -12571,6 +18129,39 @@ window.__LL_PANEL_IMPLS__ = {
       setStatus(webtoolsUnitActiveTab === "storage" ? "容量换算完成" : "px/rem 换算完成");
     });
 
+    const createUnitResultCard = (
+      labelText: string,
+      key: string,
+      emptyText = "-"
+    ): HTMLDivElement => {
+      const card = document.createElement("div");
+      card.className = "webtools-unit-card";
+      const label = document.createElement("div");
+      label.className = "webtools-unit-card-label";
+      label.textContent = labelText;
+      const value = document.createElement("div");
+      value.className = "webtools-unit-card-value";
+      value.dataset.webtoolsUnitCard = key;
+      value.textContent = emptyText;
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "settings-btn settings-btn-secondary webtools-unit-copy-btn";
+      copyButton.textContent = "复制";
+      copyButton.addEventListener("click", () => {
+        const content = value.textContent?.trim() ?? "";
+        if (!content || content === emptyText) {
+          setStatus("当前没有可复制的 " + labelText);
+          return;
+        }
+        void (async () => {
+          const copied = await copyTextToClipboard(content);
+          setStatus(copied ? "已复制 " + labelText : "复制失败");
+        })();
+      });
+      card.append(label, value, copyButton);
+      return card;
+    };
+
     const header = document.createElement("div");
     header.className = "webtools-tool-header";
     const titleGroup = document.createElement("div");
@@ -12634,9 +18225,19 @@ window.__LL_PANEL_IMPLS__ = {
         stack.appendChild(field);
       });
 
+      const summaryGrid = document.createElement("div");
+      summaryGrid.className = "webtools-unit-grid";
+      summaryGrid.append(
+        createUnitResultCard("当前 B", "B"),
+        createUnitResultCard("当前 KB", "KB"),
+        createUnitResultCard("当前 MB", "MB"),
+        createUnitResultCard("当前 GB", "GB"),
+        createUnitResultCard("当前 TB", "TB")
+      );
+
       const info = document.createElement("div");
       info.className = "webtools-tool-info webtools-unit-info";
-      form.append(stack, info);
+      form.append(stack, summaryGrid, info);
       panel.append(form);
       panelItem.appendChild(panel);
       list.appendChild(panelItem);
@@ -12696,6 +18297,14 @@ window.__LL_PANEL_IMPLS__ = {
     remField.append(remLabel, remInput);
     dualInput.append(pxField, swapIcon, remField);
 
+    const summaryGrid = document.createElement("div");
+    summaryGrid.className = "webtools-unit-screen-grid";
+    summaryGrid.append(
+      createUnitResultCard("当前 px", "pixel"),
+      createUnitResultCard("当前 rem", "rem"),
+      createUnitResultCard("根字号", "basePx")
+    );
+
     const info = document.createElement("div");
     info.className = "webtools-tool-info webtools-unit-info";
 
@@ -12713,7 +18322,7 @@ window.__LL_PANEL_IMPLS__ = {
     });
 
     screenBox.append(rootSetup, divider, dualInput);
-    form.append(screenBox, info);
+    form.append(screenBox, summaryGrid, info);
     panel.append(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -12869,44 +18478,222 @@ window.__LL_PANEL_IMPLS__ = {
 
     const form = document.createElement("form");
     form.className = "settings-form webtools-strings-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeWebtoolsStringsAction("convert", form);
+    });
+
+    const header = document.createElement("div");
+    header.className = "webtools-strings-header";
+
+    const title = document.createElement("h3");
+    title.className = "webtools-strings-title";
+    title.textContent = activePluginPanel?.title || "字符串工具";
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "webtools-strings-subtitle";
+    subtitle.textContent =
+      activePluginPanel?.subtitle || "大小写转换与 UUID 批量生成，适合整理变量名、接口字段和测试数据。";
+
+    header.append(title, subtitle);
+
+    const caseSection = document.createElement("section");
+    caseSection.className = "webtools-strings-section";
+    const caseSectionTitle = document.createElement("h4");
+    caseSectionTitle.className = "webtools-strings-section-title";
+    caseSectionTitle.textContent = "大小写转换";
+    const caseSectionDescription = document.createElement("p");
+    caseSectionDescription.className = "webtools-strings-section-description";
+    caseSectionDescription.textContent = "先输入原始文本，再选择目标命名风格。";
+
+    const caseBox = document.createElement("div");
+    caseBox.className = "webtools-strings-case-box";
 
     const input = document.createElement("textarea");
     input.className = "settings-value webtools-textarea webtools-strings-textarea";
     input.name = "webtoolsStringsInput";
     input.value = webtoolsStringsInput;
+    input.placeholder = "例如：hello_world_variable";
+    input.spellcheck = false;
+
+    const inputField = document.createElement("label");
+    inputField.className = "webtools-strings-field";
+    const inputLabel = document.createElement("span");
+    inputLabel.className = "settings-row-label";
+    inputLabel.textContent = "原始文本";
+    inputField.append(inputLabel, input);
 
     const caseType = document.createElement("select");
+    caseType.className = "webtools-strings-case-select";
     caseType.name = "webtoolsStringsCaseType";
-    ["camel", "snake", "pascal", "kebab", "upper", "lower"].forEach((v) => {
+    const caseOptions = [
+      { value: "camel", label: "camelCase" },
+      { value: "snake", label: "snake_case" },
+      { value: "pascal", label: "PascalCase" },
+      { value: "kebab", label: "kebab-case" },
+      { value: "upper", label: "UPPER CASE" },
+      { value: "lower", label: "lower case" }
+    ] as const;
+    caseOptions.forEach(({ value, label }) => {
       const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v;
-      opt.selected = webtoolsStringsCaseType === v;
+      opt.value = value;
+      opt.textContent = label;
+      opt.selected = webtoolsStringsCaseType === value;
       caseType.appendChild(opt);
     });
+
+    const caseButtonGrid = document.createElement("div");
+    caseButtonGrid.className = "webtools-strings-button-grid";
+    const caseButtons: Array<{ value: string; button: HTMLButtonElement }> = [];
+    const syncCaseButtons = (): void => {
+      caseButtons.forEach(({ value, button }) => {
+        const active = caseType.value === value;
+        button.className = `settings-btn ${active ? "settings-btn-primary" : "settings-btn-secondary"} webtools-strings-case-btn`;
+        button.dataset.active = String(active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    };
+    caseOptions.forEach(({ value, label }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        caseType.value = value;
+        webtoolsStringsCaseType = value;
+        syncCaseButtons();
+      });
+      caseButtons.push({ value, button });
+      caseButtonGrid.appendChild(button);
+    });
+    syncCaseButtons();
+
+    const convertActions = document.createElement("div");
+    convertActions.className = "settings-actions";
 
     const count = document.createElement("input");
     count.type = "number";
     count.name = "webtoolsStringsCount";
     count.value = String(webtoolsStringsUuidCount);
+    count.min = "1";
+    count.max = "100";
+    count.className = "settings-value webtools-tool-input webtools-strings-uuid-input";
 
     const convert = document.createElement("button");
     convert.type = "button";
     convert.className = "settings-btn settings-btn-primary";
-    convert.textContent = "Convert";
+    convert.textContent = "转换";
     convert.addEventListener("click", () => {
       void executeWebtoolsStringsAction("convert", form);
     });
 
+    const copyConverted = document.createElement("button");
+    copyConverted.type = "button";
+    copyConverted.className = "settings-btn settings-btn-secondary";
+    copyConverted.textContent = "复制结果";
+    copyConverted.disabled = !webtoolsStringsOutput.trim();
+    copyConverted.addEventListener("click", () => {
+      void (async () => {
+        const copied = await copyTextToClipboard(webtoolsStringsOutput);
+        setStatus(copied ? "已复制转换结果" : "复制失败");
+      })();
+    });
+
+    convertActions.append(convert, copyConverted);
+
+    const outputField = document.createElement("label");
+    outputField.className = "webtools-strings-field";
+    const outputLabel = document.createElement("span");
+    outputLabel.className = "settings-row-label";
+    outputLabel.textContent = "转换结果";
+    const output = document.createElement("textarea");
+    output.className = "settings-value webtools-textarea webtools-strings-textarea";
+    output.readOnly = true;
+    output.value = webtoolsStringsOutput;
+    output.placeholder = "点击“转换”后会在这里显示结果。";
+    output.spellcheck = false;
+    outputField.append(outputLabel, output);
+
+    caseBox.append(inputField, caseType, caseButtonGrid, convertActions, outputField);
+    caseSection.append(caseSectionTitle, caseSectionDescription, caseBox);
+
+    const divider = document.createElement("div");
+    divider.className = "webtools-strings-divider";
+
+    const uuidSection = document.createElement("section");
+    uuidSection.className = "webtools-strings-section";
+    const uuidSectionTitle = document.createElement("h4");
+    uuidSectionTitle.className = "webtools-strings-section-title";
+    uuidSectionTitle.textContent = "UUID 批量生成";
+    const uuidSectionDescription = document.createElement("p");
+    uuidSectionDescription.className = "webtools-strings-section-description";
+    uuidSectionDescription.textContent = "快速生成测试数据、主键样例或临时标识。";
+
+    const uuidBox = document.createElement("div");
+    uuidBox.className = "webtools-strings-uuid-box";
+
+    const uuidControl = document.createElement("div");
+    uuidControl.className = "webtools-strings-uuid-control";
+
+    const countLabel = document.createElement("label");
+    countLabel.className = "webtools-strings-uuid-label";
+    countLabel.textContent = "生成数量";
+    countLabel.appendChild(count);
+
     const uuid = document.createElement("button");
     uuid.type = "button";
     uuid.className = "settings-btn settings-btn-secondary";
-    uuid.textContent = "UUID";
+    uuid.textContent = "生成 UUID";
     uuid.addEventListener("click", () => {
       void executeWebtoolsStringsAction("uuid", form);
     });
 
-    form.append(input, caseType, count, convert, uuid);
+    const copyAllUuid = document.createElement("button");
+    copyAllUuid.type = "button";
+    copyAllUuid.className = "settings-btn settings-btn-secondary";
+    copyAllUuid.textContent = "复制全部";
+    copyAllUuid.disabled = webtoolsStringsUuidItems.length === 0;
+    copyAllUuid.addEventListener("click", () => {
+      void (async () => {
+        const copied = await copyTextToClipboard(webtoolsStringsUuidItems.join("\n"));
+        setStatus(copied ? "已复制全部 UUID" : "复制失败");
+      })();
+    });
+
+    uuidControl.append(countLabel, uuid, copyAllUuid);
+
+    const uuidResults = document.createElement("div");
+    uuidResults.className = "webtools-strings-uuid-results";
+    if (webtoolsStringsUuidItems.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "webtools-strings-uuid-empty";
+      empty.textContent = "点击“生成 UUID”后，这里会列出批量结果。";
+      uuidResults.appendChild(empty);
+    } else {
+      webtoolsStringsUuidItems.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = "webtools-strings-uuid-item";
+        const code = document.createElement("code");
+        code.className = "webtools-strings-uuid-code";
+        code.textContent = item;
+        const copyButton = document.createElement("button");
+        copyButton.type = "button";
+        copyButton.className = "settings-btn settings-btn-secondary";
+        copyButton.textContent = `复制 #${index + 1}`;
+        copyButton.addEventListener("click", () => {
+          void (async () => {
+            const copied = await copyTextToClipboard(item);
+            setStatus(copied ? `已复制 UUID #${index + 1}` : "复制失败");
+          })();
+        });
+        row.append(code, copyButton);
+        uuidResults.appendChild(row);
+      });
+    }
+
+    uuidBox.append(uuidControl, uuidResults);
+    uuidSection.append(uuidSectionTitle, uuidSectionDescription, uuidBox);
+
+    form.append(header, caseSection, divider, uuidSection);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -12933,29 +18720,174 @@ window.__LL_PANEL_IMPLS__ = {
     const form = document.createElement("form");
     form.className = "settings-form webtools-colors-form webtools-colors-lab";
 
+    const presetColors = [
+      "#6c5ce7",
+      "#00b894",
+      "#0984e3",
+      "#fdcb6e",
+      "#e17055",
+      "#d63031",
+      "#2d3436",
+      "#f8fafc",
+      "#1abc9c",
+      "#8e44ad",
+      "#ff7675",
+      "#00cec9"
+    ];
+
+    const header = document.createElement("div");
+    header.className = "webtools-colors-header";
+    const headerText = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "webtools-colors-title";
+    title.textContent = activePluginPanel?.title || "颜色工具";
+    const description = document.createElement("p");
+    description.className = "webtools-colors-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "HEX / RGB / HSL 转换与常用色板快速取色";
+    headerText.append(title, description);
+    header.appendChild(headerText);
+
+    const layout = document.createElement("div");
+    layout.className = "webtools-colors-layout";
+
+    const leftColumn = document.createElement("div");
+    leftColumn.className = "webtools-colors-column";
+
     const preview = document.createElement("div");
+    preview.className = "webtools-colors-preview";
     preview.setAttribute("data-webtools-colors-preview", "1");
     const previewText = document.createElement("span");
+    previewText.className = "webtools-colors-preview-text";
     previewText.setAttribute("data-webtools-colors-preview-text", "1");
     preview.appendChild(previewText);
 
+    const paletteSection = document.createElement("div");
+    paletteSection.className = "webtools-colors-section";
+    const paletteTitle = document.createElement("div");
+    paletteTitle.className = "webtools-colors-section-title";
+    paletteTitle.textContent = "常用色板";
+    const palette = document.createElement("div");
+    palette.className = "webtools-colors-palette";
+    presetColors.forEach((color) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "webtools-colors-palette-item";
+      button.title = color;
+      button.style.background = color;
+      button.dataset.webtoolsColorsPreset = color;
+      button.addEventListener("click", () => {
+        input.value = color;
+        void executeWebtoolsColorsConvert(color, { render: false, form });
+      });
+      palette.appendChild(button);
+    });
+    paletteSection.append(paletteTitle, palette);
+
+    const pickerSection = document.createElement("div");
+    pickerSection.className = "webtools-colors-section";
+    const pickerTitle = document.createElement("div");
+    pickerTitle.className = "webtools-colors-section-title";
+    pickerTitle.textContent = "手动取色";
+
     const picker = document.createElement("input");
     picker.type = "color";
+    picker.className = "webtools-colors-picker-native";
     picker.name = "webtoolsColorsPicker";
+
+    const pickerWrap = document.createElement("label");
+    pickerWrap.className = "webtools-colors-picker";
+    const pickerText = document.createElement("span");
+    pickerText.className = "webtools-colors-picker-text";
+    pickerText.textContent = "拖动色板或直接输入颜色值";
+    pickerWrap.append(picker, pickerText);
 
     const input = document.createElement("input");
     input.name = "webtoolsColorsInput";
     input.className = "settings-value";
+    input.placeholder = "#6c5ce7";
 
-    const hex = document.createElement("div");
-    hex.setAttribute("data-webtools-colors-output", "hex");
-    const rgb = document.createElement("div");
-    rgb.setAttribute("data-webtools-colors-output", "rgb");
-    const hsl = document.createElement("div");
-    hsl.setAttribute("data-webtools-colors-output", "hsl");
+    const inputField = document.createElement("label");
+    inputField.className = "webtools-colors-field";
+    const inputLabel = document.createElement("span");
+    inputLabel.className = "webtools-colors-field-label";
+    inputLabel.textContent = "颜色值";
+    const inputHint = document.createElement("span");
+    inputHint.className = "webtools-colors-field-hint";
+    inputHint.textContent = "支持 Hex，实时转换到 RGB / HSL。";
+    inputField.append(inputLabel, input, inputHint);
+    pickerSection.append(pickerTitle, pickerWrap, inputField);
+
+    leftColumn.append(preview, paletteSection, pickerSection);
+
+    const rightColumn = document.createElement("div");
+    rightColumn.className = "webtools-colors-column webtools-colors-details";
+
+    const outputsSection = document.createElement("div");
+    outputsSection.className = "webtools-colors-section";
+    const outputsTitle = document.createElement("div");
+    outputsTitle.className = "webtools-colors-section-title";
+    outputsTitle.textContent = "格式输出";
+    const outputsList = document.createElement("div");
+    outputsList.className = "webtools-colors-output-list";
+
+    const createOutputRow = (
+      labelText: string,
+      key: "hex" | "rgb" | "hsl"
+    ): HTMLDivElement => {
+      const output = document.createElement("div");
+      output.className = "webtools-colors-output";
+
+      const label = document.createElement("div");
+      label.className = "webtools-colors-output-label";
+      label.textContent = labelText;
+
+      const row = document.createElement("div");
+      row.className = "webtools-colors-output-row";
+
+      const value = document.createElement("div");
+      value.className = "webtools-colors-output-value";
+      value.setAttribute("data-webtools-colors-output", key);
+
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "settings-btn settings-btn-secondary";
+      copyButton.textContent = "复制";
+      copyButton.addEventListener("click", () => {
+        const content = value.textContent?.trim() ?? "";
+        if (!content || content === "-") {
+          setStatus(`当前没有可复制的 ${labelText}`);
+          return;
+        }
+        void (async () => {
+          const copied = await copyTextToClipboard(content);
+          setStatus(copied ? `已复制 ${labelText}` : "复制失败");
+        })();
+      });
+
+      row.append(value, copyButton);
+      output.append(label, row);
+      return output;
+    };
+    outputsList.append(
+      createOutputRow("HEX", "hex"),
+      createOutputRow("RGB", "rgb"),
+      createOutputRow("HSL", "hsl")
+    );
+    outputsSection.append(outputsTitle, outputsList);
+
+    const shadesSection = document.createElement("div");
+    shadesSection.className = "webtools-colors-section";
+    const shadesTitle = document.createElement("div");
+    shadesTitle.className = "webtools-colors-section-title";
+    shadesTitle.textContent = "明暗阶";
 
     const shades = document.createElement("div");
+    shades.className = "webtools-colors-shades";
     shades.setAttribute("data-webtools-colors-shades", "1");
+    shadesSection.append(shadesTitle, shades);
+
+    rightColumn.append(outputsSection, shadesSection);
 
     picker.addEventListener("input", () => {
       input.value = picker.value;
@@ -12970,7 +18902,8 @@ window.__LL_PANEL_IMPLS__ = {
       void executeWebtoolsColorsConvert(input.value, { render: false, form });
     });
 
-    form.append(preview, picker, input, hex, rgb, hsl, shades);
+    layout.append(leftColumn, rightColumn);
+    form.append(header, layout);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -13016,24 +18949,48 @@ window.__LL_PANEL_IMPLS__ = {
     const form = document.createElement("form");
     form.className = "settings-form webtools-qrcode-form";
 
+    const header = document.createElement("div");
+    header.className = "webtools-qrcode-header";
+    const headerText = document.createElement("div");
     const title = document.createElement("h3");
     title.className = "webtools-qrcode-title";
     title.textContent = activePluginPanel?.title || "二维码生成";
+    const description = document.createElement("p");
+    description.className = "webtools-qrcode-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "输入文本后自动生成二维码，可配置容错级别、配色与 Logo。";
+    headerText.append(title, description);
 
     const info = document.createElement("div");
     info.className = "webtools-qrcode-info";
+    header.append(headerText, info);
+
+    const layout = document.createElement("div");
+    layout.className = "webtools-qrcode-layout";
+
+    const setup = document.createElement("section");
+    setup.className = "webtools-qrcode-setup";
 
     const text = document.createElement("textarea");
     text.className = "settings-value webtools-textarea webtools-qrcode-textarea";
     text.name = "webtoolsQrText";
     text.value = webtoolsQrText;
+    text.spellcheck = false;
+    const textField = document.createElement("label");
+    textField.className = "webtools-qrcode-field";
+    const textLabel = document.createElement("span");
+    textLabel.className = "webtools-qrcode-field-label";
+    textLabel.textContent = "二维码内容";
+    textField.append(textLabel, text);
 
     const size = document.createElement("input");
     size.type = "number";
+    size.className = "settings-value webtools-tool-input";
     size.name = "webtoolsQrSize";
     size.value = String(webtoolsQrSize);
 
     const level = document.createElement("select");
+    level.className = "settings-value webtools-tool-select";
     level.name = "webtoolsQrLevel";
     ["L", "M", "Q", "H"].forEach((v) => {
       const opt = document.createElement("option");
@@ -13045,30 +19002,74 @@ window.__LL_PANEL_IMPLS__ = {
 
     const dark = document.createElement("input");
     dark.type = "color";
+    dark.className = "webtools-qrcode-color-picker";
     dark.name = "webtoolsQrDarkColor";
     dark.value = webtoolsQrDarkColor;
 
     const darkValue = document.createElement("span");
+    darkValue.className = "webtools-qrcode-color-value";
     darkValue.setAttribute("data-webtools-qrcode-dark-value", "1");
 
     const light = document.createElement("input");
     light.type = "color";
+    light.className = "webtools-qrcode-color-picker";
     light.name = "webtoolsQrLightColor";
     light.value = webtoolsQrLightColor;
 
     const lightValue = document.createElement("span");
+    lightValue.className = "webtools-qrcode-color-value";
     lightValue.setAttribute("data-webtools-qrcode-light-value", "1");
+
+    const configGrid = document.createElement("div");
+    configGrid.className = "webtools-qrcode-config-grid";
+
+    const sizeField = document.createElement("label");
+    sizeField.className = "webtools-qrcode-field";
+    const sizeLabel = document.createElement("span");
+    sizeLabel.className = "webtools-qrcode-field-label";
+    sizeLabel.textContent = "输出尺寸";
+    sizeField.append(sizeLabel, size);
+
+    const levelField = document.createElement("label");
+    levelField.className = "webtools-qrcode-field";
+    const levelLabel = document.createElement("span");
+    levelLabel.className = "webtools-qrcode-field-label";
+    levelLabel.textContent = "容错级别";
+    levelField.append(levelLabel, level);
+
+    const darkField = document.createElement("div");
+    darkField.className = "webtools-qrcode-field";
+    const darkLabel = document.createElement("span");
+    darkLabel.className = "webtools-qrcode-field-label";
+    darkLabel.textContent = "深色";
+    const darkControl = document.createElement("div");
+    darkControl.className = "webtools-qrcode-color-control";
+    darkControl.append(dark, darkValue);
+    darkField.append(darkLabel, darkControl);
+
+    const lightField = document.createElement("div");
+    lightField.className = "webtools-qrcode-field";
+    const lightLabel = document.createElement("span");
+    lightLabel.className = "webtools-qrcode-field-label";
+    lightLabel.textContent = "浅色";
+    const lightControl = document.createElement("div");
+    lightControl.className = "webtools-qrcode-color-control";
+    lightControl.append(light, lightValue);
+    lightField.append(lightLabel, lightControl);
+
+    configGrid.append(sizeField, levelField, darkField, lightField);
 
     const logoMeta = document.createElement("span");
     logoMeta.className = "webtools-qrcode-logo-meta";
     logoMeta.setAttribute("data-webtools-qrcode-logo-meta", "1");
 
     const logoMode = document.createElement("select");
+    logoMode.className = "settings-value webtools-tool-select";
     logoMode.name = "webtoolsQrLogoMode";
     [
-      ["none", "No Logo"],
-      ["text", "Text Logo"],
-      ["image", "Image Logo"]
+      ["none", "无 Logo"],
+      ["text", "文字 Logo"],
+      ["image", "图片 Logo"]
     ].forEach(([value, label]) => {
       const opt = document.createElement("option");
       opt.value = value;
@@ -13077,25 +19078,53 @@ window.__LL_PANEL_IMPLS__ = {
       logoMode.appendChild(opt);
     });
 
+    const logoSection = document.createElement("section");
+    logoSection.className = "webtools-qrcode-logo-section";
+    const logoHead = document.createElement("div");
+    logoHead.className = "webtools-qrcode-logo-head";
+    const logoTitle = document.createElement("span");
+    logoTitle.className = "webtools-qrcode-field-label";
+    logoTitle.textContent = "Logo 设置";
+
     const logoTextField = document.createElement("div");
+    logoTextField.className = "webtools-qrcode-field";
     logoTextField.setAttribute("data-webtools-qrcode-logo-text-field", "1");
+    const logoTextLabel = document.createElement("span");
+    logoTextLabel.className = "webtools-qrcode-field-label";
+    logoTextLabel.textContent = "文字 Logo";
     const logoText = document.createElement("input");
+    logoText.className = "settings-value webtools-tool-input";
     logoText.name = "webtoolsQrLogoText";
     logoText.value = webtoolsQrLogoText;
-    logoTextField.appendChild(logoText);
+    logoTextField.append(logoTextLabel, logoText);
 
     const logoImageField = document.createElement("div");
+    logoImageField.className = "webtools-qrcode-logo-image-field";
     logoImageField.setAttribute("data-webtools-qrcode-logo-image-field", "1");
+    const logoImageLabel = document.createElement("span");
+    logoImageLabel.className = "webtools-qrcode-field-label";
+    logoImageLabel.textContent = "图片 Logo";
+    const logoImageRow = document.createElement("div");
+    logoImageRow.className = "webtools-qrcode-logo-image-row";
+    const logoUpload = document.createElement("button");
+    logoUpload.type = "button";
+    logoUpload.className = "settings-btn settings-btn-secondary";
+    logoUpload.textContent = "选择图片";
+    const logoFileInput = document.createElement("input");
+    logoFileInput.type = "file";
+    logoFileInput.accept = "image/*";
+    logoFileInput.hidden = true;
     const logoImageName = document.createElement("span");
     logoImageName.className = "webtools-qrcode-logo-image-name";
     logoImageName.setAttribute("data-webtools-qrcode-logo-image-name", "1");
-    logoImageField.appendChild(logoImageName);
+    logoImageRow.append(logoUpload, logoImageName, logoFileInput);
+    logoImageField.append(logoImageLabel, logoImageRow);
 
     const clearLogo = document.createElement("button");
     clearLogo.type = "button";
-    clearLogo.className = "settings-btn settings-btn-secondary";
+    clearLogo.className = "settings-btn settings-btn-secondary webtools-qrcode-clear-logo-btn";
     clearLogo.setAttribute("data-webtools-qrcode-clear-logo", "1");
-    clearLogo.textContent = "Clear Logo";
+    clearLogo.textContent = "清除 Logo";
     clearLogo.addEventListener("click", () => {
       if (webtoolsQrLogoMode === "text") {
         webtoolsQrLogoText = "";
@@ -13108,27 +19137,52 @@ window.__LL_PANEL_IMPLS__ = {
       scheduleWebtoolsQrcodeAutoGenerate(form, true);
     });
 
+    logoHead.append(logoTitle, logoMeta, clearLogo);
+
+    const logoBody = document.createElement("div");
+    logoBody.className = "webtools-qrcode-logo-body";
+    const logoModeField = document.createElement("label");
+    logoModeField.className = "webtools-qrcode-field";
+    const logoModeLabel = document.createElement("span");
+    logoModeLabel.className = "webtools-qrcode-field-label";
+    logoModeLabel.textContent = "Logo 类型";
+    logoModeField.append(logoModeLabel, logoMode);
+    logoBody.append(logoModeField, logoTextField, logoImageField);
+    logoSection.append(logoHead, logoBody);
+
+    const actions = document.createElement("div");
+    actions.className = "webtools-qrcode-actions";
+
+    const generate = document.createElement("button");
+    generate.type = "submit";
+    generate.className = "settings-btn settings-btn-primary";
+    generate.textContent = "生成二维码";
+
     const download = document.createElement("button");
     download.type = "button";
-    download.className = "settings-btn settings-btn-primary webtools-qrcode-download-btn";
+    download.className = "settings-btn settings-btn-secondary webtools-qrcode-download-btn";
     download.setAttribute("data-webtools-qrcode-download", "1");
-    download.textContent = "Download PNG";
+    download.textContent = "下载 PNG";
     download.addEventListener("click", async () => {
       beginPluginNativeInteraction(1500);
       try {
         await downloadWebtoolsQrcodePng();
-        setStatus("QR downloaded");
+        setStatus("已下载二维码");
       } catch (error) {
-        const reason = error instanceof Error ? error.message : "Download failed";
+        const reason = error instanceof Error ? error.message : "下载失败";
         setStatus(reason);
       } finally {
         schedulePluginNativeInteractionRelease();
       }
     });
+    actions.append(generate, download);
 
+    const preview = document.createElement("section");
+    preview.className = "webtools-qrcode-preview";
     const previewHost = document.createElement("div");
     previewHost.className = "webtools-qrcode-preview-host";
     previewHost.setAttribute("data-webtools-qrcode-preview", "1");
+    preview.appendChild(previewHost);
 
     [text, size, level].forEach((node) => {
       node.addEventListener("input", () => {
@@ -13164,29 +19218,41 @@ window.__LL_PANEL_IMPLS__ = {
       scheduleWebtoolsQrcodeAutoGenerate(form);
     });
 
+    logoUpload.addEventListener("click", () => {
+      beginPluginNativeInteraction(1500);
+      logoFileInput.click();
+      schedulePluginNativeInteractionRelease();
+    });
+
+    logoFileInput.addEventListener("change", () => {
+      const file = logoFileInput.files?.[0];
+      logoFileInput.value = "";
+      if (!file) {
+        return;
+      }
+      void (async () => {
+        try {
+          const normalized = await normalizeWebtoolsQrcodeLogoImage(file);
+          webtoolsQrLogoMode = "image";
+          logoMode.value = "image";
+          webtoolsQrLogoImageDataUrl = normalized.dataUrl;
+          webtoolsQrLogoImageName = normalized.name;
+          refreshWebtoolsQrcodePanelInForm(form);
+          scheduleWebtoolsQrcodeAutoGenerate(form, true);
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : "Logo 图片处理失败");
+        }
+      })();
+    });
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void executeWebtoolsQrcodeGenerateInForm(form);
     });
 
-    form.append(
-      title,
-      info,
-      text,
-      size,
-      level,
-      dark,
-      darkValue,
-      light,
-      lightValue,
-      logoMeta,
-      logoMode,
-      logoTextField,
-      logoImageField,
-      clearLogo,
-      download,
-      previewHost
-    );
+    setup.append(textField, configGrid, logoSection, actions);
+    layout.append(setup, preview);
+    form.append(header, layout);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -13217,10 +19283,27 @@ window.__LL_PANEL_IMPLS__ = {
     const form = document.createElement("form");
     form.className = "settings-form webtools-ua-form";
 
+    const header = document.createElement("div");
+    header.className = "webtools-ua-header";
+    const headerText = document.createElement("div");
+    headerText.className = "webtools-ua-header-text";
+    const title = document.createElement("h3");
+    title.className = "webtools-ua-title";
+    title.textContent = activePluginPanel?.title || "UA 解析";
+    const subtitle = document.createElement("p");
+    subtitle.className = "webtools-ua-subtitle";
+    subtitle.textContent =
+      activePluginPanel?.subtitle || "自动识别浏览器、系统、设备与渲染引擎信息。";
+    headerText.append(title, subtitle);
+
+    const actions = document.createElement("div");
+    actions.className = "webtools-ua-actions";
+
     const input = document.createElement("textarea");
     input.className = "settings-value webtools-textarea webtools-ua-input";
     input.name = "webtoolsUaInput";
     input.value = webtoolsUaInput || navigator.userAgent;
+    input.spellcheck = false;
 
     const info = document.createElement("div");
     info.className = "webtools-ua-info";
@@ -13231,18 +19314,37 @@ window.__LL_PANEL_IMPLS__ = {
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "settings-btn settings-btn-primary";
-    copy.textContent = "Copy";
+    copy.textContent = "复制 UA";
     copy.setAttribute("data-webtools-ua-copy", "1");
 
     const current = document.createElement("button");
     current.type = "button";
     current.className = "settings-btn settings-btn-secondary";
-    current.textContent = "Current UA";
+    current.textContent = "当前 UA";
 
     const clear = document.createElement("button");
     clear.type = "button";
     clear.className = "settings-btn settings-btn-secondary";
-    clear.textContent = "Clear";
+    clear.textContent = "清空";
+
+    actions.append(current, clear, copy);
+    header.append(headerText, actions);
+
+    const editor = document.createElement("div");
+    editor.className = "webtools-ua-editor";
+    const inputSection = document.createElement("section");
+    inputSection.className = "webtools-ua-input-section";
+    const inputHead = document.createElement("div");
+    inputHead.className = "webtools-ua-input-head";
+    const inputLabel = document.createElement("div");
+    inputLabel.className = "webtools-ua-input-label";
+    inputLabel.textContent = "User-Agent 字符串";
+    const inputMeta = document.createElement("div");
+    inputMeta.className = "webtools-ua-input-meta";
+    inputMeta.textContent = "支持粘贴浏览器、App 或抓包里的完整 UA。";
+    inputHead.append(inputLabel, inputMeta);
+    inputSection.append(inputHead, input);
+    editor.append(inputSection, info, grid);
 
     current.addEventListener("click", () => {
       input.value = navigator.userAgent;
@@ -13261,17 +19363,17 @@ window.__LL_PANEL_IMPLS__ = {
       webtoolsUaError = "";
       input.value = "";
       refreshWebtoolsUaResultInForm(form);
-      setStatus("Cleared UA input");
+      setStatus("已清空 UA");
     });
 
     copy.addEventListener("click", async () => {
       const value = input.value.trim();
       if (!value) {
-        setStatus("No UA to copy");
+        setStatus("没有可复制的 UA");
         return;
       }
       await navigator.clipboard.writeText(value);
-      setStatus("Copied UA");
+      setStatus("已复制 UA");
     });
 
     input.addEventListener("input", () => {
@@ -13284,7 +19386,7 @@ window.__LL_PANEL_IMPLS__ = {
       void executeWebtoolsUaParse(input.value);
     });
 
-    form.append(current, clear, copy, input, info, grid);
+    form.append(header, editor);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -13342,6 +19444,9 @@ window.__LL_PANEL_IMPLS__ = {
     title.className = "webtools-tool-title";
     title.textContent = activePluginPanel?.title || "API 调试";
 
+    const requestRow = document.createElement("div");
+    requestRow.className = "webtools-api-request";
+
     const method = document.createElement("select");
     method.className = "settings-value webtools-tool-select webtools-api-method";
     method.name = "webtoolsApiMethod";
@@ -13358,8 +19463,21 @@ window.__LL_PANEL_IMPLS__ = {
     url.name = "webtoolsApiUrl";
     url.value = webtoolsApiUrl;
 
+    const send = document.createElement("button");
+    send.type = "submit";
+    send.className = "settings-btn settings-btn-primary webtools-api-send-btn";
+    send.textContent = "发送";
+
+    requestRow.append(method, url, send);
+
+    const previewRow = document.createElement("div");
+    previewRow.className = "webtools-api-preview-row";
+    const previewLabel = document.createElement("div");
+    previewLabel.className = "webtools-api-preview-label";
+    previewLabel.textContent = "请求预览";
     const preview = document.createElement("div");
     preview.className = "webtools-api-preview webtools-tool-code";
+    previewRow.append(previewLabel, preview);
 
     const requestTabs = document.createElement("div");
     requestTabs.className = "webtools-api-tabs";
@@ -13403,6 +19521,8 @@ window.__LL_PANEL_IMPLS__ = {
       ["text", "纯文本"],
       ["formdata", "FormData"]
     ].forEach(([value, label]) => {
+      const option = document.createElement("label");
+      option.className = "webtools-api-body-type";
       const radio = document.createElement("input");
       radio.type = "radio";
       radio.name = "webtoolsApiBodyTypeDisplay";
@@ -13418,7 +19538,8 @@ window.__LL_PANEL_IMPLS__ = {
       });
       const text = document.createElement("span");
       text.textContent = label;
-      bodyTypes.append(radio, text);
+      option.append(radio, text);
+      bodyTypes.appendChild(option);
     });
 
     const bodyTypeInput = document.createElement("input");
@@ -13442,13 +19563,12 @@ window.__LL_PANEL_IMPLS__ = {
 
     requestPanels.append(paramsPanel, headersPanel, bodyPanel);
 
-    const send = document.createElement("button");
-    send.type = "submit";
-    send.className = "settings-btn settings-btn-primary webtools-api-send-btn";
-    send.textContent = "发送";
-
     const responseSection = document.createElement("section");
     responseSection.className = "webtools-api-response-section";
+    const responseHead = document.createElement("div");
+    responseHead.className = "webtools-api-response-head";
+    const metrics = document.createElement("div");
+    metrics.className = "webtools-api-metrics";
     const status = document.createElement("div");
     status.className = "webtools-api-status";
     const time = document.createElement("span");
@@ -13457,6 +19577,8 @@ window.__LL_PANEL_IMPLS__ = {
     size.className = "webtools-api-size";
     const err = document.createElement("div");
     err.className = "webtools-api-error";
+    metrics.append(status, time, size);
+    responseHead.append(metrics, err);
     const responseUrl = document.createElement("div");
     responseUrl.className = "webtools-api-response-url webtools-tool-code";
     const responseTabs = document.createElement("div");
@@ -13497,7 +19619,7 @@ window.__LL_PANEL_IMPLS__ = {
     responseHeadersPanel.appendChild(responseHeadersHost);
 
     responsePanels.append(responseBodyPanel, responseHeadersPanel);
-    responseSection.append(status, time, size, err, responseUrl, responseTabs, responsePanels);
+    responseSection.append(responseHead, responseUrl, responseTabs, responsePanels);
 
     method.addEventListener("change", () => {
       webtoolsApiMethod = method.value;
@@ -13513,7 +19635,7 @@ window.__LL_PANEL_IMPLS__ = {
       void executeWebtoolsApiRequest(form, { render: false });
     });
 
-    form.append(title, method, url, send, preview, requestTabs, requestPanels, responseSection);
+    form.append(title, requestRow, previewRow, requestTabs, requestPanels, responseSection);
     panel.appendChild(form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -13897,3 +20019,4 @@ window.__LL_PANEL_IMPLS__ = {
     scheduleWebtoolsCronAutoParse(form, true);
   }
 };
+})();

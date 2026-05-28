@@ -22,6 +22,7 @@ test("manual text save returns a refreshed payload", async () => {
   await withTestService({}, async (service) => {
     const result = await service.saveManualText("alpha\nbeta");
 
+    assert.match(result.message, /^已保存手动文本：alpha$/);
     assert.equal(result.payload.items[0]?.summary, "alpha");
     assert.equal(result.payload.items[0]?.source, "manual");
     assert.equal(result.payload.settings.maxItems, 50);
@@ -59,7 +60,7 @@ test("sequential paste falls back to restore-only message when send shortcut fai
       assert.ok(first);
 
       const result = await service.pasteItems([first.id], "sequential");
-      assert.match(result.message, /restored to the clipboard/i);
+      assert.match(result.message, /已恢复到剪贴板，请手动使用 Ctrl\+V 粘贴。/);
     }
   );
 });

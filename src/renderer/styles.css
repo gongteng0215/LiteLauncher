@@ -6937,6 +6937,17 @@ body {
   overflow-wrap: anywhere;
 }
 
+@media (max-width: 1180px) {
+  .codeagent-switch-master-detail {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .codeagent-switch-detail-hero-actions,
+  .codeagent-switch-detail-pills {
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 860px) {
   .codeagent-switch-master-detail {
     grid-template-columns: 1fr;
@@ -6949,17 +6960,6 @@ body {
 
   .codeagent-switch-tool-stack {
     grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  }
-}
-
-@media (max-width: 1180px) {
-  .codeagent-switch-master-detail {
-    grid-template-columns: 96px minmax(0, 1fr);
-  }
-
-  .codeagent-switch-detail-hero-actions,
-  .codeagent-switch-detail-pills {
-    justify-content: flex-start;
   }
 }
 
