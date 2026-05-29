@@ -203,7 +203,7 @@ test("buildCatalogWithOptions includes a single Codex WindowsApps application it
       );
 
       assert.equal(codexItems.length, 1);
-      assert.equal(codexItems[0]?.id, "command:apps-folder:codex");
+      assert.equal(codexItems[0]?.id, "app:startapp:codex");
       assert.equal(codexItems[0]?.type, "application");
       assert.equal(codexItems[0]?.title, "Codex");
       assert.equal(codexItems[0]?.target, `command:apps-folder:${encodeURIComponent(CODEX_APP_ID)}`);
@@ -212,7 +212,7 @@ test("buildCatalogWithOptions includes a single Codex WindowsApps application it
   );
 });
 
-test("getDynamicSearchItems returns a WindowsApps Codex application result", (t) => {
+test("getDynamicSearchItems returns a WindowsApps Codex application result with catalog-stable id", (t) => {
   skipOnNonWindows(t);
 
   const originalSpawnSync = childProcess.spawnSync;
@@ -254,10 +254,85 @@ test("getDynamicSearchItems returns a WindowsApps Codex application result", (t)
   const results = getDynamicSearchItems("codex", "all");
 
   assert.equal(results.length, 1);
-  assert.equal(results[0]?.id, "command:apps-folder:codex");
+  assert.equal(results[0]?.id, "app:startapp:codex");
   assert.equal(results[0]?.type, "application");
   assert.equal(results[0]?.title, "Codex");
   assert.equal(results[0]?.subtitle, CODEX_EXE);
+  assert.equal(results[0]?.target, `command:apps-folder:${encodeURIComponent(CODEX_APP_ID)}`);
+  assert.equal(results[0]?.iconPath, CODEX_ICON);
+});
+
+test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailable", (t) => {
+  skipOnNonWindows(t);
+
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalExistsSync = fs.existsSync;
+  const originalReadFileSync = fs.readFileSync;
+
+  t.after(() => {
+    nativeChildProcess.spawnSync = originalSpawnSync;
+    fs.existsSync = originalExistsSync;
+    fs.readFileSync = originalReadFileSync;
+  });
+
+  nativeChildProcess.spawnSync = ((command, args) => {
+    const executable = String(command);
+    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
+    const script = argList.join(" ");
+
+    if (executable.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
+      return makeSpawnResult(1, "", "INFO: Could not find files for the given pattern(s).");
+    }
+
+    if (
+      executable.toLowerCase().endsWith("\\powershell.exe") &&
+      script.includes("Get-StartApps") &&
+      script.includes("Get-AppxPackage")
+    ) {
+      return makeSpawnResult(
+        0,
+        JSON.stringify({
+          name: "Codex",
+          appId: CODEX_APP_ID,
+          installLocation: CODEX_PACKAGE_ROOT
+        })
+      );
+    }
+
+    if (
+      executable.toLowerCase().endsWith("\\powershell.exe") &&
+      script.includes("Get-Command")
+    ) {
+      return makeSpawnResult(0, "");
+    }
+
+    return makeSpawnResult(1, "", "unexpected spawnSync");
+  }) as typeof childProcess.spawnSync;
+
+  const { getDynamicSearchItems } = loadFreshModule<typeof import("../main/search")>(
+    "../main/search"
+  );
+
+  fs.existsSync = ((candidate: fs.PathLike) => {
+    const fullPath = String(candidate).replace(/\//g, "\\");
+    return fullPath === `${CODEX_PACKAGE_ROOT}\\AppxManifest.xml` || fullPath === CODEX_ICON;
+  }) as typeof fs.existsSync;
+
+  fs.readFileSync = ((candidate: fs.PathLike, options?: unknown) => {
+    const fullPath = String(candidate).replace(/\//g, "\\");
+    if (fullPath === `${CODEX_PACKAGE_ROOT}\\AppxManifest.xml` && options === "utf8") {
+      return APPX_MANIFEST;
+    }
+    return originalReadFileSync(candidate, options as never);
+  }) as typeof fs.readFileSync;
+
+  const results = getDynamicSearchItems("codex", "all");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.id, "app:startapp:codex");
+  assert.equal(results[0]?.type, "application");
+  assert.equal(results[0]?.title, "Codex");
+  assert.equal(results[0]?.subtitle, CODEX_PACKAGE_ROOT);
   assert.equal(results[0]?.target, `command:apps-folder:${encodeURIComponent(CODEX_APP_ID)}`);
   assert.equal(results[0]?.iconPath, CODEX_ICON);
 });
@@ -298,7 +373,7 @@ test("executeItem launches AppsFolder targets through PowerShell Start-Process",
 
   const result = await executeItem(
     {
-      id: "command:apps-folder:codex",
+      id: "app:startapp:codex",
       type: "application",
       title: "Codex",
       subtitle: CODEX_EXE,

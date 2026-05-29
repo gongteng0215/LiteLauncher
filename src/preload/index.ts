@@ -11,6 +11,7 @@ import {
   ExecuteResult,
   LaunchItem,
   LaunchAtLoginStatus,
+  PinToggleResult,
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
@@ -75,7 +76,7 @@ const api = {
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus> {
     return ipcRenderer.invoke(IPC_CHANNELS.setLaunchAtLoginEnabled, enabled);
   },
-  setItemPinned(itemId: string, pinned: boolean): Promise<boolean> {
+  setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);
   },
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]> {

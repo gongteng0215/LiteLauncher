@@ -10,6 +10,7 @@ import {
   DebugKeyEvent,
   LaunchItem,
   LaunchAtLoginStatus,
+  PinToggleResult,
   SearchScope,
   SearchDisplayConfig
 } from "../shared/types";
@@ -24,6 +25,7 @@ import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { filterItemsByPathRules } from "./path-rule-filter";
+import { validatePinnedItemRequest } from "./pinning";
 import {
   ClipboardWorkbenchService,
   setClipboardWorkbenchService
@@ -1119,29 +1121,55 @@ async function setItemPinned(
   db: LiteDatabase,
   itemId: string,
   pinned: boolean
-): Promise<boolean> {
-  const normalizedId = itemId.trim();
-  if (!normalizedId) {
-    return false;
-  }
-
+): Promise<PinToggleResult> {
   const catalogIdSet = new Set(catalog.map((item) => item.id));
-  if (!catalogIdSet.has(normalizedId)) {
-    return false;
+  const validation = validatePinnedItemRequest(itemId, catalogIdSet);
+  if (!validation.ok) {
+    queueErrorLog({
+      scope: "main",
+      level: "warn",
+      message: "Pin request rejected",
+      context: `itemId=${validation.normalizedId || "(empty)"} pinned=${pinned ? "1" : "0"}`,
+      detail: `reason=${validation.reason}`
+    });
+    return {
+      ok: false,
+      pinned,
+      reason: validation.reason
+    };
   }
 
-  const exists = pinnedItemIds.includes(normalizedId);
-  if (pinned) {
-    if (!exists) {
-      pinnedItemIds = [normalizedId, ...pinnedItemIds].slice(0, PINNED_ITEMS_MAX);
+  const normalizedId = validation.normalizedId;
+  try {
+    const exists = pinnedItemIds.includes(normalizedId);
+    if (pinned) {
+      if (!exists) {
+        pinnedItemIds = [normalizedId, ...pinnedItemIds].slice(0, PINNED_ITEMS_MAX);
+      }
+    } else if (exists) {
+      pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
     }
-  } else if (exists) {
-    pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
-  }
 
-  pinnedItemIds = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
-  await persistPinnedItemIds(db);
-  return pinnedItemIds.includes(normalizedId);
+    pinnedItemIds = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+    await persistPinnedItemIds(db);
+    return {
+      ok: true,
+      pinned: pinnedItemIds.includes(normalizedId)
+    };
+  } catch (error) {
+    queueErrorLog({
+      scope: "main",
+      level: "error",
+      message: "Pin request failed",
+      context: `itemId=${normalizedId} pinned=${pinned ? "1" : "0"}`,
+      detail: formatErrorDetail(error)
+    });
+    return {
+      ok: false,
+      pinned,
+      reason: "persist-failed"
+    };
+  }
 }
 
 async function bootstrap(): Promise<void> {

@@ -8,6 +8,7 @@ import {
   ExecuteResult,
   LaunchItem,
   LaunchAtLoginStatus,
+  PinToggleResult,
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
@@ -254,7 +255,7 @@ declare global {
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
-      setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
+      setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
       search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
       resolveCommandQuery(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;
