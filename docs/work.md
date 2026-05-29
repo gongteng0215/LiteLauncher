@@ -1,8 +1,9 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-05-28
+更新时间：2026-05-29
 
 ## 最近完成
+- 收口桌面发版 workflow 预警：将 `.github/workflows/build-desktop.yml` 从会触发 GitHub Actions Node 20 弃用与 `windows-latest` 漂移提示的旧配置，升级为显式 `windows-2025` / `ubuntu-24.04` runner，并统一切到 `actions/checkout@v6`、`actions/setup-node@v6`、`pnpm/action-setup@v6`、`actions/upload-artifact@v7`、`actions/download-artifact@v8`，同时显式开启 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` 提前跟随平台默认值；同步新增 `src/test/build-desktop-workflow-source.test.ts` 源码护栏，防止后续回退到会再次报警的 action / runner 组合。本轮按串行顺序完成 `pnpm run build`、`node dist/test/build-desktop-workflow-source.test.js` 验证，结果均通过。
 - 收口设置页日志展示与 renderer 兜底偏好：错误日志面板进一步压紧为更适合日常排查的紧凑 monospace 区块，并为 pin 相关记录补充可读摘要；同时复核 renderer 搜索结果合并评分时，补上对稳定 `app:startapp:*` Windows Store `id` 的偏好，避免前端回退到较弱的旧结果形态。同步新增 `renderer-startapp-source` 与 `search-section-grid-style` 护栏，并在 `pnpm run build` 后串行完成 `node dist/test/renderer-error-log-source.test.js`、`node dist/test/renderer-startapp-source.test.js`、`node dist/test/search-section-grid-style.test.js`、`node dist/test/launcher-main-flow-regression.test.js`、`node dist/test/windows-app-alias-regression.test.js`、`node dist/test/e2e-search-layout-smoke.test.js` 验证，结果均通过。
 - 收口 Windows Store 应用稳定 `id`：在复核同类 StartApps / WindowsApps 流程时，发现 `src/main/catalog.ts` 在“PATH alias 可解析”分支下仍会生成 `command:apps-folder:*` 风格 `id`，而动态搜索已经统一为 `app:startapp:*`，存在在部分机器上再次触发“能搜到但不能置顶”的复发风险。现已抽出 `src/main/windows-startapp.ts` 统一构造 stable `id`，让 catalog 与动态搜索在 PATH alias 正常和缺失两种情况下都保持一致；同步补强 `windows-app-alias-regression` 断言，确认 catalog / dynamic search / AppsFolder 启动链路一致。本轮在 `pnpm run build` 后串行完成 `node dist/test/windows-app-alias-regression.test.js` 验证，结果通过。
 - 改善错误日志与真实交互验证：设置页错误日志现在会把 `Pin request rejected / failed` 翻译成更易扫读的中文摘要，直接展示“置顶请求已拒绝 / 置顶保存失败”、项目 `itemId` 与用户可理解的原因；同时把搜索首页 Electron smoke 补强为断言 live `setItemPinned(...)` 返回 `ok=true` 与 `pinned=true`，确认主进程、preload、renderer 和真实窗口交互链路一致。本轮在 `pnpm run build` 后串行完成 `node dist/test/renderer-error-log-source.test.js`、`node dist/test/launcher-main-flow-regression.test.js`、`node dist/test/e2e-search-layout-smoke.test.js` 验证，结果均通过。
