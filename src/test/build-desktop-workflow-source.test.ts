@@ -19,13 +19,18 @@ test("desktop build workflow uses explicit stable runner labels", () => {
 
   assert.match(
     workflow,
-    /runs-on:\s*windows-2025/,
-    "windows build should use an explicit runner label instead of windows-latest"
+    /runs-on:\s*windows-2025-vs2026/,
+    "windows build should target the explicit VS 2026 image instead of relying on the redirecting windows-2025 label"
   );
   assert.doesNotMatch(
     workflow,
     /runs-on:\s*windows-latest/,
     "desktop build workflow should avoid the floating windows-latest alias"
+  );
+  assert.doesNotMatch(
+    workflow,
+    /runs-on:\s*windows-2025\s*(?:\r?\n|$)/,
+    "desktop build workflow should not stay on the redirecting windows-2025 label"
   );
   assert.match(
     workflow,
