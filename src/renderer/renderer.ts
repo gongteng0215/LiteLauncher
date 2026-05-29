@@ -1,3 +1,5 @@
+type PinToggleResult = import("../shared/types").PinToggleResult;
+
 type PanelMode =
   | "search"
   | "clip"
@@ -136,7 +138,7 @@ interface LauncherApi {
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
-  setItemPinned(itemId: string, pinned: boolean): Promise<boolean>;
+  setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
   resolveCommandQuery(query: string): Promise<LaunchItem[]>;
   execute(item: LaunchItem): Promise<ExecuteResult>;
@@ -653,21 +655,107 @@ function formatErrorLogDate(value: number): string {
   return date.toLocaleString();
 }
 
+function parseErrorLogContext(
+  context: string | undefined
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!context) {
+    return result;
+  }
+
+  for (const part of context.split(/\s+/)) {
+    const [key, ...rest] = part.split("=");
+    const value = rest.join("=").trim();
+    if (!key || !value) {
+      continue;
+    }
+    result[key.trim()] = value;
+  }
+
+  return result;
+}
+
+function formatPinErrorReasonText(reason: string | undefined): string {
+  switch ((reason ?? "").trim()) {
+    case "empty-item-id":
+      return "\u65e0\u6548\u9879\u76ee";
+    case "missing-catalog-item":
+      return "\u5f53\u524d\u7ed3\u679c\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u641c\u7d22";
+    case "persist-failed":
+      return "\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5";
+    default:
+      return "\u672a\u77e5\u539f\u56e0";
+  }
+}
+
+function formatErrorLogEntry(entry: AppErrorLogEntry): string {
+  const contextMap = parseErrorLogContext(entry.context);
+  const itemId =
+    contextMap.itemId === "(empty)"
+      ? "\uff08\u7a7a\uff09"
+      : contextMap.itemId;
+  const action =
+    contextMap.pinned === "0"
+      ? "\u53d6\u6d88\u7f6e\u9876"
+      : "\u7f6e\u9876";
+
+  if (entry.message === "Pin request rejected") {
+    const reasonCode = entry.detail?.match(/reason=([a-z-]+)/i)?.[1];
+    return [
+      `[${formatErrorLogDate(entry.createdAt)}] [${entry.level}] [${entry.scope}] ${action}\u8bf7\u6c42\u5df2\u62d2\u7edd`,
+      itemId ? `\u9879\u76ee: ${itemId}` : "",
+      `\u539f\u56e0: ${formatPinErrorReasonText(reasonCode)}`
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (entry.message === "Pin request failed") {
+    return [
+      `[${formatErrorLogDate(entry.createdAt)}] [${entry.level}] [${entry.scope}] ${action}\u4fdd\u5b58\u5931\u8d25`,
+      itemId ? `\u9879\u76ee: ${itemId}` : "",
+      "\u539f\u56e0: \u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5",
+      entry.detail ? `\u8be6\u60c5: ${entry.detail}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const head = `[${formatErrorLogDate(entry.createdAt)}] [${
+    entry.level
+  }] [${entry.scope}] ${entry.message}`;
+  const context = entry.context ? `上下文: ${entry.context}` : "";
+  const detail = entry.detail ? `详情: ${entry.detail}` : "";
+  return [head, context, detail].filter(Boolean).join("\n");
+}
+
 function formatErrorLogs(entries: AppErrorLogEntry[]): string {
   if (entries.length === 0) {
     return "暂无错误日志";
   }
 
-  return entries
-    .map((entry) => {
-      const head = `[${formatErrorLogDate(entry.createdAt)}] [${
-        entry.level
-      }] [${entry.scope}] ${entry.message}`;
-      const context = entry.context ? `上下文: ${entry.context}` : "";
-      const detail = entry.detail ? `详情: ${entry.detail}` : "";
-      return [head, context, detail].filter(Boolean).join("\n");
-    })
-    .join("\n\n");
+  return entries.map((entry) => formatErrorLogEntry(entry)).join("\n\n");
+}
+
+function formatPinnedToggleStatus(
+  title: string,
+  result: PinToggleResult
+): string {
+  if (result.ok) {
+    return result.pinned ? `已置顶：${title}` : `已取消置顶：${title}`;
+  }
+
+  const prefix = result.pinned ? "置顶" : "取消置顶";
+  switch (result.reason) {
+    case "empty-item-id":
+      return `${prefix}失败：无效项目`;
+    case "missing-catalog-item":
+      return `${prefix}失败：当前结果已过期，请重新搜索`;
+    case "persist-failed":
+      return `${prefix}失败：保存失败，请重试`;
+    default:
+      return `${prefix}失败`;
+  }
 }
 
 async function reportErrorLog(input: AppErrorLogInput): Promise<void> {
@@ -1196,7 +1284,10 @@ function mergeUniqueLaunchItems(primary: LaunchItem[], fallback: LaunchItem[]): 
     if (item.subtitle?.trim()) {
       score += 10;
     }
-    if (item.id.startsWith("command:apps-folder:")) {
+    if (
+      item.id.startsWith("command:apps-folder:") ||
+      item.id.startsWith("app:startapp:")
+    ) {
       score += 10;
     }
     return score;
@@ -1252,18 +1343,14 @@ async function togglePinned(index: number): Promise<void> {
 
   const item = selected.item;
   const nextPinned = !Boolean(item.pinned);
-  const savedPinned = await launcher.setItemPinned(item.id, nextPinned);
-  if (nextPinned && !savedPinned) {
-    setStatus(`\u7f6e\u9876\u5931\u8d25\uff1a${item.title}`);
+  const pinResult = await launcher.setItemPinned(item.id, nextPinned);
+  if (!pinResult.ok) {
+    setStatus(formatPinnedToggleStatus(item.title, pinResult));
     return;
   }
 
-  updatePinnedState(item.id, savedPinned);
-  setStatus(
-    savedPinned
-      ? `\u5df2\u7f6e\u9876\uff1a${item.title}`
-      : `\u5df2\u53d6\u6d88\u7f6e\u9876\uff1a${item.title}`
-  );
+  updatePinnedState(item.id, pinResult.pinned);
+  setStatus(formatPinnedToggleStatus(item.title, pinResult));
   await refreshEntries(currentQuery);
 }
 
@@ -2225,7 +2312,9 @@ function renderSettingsPanel(): void {
 
   const errorLogOutput = document.createElement("textarea");
   errorLogOutput.className = "settings-value settings-textarea settings-log-output";
+  errorLogOutput.rows = 9;
   errorLogOutput.readOnly = true;
+  errorLogOutput.spellcheck = false;
   errorLogOutput.value = formatErrorLogs(errorLogEntries);
 
   const errorLogHint = document.createElement("span");

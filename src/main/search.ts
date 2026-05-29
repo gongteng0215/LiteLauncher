@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { computeInitialItems, computeSearchItems } from "../shared/search-engine";
 import { LaunchItem, SearchRequestOptions, SearchScope } from "../shared/types";
 import { UsageStore } from "./usage-store";
+import { buildWindowsStartAppItemId } from "./windows-startapp";
 
 const DYNAMIC_COMMAND_CACHE = new Map<string, LaunchItem | null>();
 
@@ -128,6 +129,12 @@ type WindowsAppsMetadata = {
   iconPath?: string;
 };
 
+type WindowsStartAppEntry = {
+  name: string;
+  appId: string;
+  installLocation?: string;
+};
+
 function resolveWindowsAppsMetadata(resolvedPath: string): WindowsAppsMetadata | null {
   if (process.platform !== "win32" || !resolvedPath.toLowerCase().includes("\\windowsapps\\")) {
     return null;
@@ -172,6 +179,62 @@ function resolveWindowsAppsMetadata(resolvedPath: string): WindowsAppsMetadata |
   return null;
 }
 
+function resolveWindowsStartApp(commandName: string): WindowsStartAppEntry | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const normalized = commandName.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const escaped = normalized.replace(/'/g, "''");
+  const script =
+    `$start = Get-StartApps | Where-Object { $_.Name -ieq '${escaped}' -or $_.AppID -match '(?i)${escaped}' } | Select-Object -First 1 Name,AppID;` +
+    `if (-not $start) { exit 0 }` +
+    `$family = ($start.AppID -split '!')[0];` +
+    `$pkg = Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1 InstallLocation;` +
+    `[pscustomobject]@{ name = $start.Name; appId = $start.AppID; installLocation = $pkg.InstallLocation } | ConvertTo-Json -Compress`;
+
+  try {
+    const result = spawnSync(getWindowsPowerShellExecutable(), ["-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000
+    });
+    if (result.error || result.status !== 0) {
+      return null;
+    }
+
+    const raw = String(result.stdout ?? "").trim();
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as {
+      name?: unknown;
+      appId?: unknown;
+      installLocation?: unknown;
+    };
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+    const appId = typeof parsed.appId === "string" ? parsed.appId.trim() : "";
+    const installLocation =
+      typeof parsed.installLocation === "string" ? parsed.installLocation.trim() : "";
+    if (!name || !appId) {
+      return null;
+    }
+
+    return {
+      name,
+      appId,
+      installLocation: installLocation || undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function getDynamicSearchItems(
   query: string,
   scope: SearchScope = "all"
@@ -188,13 +251,11 @@ export function getDynamicSearchItems(
   const cacheKey = normalized.toLowerCase();
   if (!DYNAMIC_COMMAND_CACHE.has(cacheKey)) {
     const resolvedPath = resolveCommandPath(normalized);
-    if (!resolvedPath) {
-      DYNAMIC_COMMAND_CACHE.set(cacheKey, null);
-    } else {
+    if (resolvedPath) {
       const windowsApps = resolveWindowsAppsMetadata(resolvedPath);
       if (windowsApps) {
         DYNAMIC_COMMAND_CACHE.set(cacheKey, {
-          id: `command:apps-folder:${cacheKey}`,
+          id: buildWindowsStartAppItemId(cacheKey),
           type: "application",
           title: windowsApps.title,
           subtitle: resolvedPath,
@@ -226,6 +287,33 @@ export function getDynamicSearchItems(
             "path",
             "alias"
           ]
+        });
+      }
+    } else {
+      const startApp = resolveWindowsStartApp(normalized);
+      if (!startApp) {
+        DYNAMIC_COMMAND_CACHE.set(cacheKey, null);
+      } else {
+        const metadata =
+          startApp.installLocation
+            ? resolveWindowsAppsMetadata(path.join(startApp.installLocation, "AppxManifest.xml"))
+            : null;
+        DYNAMIC_COMMAND_CACHE.set(cacheKey, {
+          id: buildWindowsStartAppItemId(cacheKey),
+          type: "application",
+          title: metadata?.title || startApp.name,
+          subtitle: startApp.installLocation || startApp.appId,
+          target: `command:apps-folder:${encodeURIComponent(startApp.appId)}`,
+          iconPath: metadata?.iconPath,
+          keywords: [
+            cacheKey,
+            startApp.name.toLowerCase(),
+            startApp.appId.toLowerCase(),
+            startApp.installLocation?.toLowerCase() ?? "",
+            "command",
+            "startapps",
+            "windowsapps"
+          ].filter(Boolean)
         });
       }
     }

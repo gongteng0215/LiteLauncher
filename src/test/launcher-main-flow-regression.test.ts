@@ -6,6 +6,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import { LaunchItem } from "../shared/types";
 import { executeItem } from "../main/actions";
 import { buildCatalogWithOptions } from "../main/catalog";
+import { validatePinnedItemRequest } from "../main/pinning";
 import {
   getVisiblePluginIds,
   setVisiblePluginIds
@@ -91,6 +92,36 @@ function findTarget(items: LaunchItem[], prefix: string): LaunchItem | undefined
   const normalized = prefix.trim().toLowerCase();
   return items.find((item) => item.target.trim().toLowerCase().startsWith(normalized));
 }
+
+test("validatePinnedItemRequest rejects empty ids and ids missing from the catalog", () => {
+  assert.deepEqual(
+    validatePinnedItemRequest("   ", new Set(["app:startapp:codex"])),
+    {
+      ok: false,
+      normalizedId: "",
+      reason: "empty-item-id"
+    }
+  );
+
+  assert.deepEqual(
+    validatePinnedItemRequest("app:startapp:missing", new Set(["app:startapp:codex"])),
+    {
+      ok: false,
+      normalizedId: "app:startapp:missing",
+      reason: "missing-catalog-item"
+    }
+  );
+});
+
+test("validatePinnedItemRequest accepts ids present in the catalog", () => {
+  assert.deepEqual(
+    validatePinnedItemRequest("  app:startapp:codex  ", new Set(["app:startapp:codex"])),
+    {
+      ok: true,
+      normalizedId: "app:startapp:codex"
+    }
+  );
+});
 
 test(
   "main launcher flow keeps settings and visible plugin search/execution stable",

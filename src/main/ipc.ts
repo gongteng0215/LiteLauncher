@@ -13,6 +13,7 @@ import {
   ExecuteResult,
   LaunchItem,
   LaunchAtLoginStatus,
+  PinToggleResult,
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
@@ -72,7 +73,7 @@ type ErrorLogProvider = {
 };
 
 type PinProvider = {
-  setItemPinned: (itemId: string, pinned: boolean) => Promise<boolean>;
+  setItemPinned: (itemId: string, pinned: boolean) => Promise<PinToggleResult>;
 };
 
 type IpcOptions = {

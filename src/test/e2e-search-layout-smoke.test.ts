@@ -129,11 +129,18 @@ test(
         await executeSeedItem(page, item);
       }
 
-      await page.evaluate(async (itemIds) => {
+      const pinResults = await page.evaluate(async (itemIds) => {
+        const results = [];
         for (const itemId of itemIds) {
-          await window.launcher.setItemPinned(itemId, true);
+          results.push(await window.launcher.setItemPinned(itemId, true));
         }
+        return results;
       }, SEED_PLUGIN_ITEMS.map((item) => item.id));
+
+      for (const result of pinResults) {
+        assert.equal(result.ok, true, "pinning should succeed in the live Electron shell");
+        assert.equal(result.pinned, true, "live pin result should report pinned=true");
+      }
 
       await refreshSearchHome(page);
       await waitForSearchSections(page);

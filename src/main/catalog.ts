@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { DEFAULT_CATALOG_SCAN_CONFIG } from "../shared/settings";
 import { CatalogScanConfig, LaunchItem } from "../shared/types";
 import { getPluginCatalogItems } from "./plugins";
+import { buildWindowsStartAppItemId } from "./windows-startapp";
 
 const START_MENU_RELATIVE_PATH = path.join(
   "Microsoft",
@@ -673,7 +674,7 @@ function createPathAliasCommandItems(): LaunchItem[] {
     const windowsApps = resolveWindowsAppsMetadata(resolved);
     if (windowsApps) {
       items.push({
-        id: `command:apps-folder:${commandName}`,
+        id: buildWindowsStartAppItemId(commandName),
         type: "application",
         title: windowsApps.title,
         subtitle: resolved,
@@ -779,7 +780,7 @@ function createWindowsStartAppItems(): LaunchItem[] {
         : null;
 
     items.push({
-      id: `app:startapp:${commandName}`,
+      id: buildWindowsStartAppItemId(commandName),
       type: "application",
       title: metadata?.title || entry.name,
       subtitle: entry.installLocation || entry.appId,

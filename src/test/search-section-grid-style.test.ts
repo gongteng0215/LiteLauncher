@@ -66,6 +66,17 @@ test("pinned tile marker is compact and does not cover the icon label", () => {
   assert.equal(fontSize, "0");
 });
 
+test("settings error log output stays compact and monospace", () => {
+  const logBody = getRuleBody(".settings-log-output");
+  const minHeight = getProperty(logBody, "min-height");
+  const fontSize = getProperty(logBody, "font-size");
+  const lineHeight = getProperty(logBody, "line-height");
+
+  assert.equal(minHeight, "clamp(108px, 22vh, 168px)");
+  assert.equal(fontSize, "11px");
+  assert.equal(lineHeight, "1.3");
+});
+
 test("section grid column calculation runs after the grid is attached to the DOM", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
   const renderSearchSectionsMatch = rendererSource.match(

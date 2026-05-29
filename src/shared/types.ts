@@ -93,6 +93,24 @@ export interface LaunchAtLoginStatus {
   reason?: string;
 }
 
+export type PinToggleFailureReason =
+  | "empty-item-id"
+  | "missing-catalog-item"
+  | "persist-failed";
+
+export interface PinToggleSuccessResult {
+  ok: true;
+  pinned: boolean;
+}
+
+export interface PinToggleFailureResult {
+  ok: false;
+  pinned: boolean;
+  reason: PinToggleFailureReason;
+}
+
+export type PinToggleResult = PinToggleSuccessResult | PinToggleFailureResult;
+
 export type AppErrorLogScope =
   | "main"
   | "renderer"
