@@ -59,3 +59,18 @@ test("desktop build workflow pins actions to the Node 24-ready major versions", 
   assert.doesNotMatch(workflow, /uses:\s*actions\/download-artifact@v4/);
   assert.doesNotMatch(workflow, /uses:\s*pnpm\/action-setup@v4/);
 });
+
+test("desktop build workflow avoids setup-node's built-in pnpm cache path", () => {
+  const workflow = readWorkflow();
+
+  assert.doesNotMatch(
+    workflow,
+    /cache:\s*pnpm/,
+    "workflow should not rely on setup-node's built-in pnpm cache path for release packaging"
+  );
+  assert.match(
+    workflow,
+    /package-manager-cache:\s*false/,
+    "workflow should explicitly disable setup-node's package-manager cache for these pnpm jobs"
+  );
+});
