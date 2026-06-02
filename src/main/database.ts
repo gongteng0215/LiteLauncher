@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import sqlite3 from "sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   AppErrorLogEntry,
@@ -17,6 +17,10 @@ function ensureParentDirectory(filePath: string): void {
 
 type SqlParam = string | number | null;
 const APP_ERROR_LOG_LIMIT = 2000;
+
+function coerceSqliteNumber(value: number | bigint): number {
+  return typeof value === "bigint" ? Number(value) : value;
+}
 
 export type CashflowAssetSnapshot = {
   key: string;
@@ -55,23 +59,15 @@ export type CashflowStatsSummary = {
 };
 
 export class LiteDatabase {
-  private readonly db: sqlite3.Database;
+  private readonly db: DatabaseSync;
 
   public constructor(dbPath: string) {
     ensureParentDirectory(dbPath);
-    this.db = new sqlite3.Database(dbPath);
+    this.db = new DatabaseSync(dbPath);
   }
 
-  public close(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.db.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+  public async close(): Promise<void> {
+    this.db.close();
   }
 
   private run(sql: string, params: SqlParam[] = []): Promise<void> {
@@ -89,45 +85,19 @@ export class LiteDatabase {
     sql: string,
     params: SqlParam[] = []
   ): Promise<{ changes: number; lastInsertId: number }> {
-    return new Promise((resolve, reject) => {
-      this.db.run(sql, params, function callback(
-        this: sqlite3.RunResult,
-        error: Error | null
-      ) {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve({
-          changes: this.changes ?? 0,
-          lastInsertId: this.lastID ?? 0
-        });
-      });
+    const result = this.db.prepare(sql).run(...params);
+    return Promise.resolve({
+      changes: coerceSqliteNumber(result.changes),
+      lastInsertId: coerceSqliteNumber(result.lastInsertRowid)
     });
   }
 
   private get<T>(sql: string, params: SqlParam[] = []): Promise<T | undefined> {
-    return new Promise((resolve, reject) => {
-      this.db.get(sql, params, (error, row: T | undefined) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(row);
-      });
-    });
+    return Promise.resolve(this.db.prepare(sql).get(...params) as T | undefined);
   }
 
   private all<T>(sql: string, params: SqlParam[] = []): Promise<T[]> {
-    return new Promise((resolve, reject) => {
-      this.db.all(sql, params, (error, rows: T[]) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(rows);
-      });
-    });
+    return Promise.resolve(this.db.prepare(sql).all(...params) as T[]);
   }
 
   public async init(): Promise<void> {

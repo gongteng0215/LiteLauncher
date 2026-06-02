@@ -93,6 +93,28 @@ export interface LaunchAtLoginStatus {
   reason?: string;
 }
 
+export type AppUpdaterPhase =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "not-available"
+  | "unsupported"
+  | "error";
+
+export interface AppUpdaterStatus {
+  supported: boolean;
+  phase: AppUpdaterPhase;
+  currentVersion: string;
+  updateVersion?: string;
+  downloaded: boolean;
+  autoUpdateEnabled: boolean;
+  releaseNotes?: string;
+  progressPercent?: number;
+  message?: string;
+}
+
 export type PinToggleFailureReason =
   | "empty-item-id"
   | "missing-catalog-item"

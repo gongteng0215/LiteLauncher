@@ -1,6 +1,7 @@
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
+  AppUpdaterStatus,
   CatalogRebuildResult,
   CatalogScanConfig,
   ClipItem,
@@ -242,6 +243,7 @@ declare global {
       getPinnedItems(): Promise<LaunchItem[]>;
       getPluginItems(): Promise<LaunchItem[]>;
       getAppVersion(): Promise<string>;
+      getAppUpdaterStatus(): Promise<AppUpdaterStatus>;
       getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
       setSearchDisplayConfig(
         config: Partial<SearchDisplayConfig>
@@ -255,6 +257,8 @@ declare global {
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
+      checkForAppUpdates(): Promise<AppUpdaterStatus>;
+      installAppUpdateNow(): Promise<boolean>;
       setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
       search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
       resolveCommandQuery(query: string): Promise<LaunchItem[]>;

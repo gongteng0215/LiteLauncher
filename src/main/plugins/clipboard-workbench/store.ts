@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import sqlite3 from "sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   CLIPBOARD_WORKBENCH_SETTINGS_KEY,
@@ -13,6 +13,10 @@ import {
 } from "../../../shared/clipboard-workbench";
 
 type SqlParam = string | number | null;
+
+function coerceSqliteNumber(value: number | bigint): number {
+  return typeof value === "bigint" ? Number(value) : value;
+}
 
 type ClipboardWorkbenchStoredItemRow = {
   id: string;
@@ -197,14 +201,14 @@ function mapStoredItem(
 }
 
 export class ClipboardWorkbenchStore {
-  private readonly db: sqlite3.Database;
+  private readonly db: DatabaseSync;
 
   public constructor(
     private readonly dbPath: string,
     private readonly assetsDir: string
   ) {
     ensureParentDirectory(dbPath);
-    this.db = new sqlite3.Database(dbPath);
+    this.db = new DatabaseSync(dbPath);
   }
 
   public async init(): Promise<void> {
@@ -265,16 +269,8 @@ export class ClipboardWorkbenchStore {
     );
   }
 
-  public close(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.db.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+  public async close(): Promise<void> {
+    this.db.close();
   }
 
   public async getSettings(): Promise<ClipboardWorkbenchSettings> {
@@ -594,44 +590,18 @@ export class ClipboardWorkbenchStore {
     sql: string,
     params: SqlParam[] = []
   ): Promise<{ changes: number; lastInsertId: number }> {
-    return new Promise((resolve, reject) => {
-      this.db.run(sql, params, function callback(
-        this: sqlite3.RunResult,
-        error: Error | null
-      ) {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve({
-          changes: this.changes ?? 0,
-          lastInsertId: this.lastID ?? 0
-        });
-      });
+    const result = this.db.prepare(sql).run(...params);
+    return Promise.resolve({
+      changes: coerceSqliteNumber(result.changes),
+      lastInsertId: coerceSqliteNumber(result.lastInsertRowid)
     });
   }
 
   private get<T>(sql: string, params: SqlParam[] = []): Promise<T | undefined> {
-    return new Promise((resolve, reject) => {
-      this.db.get(sql, params, (error, row: T | undefined) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(row);
-      });
-    });
+    return Promise.resolve(this.db.prepare(sql).get(...params) as T | undefined);
   }
 
   private all<T>(sql: string, params: SqlParam[] = []): Promise<T[]> {
-    return new Promise((resolve, reject) => {
-      this.db.all(sql, params, (error, rows: T[]) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(rows);
-      });
-    });
+    return Promise.resolve(this.db.prepare(sql).all(...params) as T[]);
   }
 }

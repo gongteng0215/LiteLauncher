@@ -337,6 +337,75 @@ test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailab
   assert.equal(results[0]?.iconPath, CODEX_ICON);
 });
 
+test("getDynamicSearchItems retries after an earlier Windows alias miss in the same process", (t) => {
+  skipOnNonWindows(t);
+
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalExistsSync = fs.existsSync;
+  const originalReadFileSync = fs.readFileSync;
+
+  t.after(() => {
+    nativeChildProcess.spawnSync = originalSpawnSync;
+    fs.existsSync = originalExistsSync;
+    fs.readFileSync = originalReadFileSync;
+  });
+
+  let whereCallCount = 0;
+  nativeChildProcess.spawnSync = ((command, args) => {
+    const executable = String(command);
+    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
+
+    if (executable.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
+      whereCallCount += 1;
+      if (whereCallCount === 1) {
+        return makeSpawnResult(
+          1,
+          "",
+          "INFO: Could not find files for the given pattern(s)."
+        );
+      }
+      return makeSpawnResult(0, `${CODEX_EXE}\r\n`);
+    }
+
+    if (
+      executable.toLowerCase().endsWith("\\powershell.exe") &&
+      argList.includes("-Command")
+    ) {
+      return makeSpawnResult(0, "");
+    }
+
+    return makeSpawnResult(1, "", "unexpected spawnSync");
+  }) as typeof childProcess.spawnSync;
+
+  const { getDynamicSearchItems } = loadFreshModule<typeof import("../main/search")>(
+    "../main/search"
+  );
+
+  fs.existsSync = ((candidate: fs.PathLike) => {
+    const fullPath = String(candidate).replace(/\//g, "\\");
+    return fullPath === `${CODEX_PACKAGE_ROOT}\\AppxManifest.xml` || fullPath === CODEX_ICON;
+  }) as typeof fs.existsSync;
+
+  fs.readFileSync = ((candidate: fs.PathLike, options?: unknown) => {
+    const fullPath = String(candidate).replace(/\//g, "\\");
+    if (fullPath === `${CODEX_PACKAGE_ROOT}\\AppxManifest.xml` && options === "utf8") {
+      return APPX_MANIFEST;
+    }
+    return originalReadFileSync(candidate, options as never);
+  }) as typeof fs.readFileSync;
+
+  const firstResults = getDynamicSearchItems("codex", "all");
+  assert.equal(firstResults.length, 0, "first lookup should miss");
+
+  const secondResults = getDynamicSearchItems("codex", "all");
+  assert.equal(secondResults.length, 1, "second lookup should retry and recover");
+  assert.equal(secondResults[0]?.id, "app:startapp:codex");
+  assert.equal(
+    secondResults[0]?.target,
+    `command:apps-folder:${encodeURIComponent(CODEX_APP_ID)}`
+  );
+});
+
 test("executeItem launches AppsFolder targets through PowerShell Start-Process", async (t) => {
   skipOnNonWindows(t);
 

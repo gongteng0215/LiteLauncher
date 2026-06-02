@@ -29,6 +29,8 @@ export interface CodexProfileConfig {
   serviceTier?: string;
   webSearch?: string;
   modelAutoCompactTokenLimit?: number;
+  storageKind?: "embedded" | "standalone" | "snapshot";
+  sourcePath?: string;
 }
 
 export interface CodexParsedConfig {
@@ -36,18 +38,33 @@ export interface CodexParsedConfig {
   modelProvider?: string;
   model?: string;
   reviewModel?: string;
+  openaiBaseUrl?: string;
   modelReasoningEffort?: string;
+  planModeReasoningEffort?: string;
+  modelReasoningSummary?: string;
+  modelVerbosity?: string;
+  modelSupportsReasoningSummaries?: boolean;
+  serviceTier?: string;
+  webSearch?: string;
+  modelContextWindow?: number;
   modelAutoCompactTokenLimit?: number;
   approvalPolicy?: string;
+  approvalsReviewer?: string;
+  allowLoginShell?: boolean;
   sandboxMode?: string;
   defaultPermissions?: string;
   disableResponseStorage?: boolean;
   networkAccess?: string;
+  personality?: string;
+  projectDocMaxBytes?: number;
+  toolOutputTokenLimit?: number;
+  windowsWslSetupAcknowledged?: boolean;
   windows?: {
     sandbox?: string;
     sandboxPrivateDesktop?: boolean;
   };
   history?: {
+    persistence?: string;
     maxBytes?: number;
   };
   providers: CodexProviderConfig[];
@@ -81,6 +98,111 @@ export interface CodeAgentSwitchProfilePreview {
   newSource: string;
 }
 
+export function listCodexRootChangedFields(input: CodexRootConfigInput): string[] {
+  const changedFields: string[] = [];
+
+  for (const [inputKey, { key, clearField }] of new Map<
+    string,
+    {
+      key: (typeof ROOT_CONFIG_FIELD_ORDER)[number];
+      clearField: string;
+    }
+  >([
+    ["modelProvider", { key: "model_provider", clearField: "modelProvider" }],
+    ["model", { key: "model", clearField: "model" }],
+    ["reviewModel", { key: "review_model", clearField: "reviewModel" }],
+    ["openaiBaseUrl", { key: "openai_base_url", clearField: "openaiBaseUrl" }],
+    [
+      "modelReasoningEffort",
+      { key: "model_reasoning_effort", clearField: "modelReasoningEffort" }
+    ],
+    [
+      "planModeReasoningEffort",
+      { key: "plan_mode_reasoning_effort", clearField: "planModeReasoningEffort" }
+    ],
+    [
+      "modelReasoningSummary",
+      { key: "model_reasoning_summary", clearField: "modelReasoningSummary" }
+    ],
+    ["modelVerbosity", { key: "model_verbosity", clearField: "modelVerbosity" }],
+    [
+      "modelSupportsReasoningSummaries",
+      {
+        key: "model_supports_reasoning_summaries",
+        clearField: "modelSupportsReasoningSummaries"
+      }
+    ],
+    ["serviceTier", { key: "service_tier", clearField: "serviceTier" }],
+    ["webSearch", { key: "web_search", clearField: "webSearch" }],
+    ["modelContextWindow", { key: "model_context_window", clearField: "modelContextWindow" }],
+    [
+      "modelAutoCompactTokenLimit",
+      {
+        key: "model_auto_compact_token_limit",
+        clearField: "modelAutoCompactTokenLimit"
+      }
+    ],
+    ["approvalPolicy", { key: "approval_policy", clearField: "approvalPolicy" }],
+    ["approvalsReviewer", { key: "approvals_reviewer", clearField: "approvalsReviewer" }],
+    ["allowLoginShell", { key: "allow_login_shell", clearField: "allowLoginShell" }],
+    ["sandboxMode", { key: "sandbox_mode", clearField: "sandboxMode" }],
+    ["defaultPermissions", { key: "default_permissions", clearField: "defaultPermissions" }],
+    [
+      "disableResponseStorage",
+      { key: "disable_response_storage", clearField: "disableResponseStorage" }
+    ],
+    ["networkAccess", { key: "network_access", clearField: "networkAccess" }],
+    ["personality", { key: "personality", clearField: "personality" }],
+    [
+      "projectDocMaxBytes",
+      { key: "project_doc_max_bytes", clearField: "projectDocMaxBytes" }
+    ],
+    [
+      "toolOutputTokenLimit",
+      { key: "tool_output_token_limit", clearField: "toolOutputTokenLimit" }
+    ],
+    [
+      "windowsWslSetupAcknowledged",
+      {
+        key: "windows_wsl_setup_acknowledged",
+        clearField: "windowsWslSetupAcknowledged"
+      }
+    ]
+  ]).entries()) {
+    const value = input[inputKey as keyof CodexRootConfigInput];
+    if (value !== undefined || hasClearField(input, clearField)) {
+      changedFields.push(key);
+    }
+  }
+
+  if (
+    normalizeOptionalString(input.windowsSandbox) !== undefined ||
+    hasClearField(input, "windowsSandbox")
+  ) {
+    changedFields.push("windows.sandbox");
+  }
+  if (
+    typeof input.windowsSandboxPrivateDesktop === "boolean" ||
+    hasClearField(input, "windowsSandboxPrivateDesktop")
+  ) {
+    changedFields.push("windows.private_desktop");
+  }
+  if (
+    normalizeOptionalString(input.historyPersistence) !== undefined ||
+    hasClearField(input, "historyPersistence")
+  ) {
+    changedFields.push("history.persistence");
+  }
+  if (
+    normalizeOptionalNumber(input.historyMaxBytes) !== undefined ||
+    hasClearField(input, "historyMaxBytes")
+  ) {
+    changedFields.push("history.max_bytes");
+  }
+
+  return [...new Set(changedFields)];
+}
+
 export type CodeAgentSwitchProfileMatchLevel = "exact" | "partial" | "none";
 
 export interface CodeAgentSwitchProfileMatch {
@@ -98,6 +220,22 @@ export interface CodeAgentSwitchActiveSummary {
   activeProfileMatch: CodeAgentSwitchProfileMatchLevel;
   matchedFields: string[];
   profileMatches: CodeAgentSwitchProfileMatch[];
+  activeSource: CodeAgentSwitchActiveSource;
+}
+
+export interface CodeAgentSwitchActiveSource {
+  kind: "root" | "embedded" | "standalone" | "snapshot";
+  profileId?: string;
+  label: string;
+  detail: string;
+  legacy?: boolean;
+}
+
+export interface CodeAgentSwitchLegacyMigrationResult {
+  profile: CodexProfileConfig;
+  configSource: string;
+  profileSource: string;
+  appliedToRoot: boolean;
 }
 
 export type CodexProviderConfigInput = Omit<
@@ -116,6 +254,11 @@ const PROFILE_SWITCH_FIELD_ORDER = [
   "model",
   "review_model",
   "model_reasoning_effort",
+  "plan_mode_reasoning_effort",
+  "model_reasoning_summary",
+  "model_verbosity",
+  "service_tier",
+  "web_search",
   "model_auto_compact_token_limit"
 ] as const;
 const TOP_LEVEL_PROFILE_TEMPLATE_FIELDS = PROFILE_SWITCH_FIELD_ORDER.filter(
@@ -133,6 +276,8 @@ function toCamelCodexKey(key: string): string {
       return "profile";
     case "review_model":
       return "reviewModel";
+    case "openai_base_url":
+      return "openaiBaseUrl";
     case "model_reasoning_effort":
       return "modelReasoningEffort";
     case "plan_mode_reasoning_effort":
@@ -141,14 +286,22 @@ function toCamelCodexKey(key: string): string {
       return "modelReasoningSummary";
     case "model_verbosity":
       return "modelVerbosity";
+    case "model_supports_reasoning_summaries":
+      return "modelSupportsReasoningSummaries";
     case "service_tier":
       return "serviceTier";
     case "web_search":
       return "webSearch";
+    case "model_context_window":
+      return "modelContextWindow";
     case "model_auto_compact_token_limit":
       return "modelAutoCompactTokenLimit";
     case "approval_policy":
       return "approvalPolicy";
+    case "approvals_reviewer":
+      return "approvalsReviewer";
+    case "allow_login_shell":
+      return "allowLoginShell";
     case "sandbox_mode":
       return "sandboxMode";
     case "default_permissions":
@@ -157,6 +310,14 @@ function toCamelCodexKey(key: string): string {
       return "disableResponseStorage";
     case "network_access":
       return "networkAccess";
+    case "personality":
+      return "personality";
+    case "project_doc_max_bytes":
+      return "projectDocMaxBytes";
+    case "tool_output_token_limit":
+      return "toolOutputTokenLimit";
+    case "windows_wsl_setup_acknowledged":
+      return "windowsWslSetupAcknowledged";
     case "base_url":
       return "baseUrl";
     case "wire_api":
@@ -177,6 +338,8 @@ function toCamelCodexKey(key: string): string {
       return "supportsWebsockets";
     case "sandbox_private_desktop":
       return "sandboxPrivateDesktop";
+    case "persistence":
+      return "persistence";
     case "max_bytes":
       return "maxBytes";
     default:
@@ -267,23 +430,37 @@ function assignTopLevel(config: CodexParsedConfig, key: string, value: TomlPrimi
     case "profile":
     case "model":
     case "reviewModel":
+    case "openaiBaseUrl":
     case "modelReasoningEffort":
+    case "planModeReasoningEffort":
+    case "modelReasoningSummary":
+    case "modelVerbosity":
+    case "serviceTier":
+    case "webSearch":
     case "approvalPolicy":
+    case "approvalsReviewer":
     case "sandboxMode":
     case "defaultPermissions":
     case "networkAccess":
+    case "personality":
       if (typeof value === "string") {
         config[camelKey] = value;
       }
       return;
-    case "modelAutoCompactTokenLimit":
-      if (typeof value === "number") {
-        config.modelAutoCompactTokenLimit = value;
+    case "modelSupportsReasoningSummaries":
+    case "allowLoginShell":
+    case "disableResponseStorage":
+    case "windowsWslSetupAcknowledged":
+      if (typeof value === "boolean") {
+        config[camelKey] = value;
       }
       return;
-    case "disableResponseStorage":
-      if (typeof value === "boolean") {
-        config.disableResponseStorage = value;
+    case "modelContextWindow":
+    case "modelAutoCompactTokenLimit":
+    case "projectDocMaxBytes":
+    case "toolOutputTokenLimit":
+      if (typeof value === "number") {
+        config[camelKey] = value;
       }
       return;
     default:
@@ -320,7 +497,12 @@ function assignHistory(
   if (!config.history) {
     config.history = {};
   }
-  if (toCamelCodexKey(key) === "maxBytes" && typeof value === "number") {
+  const camelKey = toCamelCodexKey(key);
+  if (camelKey === "persistence" && typeof value === "string") {
+    config.history.persistence = value;
+    return;
+  }
+  if (camelKey === "maxBytes" && typeof value === "number") {
     config.history.maxBytes = value;
   }
 }
@@ -340,8 +522,10 @@ function ensureProvider(
 function ensureProfile(config: CodexParsedConfig, id: string): CodexProfileConfig {
   let profile = config.profiles.find((item) => item.id === id);
   if (!profile) {
-    profile = { id };
+    profile = { id, storageKind: "embedded" };
     config.profiles.push(profile);
+  } else if (!profile.storageKind) {
+    profile.storageKind = "embedded";
   }
   return profile;
 }
@@ -461,8 +645,8 @@ export function parseCodexTomlConfig(source: string): CodexParsedConfig {
       return;
     }
 
-    if (line.startsWith("[") || line.endsWith("]")) {
-      if (!line.startsWith("[") || !line.endsWith("]") || line.startsWith("[[")) {
+    if (line.startsWith("[")) {
+      if (!line.endsWith("]") || line.startsWith("[[")) {
         throw new Error(`Unsupported TOML header at line ${lineNumber}`);
       }
       const header = line.slice(1, -1).trim();
@@ -721,7 +905,9 @@ function normalizeProfileInput(input: CodexProfileConfig): CodexProfileConfig {
     webSearch: normalizeOptionalString(input.webSearch),
     modelAutoCompactTokenLimit: normalizeOptionalNumber(
       input.modelAutoCompactTokenLimit
-    )
+    ),
+    storageKind: input.storageKind,
+    sourcePath: input.sourcePath
   };
 }
 
@@ -798,6 +984,33 @@ function buildProviderSectionLines(provider: CodexProviderConfig): string[] {
 
 function buildProfileSectionLines(profile: CodexProfileConfig): string[] {
   const lines = [`[profiles.${formatTomlDottedId(profile.id)}]`];
+  appendTomlAssignment(lines, "model_provider", profile.providerId);
+  appendTomlAssignment(lines, "model", profile.model);
+  appendTomlAssignment(lines, "review_model", profile.reviewModel);
+  appendTomlAssignment(
+    lines,
+    "model_reasoning_effort",
+    profile.modelReasoningEffort
+  );
+  appendTomlAssignment(
+    lines,
+    "plan_mode_reasoning_effort",
+    profile.planModeReasoningEffort
+  );
+  appendTomlAssignment(lines, "model_reasoning_summary", profile.modelReasoningSummary);
+  appendTomlAssignment(lines, "model_verbosity", profile.modelVerbosity);
+  appendTomlAssignment(lines, "service_tier", profile.serviceTier);
+  appendTomlAssignment(lines, "web_search", profile.webSearch);
+  appendTomlAssignment(
+    lines,
+    "model_auto_compact_token_limit",
+    profile.modelAutoCompactTokenLimit
+  );
+  return lines;
+}
+
+function buildStandaloneProfileLines(profile: CodexProfileConfig): string[] {
+  const lines: string[] = [];
   appendTomlAssignment(lines, "model_provider", profile.providerId);
   appendTomlAssignment(lines, "model", profile.model);
   appendTomlAssignment(lines, "review_model", profile.reviewModel);
@@ -964,6 +1177,16 @@ function getTopLevelFieldValue(
       return config.reviewModel;
     case "model_reasoning_effort":
       return config.modelReasoningEffort;
+    case "plan_mode_reasoning_effort":
+      return config.planModeReasoningEffort;
+    case "model_reasoning_summary":
+      return config.modelReasoningSummary;
+    case "model_verbosity":
+      return config.modelVerbosity;
+    case "service_tier":
+      return config.serviceTier;
+    case "web_search":
+      return config.webSearch;
     case "model_auto_compact_token_limit":
       return config.modelAutoCompactTokenLimit;
     default:
@@ -991,6 +1214,21 @@ function getProfileTemplateValues(profile: CodexProfileConfig): Map<string, Toml
   if (profile.modelReasoningEffort) {
     values.set("model_reasoning_effort", profile.modelReasoningEffort);
   }
+  if (profile.planModeReasoningEffort) {
+    values.set("plan_mode_reasoning_effort", profile.planModeReasoningEffort);
+  }
+  if (profile.modelReasoningSummary) {
+    values.set("model_reasoning_summary", profile.modelReasoningSummary);
+  }
+  if (profile.modelVerbosity) {
+    values.set("model_verbosity", profile.modelVerbosity);
+  }
+  if (profile.serviceTier) {
+    values.set("service_tier", profile.serviceTier);
+  }
+  if (profile.webSearch) {
+    values.set("web_search", profile.webSearch);
+  }
   if (typeof profile.modelAutoCompactTokenLimit === "number") {
     values.set(
       "model_auto_compact_token_limit",
@@ -1017,7 +1255,6 @@ function buildProfileMatch(
 ): CodeAgentSwitchProfileMatch {
   const matchedFields: string[] = [];
   const mismatchedFields: string[] = [];
-
   if (typeof config.profile === "string" && config.profile.length > 0) {
     if (config.profile === profile.id) {
       matchedFields.push("profile");
@@ -1055,6 +1292,62 @@ function buildProfileMatch(
   };
 }
 
+function getPathBaseName(sourcePath: string | undefined): string | undefined {
+  if (!sourcePath) {
+    return undefined;
+  }
+  const normalized = sourcePath.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  return segments[segments.length - 1] || sourcePath;
+}
+
+function buildActiveSourceSummary(
+  config: CodexParsedConfig,
+  activeProfile: CodexProfileConfig | undefined,
+  activeProfileMatch: CodeAgentSwitchProfileMatchLevel
+): CodeAgentSwitchActiveSource {
+  if (activeProfile) {
+    if (activeProfile.storageKind === "standalone") {
+      return {
+        kind: "standalone",
+        profileId: activeProfile.id,
+        label: "独立 Profile",
+        detail:
+          getPathBaseName(activeProfile.sourcePath) ??
+          `${activeProfile.id}.config.toml`
+      };
+    }
+    if (activeProfile.storageKind === "snapshot") {
+      return {
+        kind: "snapshot",
+        profileId: activeProfile.id,
+        label: "历史快照",
+        detail: getPathBaseName(activeProfile.sourcePath) ?? activeProfile.id
+      };
+    }
+    return {
+      kind: "embedded",
+      profileId: activeProfile.id,
+      label: "Legacy 内嵌 Profile",
+      detail: `[profiles.${formatTomlDottedId(activeProfile.id)}] in config.toml`,
+      legacy: true
+    };
+  }
+
+  const rootDetail =
+    activeProfileMatch === "partial"
+      ? "config.toml 顶层字段与某个 Profile 部分匹配"
+      : typeof config.profile === "string" && config.profile
+        ? `config.toml legacy profile = "${config.profile}"`
+        : "config.toml 顶层字段";
+  return {
+    kind: "root",
+    label: "主配置",
+    detail: rootDetail,
+    legacy: typeof config.profile === "string" && config.profile.length > 0
+  };
+}
+
 export function summarizeCodeAgentSwitchActiveConfig(
   config: CodexParsedConfig
 ): CodeAgentSwitchActiveSummary {
@@ -1063,24 +1356,27 @@ export function summarizeCodeAgentSwitchActiveConfig(
   );
   const exactMatch = profileMatches.find((match) => match.level === "exact");
   const fallbackMatch = exactMatch ?? profileMatches.find((match) => match.level === "partial");
-  const activeProfile = fallbackMatch
+  const matchedProfile = fallbackMatch
     ? config.profiles.find((profile) => profile.id === fallbackMatch.profileId)
     : undefined;
-  const activeProviderId = config.modelProvider ?? activeProfile?.providerId;
+  const activeProviderId = config.modelProvider ?? matchedProfile?.providerId;
   const activeProvider = config.providers.find(
     (provider) => provider.id === activeProviderId
   );
+  const activeProfile = exactMatch
+    ? config.profiles.find((profile) => profile.id === exactMatch.profileId)
+    : matchedProfile;
+  const activeProfileMatch = exactMatch ? "exact" : fallbackMatch ? "partial" : "none";
 
   return {
     activeProviderId,
     activeProvider,
     activeProfileId: exactMatch?.profileId,
-    activeProfile: exactMatch
-      ? config.profiles.find((profile) => profile.id === exactMatch.profileId)
-      : undefined,
-    activeProfileMatch: exactMatch ? "exact" : fallbackMatch ? "partial" : "none",
+    activeProfile,
+    activeProfileMatch,
     matchedFields: fallbackMatch?.matchedFields ?? [],
-    profileMatches
+    profileMatches,
+    activeSource: buildActiveSourceSummary(config, activeProfile, activeProfileMatch)
   };
 }
 
@@ -1161,11 +1457,64 @@ export interface CodexRuntimeConfigInput {
   windowsSandboxPrivateDesktop?: boolean;
 }
 
+export interface CodexRootConfigInput extends CodexRuntimeConfigInput {
+  modelProvider?: string;
+  model?: string;
+  reviewModel?: string;
+  openaiBaseUrl?: string;
+  modelReasoningEffort?: string;
+  planModeReasoningEffort?: string;
+  modelReasoningSummary?: string;
+  modelVerbosity?: string;
+  modelSupportsReasoningSummaries?: boolean;
+  serviceTier?: string;
+  webSearch?: string;
+  modelContextWindow?: number;
+  modelAutoCompactTokenLimit?: number;
+  approvalsReviewer?: string;
+  allowLoginShell?: boolean;
+  personality?: string;
+  projectDocMaxBytes?: number;
+  toolOutputTokenLimit?: number;
+  disableResponseStorage?: boolean;
+  windowsWslSetupAcknowledged?: boolean;
+  historyPersistence?: string;
+  historyMaxBytes?: number;
+  clearFields?: string[];
+}
+
 const RUNTIME_ROOT_FIELD_ORDER = [
   "approval_policy",
   "sandbox_mode",
   "default_permissions",
   "network_access"
+] as const;
+
+const ROOT_CONFIG_FIELD_ORDER = [
+  "model_provider",
+  "model",
+  "review_model",
+  "openai_base_url",
+  "model_reasoning_effort",
+  "plan_mode_reasoning_effort",
+  "model_reasoning_summary",
+  "model_verbosity",
+  "model_supports_reasoning_summaries",
+  "service_tier",
+  "web_search",
+  "model_context_window",
+  "model_auto_compact_token_limit",
+  "approval_policy",
+  "approvals_reviewer",
+  "allow_login_shell",
+  "sandbox_mode",
+  "default_permissions",
+  "disable_response_storage",
+  "network_access",
+  "personality",
+  "project_doc_max_bytes",
+  "tool_output_token_limit",
+  "windows_wsl_setup_acknowledged"
 ] as const;
 
 function getRuntimeInputValue(
@@ -1186,8 +1535,84 @@ function getRuntimeInputValue(
   }
 }
 
+function getRootInputValue(
+  input: CodexRootConfigInput,
+  key: (typeof ROOT_CONFIG_FIELD_ORDER)[number]
+): TomlPrimitive | undefined {
+  switch (key) {
+    case "model_provider":
+      return normalizeOptionalString(input.modelProvider);
+    case "model":
+      return normalizeOptionalString(input.model);
+    case "review_model":
+      return normalizeOptionalString(input.reviewModel);
+    case "openai_base_url":
+      return normalizeOptionalString(input.openaiBaseUrl);
+    case "model_reasoning_effort":
+      return normalizeOptionalString(input.modelReasoningEffort);
+    case "plan_mode_reasoning_effort":
+      return normalizeOptionalString(input.planModeReasoningEffort);
+    case "model_reasoning_summary":
+      return normalizeOptionalString(input.modelReasoningSummary);
+    case "model_verbosity":
+      return normalizeOptionalString(input.modelVerbosity);
+    case "model_supports_reasoning_summaries":
+      return typeof input.modelSupportsReasoningSummaries === "boolean"
+        ? input.modelSupportsReasoningSummaries
+        : undefined;
+    case "service_tier":
+      return normalizeOptionalString(input.serviceTier);
+    case "web_search":
+      return normalizeOptionalString(input.webSearch);
+    case "model_context_window":
+      return normalizeOptionalNumber(input.modelContextWindow);
+    case "model_auto_compact_token_limit":
+      return normalizeOptionalNumber(input.modelAutoCompactTokenLimit);
+    case "approval_policy":
+      return normalizeOptionalString(input.approvalPolicy);
+    case "approvals_reviewer":
+      return normalizeOptionalString(input.approvalsReviewer);
+    case "allow_login_shell":
+      return typeof input.allowLoginShell === "boolean" ? input.allowLoginShell : undefined;
+    case "sandbox_mode":
+      return normalizeOptionalString(input.sandboxMode);
+    case "default_permissions":
+      return normalizeOptionalString(input.defaultPermissions);
+    case "disable_response_storage":
+      return typeof input.disableResponseStorage === "boolean"
+        ? input.disableResponseStorage
+        : undefined;
+    case "network_access":
+      return normalizeOptionalString(input.networkAccess);
+    case "personality":
+      return normalizeOptionalString(input.personality);
+    case "project_doc_max_bytes":
+      return normalizeOptionalNumber(input.projectDocMaxBytes);
+    case "tool_output_token_limit":
+      return normalizeOptionalNumber(input.toolOutputTokenLimit);
+    case "windows_wsl_setup_acknowledged":
+      return typeof input.windowsWslSetupAcknowledged === "boolean"
+        ? input.windowsWslSetupAcknowledged
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function hasClearField(input: CodexRootConfigInput, field: string): boolean {
+  return input.clearFields?.includes(field) === true;
+}
+
 function upsertRootAssignments(
   source: string,
+  values: Map<string, TomlPrimitive>
+): string {
+  return updateTrackedRootAssignments(source, new Set(values.keys()), values);
+}
+
+function updateTrackedRootAssignments(
+  source: string,
+  trackedKeys: Set<string>,
   values: Map<string, TomlPrimitive>
 ): string {
   const newline = getNewline(source);
@@ -1203,12 +1628,16 @@ function upsertRootAssignments(
       continue;
     }
     const key = content.slice(0, equalsIndex).trim();
-    const value = values.get(key);
-    if (value === undefined) {
+    if (!trackedKeys.has(key)) {
       continue;
     }
-    lines[index] = replaceTomlAssignmentValue(rawLine, value);
-    seen.add(key);
+    const value = values.get(key);
+    if (value === undefined) {
+      lines[index] = removeTopLevelAssignmentLine(rawLine);
+    } else {
+      lines[index] = replaceTomlAssignmentValue(rawLine, value);
+      seen.add(key);
+    }
   }
   const insertedLines: string[] = [];
   for (const [key, value] of values.entries()) {
@@ -1227,34 +1656,229 @@ function upsertRootAssignments(
   return lines.join(newline);
 }
 
+function updateNamedSectionAssignments(
+  source: string,
+  headerName: string,
+  trackedKeys: Set<string>,
+  values: Map<string, TomlPrimitive>
+): string {
+  const newline = getNewline(source);
+  const lines = source.split(/\r?\n/);
+  const range = findNamedSectionRange(source, headerName);
+  if (!range) {
+    if (values.size === 0) {
+      return source;
+    }
+    const sectionLines = [`[${headerName}]`];
+    for (const [key, value] of values.entries()) {
+      sectionLines.push(`${key} = ${formatTomlValue(value)}`);
+    }
+    return replaceOrAppendNamedSection(source, headerName, sectionLines);
+  }
+
+  const sectionLines = lines.slice(range.start, range.end);
+  const nextSectionLines = [sectionLines[0] ?? `[${headerName}]`];
+  const seen = new Set<string>();
+  for (let index = 1; index < sectionLines.length; index += 1) {
+    const rawLine = sectionLines[index] ?? "";
+    const content = stripTomlComment(rawLine);
+    const equalsIndex = content.indexOf("=");
+    if (equalsIndex <= 0) {
+      nextSectionLines.push(rawLine);
+      continue;
+    }
+    const key = content.slice(0, equalsIndex).trim();
+    if (!trackedKeys.has(key)) {
+      nextSectionLines.push(rawLine);
+      continue;
+    }
+    const value = values.get(key);
+    if (value === undefined) {
+      continue;
+    }
+    nextSectionLines.push(replaceTomlAssignmentValue(rawLine, value));
+    seen.add(key);
+  }
+
+  for (const [key, value] of values.entries()) {
+    if (seen.has(key)) {
+      continue;
+    }
+    nextSectionLines.push(`${key} = ${formatTomlValue(value)}`);
+  }
+
+  const hasBody = nextSectionLines
+    .slice(1)
+    .some((line) => stripTomlComment(line).trim().length > 0);
+  if (!hasBody) {
+    lines.splice(range.start, range.end - range.start);
+    return lines.join(newline);
+  }
+  lines.splice(range.start, range.end - range.start, ...nextSectionLines);
+  return lines.join(newline);
+}
+
+export function updateCodexRootConfigInToml(
+  source: string,
+  input: CodexRootConfigInput
+): string {
+  parseCodexTomlConfig(source);
+
+  const rootValues = new Map<string, TomlPrimitive>();
+  const trackedRootKeys = new Set<string>();
+  const rootFieldMap = new Map<
+    string,
+    {
+      key: (typeof ROOT_CONFIG_FIELD_ORDER)[number];
+      clearField: string;
+    }
+  >([
+    ["modelProvider", { key: "model_provider", clearField: "modelProvider" }],
+    ["model", { key: "model", clearField: "model" }],
+    ["reviewModel", { key: "review_model", clearField: "reviewModel" }],
+    ["openaiBaseUrl", { key: "openai_base_url", clearField: "openaiBaseUrl" }],
+    [
+      "modelReasoningEffort",
+      { key: "model_reasoning_effort", clearField: "modelReasoningEffort" }
+    ],
+    [
+      "planModeReasoningEffort",
+      { key: "plan_mode_reasoning_effort", clearField: "planModeReasoningEffort" }
+    ],
+    [
+      "modelReasoningSummary",
+      { key: "model_reasoning_summary", clearField: "modelReasoningSummary" }
+    ],
+    ["modelVerbosity", { key: "model_verbosity", clearField: "modelVerbosity" }],
+    [
+      "modelSupportsReasoningSummaries",
+      {
+        key: "model_supports_reasoning_summaries",
+        clearField: "modelSupportsReasoningSummaries"
+      }
+    ],
+    ["serviceTier", { key: "service_tier", clearField: "serviceTier" }],
+    ["webSearch", { key: "web_search", clearField: "webSearch" }],
+    ["modelContextWindow", { key: "model_context_window", clearField: "modelContextWindow" }],
+    [
+      "modelAutoCompactTokenLimit",
+      {
+        key: "model_auto_compact_token_limit",
+        clearField: "modelAutoCompactTokenLimit"
+      }
+    ],
+    ["approvalPolicy", { key: "approval_policy", clearField: "approvalPolicy" }],
+    ["approvalsReviewer", { key: "approvals_reviewer", clearField: "approvalsReviewer" }],
+    ["allowLoginShell", { key: "allow_login_shell", clearField: "allowLoginShell" }],
+    ["sandboxMode", { key: "sandbox_mode", clearField: "sandboxMode" }],
+    ["defaultPermissions", { key: "default_permissions", clearField: "defaultPermissions" }],
+    [
+      "disableResponseStorage",
+      { key: "disable_response_storage", clearField: "disableResponseStorage" }
+    ],
+    ["networkAccess", { key: "network_access", clearField: "networkAccess" }],
+    ["personality", { key: "personality", clearField: "personality" }],
+    [
+      "projectDocMaxBytes",
+      { key: "project_doc_max_bytes", clearField: "projectDocMaxBytes" }
+    ],
+    [
+      "toolOutputTokenLimit",
+      { key: "tool_output_token_limit", clearField: "toolOutputTokenLimit" }
+    ],
+    [
+      "windowsWslSetupAcknowledged",
+      {
+        key: "windows_wsl_setup_acknowledged",
+        clearField: "windowsWslSetupAcknowledged"
+      }
+    ]
+  ]);
+  for (const { key, clearField } of rootFieldMap.values()) {
+    const value = getRootInputValue(input, key);
+    if (value !== undefined || hasClearField(input, clearField)) {
+      trackedRootKeys.add(key);
+    }
+    if (value !== undefined) {
+      rootValues.set(key, value);
+    }
+  }
+
+  let nextSource = updateTrackedRootAssignments(source, trackedRootKeys, rootValues);
+
+  const windowsValues = new Map<string, TomlPrimitive>();
+  const trackedWindowsKeys = new Set<string>();
+  if (
+    normalizeOptionalString(input.windowsSandbox) !== undefined ||
+    hasClearField(input, "windowsSandbox")
+  ) {
+    trackedWindowsKeys.add("sandbox");
+  }
+  if (normalizeOptionalString(input.windowsSandbox) !== undefined) {
+    windowsValues.set("sandbox", normalizeOptionalString(input.windowsSandbox) as string);
+  }
+  if (
+    typeof input.windowsSandboxPrivateDesktop === "boolean" ||
+    hasClearField(input, "windowsSandboxPrivateDesktop")
+  ) {
+    trackedWindowsKeys.add("sandbox_private_desktop");
+  }
+  if (typeof input.windowsSandboxPrivateDesktop === "boolean") {
+    windowsValues.set("sandbox_private_desktop", input.windowsSandboxPrivateDesktop);
+  }
+  nextSource = updateNamedSectionAssignments(
+    nextSource,
+    "windows",
+    trackedWindowsKeys,
+    windowsValues
+  );
+
+  const historyValues = new Map<string, TomlPrimitive>();
+  const trackedHistoryKeys = new Set<string>();
+  if (
+    normalizeOptionalString(input.historyPersistence) !== undefined ||
+    hasClearField(input, "historyPersistence")
+  ) {
+    trackedHistoryKeys.add("persistence");
+  }
+  if (normalizeOptionalString(input.historyPersistence) !== undefined) {
+    historyValues.set(
+      "persistence",
+      normalizeOptionalString(input.historyPersistence) as string
+    );
+  }
+  if (
+    normalizeOptionalNumber(input.historyMaxBytes) !== undefined ||
+    hasClearField(input, "historyMaxBytes")
+  ) {
+    trackedHistoryKeys.add("max_bytes");
+  }
+  if (normalizeOptionalNumber(input.historyMaxBytes) !== undefined) {
+    historyValues.set("max_bytes", normalizeOptionalNumber(input.historyMaxBytes) as number);
+  }
+  nextSource = updateNamedSectionAssignments(
+    nextSource,
+    "history",
+    trackedHistoryKeys,
+    historyValues
+  );
+
+  parseCodexTomlConfig(nextSource);
+  return nextSource;
+}
+
 export function updateCodexRuntimeConfigInToml(
   source: string,
   input: CodexRuntimeConfigInput
 ): string {
-  parseCodexTomlConfig(source);
-  const values = new Map<string, TomlPrimitive>();
-  for (const key of RUNTIME_ROOT_FIELD_ORDER) {
-    const value = getRuntimeInputValue(input, key);
-    if (value !== undefined) {
-      values.set(key, value);
-    }
-  }
-  let nextSource = upsertRootAssignments(source, values);
-  if (
-    normalizeOptionalString(input.windowsSandbox) ||
-    typeof input.windowsSandboxPrivateDesktop === "boolean"
-  ) {
-    const lines = ["[windows]"];
-    appendTomlAssignment(lines, "sandbox", normalizeOptionalString(input.windowsSandbox));
-    appendTomlAssignment(
-      lines,
-      "sandbox_private_desktop",
-      input.windowsSandboxPrivateDesktop
-    );
-    nextSource = replaceOrAppendNamedSection(nextSource, "windows", lines);
-  }
-  parseCodexTomlConfig(nextSource);
-  return nextSource;
+  return updateCodexRootConfigInToml(source, {
+    approvalPolicy: input.approvalPolicy,
+    sandboxMode: input.sandboxMode,
+    defaultPermissions: input.defaultPermissions,
+    networkAccess: input.networkAccess,
+    windowsSandbox: input.windowsSandbox,
+    windowsSandboxPrivateDesktop: input.windowsSandboxPrivateDesktop
+  });
 }
 
 function findNamedSectionRange(
@@ -1320,6 +1944,183 @@ function trimDiffLine(line: string): string {
 
 function removeTopLevelAssignmentLine(_rawLine: string): string {
   return "";
+}
+
+export function buildStandaloneCodexProfileToml(profileInput: CodexProfileConfig): string {
+  const profile = normalizeProfileInput(profileInput);
+  const lines = buildStandaloneProfileLines(profile);
+  const source = lines.length > 0 ? `${lines.join("\n")}\n` : "";
+  parseCodexTomlConfig(source);
+  return source;
+}
+
+export function migrateLegacyCodexProfileToStandalone(
+  source: string,
+  profileId: string
+): CodeAgentSwitchLegacyMigrationResult {
+  const normalizedProfileId = profileId.trim();
+  if (!normalizedProfileId) {
+    throw new Error("请选择要迁移的 Profile");
+  }
+
+  const config = parseCodexTomlConfig(source);
+  const profile = config.profiles.find((item) => item.id === normalizedProfileId);
+  if (!profile) {
+    throw new Error(`Profile "${normalizedProfileId}" does not exist`);
+  }
+  if (profile.storageKind && profile.storageKind !== "embedded") {
+    throw new Error(`Profile "${normalizedProfileId}" is not a legacy embedded profile`);
+  }
+
+  const normalizedProfile: CodexProfileConfig = {
+    ...normalizeProfileInput(profile),
+    storageKind: "standalone"
+  };
+  const profileSource = buildStandaloneCodexProfileToml(normalizedProfile);
+  const configWithoutProfile = deleteCodexProfileInToml(source, normalizedProfile.id);
+  const profileMatch = buildProfileMatch(config, profile);
+  const appliedToRoot =
+    config.profile === normalizedProfile.id || profileMatch.level === "exact";
+  const configSource = appliedToRoot
+    ? buildCodeAgentSwitchProfilePreviewFromProfile(
+        configWithoutProfile,
+        normalizedProfile,
+        config.providers
+      ).newSource
+    : configWithoutProfile;
+
+  parseCodexTomlConfig(configSource);
+  return {
+    profile: normalizedProfile,
+    configSource,
+    profileSource,
+    appliedToRoot
+  };
+}
+
+export function buildCodeAgentSwitchProfilePreviewFromProfile(
+  source: string,
+  profileInput: CodexProfileConfig,
+  extraProviders: CodexProviderConfig[] = []
+): CodeAgentSwitchProfilePreview {
+  const profile = normalizeProfileInput(profileInput);
+  const config = parseCodexTomlConfig(source);
+  const availableProviders = [...config.providers];
+  for (const provider of extraProviders) {
+    if (!availableProviders.some((item) => item.id === provider.id)) {
+      availableProviders.push(provider);
+    }
+  }
+  if (
+    profile.providerId &&
+    !availableProviders.some((provider) => provider.id === profile.providerId)
+  ) {
+    throw new Error(`Provider "${profile.providerId}" 不存在`);
+  }
+
+  const desired = getProfileTemplateValues(profile);
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+  const nextLines = [...lines];
+  const firstHeaderIndex = lines.findIndex((line) => isTomlHeaderLine(line));
+  const rootEndIndex = firstHeaderIndex === -1 ? lines.length : firstHeaderIndex;
+  const seenFields = new Set<string>();
+  const changedFields: string[] = [];
+  const diffLines: string[] = [];
+
+  for (let index = 0; index < rootEndIndex; index += 1) {
+    const rawLine = nextLines[index] ?? "";
+    const content = stripTomlComment(rawLine);
+    const equalsIndex = content.indexOf("=");
+    if (equalsIndex <= 0) {
+      continue;
+    }
+    const key = content.slice(0, equalsIndex).trim();
+    if (key === "profile") {
+      const replacement = removeTopLevelAssignmentLine(rawLine);
+      nextLines[index] = replacement;
+      changedFields.push(key);
+      diffLines.push(`- ${trimDiffLine(rawLine)}`);
+      continue;
+    }
+    if (PROFILE_SWITCH_FIELD_ORDER.includes(key as (typeof PROFILE_SWITCH_FIELD_ORDER)[number])) {
+      const desiredValue = desired.get(key);
+      if (desiredValue === undefined) {
+        const replacement = removeTopLevelAssignmentLine(rawLine);
+        nextLines[index] = replacement;
+        changedFields.push(key);
+        diffLines.push(`- ${trimDiffLine(rawLine)}`);
+        continue;
+      }
+    }
+    if (!desired.has(key)) {
+      continue;
+    }
+    const value = desired.get(key);
+    if (value === undefined) {
+      continue;
+    }
+    seenFields.add(key);
+    const replacement = replaceTomlAssignmentValue(rawLine, value);
+    if (replacement !== rawLine) {
+      nextLines[index] = replacement;
+      changedFields.push(key);
+      diffLines.push(`- ${trimDiffLine(rawLine)}`);
+      diffLines.push(`+ ${trimDiffLine(replacement)}`);
+    }
+  }
+
+  const insertedLines: string[] = [];
+  for (const key of PROFILE_SWITCH_FIELD_ORDER) {
+    if (key === "profile" || !desired.has(key) || seenFields.has(key)) {
+      continue;
+    }
+    const value = desired.get(key);
+    if (value === undefined) {
+      continue;
+    }
+    insertedLines.push(`${key} = ${formatTomlValue(value)}`);
+    changedFields.push(key);
+    diffLines.push(`+ ${key} = ${formatTomlValue(value)}`);
+  }
+
+  if (insertedLines.length > 0) {
+    let insertIndex = rootEndIndex;
+    while (insertIndex > 0 && nextLines[insertIndex - 1]?.trim() === "") {
+      insertIndex -= 1;
+    }
+    nextLines.splice(insertIndex, 0, ...insertedLines);
+  }
+
+  const changedFieldSet = new Set(changedFields);
+  for (const key of PROFILE_SWITCH_FIELD_ORDER) {
+    if (key === "profile") {
+      continue;
+    }
+    const desiredValue = desired.get(key);
+    if (
+      desiredValue !== undefined &&
+      getTopLevelFieldValue(config, key) !== desiredValue &&
+      !changedFieldSet.has(key)
+    ) {
+      changedFields.push(key);
+      changedFieldSet.add(key);
+    }
+  }
+
+  let newSource = nextLines.join(newline);
+  for (const provider of extraProviders) {
+    newSource = upsertCodexProviderInToml(newSource, provider);
+  }
+  parseCodexTomlConfig(newSource);
+
+  return {
+    profileId: profile.id,
+    providerId: profile.providerId,
+    changedFields: [...new Set(changedFields)],
+    diffLines,
+    newSource
+  };
 }
 
 export function buildCodeAgentSwitchProfilePreview(
@@ -1516,13 +2317,16 @@ export function diagnoseCodexConfig(
     );
   }
 
-  if (config.profiles.length > 0) {
+  if (
+    typeof config.profile === "string" ||
+    config.profiles.some((profile) => profile.storageKind === "embedded")
+  ) {
     diagnostics.push(
       createDiagnostic(
         "D008",
         "warning",
-        "当前配置包含 profiles",
-        "Profile 在不同 Codex 客户端中的支持可能不完全一致。"
+        "检测到旧版 Codex profile 配置写法",
+        "Codex 0.134.0+ 不再支持顶层 profile 和 [profiles.*]；请迁移到独立的 <name>.config.toml 文件，或直接把当前生效配置写入 config.toml。"
       )
     );
   }
