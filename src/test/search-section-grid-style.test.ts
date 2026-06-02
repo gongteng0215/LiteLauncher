@@ -194,3 +194,28 @@ test("settings panel only exposes the search result limit that still affects ren
   assert.equal(body.includes('key: "pinnedLimit"'), false);
   assert.equal(body.includes('key: "pluginLimit"'), false);
 });
+
+test("settings panel exposes app update status and actions in the system section", () => {
+  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    rendererSource,
+    /getAppUpdaterStatus\(\)/,
+    "settings bootstrapping should request app updater status from preload"
+  );
+  assert.match(
+    rendererSource,
+    /checkForAppUpdates\(\)/,
+    "settings panel should expose a manual check-for-updates action"
+  );
+  assert.match(
+    rendererSource,
+    /installAppUpdateNow\(\)/,
+    "settings panel should expose an install-now action when an update is ready"
+  );
+  assert.match(
+    rendererSource,
+    /自动更新|检查更新|立即安装并重启/,
+    "settings panel should describe app update status and actions in visible copy"
+  );
+});

@@ -105,6 +105,26 @@ interface LaunchAtLoginStatus {
   reason?: string;
 }
 
+interface AppUpdaterStatus {
+  supported: boolean;
+  phase:
+    | "idle"
+    | "checking"
+    | "available"
+    | "downloading"
+    | "downloaded"
+    | "not-available"
+    | "unsupported"
+    | "error";
+  currentVersion: string;
+  updateVersion?: string;
+  downloaded: boolean;
+  autoUpdateEnabled: boolean;
+  releaseNotes?: string;
+  progressPercent?: number;
+  message?: string;
+}
+
 interface DebugKeyEvent {
   source: "main" | "renderer";
   phase: string;
@@ -125,6 +145,7 @@ interface LauncherApi {
   getPinnedItems(): Promise<LaunchItem[]>;
   getPluginItems(): Promise<LaunchItem[]>;
   getAppVersion(): Promise<string>;
+  getAppUpdaterStatus(): Promise<AppUpdaterStatus>;
   getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
   setSearchDisplayConfig(
     config: Partial<SearchDisplayConfig>
@@ -138,6 +159,8 @@ interface LauncherApi {
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
+  checkForAppUpdates(): Promise<AppUpdaterStatus>;
+  installAppUpdateNow(): Promise<boolean>;
   setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
   resolveCommandQuery(query: string): Promise<LaunchItem[]>;
@@ -371,6 +394,14 @@ let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
   supported: false,
   reason: "状态未知"
+};
+let appUpdaterStatus: AppUpdaterStatus = {
+  supported: false,
+  phase: "unsupported",
+  currentVersion: "",
+  downloaded: false,
+  autoUpdateEnabled: false,
+  message: "自动更新状态未知"
 };
 let appVersion = "未知版本";
 let errorLogEntries: AppErrorLogEntry[] = [];
@@ -735,6 +766,99 @@ function formatErrorLogs(entries: AppErrorLogEntry[]): string {
   }
 
   return entries.map((entry) => formatErrorLogEntry(entry)).join("\n\n");
+}
+
+function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
+  if (!status.supported) {
+    return status.message ?? "当前环境暂不支持自动更新";
+  }
+
+  switch (status.phase) {
+    case "checking":
+      return "正在检查更新";
+    case "available":
+      return status.updateVersion
+        ? `发现新版本 v${status.updateVersion}，正在准备下载`
+        : "发现新版本，正在准备下载";
+    case "downloading":
+      return typeof status.progressPercent === "number"
+        ? `正在下载更新 ${Math.round(status.progressPercent)}%`
+        : "正在下载更新";
+    case "downloaded":
+      return status.updateVersion
+        ? `新版本 v${status.updateVersion} 已下载完成`
+        : "新版本已下载完成";
+    case "not-available":
+      return "当前已是最新版本";
+    case "error":
+      return status.message ?? "检查更新失败";
+    case "idle":
+    case "unsupported":
+    default:
+      return status.message ?? "可手动检查更新";
+  }
+}
+
+function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
+  if (!status.supported) {
+    return status.message ?? "当前环境暂不支持自动更新";
+  }
+
+  if (status.phase === "downloaded" && status.downloaded) {
+    return "更新包已就绪，可立即安装并重启";
+  }
+
+  if (status.phase === "downloading") {
+    return "后台下载完成后可直接安装";
+  }
+
+  if (status.phase === "not-available") {
+    return "GitHub Releases 未发现更新";
+  }
+
+  if (status.phase === "error") {
+    return status.message ?? "可稍后再次检查";
+  }
+
+  return "仅 Windows NSIS 安装版支持自动更新";
+}
+
+async function checkForAppUpdatesFromSettings(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.checkForAppUpdates) {
+    setStatus("桥接层未加载，无法检查更新");
+    return;
+  }
+
+  setStatus("正在检查更新...");
+  try {
+    appUpdaterStatus = await launcher.checkForAppUpdates();
+    setStatus(`自动更新：${formatAppUpdaterStatusSummary(appUpdaterStatus)}`);
+  } catch {
+    setStatus("检查更新失败");
+  }
+
+  renderList();
+}
+
+async function installAppUpdateNowFromSettings(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.installAppUpdateNow) {
+    setStatus("桥接层未加载，无法安装更新");
+    return;
+  }
+
+  try {
+    const ok = await launcher.installAppUpdateNow();
+    if (!ok) {
+      setStatus("更新尚未下载完成，暂不能安装");
+      return;
+    }
+
+    setStatus("正在安装更新并重启...");
+  } catch {
+    setStatus("安装更新失败");
+  }
 }
 
 function formatPinnedToggleStatus(
@@ -2230,7 +2354,7 @@ function renderSettingsPanel(): void {
 
   const systemGroup = createGroup(
     "系统",
-    "管理应用的启动行为与当前版本信息。"
+    "管理应用的启动行为、自动更新与当前版本信息。"
   );
   const {
     row: launchAtLoginRow,
@@ -2276,6 +2400,52 @@ function renderSettingsPanel(): void {
   versionControl.appendChild(versionValue);
   versionHint.dataset.compact = "true";
   systemGroup.body.appendChild(versionRow);
+
+  const {
+    row: updaterRow,
+    control: updaterControl,
+    hint: updaterHint
+  } = createRow(
+    "自动更新",
+    formatAppUpdaterActionHint(appUpdaterStatus)
+  );
+  const updaterStack = document.createElement("div");
+  updaterStack.className = "settings-control-stack";
+
+  const updaterValue = document.createElement("div");
+  updaterValue.className = "settings-static-value";
+  updaterValue.textContent = formatAppUpdaterStatusSummary(appUpdaterStatus);
+
+  const updaterActions = document.createElement("div");
+  updaterActions.className = "settings-inline-actions";
+
+  const checkUpdatesButton = document.createElement("button");
+  checkUpdatesButton.type = "button";
+  checkUpdatesButton.className = "settings-btn settings-btn-secondary";
+  checkUpdatesButton.textContent = "检查更新";
+  checkUpdatesButton.disabled =
+    appUpdaterStatus.phase === "checking" ||
+    appUpdaterStatus.phase === "downloading";
+  checkUpdatesButton.addEventListener("click", () => {
+    void checkForAppUpdatesFromSettings();
+  });
+  updaterActions.appendChild(checkUpdatesButton);
+
+  if (appUpdaterStatus.downloaded && appUpdaterStatus.phase === "downloaded") {
+    const installNowButton = document.createElement("button");
+    installNowButton.type = "button";
+    installNowButton.className = "settings-btn settings-btn-primary";
+    installNowButton.textContent = "立即安装并重启";
+    installNowButton.addEventListener("click", () => {
+      void installAppUpdateNowFromSettings();
+    });
+    updaterActions.appendChild(installNowButton);
+  }
+
+  updaterStack.append(updaterValue, updaterActions);
+  updaterControl.appendChild(updaterStack);
+  updaterHint.dataset.compact = "true";
+  systemGroup.body.appendChild(updaterRow);
   form.appendChild(systemGroup.section);
 
   const logGroup = createGroup(
@@ -2515,6 +2685,7 @@ async function refreshEntries(query: string): Promise<void> {
         nextCatalogScanConfig,
         nextVisiblePluginIds,
         nextLaunchAtLoginStatus,
+        nextAppUpdaterStatus,
         nextAppVersion,
         nextErrorLogs
       ] =
@@ -2523,6 +2694,7 @@ async function refreshEntries(query: string): Promise<void> {
           launcher.getCatalogScanConfig(),
           launcher.getVisiblePluginIds(),
           launcher.getLaunchAtLoginStatus(),
+          launcher.getAppUpdaterStatus().catch(() => appUpdaterStatus),
           launcher.getAppVersion().catch(() => ""),
           launcher.getErrorLogs(40).catch(() => [])
         ]);
@@ -2532,6 +2704,7 @@ async function refreshEntries(query: string): Promise<void> {
         ? parseVisiblePluginIdsText(nextVisiblePluginIds.join("\n"))
         : [];
       launchAtLoginStatus = nextLaunchAtLoginStatus;
+      appUpdaterStatus = nextAppUpdaterStatus;
       errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];
       appVersion =
         typeof nextAppVersion === "string" && nextAppVersion.trim()

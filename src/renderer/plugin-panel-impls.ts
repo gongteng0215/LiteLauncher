@@ -1936,17 +1936,38 @@ let codeAgentSwitchData: {
   tools?: CodeAgentSwitchToolView[];
   exists?: boolean;
   configPath?: string;
+  configSource?: string;
+  rootSource?: string;
   config?: {
     profile?: string;
     modelProvider?: string;
     model?: string;
     reviewModel?: string;
+    openaiBaseUrl?: string;
     modelReasoningEffort?: string;
+    planModeReasoningEffort?: string;
+    modelReasoningSummary?: string;
+    modelVerbosity?: string;
+    modelSupportsReasoningSummaries?: boolean;
+    serviceTier?: string;
+    webSearch?: string;
+    modelContextWindow?: number;
     modelAutoCompactTokenLimit?: number;
     approvalPolicy?: string;
+    approvalsReviewer?: string;
+    allowLoginShell?: boolean;
     sandboxMode?: string;
     defaultPermissions?: string;
+    disableResponseStorage?: boolean;
     networkAccess?: string;
+    personality?: string;
+    projectDocMaxBytes?: number;
+    toolOutputTokenLimit?: number;
+    windowsWslSetupAcknowledged?: boolean;
+    history?: {
+      persistence?: string;
+      maxBytes?: number;
+    };
     windows?: {
       sandbox?: string;
       sandboxPrivateDesktop?: boolean;
@@ -1972,6 +1993,7 @@ let codeAgentSwitchData: {
     changedFields?: string[];
     diffLines?: string[];
   };
+  rootChangedFields?: string[];
   applied?: boolean;
   restored?: boolean;
   savedProvider?: boolean;
@@ -2288,6 +2310,23 @@ function createCodeAgentSwitchSelect(
   return label;
 }
 
+function createCodeAgentSwitchCheckbox(
+  labelText: string,
+  name: string,
+  checked: boolean | undefined
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "codeagent-switch-editor-field";
+  const text = document.createElement("span");
+  text.textContent = labelText;
+  const input = document.createElement("input");
+  input.name = name;
+  input.type = "checkbox";
+  input.checked = checked === true;
+  label.append(text, input);
+  return label;
+}
+
 function formatCodeAgentSwitchStringMap(map?: Record<string, string>): string {
   return Object.entries(map ?? {})
     .map(([key, value]) => `${key}=${value}`)
@@ -2380,7 +2419,29 @@ function createCodeAgentSwitchDetailSection(
   return section;
 }
 
-function createCodeAgentSwitchProviderEditor(provider?: CodeAgentSwitchProviderView): HTMLDivElement {
+function createCodeAgentSwitchEditorGroup(
+  titleText: string,
+  ...fields: HTMLElement[]
+): HTMLDivElement {
+  const group = document.createElement("div");
+  group.className = "codeagent-switch-editor-group";
+
+  const title = document.createElement("div");
+  title.className = "codeagent-switch-editor-group-title";
+  title.textContent = titleText;
+
+  const grid = document.createElement("div");
+  grid.className = "codeagent-switch-editor-grid";
+  grid.append(...fields);
+
+  group.append(title, grid);
+  return group;
+}
+
+function createCodeAgentSwitchProviderEditor(
+  provider?: CodeAgentSwitchProviderView,
+  options?: { showSaveButton?: boolean }
+): HTMLDivElement {
   const editor = document.createElement("div");
   editor.className = "codeagent-switch-editor codeagent-switch-provider-editor";
   const providerId =
@@ -2566,7 +2627,10 @@ function createCodeAgentSwitchProviderEditor(provider?: CodeAgentSwitchProviderV
   copyKeyButton.addEventListener("click", () => {
     void copyCodeAgentSwitchProviderKeyCommand(editor);
   });
-  actions.append(saveButton, applyKeyButton, copyKeyButton);
+  if (options?.showSaveButton !== false) {
+    actions.appendChild(saveButton);
+  }
+  actions.append(applyKeyButton, copyKeyButton);
   editor.append(grid, keySection, actions);
   return editor;
 }
@@ -2665,18 +2729,132 @@ function createCodeAgentSwitchProfileEditor(
 }
 
 function createCodeAgentSwitchRuntimeEditor(
-  config: NonNullable<typeof codeAgentSwitchData.config>
+  config: NonNullable<typeof codeAgentSwitchData.config>,
+  options?: { showSaveButton?: boolean }
 ): HTMLElement {
   const runtime = createCodeAgentSwitchDetailSection(
-    "运行权限",
-    "对应 Codex 官方 config.toml 的 approval、sandbox、network 和 Windows 沙箱字段。",
+    "Root 配置",
+    "对应 Codex 官方完整 config.toml 的 Root 字段，保存后会写回最终 Root 配置。",
     "codeagent-switch-runtime"
   );
   const editor = document.createElement("div");
   editor.className = "codeagent-switch-editor codeagent-switch-runtime-editor";
-  const grid = document.createElement("div");
-  grid.className = "codeagent-switch-editor-grid";
-  grid.append(
+  const modelGroup = createCodeAgentSwitchEditorGroup(
+    "模型与接入",
+    createCodeAgentSwitchInput("model_provider", "runtimeProvider", config.modelProvider, "relay_1"),
+    createCodeAgentSwitchInput("model", "runtimeModel", config.model, "gpt-5"),
+    createCodeAgentSwitchInput(
+      "review_model",
+      "runtimeReviewModel",
+      config.reviewModel,
+      "gpt-5-mini"
+    ),
+    createCodeAgentSwitchInput(
+      "openai_base_url",
+      "runtimeOpenAiBaseUrl",
+      config.openaiBaseUrl,
+      "https://api.openai.com/v1"
+    ),
+    createCodeAgentSwitchSelect("service_tier", "runtimeServiceTier", config.serviceTier, [
+      { value: "", label: "Default" },
+      { value: "auto", label: "auto" },
+      { value: "default", label: "default" },
+      { value: "flex", label: "flex" },
+      { value: "fast", label: "fast" },
+      { value: "priority", label: "priority" }
+    ])
+  );
+  const reasoningGroup = createCodeAgentSwitchEditorGroup(
+    "推理与上下文",
+    createCodeAgentSwitchSelect(
+      "model_reasoning_effort",
+      "runtimeReasoning",
+      config.modelReasoningEffort,
+      [
+        { value: "", label: "Default" },
+        { value: "minimal", label: "minimal" },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+        { value: "xhigh", label: "xhigh" }
+      ]
+    ),
+    createCodeAgentSwitchSelect(
+      "plan_mode_reasoning_effort",
+      "runtimePlanReasoning",
+      config.planModeReasoningEffort,
+      [
+        { value: "", label: "Default" },
+        { value: "minimal", label: "minimal" },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+        { value: "xhigh", label: "xhigh" }
+      ]
+    ),
+    createCodeAgentSwitchSelect(
+      "model_reasoning_summary",
+      "runtimeReasoningSummary",
+      config.modelReasoningSummary,
+      [
+        { value: "", label: "Default" },
+        { value: "auto", label: "auto" },
+        { value: "brief", label: "brief" },
+        { value: "concise", label: "concise" },
+        { value: "detailed", label: "detailed" }
+      ]
+    ),
+    createCodeAgentSwitchSelect("model_verbosity", "runtimeVerbosity", config.modelVerbosity, [
+      { value: "", label: "Default" },
+      { value: "low", label: "low" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" }
+    ]),
+    createCodeAgentSwitchSelect(
+      "model_supports_reasoning_summaries",
+      "runtimeModelSupportsReasoningSummaries",
+      config.modelSupportsReasoningSummaries === undefined
+        ? ""
+        : config.modelSupportsReasoningSummaries
+          ? "true"
+          : "false",
+      [
+        { value: "", label: "Default" },
+        { value: "true", label: "true" },
+        { value: "false", label: "false" }
+      ]
+    ),
+    createCodeAgentSwitchSelect("web_search", "runtimeWebSearch", config.webSearch, [
+      { value: "", label: "Default" },
+      { value: "disabled", label: "disabled" },
+      { value: "cached", label: "cached" },
+      { value: "live", label: "live" }
+    ]),
+    createCodeAgentSwitchInput(
+      "model_context_window",
+      "runtimeModelContextWindow",
+      config.modelContextWindow,
+      "200000",
+      "number"
+    ),
+    createCodeAgentSwitchInput(
+      "model_auto_compact_token_limit",
+      "runtimeCompactLimit",
+      config.modelAutoCompactTokenLimit,
+      "350000",
+      "number"
+    ),
+    createCodeAgentSwitchInput("personality", "runtimePersonality", config.personality, "pragmatic"),
+    createCodeAgentSwitchInput(
+      "tool_output_token_limit",
+      "runtimeToolOutputTokenLimit",
+      config.toolOutputTokenLimit,
+      "24000",
+      "number"
+    )
+  );
+  const securityGroup = createCodeAgentSwitchEditorGroup(
+    "安全与权限",
     createCodeAgentSwitchSelect("approval_policy", "runtimeApprovalPolicy", config.approvalPolicy, [
       { value: "", label: "默认" },
       { value: "untrusted", label: "untrusted" },
@@ -2684,6 +2862,22 @@ function createCodeAgentSwitchRuntimeEditor(
       { value: "on-request", label: "on-request" },
       { value: "never", label: "never" }
     ]),
+    createCodeAgentSwitchInput(
+      "approvals_reviewer",
+      "runtimeApprovalsReviewer",
+      config.approvalsReviewer,
+      "auto_review"
+    ),
+    createCodeAgentSwitchSelect(
+      "allow_login_shell",
+      "runtimeAllowLoginShell",
+      config.allowLoginShell === undefined ? "" : config.allowLoginShell ? "true" : "false",
+      [
+        { value: "", label: "Default" },
+        { value: "true", label: "true" },
+        { value: "false", label: "false" }
+      ]
+    ),
     createCodeAgentSwitchSelect("sandbox_mode", "runtimeSandboxMode", config.sandboxMode, [
       { value: "", label: "默认" },
       { value: "read-only", label: "read-only" },
@@ -2700,26 +2894,87 @@ function createCodeAgentSwitchRuntimeEditor(
         { value: "untrusted", label: "untrusted" }
       ]
     ),
+    createCodeAgentSwitchSelect(
+      "disable_response_storage",
+      "runtimeDisableResponseStorage",
+      config.disableResponseStorage === undefined
+        ? ""
+        : config.disableResponseStorage
+          ? "true"
+          : "false",
+      [
+        { value: "", label: "Default" },
+        { value: "true", label: "true" },
+        { value: "false", label: "false" }
+      ]
+    ),
     createCodeAgentSwitchSelect("network_access", "runtimeNetworkAccess", config.networkAccess, [
       { value: "", label: "默认" },
       { value: "enabled", label: "enabled" },
       { value: "restricted", label: "restricted" },
       { value: "disabled", label: "disabled" }
-    ]),
+    ])
+  );
+  const platformGroup = createCodeAgentSwitchEditorGroup(
+    "历史与平台",
+    createCodeAgentSwitchInput(
+      "project_doc_max_bytes",
+      "runtimeProjectDocMaxBytes",
+      config.projectDocMaxBytes,
+      "131072",
+      "number"
+    ),
+    createCodeAgentSwitchSelect(
+      "windows_wsl_setup_acknowledged",
+      "runtimeWindowsWslSetupAcknowledged",
+      config.windowsWslSetupAcknowledged === undefined
+        ? ""
+        : config.windowsWslSetupAcknowledged
+          ? "true"
+          : "false",
+      [
+        { value: "", label: "Default" },
+        { value: "true", label: "true" },
+        { value: "false", label: "false" }
+      ]
+    ),
     createCodeAgentSwitchSelect("windows.sandbox", "runtimeWindowsSandbox", config.windows?.sandbox, [
       { value: "", label: "默认" },
       { value: "read-only", label: "read-only" },
       { value: "workspace-write", label: "workspace-write" },
-      { value: "elevated", label: "elevated" }
+      { value: "elevated", label: "elevated" },
+      { value: "unelevated", label: "unelevated" }
     ]),
     createCodeAgentSwitchSelect(
       "windows.private_desktop",
       "runtimeWindowsSandboxPrivateDesktop",
-      config.windows?.sandboxPrivateDesktop === true ? "true" : "",
+      config.windows?.sandboxPrivateDesktop === undefined
+        ? ""
+        : config.windows.sandboxPrivateDesktop
+          ? "true"
+          : "false",
       [
         { value: "", label: "默认" },
-        { value: "true", label: "启用" }
+        { value: "true", label: "true" },
+        { value: "false", label: "false" }
       ]
+    ),
+    createCodeAgentSwitchSelect(
+      "history.persistence",
+      "runtimeHistoryPersistence",
+      config.history?.persistence,
+      [
+        { value: "", label: "Default" },
+        { value: "none", label: "none" },
+        { value: "save-all", label: "save-all" }
+      ]
+    ),
+    createCodeAgentSwitchInput(
+      "history.max_bytes",
+      "runtimeHistoryMaxBytes",
+      config.history?.maxBytes,
+      "104857600",
+      "number"
     )
   );
   const actions = document.createElement("div");
@@ -2727,12 +2982,16 @@ function createCodeAgentSwitchRuntimeEditor(
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "settings-btn settings-btn-primary";
-  saveButton.textContent = "保存运行权限";
+  saveButton.textContent = "保存 Root 配置";
   saveButton.addEventListener("click", () => {
     void executeCodeAgentSwitchSaveRuntime(editor);
   });
-  actions.appendChild(saveButton);
-  editor.append(grid, actions);
+  if (options?.showSaveButton !== false) {
+    actions.appendChild(saveButton);
+    editor.append(modelGroup, reasoningGroup, securityGroup, platformGroup, actions);
+  } else {
+    editor.append(modelGroup, reasoningGroup, securityGroup, platformGroup);
+  }
   runtime.appendChild(editor);
   return runtime;
 }
@@ -3042,6 +3301,67 @@ function createCodeAgentSwitchPreviewSection(): HTMLElement {
   return preview;
 }
 
+function createCodeAgentSwitchRootPreviewSection(): HTMLElement {
+  const rootPreviewTitle = "完整 config.toml";
+  const rootSaveLabel = "保存 Root 配置";
+  const section = createCodeAgentSwitchDetailSection(
+    "Root 预览",
+    "完整 config.toml 预览，用来确认 Root 配置最终保存后的结果。",
+    "codeagent-switch-root-preview"
+  );
+  const head = section.querySelector(".codeagent-switch-section-head");
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "settings-btn settings-btn-secondary";
+  copyButton.textContent = codeAgentSwitchCopyState === "diff" ? "已复制" : "复制 config.toml";
+  copyButton.disabled = !(codeAgentSwitchData.rootSource ?? codeAgentSwitchData.configSource ?? "").trim();
+  copyButton.addEventListener("click", () => {
+    void copyCodeAgentSwitchText(
+      "diff",
+      codeAgentSwitchData.rootSource ?? codeAgentSwitchData.configSource ?? "",
+      `已复制${rootPreviewTitle}`,
+      "当前没有可复制的 config.toml"
+    );
+  });
+  head?.appendChild(copyButton);
+
+  const meta = document.createElement("div");
+  meta.className = "codeagent-switch-preview-meta";
+  meta.textContent = `${rootPreviewTitle} · ${rootSaveLabel}`;
+
+  const rootChangedFields = codeAgentSwitchData.rootChangedFields ?? [];
+  const summary = document.createElement("div");
+  summary.className = "codeagent-switch-root-preview-summary";
+  if (rootChangedFields.length > 0) {
+    const changedHead = document.createElement("div");
+    changedHead.className = "codeagent-switch-preview-meta";
+    changedHead.textContent = `最近更新 ${rootChangedFields.length} 个 Root 字段`;
+    const changedList = document.createElement("div");
+    changedList.className = "codeagent-switch-root-change-list";
+    for (const field of rootChangedFields) {
+      changedList.appendChild(createCodeAgentSwitchStateBadge(field, "selected"));
+    }
+    summary.append(changedHead, changedList);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "codeagent-switch-preview-meta";
+    empty.textContent = "保存后会在这里显示最近更新的 Root 字段。";
+    summary.appendChild(empty);
+  }
+
+  const source = document.createElement("pre");
+  source.className = "codeagent-switch-config-source codeagent-switch-root-source";
+  source.textContent =
+    codeAgentSwitchData.rootSource ??
+    codeAgentSwitchData.configSource ??
+    "暂无 config.toml 内容";
+
+  section.append(meta, summary, source);
+  return section;
+}
+
+const CODEAGENT_SWITCH_ROOT_SECTION_TITLE = "保存 Root 配置";
+
 function createCodeAgentSwitchDiagnosticsSection(): HTMLElement {
   const diagnostics = createCodeAgentSwitchDetailSection(
     "诊断",
@@ -3178,6 +3498,16 @@ function createCodeAgentSwitchDetailPanel(
       ? profiles.find((profile) => profile.id === codeAgentSwitchSelectedId)
       : undefined;
   const isProviderDetail = codeAgentSwitchSelectedKind === "provider";
+  const providerDetailEditor = isProviderDetail
+    ? createCodeAgentSwitchProviderEditor(selectedProvider, {
+        showSaveButton: false
+      })
+    : undefined;
+  const providerDetailRuntimeEditor = isProviderDetail
+    ? createCodeAgentSwitchRuntimeEditor(config, {
+        showSaveButton: false
+      })
+    : undefined;
 
   const hero = document.createElement("section");
   hero.className = "codeagent-switch-detail-section codeagent-switch-detail-hero";
@@ -3225,7 +3555,24 @@ function createCodeAgentSwitchDetailPanel(
   const heroAside = document.createElement("div");
   heroAside.className = "codeagent-switch-detail-hero-aside";
   heroAside.appendChild(pills);
-  if (!isProviderDetail && selectedProfile) {
+  if (isProviderDetail) {
+    const heroActions = document.createElement("div");
+    heroActions.className = "codeagent-switch-detail-hero-actions";
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "settings-btn settings-btn-primary";
+    saveButton.textContent = "Save Provider + Root";
+    saveButton.addEventListener("click", () => {
+      if (providerDetailEditor && providerDetailRuntimeEditor) {
+        void executeCodeAgentSwitchSaveProviderAndRuntime(
+          providerDetailEditor,
+          providerDetailRuntimeEditor
+        );
+      }
+    });
+    heroActions.appendChild(saveButton);
+    heroAside.appendChild(heroActions);
+  } else if (selectedProfile) {
     const heroActions = document.createElement("div");
     heroActions.className = "codeagent-switch-detail-hero-actions";
     const previewButton = document.createElement("button");
@@ -3272,10 +3619,13 @@ function createCodeAgentSwitchDetailPanel(
       "Provider 配置",
       "管理 base_url、wire_api、认证方式、headers、query 和 env_key 名称。"
     );
-    providerConfig.appendChild(createCodeAgentSwitchProviderEditor(selectedProvider));
+    if (providerDetailEditor) {
+      providerConfig.appendChild(providerDetailEditor);
+    }
     detailPanel.appendChild(providerConfig);
     detailPanel.append(
-      createCodeAgentSwitchRuntimeEditor(config),
+      providerDetailRuntimeEditor ?? createCodeAgentSwitchRuntimeEditor(config),
+      createCodeAgentSwitchRootPreviewSection(),
       createCodeAgentSwitchCommandsSection(),
       createCodeAgentSwitchDiagnosticsSection(),
       createCodeAgentSwitchBackupsSection()
@@ -3339,6 +3689,7 @@ function createCodeAgentSwitchDetailPanel(
   }
   detailPanel.append(
     createCodeAgentSwitchRuntimeEditor(config),
+    createCodeAgentSwitchRootPreviewSection(),
     createCodeAgentSwitchPreviewSection(),
     createCodeAgentSwitchDiagnosticsSection(),
     createCodeAgentSwitchBackupsSection(),
@@ -3428,6 +3779,14 @@ function renderCodeAgentSwitchPanelV2(): void {
 
   const status = document.createElement("div");
   status.className = "codeagent-switch-status";
+  const hasSaveSuccess =
+    codeAgentSwitchData.savedProvider ||
+    codeAgentSwitchData.savedRuntime ||
+    codeAgentSwitchData.savedProfile ||
+    codeAgentSwitchData.deletedProvider ||
+    codeAgentSwitchData.deletedProfile ||
+    codeAgentSwitchData.restored ||
+    codeAgentSwitchData.applied;
   status.dataset.state =
     codeAgentSwitchData.error
       ? "error"
@@ -3435,15 +3794,19 @@ function renderCodeAgentSwitchPanelV2(): void {
         ? "error"
         : (codeAgentSwitchData.diagnostics ?? []).some((item) => item.level === "warning")
           ? "warning"
-          : "ok";
+          : hasSaveSuccess
+            ? "ok"
+            : "info";
   status.textContent = codeAgentSwitchData.error
     ? `执行失败：${codeAgentSwitchData.error}`
-    : codeAgentSwitchData.savedProvider
-      ? "已保存 Provider，写入前已备份当前配置。"
+    : codeAgentSwitchData.savedProvider && codeAgentSwitchData.savedRuntime
+      ? "已保存 Codex Provider + Root 配置，写入前已备份当前配置。"
+      : codeAgentSwitchData.savedProvider
+        ? "已保存 Codex Provider 配置，写入前已备份当前配置。"
       : codeAgentSwitchData.setProviderKey
         ? `已写入用户级系统环境变量：${codeAgentSwitchData.keyAppliedEnvKey ?? ""}`
       : codeAgentSwitchData.savedRuntime
-        ? "已保存运行权限，写入前已备份当前配置。"
+        ? "已保存 Codex Root 配置，写入前已备份当前配置。"
       : codeAgentSwitchData.savedProfile
         ? "已保存 Profile，写入前已备份当前配置。"
         : codeAgentSwitchData.deletedProvider
@@ -3796,6 +4159,7 @@ type CodeAgentSwitchUiAction =
   | "backups"
   | "restore"
   | "save-provider"
+  | "save-provider-runtime"
   | "set-provider-key"
   | "delete-provider"
   | "save-profile"
@@ -3878,6 +4242,109 @@ function getCodeAgentSwitchOptionalNumber(container: HTMLElement, name: string):
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function buildCodeAgentSwitchProviderSavePayload(
+  container: HTMLElement
+):
+  | {
+      providerId: string;
+      params: Record<string, string | number | boolean | undefined>;
+    }
+  | undefined {
+  const providerId = getCodeAgentSwitchFormValue(container, "providerId");
+  if (!providerId) {
+    setStatus("璇峰厛濉啓 Provider ID");
+    return undefined;
+  }
+  const auth = getCodeAgentSwitchFormValue(container, "providerAuth") || "env_key";
+  const baseUrl = getCodeAgentSwitchFormValue(container, "providerBaseUrl");
+  const name =
+    getCodeAgentSwitchFormValue(container, "providerName") ||
+    deriveCodeAgentSwitchProviderName(providerId, baseUrl);
+  return {
+    providerId,
+    params: {
+      provider: providerId,
+      name,
+      baseUrl,
+      wireApi: getCodeAgentSwitchFormValue(container, "providerWireApi") || "responses",
+      auth,
+      envKey: auth === "openai_auth" ? undefined : deriveCodeAgentSwitchEnvKeyName(providerId),
+      envKeyInstructions: getCodeAgentSwitchFormValue(container, "providerEnvKeyInstructions"),
+      supportsWebsockets:
+        getCodeAgentSwitchFormValue(container, "providerSupportsWebsockets") === "true"
+          ? true
+          : undefined,
+      httpHeaders: getCodeAgentSwitchFormValue(container, "providerHttpHeaders"),
+      envHttpHeaders: getCodeAgentSwitchFormValue(container, "providerEnvHttpHeaders"),
+      queryParams: getCodeAgentSwitchFormValue(container, "providerQueryParams"),
+      requestMaxRetries: getCodeAgentSwitchOptionalNumber(container, "providerRequestMaxRetries"),
+      streamMaxRetries: getCodeAgentSwitchOptionalNumber(container, "providerStreamMaxRetries"),
+      streamIdleTimeoutMs: getCodeAgentSwitchOptionalNumber(container, "providerStreamIdleTimeoutMs")
+    }
+  };
+}
+
+function buildCodeAgentSwitchRuntimeSavePayload(
+  container: HTMLElement
+): Record<string, string | number | boolean | undefined> {
+  return {
+    provider: getCodeAgentSwitchFormValue(container, "runtimeProvider"),
+    model: getCodeAgentSwitchFormValue(container, "runtimeModel"),
+    reviewModel: getCodeAgentSwitchFormValue(container, "runtimeReviewModel"),
+    openaiBaseUrl: getCodeAgentSwitchFormValue(container, "runtimeOpenAiBaseUrl"),
+    reasoning: getCodeAgentSwitchFormValue(container, "runtimeReasoning"),
+    planReasoning: getCodeAgentSwitchFormValue(container, "runtimePlanReasoning"),
+    reasoningSummary: getCodeAgentSwitchFormValue(container, "runtimeReasoningSummary"),
+    verbosity: getCodeAgentSwitchFormValue(container, "runtimeVerbosity"),
+    modelSupportsReasoningSummaries:
+      getCodeAgentSwitchFormValue(container, "runtimeModelSupportsReasoningSummaries") === "true"
+        ? true
+        : getCodeAgentSwitchFormValue(container, "runtimeModelSupportsReasoningSummaries") === "false"
+          ? false
+          : undefined,
+    serviceTier: getCodeAgentSwitchFormValue(container, "runtimeServiceTier"),
+    webSearch: getCodeAgentSwitchFormValue(container, "runtimeWebSearch"),
+    modelContextWindow: getCodeAgentSwitchOptionalNumber(container, "runtimeModelContextWindow"),
+    compactLimit: getCodeAgentSwitchOptionalNumber(container, "runtimeCompactLimit"),
+    approvalPolicy: getCodeAgentSwitchFormValue(container, "runtimeApprovalPolicy"),
+    approvalsReviewer: getCodeAgentSwitchFormValue(container, "runtimeApprovalsReviewer"),
+    allowLoginShell:
+      getCodeAgentSwitchFormValue(container, "runtimeAllowLoginShell") === "true"
+        ? true
+        : getCodeAgentSwitchFormValue(container, "runtimeAllowLoginShell") === "false"
+          ? false
+          : undefined,
+    sandboxMode: getCodeAgentSwitchFormValue(container, "runtimeSandboxMode"),
+    defaultPermissions: getCodeAgentSwitchFormValue(container, "runtimeDefaultPermissions"),
+    disableResponseStorage:
+      getCodeAgentSwitchFormValue(container, "runtimeDisableResponseStorage") === "true"
+        ? true
+        : getCodeAgentSwitchFormValue(container, "runtimeDisableResponseStorage") === "false"
+          ? false
+          : undefined,
+    networkAccess: getCodeAgentSwitchFormValue(container, "runtimeNetworkAccess"),
+    personality: getCodeAgentSwitchFormValue(container, "runtimePersonality"),
+    projectDocMaxBytes: getCodeAgentSwitchOptionalNumber(container, "runtimeProjectDocMaxBytes"),
+    toolOutputTokenLimit: getCodeAgentSwitchOptionalNumber(container, "runtimeToolOutputTokenLimit"),
+    windowsWslSetupAcknowledged:
+      getCodeAgentSwitchFormValue(container, "runtimeWindowsWslSetupAcknowledged") === "true"
+        ? true
+        : getCodeAgentSwitchFormValue(container, "runtimeWindowsWslSetupAcknowledged") === "false"
+          ? false
+          : undefined,
+    windowsSandbox: getCodeAgentSwitchFormValue(container, "runtimeWindowsSandbox"),
+    windowsSandboxPrivateDesktop:
+      getCodeAgentSwitchFormValue(container, "runtimeWindowsSandboxPrivateDesktop") === "true"
+        ? true
+        : getCodeAgentSwitchFormValue(container, "runtimeWindowsSandboxPrivateDesktop") === "false"
+          ? false
+        : undefined
+    ,
+    historyPersistence: getCodeAgentSwitchFormValue(container, "runtimeHistoryPersistence"),
+    historyMaxBytes: getCodeAgentSwitchOptionalNumber(container, "runtimeHistoryMaxBytes")
+  };
 }
 
 async function executeCodeAgentSwitchSaveProvider(container: HTMLElement): Promise<void> {
@@ -3990,16 +4457,28 @@ async function executeCodeAgentSwitchSaveProfile(container: HTMLElement): Promis
 }
 
 async function executeCodeAgentSwitchSaveRuntime(container: HTMLElement): Promise<void> {
-  await executeCodeAgentSwitchAction("save-runtime", undefined, undefined, {
-    approvalPolicy: getCodeAgentSwitchFormValue(container, "runtimeApprovalPolicy"),
-    sandboxMode: getCodeAgentSwitchFormValue(container, "runtimeSandboxMode"),
-    defaultPermissions: getCodeAgentSwitchFormValue(container, "runtimeDefaultPermissions"),
-    networkAccess: getCodeAgentSwitchFormValue(container, "runtimeNetworkAccess"),
-    windowsSandbox: getCodeAgentSwitchFormValue(container, "runtimeWindowsSandbox"),
-    windowsSandboxPrivateDesktop:
-      getCodeAgentSwitchFormValue(container, "runtimeWindowsSandboxPrivateDesktop") === "true"
-        ? true
-        : undefined
+  await executeCodeAgentSwitchAction(
+    "save-runtime",
+    undefined,
+    undefined,
+    buildCodeAgentSwitchRuntimeSavePayload(container)
+  );
+}
+
+async function executeCodeAgentSwitchSaveProviderAndRuntime(
+  providerContainer: HTMLElement,
+  runtimeContainer: HTMLElement
+): Promise<void> {
+  const providerPayload = buildCodeAgentSwitchProviderSavePayload(providerContainer);
+  if (!providerPayload) {
+    return;
+  }
+  codeAgentSwitchSelectedKind = "provider";
+  codeAgentSwitchSelectedId = providerPayload.providerId;
+  codeAgentSwitchSelectionMode = "manual";
+  await executeCodeAgentSwitchAction("save-provider-runtime", undefined, undefined, {
+    ...providerPayload.params,
+    ...buildCodeAgentSwitchRuntimeSavePayload(runtimeContainer)
   });
 }
 

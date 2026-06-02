@@ -3,11 +3,15 @@ import test from "node:test";
 
 import {
   buildCodeAgentSwitchProfilePreview,
+  buildCodeAgentSwitchProfilePreviewFromProfile,
+  buildStandaloneCodexProfileToml,
   buildCodeAgentSwitchEnvCommands,
   deleteCodexProfileInToml,
   deleteCodexProviderInToml,
   diagnoseCodexConfig,
+  migrateLegacyCodexProfileToStandalone,
   parseCodexTomlConfig,
+  updateCodexRootConfigInToml,
   updateCodexRuntimeConfigInToml,
   summarizeCodeAgentSwitchActiveConfig,
   upsertCodexProfileInToml,
@@ -18,16 +22,32 @@ const RELAY_CONFIG = `
 model_provider = "relay_1"
 model = "gpt-5.5"
 review_model = "gpt-5.4"
+openai_base_url = "https://proxy.openai.example/v1"
 model_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "high"
+model_reasoning_summary = "auto"
+model_verbosity = "low"
+model_supports_reasoning_summaries = true
+service_tier = "fast"
+web_search = "live"
+model_context_window = 128000
 model_auto_compact_token_limit = 350000
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
+allow_login_shell = false
+personality = "friendly"
+project_doc_max_bytes = 65536
+tool_output_token_limit = 12000
 disable_response_storage = true
 network_access = "enabled"
+windows_wsl_setup_acknowledged = true
 
 [windows]
 sandbox = "elevated"
 sandbox_private_desktop = true
 
 [history]
+persistence = "save-all"
 max_bytes = 104857600
 
 [model_providers.relay_1]
@@ -55,12 +75,28 @@ test("parses Codex providers, profiles, history, and top-level model fields", ()
   assert.equal(config.modelProvider, "relay_1");
   assert.equal(config.model, "gpt-5.5");
   assert.equal(config.reviewModel, "gpt-5.4");
+  assert.equal(config.openaiBaseUrl, "https://proxy.openai.example/v1");
   assert.equal(config.modelReasoningEffort, "xhigh");
+  assert.equal(config.planModeReasoningEffort, "high");
+  assert.equal(config.modelReasoningSummary, "auto");
+  assert.equal(config.modelVerbosity, "low");
+  assert.equal(config.modelSupportsReasoningSummaries, true);
+  assert.equal(config.serviceTier, "fast");
+  assert.equal(config.webSearch, "live");
+  assert.equal(config.modelContextWindow, 128000);
   assert.equal(config.modelAutoCompactTokenLimit, 350000);
+  assert.equal(config.approvalPolicy, "on-request");
+  assert.equal(config.approvalsReviewer, "auto_review");
+  assert.equal(config.allowLoginShell, false);
+  assert.equal(config.personality, "friendly");
+  assert.equal(config.projectDocMaxBytes, 65536);
+  assert.equal(config.toolOutputTokenLimit, 12000);
   assert.equal(config.disableResponseStorage, true);
   assert.equal(config.networkAccess, "enabled");
+  assert.equal(config.windowsWslSetupAcknowledged, true);
   assert.equal(config.windows?.sandbox, "elevated");
   assert.equal(config.windows?.sandboxPrivateDesktop, true);
+  assert.equal(config.history?.persistence, "save-all");
   assert.equal(config.history?.maxBytes, 104857600);
 
   const relay = config.providers.find((provider) => provider.id === "relay_1");
@@ -168,6 +204,27 @@ source = '\\\\?\\C:\\Users\\lybly\\.codex\\.tmp\\bundled-marketplaces\\openai-bu
   assert.equal(config.providers[0]?.envKey, "CODEX_RELAY_KEY");
 });
 
+test("ignores unknown sections that contain array assignments", () => {
+  const config = parseCodexTomlConfig(`
+model_provider = "OpenAI"
+
+[model_providers.OpenAI]
+base_url = "https://openrouter.icu"
+env_key = "RELAY_1_API_KEY"
+
+[mcp_servers.node_repl]
+args = []
+command = 'C:\\Users\\lybly\\AppData\\Local\\OpenAI\\Codex\\bin\\node_repl.exe'
+
+[mcp_servers.node_repl.env]
+NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
+`);
+
+  assert.equal(config.modelProvider, "OpenAI");
+  assert.equal(config.providers[0]?.id, "OpenAI");
+  assert.equal(config.providers[0]?.envKey, "RELAY_1_API_KEY");
+});
+
 test("builds copyable env commands without storing a real API key", () => {
   const commands = buildCodeAgentSwitchEnvCommands("RELAY_1_API_KEY");
 
@@ -253,6 +310,50 @@ model_reasoning_effort = "xhigh"
     summary.profileMatches.find((item) => item.profileId === "淘宝1")?.level,
     "exact"
   );
+});
+
+test("summarizes current config source for standalone and legacy embedded profiles", () => {
+  const standaloneConfig = parseCodexTomlConfig(`
+model_provider = "relay_1"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+
+[model_providers.relay_1]
+base_url = "https://relay.example.com/v1"
+env_key = "RELAY_1_API_KEY"
+`);
+  standaloneConfig.profiles.push({
+    id: "daily",
+    providerId: "relay_1",
+    model: "gpt-5.5",
+    reviewModel: "gpt-5.5",
+    storageKind: "standalone",
+    sourcePath: "C:\\Users\\lybly\\.codex\\daily.config.toml"
+  });
+
+  const standaloneSummary = summarizeCodeAgentSwitchActiveConfig(standaloneConfig);
+  assert.equal(standaloneSummary.activeProfileId, "daily");
+  assert.equal(standaloneSummary.activeProfileMatch, "exact");
+  assert.equal(standaloneSummary.activeSource.kind, "standalone");
+  assert.equal(standaloneSummary.activeSource.profileId, "daily");
+  assert.match(standaloneSummary.activeSource.detail, /daily\.config\.toml/i);
+
+  const embeddedConfig = parseCodexTomlConfig(`
+profile = "legacy"
+
+[model_providers.relay_1]
+base_url = "https://relay.example.com/v1"
+env_key = "RELAY_1_API_KEY"
+
+[profiles.legacy]
+model_provider = "relay_1"
+model = "gpt-5.4"
+`);
+  const embeddedSummary = summarizeCodeAgentSwitchActiveConfig(embeddedConfig);
+  assert.equal(embeddedSummary.activeProfileId, "legacy");
+  assert.equal(embeddedSummary.activeSource.kind, "embedded");
+  assert.equal(embeddedSummary.activeSource.legacy, true);
+  assert.match(embeddedSummary.activeSource.label, /legacy/i);
 });
 
 test("upserts and deletes Codex profile sections with non-ascii ids", () => {
@@ -442,6 +543,111 @@ model = "gpt-5.5"
   assert.equal(config.windows?.sandboxPrivateDesktop, true);
 });
 
+test("updates Codex root config official fields and clears removed values", () => {
+  const source = `model_provider = "relay_1"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+openai_base_url = "https://old-proxy.example/v1"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+model_verbosity = "high"
+model_supports_reasoning_summaries = true
+service_tier = "fast"
+web_search = "live"
+model_context_window = 128000
+model_auto_compact_token_limit = 350000
+approval_policy = "on-request"
+approvals_reviewer = "user"
+allow_login_shell = false
+disable_response_storage = true
+network_access = "enabled"
+personality = "friendly"
+project_doc_max_bytes = 65536
+tool_output_token_limit = 12000
+windows_wsl_setup_acknowledged = true
+
+[windows]
+sandbox = "elevated"
+sandbox_private_desktop = true
+
+[history]
+persistence = "save-all"
+max_bytes = 104857600
+`;
+
+  const nextSource = updateCodexRootConfigInToml(source, {
+    modelProvider: "relay_2",
+    model: "gpt-5.6",
+    reviewModel: "gpt-5.6-mini",
+    modelReasoningEffort: "minimal",
+    planModeReasoningEffort: "xhigh",
+    modelReasoningSummary: "concise",
+    modelVerbosity: "medium",
+    modelSupportsReasoningSummaries: false,
+    serviceTier: "flex",
+    webSearch: "cached",
+    modelContextWindow: 200000,
+    modelAutoCompactTokenLimit: 420000,
+    approvalPolicy: "never",
+    approvalsReviewer: "auto_review",
+    allowLoginShell: true,
+    sandboxMode: "danger-full-access",
+    defaultPermissions: "trusted",
+    disableResponseStorage: false,
+    networkAccess: "restricted",
+    personality: "pragmatic",
+    projectDocMaxBytes: 131072,
+    toolOutputTokenLimit: 24000,
+    windowsWslSetupAcknowledged: false,
+    windowsSandbox: "unelevated",
+    windowsSandboxPrivateDesktop: false,
+    historyPersistence: "none",
+    historyMaxBytes: 2048,
+    clearFields: ["openaiBaseUrl"]
+  });
+  const config = parseCodexTomlConfig(nextSource);
+
+  assert.match(nextSource, /^model_provider = "relay_2"$/m);
+  assert.match(nextSource, /^model = "gpt-5.6"$/m);
+  assert.match(nextSource, /^review_model = "gpt-5.6-mini"$/m);
+  assert.doesNotMatch(nextSource, /^openai_base_url = /m);
+  assert.match(nextSource, /^model_reasoning_effort = "minimal"$/m);
+  assert.match(nextSource, /^plan_mode_reasoning_effort = "xhigh"$/m);
+  assert.match(nextSource, /^model_reasoning_summary = "concise"$/m);
+  assert.match(nextSource, /^model_verbosity = "medium"$/m);
+  assert.match(nextSource, /^model_supports_reasoning_summaries = false$/m);
+  assert.match(nextSource, /^service_tier = "flex"$/m);
+  assert.match(nextSource, /^web_search = "cached"$/m);
+  assert.match(nextSource, /^model_context_window = 200000$/m);
+  assert.match(nextSource, /^model_auto_compact_token_limit = 420000$/m);
+  assert.match(nextSource, /^approvals_reviewer = "auto_review"$/m);
+  assert.match(nextSource, /^allow_login_shell = true$/m);
+  assert.match(nextSource, /^disable_response_storage = false$/m);
+  assert.match(nextSource, /^personality = "pragmatic"$/m);
+  assert.match(nextSource, /^project_doc_max_bytes = 131072$/m);
+  assert.match(nextSource, /^tool_output_token_limit = 24000$/m);
+  assert.match(nextSource, /^windows_wsl_setup_acknowledged = false$/m);
+  assert.match(nextSource, /\[windows\][\s\S]*sandbox = "unelevated"/m);
+  assert.match(nextSource, /\[windows\][\s\S]*sandbox_private_desktop = false/m);
+  assert.match(nextSource, /\[history\][\s\S]*persistence = "none"/m);
+  assert.match(nextSource, /\[history\][\s\S]*max_bytes = 2048/m);
+  assert.equal(config.modelProvider, "relay_2");
+  assert.equal(config.model, "gpt-5.6");
+  assert.equal(config.reviewModel, "gpt-5.6-mini");
+  assert.equal(config.openaiBaseUrl, undefined);
+  assert.equal(config.planModeReasoningEffort, "xhigh");
+  assert.equal(config.modelSupportsReasoningSummaries, false);
+  assert.equal(config.approvalsReviewer, "auto_review");
+  assert.equal(config.allowLoginShell, true);
+  assert.equal(config.disableResponseStorage, false);
+  assert.equal(config.personality, "pragmatic");
+  assert.equal(config.projectDocMaxBytes, 131072);
+  assert.equal(config.toolOutputTokenLimit, 24000);
+  assert.equal(config.windowsWslSetupAcknowledged, false);
+  assert.equal(config.history?.persistence, "none");
+  assert.equal(config.history?.maxBytes, 2048);
+});
+
 test("deletes Codex profile sections without touching unrelated sections", () => {
   const source = `model_provider = "relay_1"
 
@@ -617,4 +823,118 @@ model = "gpt-5.4"
       ),
     /Provider "missing_relay" 不存在/
   );
+});
+
+test("builds standalone Codex profile toml without legacy [profiles] wrapper", () => {
+  const source = buildStandaloneCodexProfileToml({
+    id: "TokenRouter",
+    providerId: "TokenRouter",
+    model: "gpt-5.4",
+    modelReasoningEffort: "high",
+    planModeReasoningEffort: "xhigh",
+    serviceTier: "fast"
+  });
+
+  assert.doesNotMatch(source, /\[profiles\./);
+  assert.match(source, /^model_provider = "TokenRouter"$/m);
+  assert.match(source, /^model = "gpt-5.4"$/m);
+  assert.match(source, /^plan_mode_reasoning_effort = "xhigh"$/m);
+  assert.match(source, /^service_tier = "fast"$/m);
+});
+
+test("migrates an embedded legacy profile into standalone toml and modern root fields", () => {
+  const migration = migrateLegacyCodexProfileToStandalone(
+    `profile = "daily"
+
+[model_providers.relay_1]
+base_url = "https://relay.example.com/v1"
+env_key = "RELAY_1_API_KEY"
+
+[profiles.daily]
+model_provider = "relay_1"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
+model_reasoning_effort = "high"
+`
+,
+    "daily"
+  );
+
+  assert.equal(migration.profile.id, "daily");
+  assert.equal(migration.appliedToRoot, true);
+  assert.doesNotMatch(migration.profileSource, /\[profiles\./);
+  assert.match(migration.profileSource, /^model_provider = "relay_1"$/m);
+  assert.match(migration.profileSource, /^model = "gpt-5.4"$/m);
+  assert.doesNotMatch(migration.configSource, /\[profiles\.daily\]/);
+  assert.doesNotMatch(migration.configSource, /^profile = /m);
+  assert.match(migration.configSource, /^model_provider = "relay_1"$/m);
+  assert.match(migration.configSource, /^model = "gpt-5.4"$/m);
+});
+
+test("migrates a non-current embedded profile without rewriting current root fields", () => {
+  const migration = migrateLegacyCodexProfileToStandalone(
+    `profile = "current"
+model_provider = "relay_current"
+model = "gpt-5.5"
+
+[model_providers.relay_current]
+base_url = "https://relay-current.example.com/v1"
+env_key = "RELAY_CURRENT_API_KEY"
+
+[model_providers.relay_legacy]
+base_url = "https://relay-legacy.example.com/v1"
+env_key = "RELAY_LEGACY_API_KEY"
+
+[profiles.current]
+model_provider = "relay_current"
+model = "gpt-5.5"
+
+[profiles.legacy]
+model_provider = "relay_legacy"
+model = "gpt-5.4"
+`
+,
+    "legacy"
+  );
+
+  assert.equal(migration.profile.id, "legacy");
+  assert.equal(migration.appliedToRoot, false);
+  assert.match(migration.configSource, /^profile = "current"$/m);
+  assert.match(migration.configSource, /^model_provider = "relay_current"$/m);
+  assert.doesNotMatch(migration.configSource, /\[profiles\.legacy\]/);
+  assert.match(migration.profileSource, /^model_provider = "relay_legacy"$/m);
+  assert.match(migration.profileSource, /^model = "gpt-5.4"$/m);
+});
+
+test("profile preview from standalone profile removes legacy root profile field and keeps templates untouched", () => {
+  const source = `profile = "old"
+model_provider = "relay_one"
+model = "gpt-5.5"
+
+[model_providers.relay_one]
+base_url = "https://relay-one.example.com/v1"
+env_key = "RELAY_ONE_API_KEY"
+
+[profiles.fast]
+model_provider = "relay_one"
+model = "gpt-5.4"
+`;
+
+  const preview = buildCodeAgentSwitchProfilePreviewFromProfile(source, {
+    id: "TokenRouter",
+    providerId: "relay_one",
+    model: "gpt-5.4",
+    reviewModel: "gpt-5.4",
+    modelReasoningEffort: "high",
+    storageKind: "standalone",
+    sourcePath: "C:\\Users\\lybly\\.codex\\TokenRouter.config.toml"
+  });
+
+  assert.doesNotMatch(preview.newSource, /^profile = /m);
+  assert.match(preview.newSource, /\[profiles\.fast\]/);
+  assert.match(preview.newSource, /^model_provider = "relay_one"$/m);
+  assert.match(preview.newSource, /^model = "gpt-5.4"$/m);
+  assert.match(preview.newSource, /^review_model = "gpt-5.4"$/m);
+  assert.match(preview.newSource, /^model_reasoning_effort = "high"$/m);
+  assert.ok(preview.diffLines.includes('- profile = "old"'));
 });

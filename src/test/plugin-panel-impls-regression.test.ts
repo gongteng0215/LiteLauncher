@@ -25,6 +25,15 @@ const pluginRuntimeTypesPath = path.join(
   "renderer",
   "plugin-runtime-types.d.ts"
 );
+const mainDatabasePath = path.join(process.cwd(), "src", "main", "database.ts");
+const clipboardWorkbenchStorePath = path.join(
+  process.cwd(),
+  "src",
+  "main",
+  "plugins",
+  "clipboard-workbench",
+  "store.ts"
+);
 
 function readRendererSource(): string {
   return fs.readFileSync(rendererPath, "utf8");
@@ -36,6 +45,14 @@ function readPanelImplsSource(): string {
 
 function readPluginRuntimeTypesSource(): string {
   return fs.readFileSync(pluginRuntimeTypesPath, "utf8");
+}
+
+function readMainDatabaseSource(): string {
+  return fs.readFileSync(mainDatabasePath, "utf8");
+}
+
+function readClipboardWorkbenchStoreSource(): string {
+  return fs.readFileSync(clipboardWorkbenchStorePath, "utf8");
 }
 
 function readRendererHtmlSource(): string {
@@ -679,12 +696,12 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   assert.match(
     panelImplsSource,
     /codeagent-switch-list-switch-actions/,
-    "CodeAgent Switch profile rows should expose visible preview/apply switch actions"
+    "CodeAgent Switch profile rows should keep inline preview/apply actions visible from the list"
   );
   assert.match(
     panelImplsSource,
-    /executeCodeAgentSwitchAction\("apply", profile\.id\)/,
-    "CodeAgent Switch profile rows should make switching available without hunting in the detail pane"
+    /createCodeAgentSwitchPreviewSection\(\)/,
+    "CodeAgent Switch profile detail should expose the shared preview section for diff-based apply flows"
   );
   assert.match(
     panelImplsSource,
@@ -738,8 +755,8 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     panelImplsSource,
-    /codeAgentSwitchCopyState:\s*"" \| "env" \| "diagnostics" \| "diff" \| "key"/,
-    "CodeAgent Switch should keep key copy feedback separate from generic env command copy feedback"
+    /let codeAgentSwitchCopyState:\s*""\s*\|\s*"env"\s*\|\s*"diagnostics"\s*\|\s*"diff"\s*\|\s*"key"\s*=\s*"";/,
+    "CodeAgent Switch should keep env, diagnostics, diff, and key copy feedback separate"
   );
   assert.equal(
     panelImplsSource.includes('getCodeAgentSwitchFormValue(container, "providerEnvKey")'),
@@ -750,6 +767,11 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
     panelImplsSource,
     /codeagent-switch-diff/,
     "CodeAgent Switch should render a diff preview block"
+  );
+  assert.match(
+    panelImplsSource,
+    /copyCodeAgentSwitchText\(\s*"diff"/,
+    "CodeAgent Switch should allow copying the generated preview diff directly"
   );
   assert.match(
     panelImplsSource,
@@ -784,12 +806,22 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   assert.match(
     panelImplsSource,
     /codeagent-switch-profile-list/,
-    "CodeAgent Switch should make Profile the primary selectable list"
+    "CodeAgent Switch should keep a dedicated Profiles list section in the master-detail sidebar"
   );
   assert.match(
     panelImplsSource,
     /codeagent-switch-provider-strip/,
     "CodeAgent Switch should keep Provider selection as a compact strip"
+  );
+  assert.doesNotMatch(
+    panelImplsSource,
+    /createCodeAgentSwitchProviderSwitchSection/,
+    "CodeAgent Switch should not keep a duplicate provider-side target selector once detail actions own preview/apply"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-detail-primary-actions/,
+    "CodeAgent Switch profile detail should keep preview/apply controls in the primary action section"
   );
   assert.match(
     panelImplsSource,
@@ -889,12 +921,92 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   assert.match(
     panelImplsSource,
     /codeagent-switch-runtime/,
-    "CodeAgent Switch should expose a runtime permissions section"
+    "CodeAgent Switch should expose a root config section"
   );
   assert.match(
     panelImplsSource,
     /save-runtime/,
-    "CodeAgent Switch should support saving runtime permissions"
+    "CodeAgent Switch should support saving root config"
+  );
+  assert.match(
+    panelImplsSource,
+    /runtimeModel/,
+    "CodeAgent Switch root editor should expose the root model field"
+  );
+  assert.match(
+    panelImplsSource,
+    /runtimeReviewModel/,
+    "CodeAgent Switch root editor should expose the root review model field"
+  );
+  assert.match(
+    panelImplsSource,
+    /runtimeReasoningSummary/,
+    "CodeAgent Switch root editor should expose the root reasoning summary field"
+  );
+  assert.match(
+    panelImplsSource,
+    /runtimeHistoryPersistence/,
+    "CodeAgent Switch root editor should expose the root history persistence field"
+  );
+  assert.match(
+    panelImplsSource,
+    /runtimePersonality/,
+    "CodeAgent Switch root editor should expose the root personality field"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-editor-group/,
+    "CodeAgent Switch root editor should group related Root fields for readability"
+  );
+  assert.match(
+    panelImplsSource,
+    /codeagent-switch-editor-group-title/,
+    "CodeAgent Switch root editor should render visible group titles"
+  );
+  assert.match(
+    panelImplsSource,
+    /模型与接入|推理与上下文|安全与权限|历史与平台/,
+    "CodeAgent Switch root editor should label grouped Root sections"
+  );
+  assert.match(
+    panelImplsSource,
+    /完整\s*config\.toml/,
+    "CodeAgent Switch root preview copy should describe the full saved config.toml"
+  );
+  assert.match(
+    panelImplsSource,
+    /保存 Root 配置|Save Provider \+ Root/,
+    "CodeAgent Switch actions should describe Root config saving semantics"
+  );
+  assert.match(
+    panelImplsSource,
+    /已保存 Codex Provider \+ Root 配置|已保存 Codex Root 配置/,
+    "CodeAgent Switch status copy should clearly distinguish combined Provider + Root saves from Root-only saves"
+  );
+  assert.match(
+    panelImplsSource,
+    /rootChangedFields|最近更新|createCodeAgentSwitchStateBadge/,
+    "CodeAgent Switch root preview should surface a recent Root field change summary after saves"
+  );
+  assert.match(
+    panelImplsSource,
+    /save-provider-runtime/,
+    "CodeAgent Switch provider detail should support saving provider and root config together"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeCodeAgentSwitchSaveProviderAndRuntime/,
+    "CodeAgent Switch should expose a combined provider+root save helper"
+  );
+  assert.match(
+    panelImplsSource,
+    /createCodeAgentSwitchProviderEditor\(selectedProvider,\s*\{\s*showSaveButton:\s*false\s*\}\)/,
+    "CodeAgent Switch provider detail should hide the nested provider save button and rely on the shared action"
+  );
+  assert.match(
+    panelImplsSource,
+    /createCodeAgentSwitchRuntimeEditor\(config,\s*\{\s*showSaveButton:\s*false\s*\}\)/,
+    "CodeAgent Switch provider detail should hide the nested root save button and rely on the shared action"
   );
   assert.match(
     panelImplsSource,
@@ -958,6 +1070,26 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     stylesSource,
+    /\.codeagent-switch-editor-field > span[\s\S]*overflow-wrap:\s*anywhere;/,
+    "CodeAgent Switch editor labels should wrap instead of overlapping"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-runtime-editor \.codeagent-switch-editor-field[\s\S]*grid-template-rows:\s*minmax\(28px,\s*auto\)\s+minmax\(30px,\s*auto\)\s+minmax\(27px,\s*auto\);/,
+    "CodeAgent Switch root editor should reserve consistent rows for label, control, and hint alignment"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-status\[data-state="ok"\]/,
+    "CodeAgent Switch should expose a dedicated success-state style for saved Root and Provider updates"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-root-change-list|\.codeagent-switch-root-preview-summary/,
+    "CodeAgent Switch should style Root change summaries and field badges in the preview panel"
+  );
+  assert.match(
+    stylesSource,
     /grid-template-columns:\s*112px\s+minmax\(220px,\s*0\.58fr\)\s+minmax\(360px,\s*1\.42fr\)/,
     "CodeAgent Switch shell should reserve a fixed-width tool sidebar and give more room to detail"
   );
@@ -965,6 +1097,16 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
     stylesSource,
     /\.codeagent-switch-tool-button/,
     "CodeAgent Switch tool buttons should be fixed sidebar buttons instead of auto-stretched tabs"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-list-panel[\s\S]*position:\s*sticky;/,
+    "CodeAgent Switch provider list should remain visible while the detail pane scrolls"
+  );
+  assert.match(
+    stylesSource,
+    /\.codeagent-switch-detail-hero[\s\S]*position:\s*sticky;/,
+    "CodeAgent Switch detail hero should keep the selected provider/profile context pinned while scrolling"
   );
   assert.match(
     handlerConfigSource,
@@ -3742,6 +3884,11 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     "asset copy step should expose shared Image Prompt smart templates to the renderer"
   );
   assert.match(
+    copyAssetsSource,
+    /typeof builder\.getImagePromptProductTemplates !== "function"/,
+    "asset copy step should skip watch-time partial builder exports instead of throwing"
+  );
+  assert.match(
     panelImplsSource,
     /__LL_IMAGE_PROMPT_DATA__/,
     "panel impls should read Image Prompt config from the generated shared data global"
@@ -4297,5 +4444,31 @@ test("launch execution skips stale refresh after panel-opening commands", () => 
     executeSelectedSource,
     /if\s*\(\s*mode !== modeBeforeExecute \|\| currentQuery !== queryBeforeExecute\s*\)\s*{\s*return;\s*}\s*await refreshEntries\(currentQuery\);/s,
     "keepOpen refresh should be skipped after async mode/query changes"
+  );
+});
+
+test("database layers use built-in node:sqlite instead of sqlite3 native addon", () => {
+  const mainDatabaseSource = readMainDatabaseSource();
+  const clipboardWorkbenchStoreSource = readClipboardWorkbenchStoreSource();
+
+  assert.match(
+    mainDatabaseSource,
+    /from "node:sqlite"/,
+    "LiteDatabase should use the built-in node:sqlite module"
+  );
+  assert.doesNotMatch(
+    mainDatabaseSource,
+    /from "sqlite3"/,
+    "LiteDatabase should no longer import sqlite3"
+  );
+  assert.match(
+    clipboardWorkbenchStoreSource,
+    /from "node:sqlite"/,
+    "ClipboardWorkbenchStore should use the built-in node:sqlite module"
+  );
+  assert.doesNotMatch(
+    clipboardWorkbenchStoreSource,
+    /from "sqlite3"/,
+    "ClipboardWorkbenchStore should no longer import sqlite3"
   );
 });

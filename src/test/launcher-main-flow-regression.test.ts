@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { DEFAULT_CATALOG_SCAN_CONFIG } from "../shared/settings";
@@ -92,6 +94,48 @@ function findTarget(items: LaunchItem[], prefix: string): LaunchItem | undefined
   const normalized = prefix.trim().toLowerCase();
   return items.find((item) => item.target.trim().toLowerCase().startsWith(normalized));
 }
+
+test("release config keeps auto-update metadata on non-draft GitHub releases", () => {
+  const packageJsonPath = path.join(process.cwd(), "package.json");
+  const workflowPath = path.join(
+    process.cwd(),
+    ".github",
+    "workflows",
+    "build-desktop.yml"
+  );
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+    dependencies?: Record<string, string>;
+    build?: {
+      publish?: Array<Record<string, unknown>>;
+    };
+  };
+  const workflowSource = fs.readFileSync(workflowPath, "utf8");
+  const publishConfig = Array.isArray(packageJson.build?.publish)
+    ? packageJson.build?.publish[0]
+    : null;
+
+  assert.equal(
+    typeof packageJson.dependencies?.["electron-updater"],
+    "string",
+    "desktop package should include electron-updater"
+  );
+  assert.equal(
+    publishConfig?.provider,
+    "github",
+    "desktop release metadata should keep GitHub as the update provider"
+  );
+  assert.notEqual(
+    publishConfig?.releaseType,
+    "draft",
+    "draft GitHub releases are invisible to electron-updater"
+  );
+  assert.match(
+    workflowSource,
+    /gh release edit "\$\{GITHUB_REF_NAME\}".*--draft=false.*--latest/,
+    "release workflow should publish draft releases before uploading updater metadata"
+  );
+});
 
 test("validatePinnedItemRequest rejects empty ids and ids missing from the catalog", () => {
   assert.deepEqual(

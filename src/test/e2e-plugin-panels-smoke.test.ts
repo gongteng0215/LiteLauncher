@@ -720,6 +720,23 @@ test(
         "codeagent-switch"
       );
       await assertPanelFitsNarrowViewport("form.codeagent-switch-form");
+      await page.waitForFunction(() => {
+        const form = document.querySelector("form.codeagent-switch-form");
+        const modelField = document.querySelector('[name="runtimeModel"]');
+        const reviewField = document.querySelector('[name="runtimeReviewModel"]');
+        const rootPreview = document.querySelector(".codeagent-switch-root-preview");
+        const rootSource = document.querySelector(".codeagent-switch-root-source");
+        return Boolean(form && modelField && reviewField && rootPreview && rootSource);
+      }, undefined, { timeout: 10000 });
+      await page.locator('.codeagent-switch-provider-chip').first().click();
+      await page.waitForFunction(() => {
+        const saveButton = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(".codeagent-switch-detail-hero-actions button")
+        ).find((node) => /Save Provider \+ Root/i.test(node.textContent ?? ""));
+        const rootPreview = document.querySelector(".codeagent-switch-root-preview");
+        const rootSource = document.querySelector(".codeagent-switch-root-source");
+        return Boolean(saveButton && rootPreview && rootSource);
+      }, undefined, { timeout: 10000 });
     } catch (error) {
       if (session) {
         const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);

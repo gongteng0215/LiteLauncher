@@ -20,6 +20,7 @@ import {
   normalizeCatalogScanConfig,
   normalizeSearchDisplayConfig
 } from "../shared/settings";
+import { createAppUpdater } from "./app-updater";
 import { buildCatalogWithOptions } from "./catalog";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
@@ -1249,6 +1250,8 @@ async function bootstrap(): Promise<void> {
     await setupAppTray(launcherWindow);
   }
 
+  const appUpdater = createAppUpdater();
+
   registerIpcHandlers(launcherWindow, {
     usageStore: activeUsageStore,
     searchProvider: {
@@ -1357,6 +1360,7 @@ async function bootstrap(): Promise<void> {
     catalogProvider: {
       rebuildCatalog: () => rebuildCatalogIndex(activeDatabase)
     },
+    updaterProvider: appUpdater,
     errorLogProvider: {
       recordError: (input) => activeDatabase.recordErrorLog(input),
       getErrorLogs: (limit) => activeDatabase.getErrorLogs(limit),
@@ -1373,6 +1377,7 @@ async function bootstrap(): Promise<void> {
 
   activeClipService.start();
   activeClipboardWorkbenchService.start();
+  appUpdater.scheduleStartupCheck();
   if (!E2E_MODE) {
     registerGlobalShortcut(
       () => toggleLauncherWindow(launcherWindow),

@@ -7,7 +7,7 @@ import { LaunchItem, SearchRequestOptions, SearchScope } from "../shared/types";
 import { UsageStore } from "./usage-store";
 import { buildWindowsStartAppItemId } from "./windows-startapp";
 
-const DYNAMIC_COMMAND_CACHE = new Map<string, LaunchItem | null>();
+const DYNAMIC_COMMAND_CACHE = new Map<string, LaunchItem>();
 
 function isSimpleCommandQuery(query: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{1,63}$/i.test(query);
@@ -291,9 +291,7 @@ export function getDynamicSearchItems(
       }
     } else {
       const startApp = resolveWindowsStartApp(normalized);
-      if (!startApp) {
-        DYNAMIC_COMMAND_CACHE.set(cacheKey, null);
-      } else {
+      if (startApp) {
         const metadata =
           startApp.installLocation
             ? resolveWindowsAppsMetadata(path.join(startApp.installLocation, "AppxManifest.xml"))

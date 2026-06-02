@@ -85,6 +85,15 @@ function writeImagePromptDataScript() {
 
   delete require.cache[require.resolve(builderPath)];
   const builder = require(builderPath);
+  if (
+    typeof builder.getImagePromptProductTemplates !== "function" ||
+    typeof builder.getImagePromptOptionGroups !== "function" ||
+    typeof builder.getImagePromptStylePresets !== "function" ||
+    typeof builder.getImagePromptSmartTemplates !== "function" ||
+    typeof builder.getImagePromptTextOptions !== "function"
+  ) {
+    return;
+  }
   const productId = "chatgpt-images-2";
   const data = {
     products: builder.getImagePromptProductTemplates(),

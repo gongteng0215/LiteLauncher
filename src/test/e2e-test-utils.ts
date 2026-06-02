@@ -13,6 +13,11 @@ export interface E2ESession {
   close: () => Promise<void>;
 }
 
+export interface LaunchE2ESessionOptions {
+  userDataDir?: string;
+  cleanupUserDataDir?: boolean;
+}
+
 function sanitizeArtifactName(name: string): string {
   return name.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
@@ -88,8 +93,13 @@ export async function waitForActivePlugin(
   );
 }
 
-export async function launchE2ESession(): Promise<E2ESession> {
-  const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "litelauncher-e2e-"));
+export async function launchE2ESession(
+  options: LaunchE2ESessionOptions = {}
+): Promise<E2ESession> {
+  const userDataDir =
+    options.userDataDir ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "litelauncher-e2e-")));
+  const cleanupUserDataDir = options.cleanupUserDataDir !== false;
   const electronApp = await electron.launch({
     cwd: PROJECT_ROOT,
     args: ["."],
@@ -106,7 +116,9 @@ export async function launchE2ESession(): Promise<E2ESession> {
     page,
     close: async () => {
       await electronApp.close();
-      await removeDirectoryWithRetry(userDataDir);
+      if (cleanupUserDataDir) {
+        await removeDirectoryWithRetry(userDataDir);
+      }
     }
   };
 }

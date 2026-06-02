@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
+  AppUpdaterStatus,
   CatalogRebuildResult,
   CatalogScanConfig,
   ClipItem,
@@ -45,6 +46,9 @@ const api = {
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC_CHANNELS.getAppVersion);
   },
+  getAppUpdaterStatus(): Promise<AppUpdaterStatus> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getAppUpdaterStatus);
+  },
   getSearchDisplayConfig(): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.getSearchDisplayConfig);
   },
@@ -75,6 +79,12 @@ const api = {
   },
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus> {
     return ipcRenderer.invoke(IPC_CHANNELS.setLaunchAtLoginEnabled, enabled);
+  },
+  checkForAppUpdates(): Promise<AppUpdaterStatus> {
+    return ipcRenderer.invoke(IPC_CHANNELS.checkForAppUpdates);
+  },
+  installAppUpdateNow(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.installAppUpdateNow);
   },
   setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);

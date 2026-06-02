@@ -7,6 +7,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
+  AppUpdaterStatus,
   CatalogRebuildResult,
   CatalogScanConfig,
   ClipItem,
@@ -66,6 +67,12 @@ type CatalogProvider = {
   rebuildCatalog: () => Promise<CatalogRebuildResult>;
 };
 
+type UpdaterProvider = {
+  getStatus: () => AppUpdaterStatus;
+  checkForUpdates: () => Promise<AppUpdaterStatus>;
+  installUpdateNow: () => Promise<boolean>;
+};
+
 type ErrorLogProvider = {
   recordError: (input: AppErrorLogInput) => Promise<void>;
   getErrorLogs: (limit: number) => Promise<AppErrorLogEntry[]>;
@@ -81,6 +88,7 @@ type IpcOptions = {
   clipProvider: ClipProvider;
   settingsProvider: SettingsProvider;
   catalogProvider: CatalogProvider;
+  updaterProvider: UpdaterProvider;
   errorLogProvider: ErrorLogProvider;
   pinProvider: PinProvider;
   usageStore: UsageStore;
@@ -104,6 +112,9 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.clearErrorLogs,
   IPC_CHANNELS.getLaunchAtLoginStatus,
   IPC_CHANNELS.setLaunchAtLoginEnabled,
+  IPC_CHANNELS.getAppUpdaterStatus,
+  IPC_CHANNELS.checkForAppUpdates,
+  IPC_CHANNELS.installAppUpdateNow,
   IPC_CHANNELS.setItemPinned,
   IPC_CHANNELS.search,
   IPC_CHANNELS.resolveCommandQuery,
@@ -1075,6 +1086,10 @@ export function registerIpcHandlers(
     return options.settingsProvider.getLaunchAtLoginStatus();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getAppUpdaterStatus, () => {
+    return options.updaterProvider.getStatus();
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.setSearchDisplayConfig,
     async (_, configInput: Partial<SearchDisplayConfig> | null) => {
@@ -1166,6 +1181,14 @@ export function registerIpcHandlers(
       );
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.checkForAppUpdates, async () => {
+    return options.updaterProvider.checkForUpdates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.installAppUpdateNow, async () => {
+    return options.updaterProvider.installUpdateNow();
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.setItemPinned,
