@@ -1477,28 +1477,168 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     panelImplsSource,
-    /webtools-password-workbench/,
-    "password tool should render a two-part workbench instead of stretched rows"
+    /webtools-password-command-deck/,
+    "password tool should render a compact command deck so the first screen looks visibly different"
   );
   assert.match(
     panelImplsSource,
-    /webtools-password-preset-grid/,
-    "password tool should expose quick presets to fill the layout with useful actions"
+    /webtools-password-metric-strip/,
+    "password tool should surface key metrics in a compact header strip instead of a separate side summary card"
   );
   assert.match(
     panelImplsSource,
-    /webtools-password-summary-grid/,
-    "password tool should render a real-time summary area instead of leaving the side empty"
+    /webtools-password-toolbar-row/,
+    "password tool should group presets and primary actions into a single toolbar row"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-action-rail/,
+    "password tool should dedicate a compact action rail for generate and copy shortcuts"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-control-matrix/,
+    "password tool should turn the option area into a compact multi-column control matrix"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-insight-strip/,
+    "password tool should place strength, preview, and notes into one tight insight strip"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-password-results-stage/,
+    "password tool should promote the result section into the dominant stage area"
   );
   assert.match(
     stylesSource,
-    /\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(360px,\s*1\.45fr\)\s+minmax\(230px,\s*0\.75fr\)/,
-    "password tool workbench should reserve a compact summary column instead of stretching one giant form"
+    /\.webtools-password-command-deck\s*\{[\s\S]*display:\s*grid;[\s\S]*gap:\s*8px;/,
+    "password tool command deck should frame the header content as a distinct compact block"
   );
   assert.match(
     stylesSource,
-    /\.webtools-password-preset-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(96px,\s*1fr\)\)/,
-    "password preset buttons should use bounded widths instead of auto-stretching across the row"
+    /\.webtools-password-metric-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/,
+    "password tool metrics should sit in a single horizontal strip before the controls"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-toolbar-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(260px,\s*0\.92fr\)/,
+    "password tool should place presets and primary actions on one compressed toolbar row"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-action-rail\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    "password tool action rail should keep the main actions visible without adding extra rows"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-command-deck\s+\.webtools-password-action-row\s*\.settings-btn\s*\{[\s\S]*min-height:\s*34px;[\s\S]*font-size:\s*11px;/,
+    "password top action buttons should shrink so the toolbar feels less bulky"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-control-matrix\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    "password tool should use a three-column control matrix instead of a left-right workbench"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-control-matrix\s*\{[\s\S]*align-items:\s*stretch;/,
+    "password tool control matrix should stretch each block so the top input groups align cleanly"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-block\s*\{[\s\S]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\);[\s\S]*min-height:\s*100%;/,
+    "password option blocks should share the same vertical skeleton instead of drifting by content height"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-block-body\s*\{[\s\S]*display:\s*grid;[\s\S]*align-content:\s*start;/,
+    "password option block bodies should pin their controls to the top edge for cleaner alignment"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-preset-strip\s*\{[\s\S]*display:\s*flex;[\s\S]*align-items:\s*center;/,
+    "password tool should treat presets as a toolbar strip instead of a stacked card block"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-preset-grid\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/,
+    "password preset buttons should flow like compact quick actions instead of rigid tiles"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-preset\s*\{[\s\S]*display:\s*inline-flex;[\s\S]*border-radius:\s*999px;[\s\S]*min-height:\s*30px;/,
+    "password preset buttons should render as pill actions to lower the top deck"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-flag-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    "password character toggles should stay in one compact row on desktop"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-symbol-stack\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*0\.92fr\)\s+minmax\(0,\s*1\.08fr\)/,
+    "password symbol controls should use a tight dual-column pack instead of a tall vertical stack"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-insight-strip\s*\{[\s\S]*grid-template-columns:\s*minmax\(126px,\s*0\.72fr\)\s+minmax\(220px,\s*1fr\)\s+minmax\(0,\s*1\.28fr\)/,
+    "password tool should keep strength, preview, and guidance in one compact insight strip"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-tip-list\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+    "password tips should stay in a compact two-column grid instead of stretching the top area taller"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-table-wrap\s*\{[\s\S]*max-height:\s*min\(600px,\s*64vh\)/,
+    "password result area should expose more rows before scrolling"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-results-stage\s*\{[\s\S]*padding-top:\s*4px;/,
+    "password result stage should reduce top padding so the table starts closer to the heading"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-results-actions\s*\.settings-btn\s*\{[\s\S]*min-height:\s*20px;/,
+    "password result toolbar buttons should stay compact so they do not consume table space"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-table th\s*\{[\s\S]*padding:\s*2px\s+4px;/,
+    "password result table header should use tighter padding to fit more rows in view"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-table td\s*\{[\s\S]*padding:\s*1px\s+4px;[\s\S]*height:\s*22px;/,
+    "password result rows should use tighter padding and row height so more generated rows stay visible"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-results-stage\s+\.webtools-password-copy-btn\s*\{[\s\S]*min-width:\s*44px;[\s\S]*min-height:\s*20px;[\s\S]*font-size:\s*10px;/,
+    "password row copy buttons should shrink with the denser result rows"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-sizing-grid\s*\{[\s\S]*align-items:\s*start;/,
+    "password length and count fields should align from the same top baseline as the other input groups"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-field-stack\s*\{[\s\S]*align-content:\s*start;/,
+    "password length quick actions should stay anchored to the top instead of floating within the block"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-flag-card\s*\{[\s\S]*min-height:\s*38px;/,
+    "password toggle cards should share a consistent compact height across the top control deck"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-password-copy-btn\s*\{[\s\S]*min-width:\s*48px;[\s\S]*white-space:\s*nowrap;/,
+    "password row copy buttons should stay on one line instead of collapsing into vertical text"
   );
   assert.match(
     panelImplsSource,
@@ -1628,7 +1768,27 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   assert.match(
     stylesSource,
     /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-workbench\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
-    "password tool should stack into one column on narrow windows"
+    "password tool workbench card should keep a single-column stack on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-toolbar-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "password tool toolbar should stack once the viewport narrows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-symbol-stack\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "password symbol controls should collapse to one column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-control-matrix\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "password control matrix should collapse to a single column on narrow windows"
+  );
+  assert.match(
+    stylesSource,
+    /@media \(max-width:\s*980px\)[\s\S]*\.webtools-password-insight-strip\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "password insight strip should stack cleanly on narrow windows"
   );
   assert.match(
     stylesSource,
