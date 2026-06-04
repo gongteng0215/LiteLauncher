@@ -14315,10 +14315,21 @@ window.__LL_PANEL_IMPLS__ = {
     workbench.className = "webtools-password-workbench";
 
     const configCard = document.createElement("section");
-    configCard.className = "settings-group webtools-password-card webtools-password-config-card";
+    configCard.className =
+      "settings-group webtools-password-card webtools-password-config-card webtools-password-command-deck";
     configCard.appendChild(createCardHead("生成配置", "预设、字符、长度、数量集中操作。"));
 
-    const presetBlockNodes = createBlock("快捷预设", "按场景切组合。");
+    const presetStrip = document.createElement("div");
+    presetStrip.className = "webtools-password-preset-strip";
+    const presetStripCopy = document.createElement("div");
+    presetStripCopy.className = "webtools-password-strip-copy";
+    const presetStripLabel = document.createElement("div");
+    presetStripLabel.className = "webtools-password-strip-label";
+    presetStripLabel.textContent = "快捷预设";
+    const presetStripHint = document.createElement("div");
+    presetStripHint.className = "webtools-password-strip-hint";
+    presetStripHint.textContent = "按场景切换组合。";
+    presetStripCopy.append(presetStripLabel, presetStripHint);
     const presetGrid = document.createElement("div");
     presetGrid.className = "webtools-password-preset-grid";
     const presetButtons: HTMLButtonElement[] = [];
@@ -14327,14 +14338,11 @@ window.__LL_PANEL_IMPLS__ = {
       button.type = "button";
       button.className = "webtools-password-preset";
       button.dataset.presetId = preset.id;
+      button.title = preset.usage;
 
       const title = document.createElement("strong");
       title.textContent = preset.label;
-
-      const description = document.createElement("span");
-      description.textContent = preset.description;
-
-      button.append(title, description);
+      button.appendChild(title);
       button.addEventListener("click", () => {
         applyOptionsToForm(preset.options);
         syncPasswordWorkbench();
@@ -14343,10 +14351,11 @@ window.__LL_PANEL_IMPLS__ = {
       presetButtons.push(button);
       presetGrid.appendChild(button);
     });
-    presetBlockNodes.body.appendChild(presetGrid);
+    presetStrip.append(presetStripCopy, presetGrid);
 
     const controlsGrid = document.createElement("div");
-    controlsGrid.className = "webtools-password-control-grid";
+    controlsGrid.className =
+      "webtools-password-control-grid webtools-password-control-matrix";
 
     const charsBlockNodes = createBlock("字符池", "勾选参与生成的字符类型。");
     const charsWrap = document.createElement("div");
@@ -14387,6 +14396,7 @@ window.__LL_PANEL_IMPLS__ = {
       "提升复杂度",
       webtoolsPasswordOptions.includeSymbols
     );
+    includeSymbolsNodes.wrap.classList.add("webtools-password-symbol-toggle");
     const includeSymbolsInput = includeSymbolsNodes.input;
 
     const symbolsInput = document.createElement("input");
@@ -14398,6 +14408,7 @@ window.__LL_PANEL_IMPLS__ = {
 
     const symbolsField = document.createElement("label");
     symbolsField.className = "webtools-password-input-field";
+    symbolsField.classList.add("webtools-password-symbol-field");
     const symbolsFieldLabel = document.createElement("span");
     symbolsFieldLabel.className = "webtools-password-field-label";
     symbolsFieldLabel.textContent = "符号集合";
@@ -14428,13 +14439,13 @@ window.__LL_PANEL_IMPLS__ = {
       "避免 0/O、1/l 混淆",
       webtoolsPasswordOptions.excludeSimilar
     );
+    excludeSimilarNodes.wrap.classList.add("webtools-password-similar-toggle");
     const excludeSimilarInput = excludeSimilarNodes.input;
 
     symbolsWrap.append(includeSymbolsNodes.wrap, symbolsField, symbolQuickGrid, excludeSimilarNodes.wrap);
     symbolsBlockNodes.body.appendChild(symbolsWrap);
 
-    controlsGrid.append(charsBlockNodes.block, symbolsBlockNodes.block);
-
+    const sizingBlockNodes = createBlock("闀垮害涓庢壒閲?", "闀垮害鍜屾壒閲忛兘鍦ㄥ悓涓尯鍧楀唴蹇€熻皟鏁淬€?");
     const sizingGrid = document.createElement("div");
     sizingGrid.className = "webtools-password-sizing-grid";
 
@@ -14486,9 +14497,12 @@ window.__LL_PANEL_IMPLS__ = {
     lengthStack.className = "webtools-password-field-stack";
     lengthStack.append(lengthField, quickLengthGrid);
     sizingGrid.append(lengthStack, countField);
+    sizingBlockNodes.body.appendChild(sizingGrid);
+    controlsGrid.append(charsBlockNodes.block, symbolsBlockNodes.block, sizingBlockNodes.block);
 
     const actionRow = document.createElement("div");
-    actionRow.className = "webtools-password-action-row";
+    actionRow.className =
+      "webtools-password-action-row webtools-password-action-rail";
 
     const generateButton = document.createElement("button");
     generateButton.type = "submit";
@@ -14533,7 +14547,11 @@ window.__LL_PANEL_IMPLS__ = {
     });
     actionRow.appendChild(copyFirstButton);
 
-    configCard.append(presetBlockNodes.block, controlsGrid, sizingGrid, actionRow);
+    const toolbarRow = document.createElement("div");
+    toolbarRow.className = "webtools-password-toolbar-row";
+    toolbarRow.append(presetStrip, actionRow);
+
+    configCard.append(toolbarRow, controlsGrid);
 
     const summaryCard = document.createElement("aside");
     summaryCard.className =
@@ -14541,7 +14559,7 @@ window.__LL_PANEL_IMPLS__ = {
     summaryCard.appendChild(createCardHead("摘要", "实时看强度和结果。"));
 
     const summaryGrid = document.createElement("div");
-    summaryGrid.className = "webtools-password-summary-grid";
+    summaryGrid.className = "webtools-password-summary-grid webtools-password-metric-strip";
 
     const createMetric = (
       labelText: string
@@ -14579,13 +14597,17 @@ window.__LL_PANEL_IMPLS__ = {
     const summaryBadges = document.createElement("div");
     summaryBadges.className = "webtools-password-summary-badges";
 
+    const summaryFocus = document.createElement("div");
+    summaryFocus.className =
+      "webtools-password-summary-focus webtools-password-insight-strip";
+
     const preview = document.createElement("div");
     preview.className = "webtools-password-preview";
     const previewHead = document.createElement("div");
     previewHead.className = "webtools-password-preview-head";
     const previewTitle = document.createElement("div");
     previewTitle.className = "webtools-password-preview-title";
-    previewTitle.textContent = "最近首条";
+    previewTitle.textContent = "首条预览";
     const previewMeta = document.createElement("div");
     previewMeta.className = "webtools-password-card-subtitle";
     previewHead.append(previewTitle, previewMeta);
@@ -14593,16 +14615,23 @@ window.__LL_PANEL_IMPLS__ = {
     previewValue.className = "webtools-password-preview-value";
     preview.append(previewHead, previewValue);
 
+    summaryFocus.append(strengthPanel, preview);
+
     const tips = document.createElement("div");
     tips.className = "webtools-password-tip-list";
 
-    summaryCard.append(summaryGrid, strengthPanel, summaryBadges, preview, tips);
+    const summaryNotes = document.createElement("div");
+    summaryNotes.className = "webtools-password-summary-notes";
+    summaryNotes.append(summaryBadges, tips);
+
+    summaryFocus.append(summaryNotes);
+    summaryCard.append(summaryGrid, summaryFocus);
 
     workbench.append(configCard, summaryCard);
 
     const resultsCard = document.createElement("section");
     resultsCard.className =
-      "settings-group webtools-password-card webtools-password-results-card";
+      "settings-group webtools-password-card webtools-password-results-card webtools-password-results-stage";
     const resultsHead = document.createElement("div");
     resultsHead.className = "webtools-password-results-head";
     const resultsHeadCopy = createCardHead("生成结果", "结果会按强度展示，并支持逐条复制。");

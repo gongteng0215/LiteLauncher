@@ -1088,6 +1088,52 @@ function mergeSearchItems(
   return result.slice(0, limit);
 }
 
+function findCatalogPinCandidate(item: LaunchItem): LaunchItem | undefined {
+  const normalizedId = item.id.trim().toLowerCase();
+  if (normalizedId) {
+    const byId = catalog.find((entry) => entry.id.trim().toLowerCase() === normalizedId);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const normalizedTarget = item.target.trim().toLowerCase();
+  if (normalizedTarget) {
+    const byTarget = catalog.find(
+      (entry) => entry.target.trim().toLowerCase() === normalizedTarget
+    );
+    if (byTarget) {
+      return byTarget;
+    }
+
+    const bySubtitle = catalog.find(
+      (entry) => entry.subtitle.trim().toLowerCase() === normalizedTarget
+    );
+    if (bySubtitle) {
+      return bySubtitle;
+    }
+  }
+
+  return undefined;
+}
+
+function findDynamicPinCandidate(itemId: string): LaunchItem | undefined {
+  const normalizedRequestedId = String(itemId ?? "").trim();
+  if (!normalizedRequestedId) {
+    return undefined;
+  }
+
+  const normalizedQuery = normalizedRequestedId
+    .replace(/^app:startapp:/i, "")
+    .replace(/^app:path-alias:/i, "");
+  if (!normalizedQuery) {
+    return undefined;
+  }
+
+  const liveResults = getDynamicSearchItems(normalizedQuery, "all");
+  return liveResults.find((entry) => entry.id === normalizedRequestedId);
+}
+
 function matchesSearchScope(item: LaunchItem, scope: SearchScope): boolean {
   if (scope === "all") {
     return true;
@@ -1121,10 +1167,31 @@ function filterItemsByResultPathRules(items: LaunchItem[]): LaunchItem[] {
 async function setItemPinned(
   db: LiteDatabase,
   itemId: string,
-  pinned: boolean
+  pinned: boolean,
+  item?: LaunchItem
 ): Promise<PinToggleResult> {
   const catalogIdSet = new Set(catalog.map((item) => item.id));
-  const validation = validatePinnedItemRequest(itemId, catalogIdSet);
+  const normalizedRequestedId = String(itemId ?? "").trim();
+  const hydratedRequestedItem =
+    item &&
+    typeof item === "object" &&
+    String(item.id ?? "").trim() === normalizedRequestedId
+      ? item
+      : undefined;
+  const stableRequestedItem = hydratedRequestedItem
+    ? findCatalogPinCandidate(hydratedRequestedItem)
+    : undefined;
+  const hydratedDynamicItem =
+    hydratedRequestedItem ??
+    stableRequestedItem ??
+    (normalizedRequestedId && !catalogIdSet.has(normalizedRequestedId)
+      ? findDynamicPinCandidate(normalizedRequestedId)
+      : undefined);
+  const validation = validatePinnedItemRequest(
+    itemId,
+    catalogIdSet,
+    hydratedDynamicItem
+  );
   if (!validation.ok) {
     queueErrorLog({
       scope: "main",
@@ -1140,7 +1207,13 @@ async function setItemPinned(
     };
   }
 
-  const normalizedId = validation.normalizedId;
+  const persistedCatalogCandidate = validation.hydratedItem
+    ? findCatalogPinCandidate(validation.hydratedItem)
+    : undefined;
+  const normalizedId =
+    stableRequestedItem?.id ??
+    persistedCatalogCandidate?.id ??
+    validation.normalizedId;
   try {
     const exists = pinnedItemIds.includes(normalizedId);
     if (pinned) {
@@ -1152,10 +1225,20 @@ async function setItemPinned(
     }
 
     pinnedItemIds = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+    const persisted = pinnedItemIds.includes(normalizedId);
+    if (pinned && !persisted) {
+      await persistPinnedItemIds(db);
+      return {
+        ok: false,
+        pinned,
+        reason: "missing-catalog-item"
+      };
+    }
+
     await persistPinnedItemIds(db);
     return {
       ok: true,
-      pinned: pinnedItemIds.includes(normalizedId)
+      pinned: persisted
     };
   } catch (error) {
     queueErrorLog({
@@ -1367,8 +1450,8 @@ async function bootstrap(): Promise<void> {
       clearErrorLogs: () => activeDatabase.clearErrorLogs()
     },
     pinProvider: {
-      setItemPinned: (itemId, pinned) =>
-        setItemPinned(activeDatabase, itemId, pinned)
+      setItemPinned: (itemId, pinned, item) =>
+        setItemPinned(activeDatabase, itemId, pinned, item)
     },
     onItemUsed: async (itemId) => {
       await database?.recordUsage(itemId);

@@ -39,8 +39,10 @@ jobs:
       - name: Build Windows packages (NSIS + Portable)
         shell: pwsh
         run: |
+          node scripts/clean-release.cjs
           pnpm run build
           pnpm exec electron-builder --win --x64 --publish never
+          node scripts/verify-release-output.cjs win
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
@@ -79,8 +81,10 @@ jobs:
 
       - name: Build macOS arm64 packages
         run: |
+          node scripts/clean-release.cjs
           pnpm run build
           pnpm exec electron-builder --mac dmg zip --arm64 --publish never
+          node scripts/verify-release-output.cjs mac
 
       - name: Upload macOS arm64 artifacts
         uses: actions/upload-artifact@v7
@@ -120,8 +124,10 @@ jobs:
 
       - name: Build macOS x64 packages
         run: |
+          node scripts/clean-release.cjs
           pnpm run build
           pnpm exec electron-builder --mac dmg zip --x64 --publish never
+          node scripts/verify-release-output.cjs mac
 
       - name: Upload macOS x64 artifacts
         uses: actions/upload-artifact@v7

@@ -80,7 +80,11 @@ type ErrorLogProvider = {
 };
 
 type PinProvider = {
-  setItemPinned: (itemId: string, pinned: boolean) => Promise<PinToggleResult>;
+  setItemPinned: (
+    itemId: string,
+    pinned: boolean,
+    item?: LaunchItem
+  ) => Promise<PinToggleResult>;
 };
 
 type IpcOptions = {
@@ -1192,10 +1196,16 @@ export function registerIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.setItemPinned,
-    async (_, itemIdInput: string, pinnedInput: boolean) => {
+    async (_, itemIdInput: string, pinnedInput: boolean, itemInput?: LaunchItem) => {
       const itemId = String(itemIdInput ?? "").trim();
       const pinned = Boolean(pinnedInput);
-      return options.pinProvider.setItemPinned(itemId, pinned);
+      const item =
+        itemInput &&
+        typeof itemInput === "object" &&
+        String((itemInput as LaunchItem).id ?? "").trim() === itemId
+          ? (itemInput as LaunchItem)
+          : undefined;
+      return options.pinProvider.setItemPinned(itemId, pinned, item);
     }
   );
 

@@ -862,39 +862,41 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
-  max-height: min(204px, 30vh);
+  max-height: min(430px, 48vh);
   overflow: auto;
 }
 
 .webtools-password-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
   table-layout: fixed;
 }
 
 .webtools-password-table th:nth-child(1),
 .webtools-password-table td:nth-child(1) {
-  width: 44px;
+  width: 36px;
 }
 
 .webtools-password-table th:nth-child(3),
 .webtools-password-table td:nth-child(3) {
-  width: 82px;
+  width: 72px;
 }
 
 .webtools-password-table th:nth-child(4),
 .webtools-password-table td:nth-child(4) {
-  width: 72px;
+  width: 74px;
   text-align: right;
 }
 
 .webtools-password-table th {
   text-align: left;
-  padding: 5px 8px;
+  padding: 2px 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   color: rgba(233, 242, 255, 0.86);
   font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.02em;
   background: rgba(15, 23, 42, 0.35);
   position: sticky;
   top: 0;
@@ -902,11 +904,11 @@ body {
 }
 
 .webtools-password-table td {
-  padding: 5px 8px;
+  padding: 1px 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   color: #f4f8ff;
   vertical-align: middle;
-  height: 32px;
+  height: 22px;
 }
 
 .webtools-password-cell-value {
@@ -953,9 +955,11 @@ body {
 }
 
 .webtools-password-copy-btn {
-  min-width: 44px;
-  padding: 3px 7px;
-  font-size: 11px;
+  min-width: 36px;
+  min-height: 14px;
+  padding: 0 2px;
+  font-size: 7px;
+  white-space: nowrap;
 }
 
 .webtools-password-results-card[data-masked="true"] .webtools-password-cell-value {
@@ -964,26 +968,26 @@ body {
 }
 
 .webtools-password-lab {
-  gap: 10px;
+  gap: 8px;
 }
 
 .webtools-password-hero {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 2px;
+  gap: 8px;
+  padding: 0;
 }
 
 .webtools-password-hero-copy {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
 .webtools-password-hero-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 19px;
   line-height: 1.08;
   font-weight: 700;
   color: #8de0ff;
@@ -992,8 +996,8 @@ body {
 
 .webtools-password-hero-subtitle {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.3;
   color: rgba(233, 242, 255, 0.76);
 }
 
@@ -1009,13 +1013,13 @@ body {
 .webtools-password-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
+  min-height: 20px;
+  padding: 0 7px;
   border-radius: 999px;
   border: 1px solid rgba(125, 211, 252, 0.22);
   background: rgba(125, 211, 252, 0.1);
   color: #eaf7ff;
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1033,14 +1037,19 @@ body {
 
 .webtools-password-workbench {
   display: grid;
-  grid-template-columns: minmax(360px, 1.45fr) minmax(230px, 0.75fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
   align-items: start;
 }
 
-.webtools-password-card {
+.webtools-password-command-deck {
+  display: grid;
   gap: 8px;
-  padding: 10px;
+}
+
+.webtools-password-card {
+  gap: 6px;
+  padding: 7px;
   border-radius: 8px;
 }
 
@@ -1056,18 +1065,20 @@ body {
 }
 
 .webtools-password-card-subtitle {
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.3;
   color: rgba(233, 242, 255, 0.68);
 }
 
 .webtools-password-block {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 5px;
+  padding: 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.14);
   background: rgba(255, 255, 255, 0.03);
+  min-height: 100%;
 }
 
 .webtools-password-block-head {
@@ -1075,32 +1086,67 @@ body {
   gap: 1px;
 }
 
+.webtools-password-block-body {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  min-height: 0;
+}
+
 .webtools-password-block-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: #f2f8ff;
 }
 
 .webtools-password-block-subtitle {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.3;
   color: rgba(233, 242, 255, 0.62);
 }
 
-.webtools-password-preset-grid {
+.webtools-password-preset-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.webtools-password-strip-copy {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: 6px;
-  justify-content: start;
+  gap: 1px;
+  min-width: 108px;
+}
+
+.webtools-password-strip-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ecf6ff;
+}
+
+.webtools-password-strip-hint {
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgba(233, 242, 255, 0.62);
+}
+
+.webtools-password-preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  flex: 1 1 auto;
 }
 
 .webtools-password-preset {
-  display: grid;
-  gap: 1px;
-  min-height: 46px;
-  padding: 7px 8px;
-  text-align: left;
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-height: 30px;
+  padding: 0 11px;
+  text-align: center;
+  border-radius: 999px;
   border: 1px solid rgba(125, 211, 252, 0.18);
   background: rgba(255, 255, 255, 0.04);
   color: #edf7ff;
@@ -1113,13 +1159,14 @@ body {
 }
 
 .webtools-password-preset strong {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .webtools-password-preset span {
-  font-size: 11px;
-  line-height: 1.25;
+  display: none;
+  font-size: 10px;
+  line-height: 1.2;
   color: rgba(233, 242, 255, 0.72);
 }
 
@@ -1138,20 +1185,25 @@ body {
 .webtools-password-control-grid {
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(260px, 1.15fr);
-  gap: 8px;
+  gap: 6px;
+}
+
+.webtools-password-control-matrix {
+  align-items: stretch;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .webtools-password-flag-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
 }
 
 .webtools-password-flag-card {
-  align-items: flex-start;
-  gap: 8px;
-  min-height: 48px;
-  padding: 7px 8px;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 5px 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.16);
   background: rgba(255, 255, 255, 0.03);
@@ -1164,37 +1216,49 @@ body {
 }
 
 .webtools-password-flag-copy strong {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: #edf7ff;
 }
 
 .webtools-password-flag-copy small {
-  font-size: 11px;
-  line-height: 1.25;
+  font-size: 10px;
+  line-height: 1.2;
   color: rgba(233, 242, 255, 0.62);
 }
 
 .webtools-password-symbol-stack {
   display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
   gap: 6px;
+  align-items: start;
+}
+
+.webtools-password-symbol-toggle,
+.webtools-password-similar-toggle {
+  min-height: 38px;
+}
+
+.webtools-password-symbol-field {
+  min-height: 38px;
 }
 
 .webtools-password-input-field,
 .webtools-password-field {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
+  align-content: start;
 }
 
 .webtools-password-field-label {
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(233, 242, 255, 0.86);
 }
 
 .webtools-password-field-hint {
-  font-size: 11px;
-  line-height: 1.25;
+  font-size: 10px;
+  line-height: 1.2;
   color: rgba(125, 211, 252, 0.82);
 }
 
@@ -1204,31 +1268,46 @@ body {
 
 .webtools-password-sizing-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 340px) minmax(120px, 170px);
-  gap: 8px;
+  grid-template-columns: minmax(220px, 320px) minmax(112px, 160px);
+  gap: 6px;
+  align-items: start;
   justify-content: start;
+}
+
+.webtools-password-toolbar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.92fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.webtools-password-control-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .webtools-password-field-stack {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
+  align-content: start;
 }
 
 .webtools-password-quick-grid {
   display: flex;
-  gap: 5px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .webtools-password-mini-btn {
-  min-height: 24px;
-  padding: 0 8px;
+  min-height: 22px;
+  padding: 0 7px;
   border-radius: 7px;
   border: 1px solid rgba(125, 211, 252, 0.18);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(233, 242, 255, 0.86);
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
 }
 
@@ -1248,69 +1327,96 @@ body {
 }
 
 .webtools-password-action-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.webtools-password-action-rail {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.webtools-password-action-row .settings-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .webtools-password-generate-btn {
-  min-width: 126px;
-  padding: 8px 14px;
-  font-size: 13px;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: 11px;
 }
 
 .webtools-password-generate-copy-btn,
 .webtools-password-copy-first-btn {
-  min-width: 104px;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: 11px;
 }
 
-.webtools-password-summary-grid {
+.webtools-password-summary-grid,
+.webtools-password-metric-strip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.webtools-password-summary-card {
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.webtools-password-summary-focus,
+.webtools-password-insight-strip {
+  display: grid;
+  grid-template-columns: minmax(126px, 0.72fr) minmax(220px, 1fr) minmax(0, 1.28fr);
+  gap: 8px;
+  align-items: stretch;
 }
 
 .webtools-password-metric {
   display: grid;
   gap: 2px;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.14);
   background: rgba(255, 255, 255, 0.03);
 }
 
 .webtools-password-metric-label {
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(233, 242, 255, 0.62);
 }
 
 .webtools-password-metric-value {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #eff8ff;
 }
 
 .webtools-password-strength-panel {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 5px;
+  padding: 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.16);
   background: rgba(255, 255, 255, 0.03);
 }
 
 .webtools-password-entropy {
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.25;
   color: rgba(233, 242, 255, 0.76);
 }
 
 .webtools-password-preview {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 5px;
+  padding: 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.16);
   background:
@@ -1319,11 +1425,11 @@ body {
 
 .webtools-password-preview-head {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .webtools-password-preview-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: #eff8ff;
 }
@@ -1332,13 +1438,13 @@ body {
   display: block;
   max-width: 100%;
   overflow: hidden;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.14);
   background: rgba(9, 18, 30, 0.48);
   color: #d9f5ff;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.25;
   word-break: break-all;
   font-family: Consolas, "Cascadia Code", "Courier New", monospace;
 }
@@ -1349,46 +1455,60 @@ body {
 
 .webtools-password-tip-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.webtools-password-summary-notes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+  align-content: start;
 }
 
 .webtools-password-tip {
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 8px;
   border: 1px dashed rgba(125, 211, 252, 0.18);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.28;
   color: rgba(233, 242, 255, 0.78);
 }
 
 .webtools-password-results-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 2px;
+}
+
+.webtools-password-results-stage {
+  padding-top: 4px;
 }
 
 .webtools-password-results-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
+  gap: 2px;
   flex-wrap: wrap;
 }
 
 .webtools-password-results-actions .settings-btn {
-  min-height: 28px;
-  padding: 4px 8px;
-  font-size: 11px;
+  min-height: 20px;
+  padding: 1px 5px;
+  font-size: 9px;
+  white-space: nowrap;
 }
 
 .webtools-password-result-host {
   margin-top: 0;
+  display: grid;
 }
 
 .webtools-password-results-card .password-output-row {
-  gap: 6px;
+  gap: 2px;
 }
 
 .webtools-password-results-card .password-output-row .settings-row-label {
@@ -1397,6 +1517,11 @@ body {
 
 .webtools-password-lab .webtools-password-table-wrap {
   border-radius: 8px;
+}
+
+.webtools-password-table-wrap {
+  margin-top: 1px;
+  max-height: min(600px, 64vh);
 }
 
 .webtools-password-lab .webtools-password-table th {
@@ -5472,6 +5597,28 @@ body {
   border-color: rgba(125, 211, 252, 0.5);
 }
 
+.webtools-password-command-deck .webtools-password-action-row .settings-btn {
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.webtools-password-command-deck .webtools-password-generate-btn,
+.webtools-password-command-deck .webtools-password-generate-copy-btn,
+.webtools-password-command-deck .webtools-password-copy-first-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.webtools-password-results-stage .webtools-password-copy-btn {
+  min-width: 44px;
+  min-height: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+}
+
 @media (max-width: 1280px) {
   .cashflow-stats {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -5533,8 +5680,16 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   }
 
-  .webtools-password-control-grid,
+  .webtools-password-control-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .webtools-password-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .webtools-password-summary-focus,
+  .webtools-password-tip-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -5542,13 +5697,20 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   }
 
+  .webtools-password-symbol-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .webtools-password-sizing-grid {
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   }
 
+  .webtools-password-control-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .webtools-password-action-row {
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .webtools-password-generate-btn,
@@ -5568,6 +5730,10 @@ body {
 
   .webtools-password-results-actions .settings-btn {
     width: auto;
+  }
+
+  .webtools-password-table-wrap {
+    max-height: min(320px, 38vh);
   }
 
   .webtools-password-lab .webtools-password-symbol-input {
@@ -8682,6 +8848,22 @@ body {
   .webtools-json-shell,
   .webtools-json-control-panel,
   .webtools-cron-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .webtools-password-toolbar-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .webtools-password-control-matrix {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .webtools-password-symbol-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .webtools-password-insight-strip {
     grid-template-columns: minmax(0, 1fr);
   }
 

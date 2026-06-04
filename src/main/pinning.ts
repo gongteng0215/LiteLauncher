@@ -1,4 +1,4 @@
-import { PinToggleFailureReason } from "../shared/types";
+import { LaunchItem, PinToggleFailureReason } from "../shared/types";
 
 export type PinRequestValidationReason = Exclude<
   PinToggleFailureReason,
@@ -9,6 +9,7 @@ export type PinRequestValidationResult =
   | {
       ok: true;
       normalizedId: string;
+      hydratedItem?: LaunchItem;
     }
   | {
       ok: false;
@@ -18,7 +19,8 @@ export type PinRequestValidationResult =
 
 export function validatePinnedItemRequest(
   itemId: string,
-  catalogIds: ReadonlySet<string>
+  catalogIds: ReadonlySet<string>,
+  hydratedItem?: LaunchItem | null
 ): PinRequestValidationResult {
   const normalizedId = String(itemId ?? "").trim();
   if (!normalizedId) {
@@ -30,6 +32,14 @@ export function validatePinnedItemRequest(
   }
 
   if (!catalogIds.has(normalizedId)) {
+    if (hydratedItem && hydratedItem.id.trim() === normalizedId) {
+      return {
+        ok: true,
+        normalizedId,
+        hydratedItem
+      };
+    }
+
     return {
       ok: false,
       normalizedId,

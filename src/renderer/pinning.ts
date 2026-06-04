@@ -1,5 +1,12 @@
 import { PinToggleResult } from "../shared/types";
 
+type LaunchEntry = {
+  kind: "launch";
+  item: {
+    id: string;
+  };
+};
+
 export function formatPinnedToggleStatus(
   title: string,
   result: PinToggleResult
@@ -19,4 +26,21 @@ export function formatPinnedToggleStatus(
     default:
       return `${prefix}失败`;
   }
+}
+
+export function findLaunchEntryIndexByItemId(
+  entries: ReadonlyArray<LaunchEntry | { kind: string }>,
+  itemId: string
+): number {
+  const normalizedId = String(itemId ?? "").trim();
+  if (!normalizedId) {
+    return -1;
+  }
+
+  return entries.findIndex(
+    (entry) =>
+      entry.kind === "launch" &&
+      "item" in entry &&
+      entry.item?.id === normalizedId
+  );
 }

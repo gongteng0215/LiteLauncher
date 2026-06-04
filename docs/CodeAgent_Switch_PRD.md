@@ -8,7 +8,7 @@
 > 首期重点：Codex 配置读取、Provider/Profile 预设管理、配置诊断、安全切换  
 > 后续扩展：Claude Code、Gemini CLI、OpenCode、OpenClaw 等 AI 编程工具配置管理
 
-> 当前实现状态：已接入 LiteLauncher 默认可见插件，支持读取 Codex `config.toml`、展示 Provider / Profile / 模型摘要、配置诊断、环境变量命令复制、Profile 切换 diff 预览、备份后安全写入、备份列表与恢复；当前配置会在列表和详情页中明确标注，Profile 行与详情页顶部都提供“预览 / 设为当前”入口，切换只更新 Codex 新版顶层 `profile` 字段，并清理根部重复模型字段，具体 Provider / 模型 / reasoning 参数保留在 `[profiles.xxx]` 模板段；Provider 新增会自动生成 ID、显示名称和 `env_key` 名称，API Key 可直接写入 Windows 用户级系统环境变量，也可复制命令备选，但不会写入配置或插件状态；已按官方 Codex 配置参考补齐 Provider 高级字段、Profile 高级模型字段和运行权限字段的编辑与保存。
+> 当前实现状态：已接入 LiteLauncher 默认可见插件，支持读取 Codex `config.toml`、同目录独立 `<profile>.config.toml` 文件以及历史 `config - xxx.toml` 快照，展示 Provider / Profile / 模型摘要、配置诊断、环境变量命令复制、Profile 切换 diff 预览、备份后安全写入、备份列表与恢复；当前配置会在列表和详情页中明确标注，Profile 行与详情页顶部都提供“预览 / 设为当前”入口，新增 Profile 默认保存为独立 `*.config.toml`，切换时会把选中 Profile 的模型字段写回当前 `config.toml` 顶层；当前配置卡与 Profile 详情页会额外显示“当前生效配置来源”，区分主 `config.toml` 顶层、legacy `[profiles.xxx]`、独立 `<profile>.config.toml` 和历史 snapshot；旧顶层 `profile = "..."` 和嵌入式 `[profiles.xxx]` 会被识别为 legacy 并提示迁移风险，embedded profile 可直接在详情页执行“一键迁移到独立文件”；Provider 新增会自动生成 ID、显示名称和 `env_key` 名称，API Key 可直接写入 Windows 用户级系统环境变量，也可复制命令备选，但不会写入配置或插件状态；已按官方 Codex 配置参考补齐 Provider 高级字段、Profile 高级模型字段，以及 Root 配置编辑能力，支持在面板内直接编辑、预览并写回 `model_provider`、`model`、`review_model`、`openai_base_url`、reasoning / verbosity / service tier / web_search、approval / sandbox / windows、history.persistence / history.max_bytes、`windows_wsl_setup_acknowledged`、`project_doc_max_bytes`、`tool_output_token_limit` 等常用顶层字段；Root 区现在会直接内嵌“Root 完整预览”，按当前表单值实时生成带行尾字段说明的 TOML，`当前 Root 落盘内容` 也会带同样的每行说明，便于对照编辑中状态与已落盘内容。
 
 ---
 
@@ -120,7 +120,7 @@ command:plugin:codeagent-switch?action=restore&backup=<backup-id>
 ### 4.2 典型场景
 
 场景 A：两个中转站快速切换  
-用户有 Relay 1 和 Relay 2，希望从 LiteLauncher 打开插件，选择 Relay 2，看到 diff，确认后备份并写入 `~/.codex/config.toml`。写入范围只包含顶层 `profile = "<profile-id>"`，并会移除旧配置根部重复的 `model_provider`、`model`、`review_model`、`model_reasoning_effort` 等模板字段；实际 Provider、模型和 reasoning 参数由 `[profiles.xxx]` 预设段统一承载。
+用户有 Relay 1 和 Relay 2，希望从 LiteLauncher 打开插件，选择 Relay 2，看到 diff，确认后备份并写入 `~/.codex/config.toml`。如果该 Profile 使用独立 `~/.codex/<profile>.config.toml`，插件会先维护对应独立文件，再把生效字段写回当前 `config.toml` 顶层；如果是旧嵌入式 `[profiles.xxx]`，插件会识别为 legacy 并提示迁移风险。
 
 场景 B：诊断认证方式  
 用户不知道配置里同时出现 `env_key` 和 `requires_openai_auth` 是否合理。插件给出诊断：中转站 API Key 模式推荐使用 `env_key`，OpenAI 登录态模式使用 `requires_openai_auth`，同一个 Provider 不建议混用。
@@ -166,7 +166,7 @@ MVP 阶段不做：
 | Codex 配置读取 | 是 | 读取并解析用户级 `~/.codex/config.toml` |
 | 配置路径展示 | 是 | 显示 Windows / macOS / Linux 实际路径 |
 | Provider 识别 | 是 | 识别 `[model_providers.<id>]` |
-| Profile 识别 | 是 | 识别 `[profiles.<name>]`，并提示 IDE 扩展兼容风险 |
+| Profile 识别 | 是 | 识别独立 `<profile>.config.toml`、旧 `[profiles.<name>]` 与历史快照文件，并标注来源 |
 | 本地预设管理 | 是 | 保存 LiteLauncher 管理的 Provider/Profile 预设 |
 | 切换前 diff | 是 | 写入前展示顶层 `profile` 变更，以及会被清理的根部重复模型字段 |
 | 安全写入 | 是 | 当前已支持 Profile 切换的备份、临时文件、替换、重读校验；更细的失败自动回滚后续补齐 |
@@ -663,7 +663,7 @@ fixtures/codeagent-switch/
 ```bash
 pnpm run build
 node dist/test/codeagent-switch-parser.test.js
-node dist/test/codeagent-switch-service.test.js
+node dist/test/codeagent-switch-plugin.test.js
 node dist/test/plugin-panel-impls-regression.test.js
 node dist/test/visible-plugins-regression.test.js
 ```
@@ -809,7 +809,7 @@ CodeAgent Switch 在 LiteLauncher 里的最佳落地方式不是做一个新的�
 - Dashboard 会标注当前 `profile`、由 Profile 推导的 Provider、当前模型、review 模型、reasoning，以及 exact / partial 匹配的 Profile。
 - Provider 支持新增、编辑、删除；可配置 `id`、`name`、`base_url`、`wire_api`、认证方式、`env_key` 名称和重试字段。
 - `env_key` 只保存环境变量名，插件仍不保存真实 API Key；疑似真实 Key 会被共享层校验拦截。
-- Profile 支持新增、编辑、删除、预览和应用；应用 Profile 只写顶层 `profile = "<profile-id>"`，并清理根部重复模型字段，具体 Provider / 模型 / reasoning 参数由对应 `[profiles.xxx]` 段保存。
+- Profile 支持新增、编辑、删除、预览和应用；新增或保存 legacy Profile 时默认落到独立 `<profile>.config.toml`，应用 / 预览会按新版 Codex 机制把当前生效字段写回主 `config.toml` 顶层；旧的顶层 `profile = "..."` 与嵌入式 `[profiles.xxx]` 只作为兼容和迁移来源保留。
 - 删除 Provider 会阻止删除当前 Provider，也会阻止删除仍被 Profile 引用的 Provider。
 - TOML 解析和写入支持 `[profiles."淘宝1"]` 这类带引号的非 ASCII profile id；Profile exact 匹配优先使用顶层 `profile`，没有顶层 `profile` 的旧配置才回退比较模板字段；中文 Provider/Profile 名称使用 UTF-8 链路回归覆盖，防止 `淘宝1`、`银河` 等值再次变成 mojibake。
 - 面板已改为 master-detail：左侧 Provider/Profile 只展示简略配置摘要，点击后在右侧详情页编辑；选中状态和当前生效状态分开标注。
@@ -833,3 +833,25 @@ CodeAgent Switch 面板继续向 cc switch 风格靠拢，当前 UI 已调整为
 - Provider 编辑器不再让用户手填 `env_key` 名称，而是根据 Provider ID 自动生成 `CODEAGENT_<PROVIDER>_API_KEY`；API Key 输入框只用于复制本机环境变量设置命令，不保存明文 Key。
 - 样式上固定工具栏宽度，右侧详情列获得更多空间；窄屏会折叠为单列，避免大面积空白和按钮自动拉伸。
 - 源码回归新增布局结构断言，锁住 `codeagent-switch-shell`、`codeagent-switch-tool-sidebar`、`codeagent-switch-profile-list`、`codeagent-switch-provider-strip`、`codeagent-switch-detail-section` 等关键结构，防止后续退回旧布局。
+
+## 20. 2026-05-31 standalone profile 收口更新
+
+CodeAgent Switch 本轮继续按新版 Codex profile 机制收口，主线从“兼容 legacy”切到“standalone 优先”：
+
+- 旧的 `[profiles.xxx]` 在保存时不再继续沿用 legacy 写法，而是自动输出为同目录 `~/.codex/<name>.config.toml`。
+- 如果这个旧 profile 当前正生效，保存时会顺带清理 legacy 顶层 `profile = "..."`，并把新的生效字段写回主 `config.toml` 顶层，避免出现“文件改了但当前配置还停在旧模型”的断层。
+- 右侧 Profile 详情页新增“配置预览”分组，直接展示：
+  - standalone 文件路径
+  - 将要保存的 TOML 内容
+  - 一键复制配置
+- 原有 diff 预览继续只服务于“预览切换 / 设为当前”这条链路；legacy 迁移入口不再占主流程，而是改成“保存时自动转换”的说明。
+
+## 21. 2026-06-01 Root 预览与可读性更新
+
+CodeAgent Switch 本轮继续收口 Root 配置编辑区的可读性和反馈路径：
+
+- Root 编辑区内嵌了独立的“Root 完整预览”，会按当前表单值实时生成顶层 TOML。
+- 预览中的每一行都会追加字段说明，帮助用户理解 `model_provider`、`approval_policy`、`history.max_bytes` 这类字段的含义。
+- `当前 Root 落盘内容` 也会带同样的每行说明，方便直接对照“正在编辑的值”和“文件里已有的值”。
+- Root 表单里的超长字段标签改成更短、更适合扫描的显示名，完整 key 语义放到字段说明里，减少窄宽度下的堆叠和重叠。
+- 当前这套 Root 预览语义仍然是“顶层 Root 配置预览”，不等同于整份 `config.toml` 的最终切换结果；完整切换结果仍由 Profile 的 `diff / 最终配置预览` 负责。

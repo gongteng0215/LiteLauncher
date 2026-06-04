@@ -1,8 +1,15 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-05-29
+更新时间：2026-06-04
 
 ## 最近完成
+- 准备发布 `v1.0.20`：将本轮收口到一版可直接发布的桌面更新，当前范围已覆盖置顶稳定性、搜索输入键盘检索规则、自动更新 / 发布链路、密码工具紧凑布局，以及 CodeAgent Switch 的新版 Codex 配置编辑与预览。已按串行顺序完成 `pnpm run build`、搜索 / 置顶 / 可见插件 / CodeAgent Switch / workflow 护栏相关 `dist` 回归、`e2e-launcher-smoke` / `e2e-search-layout-smoke` / `e2e-plugin-panels-smoke` / `e2e-plugin-panel-layout-smoke`，并额外完成 `pnpm run dist:win` 本地打包校验；其中还补修了 Windows NSIS 安装包命名与 `latest.yml` 自动更新元数据一致性，当前 `release/latest.yml` 与 `release/LiteLauncher-Setup-1.0.20.exe` 已对齐。
+- CodeAgent Switch 继续收口 Root 配置编辑体验：Root 区现在直接内嵌“Root 完整预览”，会按当前表单值实时生成顶层 TOML，并在每一行后追加字段说明；同时把长字段名改成更短的可扫描标签，避免 `model_supports_reasoning_summaries` 这类长 key 在窄宽度下互相挤压。当前 `当前 Root 落盘内容` 也会带同样的行尾说明，方便对照“正在编辑的值”和“已经写进文件的值”。本轮按顺序完成 `pnpm run build`、`node dist/test/plugin-panel-impls-regression.test.js`、`node dist/test/codeagent-switch-plugin.test.js`，结果均通过。
+- CodeAgent Switch 本轮补齐新版 Codex Root 配置编辑能力：共享层新增官方常用顶层字段解析与写回，现已支持在面板内直接编辑并预览 `model_provider`、`model`、`review_model`、`openai_base_url`、`model_reasoning_effort`、`plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`model_supports_reasoning_summaries`、`service_tier`、`web_search`、`model_context_window`、`model_auto_compact_token_limit`、`approval_policy`、`approvals_reviewer`、`allow_login_shell`、`sandbox_mode`、`default_permissions`、`disable_response_storage`、`network_access`、`personality`、`project_doc_max_bytes`、`tool_output_token_limit`、`windows_wsl_setup_acknowledged`、`[windows] sandbox / sandbox_private_desktop`、`[history] persistence / max_bytes`；同时保存链路支持显式清空字段时从 `config.toml` 中移除旧值，避免表单恢复默认后文件残留历史配置。面板里的“运行权限”区已升级为分组式 `Root 配置` 编辑器，并与“当前 Root 配置”源码预览保持同步。按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
+- CodeAgent Switch 本轮继续按新版 Codex standalone profile 收口：保存旧 `[profiles.xxx]` 时不再沿用 legacy 写法，而是自动改写为同目录 `~/.codex/<name>.config.toml`，如果该旧 profile 当前正生效，还会同步清理顶层 legacy `profile = "..."` 并把新的生效字段写回主 `config.toml` 顶层，确保“保存一次就转到新版模型”。面板右侧详情页新增“配置预览”区，直接展示所选 Profile 的 standalone TOML 内容、目标文件路径和复制动作；原有 diff 预览继续保留给“预览切换 / 设为当前”使用，legacy 迁移按钮从主流程降权为“保存时自动转换”的说明。本轮按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
+- CodeAgent Switch 继续向新版 Codex 配置模型收口：共享层新增“当前生效配置来源”摘要，能区分主 `config.toml` 顶层、legacy `[profiles.xxx]`、独立 `<profile>.config.toml` 和历史 `config - xxx.toml` 快照；同时补上 embedded legacy profile 的一键迁移链路，会把旧 `[profiles.xxx]` 导出为独立 `~/.codex/<name>.config.toml`，按需把当前生效字段写回主 `config.toml` 顶层，并在迁移前保留插件备份。面板当前配置卡和 Profile 详情页也已同步显示来源信息与“迁移到独立文件”入口。本轮按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
+- 修复 `Codex` 偶发“明明已安装但本轮会话里仍然搜不到”的动态命令缓存问题：排查发现 `src/main/search.ts` 会把 Windows 动态命令查询的空结果一并写入 `DYNAMIC_COMMAND_CACHE`，一旦 `where codex` / PATH alias 在某次查询里临时 miss，当前 LiteLauncher 进程后续就会一直复用这个空缓存，不再重试 `Codex` 探测；现已将该缓存收紧为“只缓存成功命中”，并为 `windows-app-alias-regression` 新增“首次 miss、第二次同进程恢复”回归断言，确保商店版 `Codex` 不会因一次瞬时探测失败而整轮会话都搜不到。本轮已按串行顺序完成 `pnpm run build` 与 `node dist/test/windows-app-alias-regression.test.js`，结果通过。
+- 补上 `v1.0.17` 的 Windows 真机定向回归：新增 `src/test/e2e-windows-codex-regression.test.ts`，在本机已安装 `Microsoft Store Codex`（`OpenAI.Codex_2p2nqsd0c76g0!App`）时，真实拉起 Electron 壳层，覆盖 `Codex` 搜索命中、调用 live `setItemPinned(...)` 置顶、同一份 `userData` 重启后置顶项仍可恢复、以及最终取消置顶的完整链路；同时扩展 `src/test/e2e-test-utils.ts`，让 E2E 会话可复用指定的临时 `userData` 目录，便于做跨重启持久化验证。本轮已按串行顺序完成 `pnpm run build` 与 `node dist/test/e2e-windows-codex-regression.test.js`，结果通过。
 - 继续收口桌面发版 workflow 的 Windows runner follow-up：在把 `windows-latest` 升成显式 `windows-2025`、并统一切到 Node 24-ready action 版本后，远端 `workflow_dispatch` 验证虽已通过，但仍看到 GitHub 给出 `windows-2025 -> windows-2025-vs2026` 的重定向提示；继续将 Windows job 显式固定到 `windows-2025-vs2026` 后，这条提示消失了，但又暴露出 `actions/setup-node@v6` 在该镜像上配合内建 `pnpm` cache 会在 `Setup Node.js` 阶段提前失败。最终根因收口为 `setup-node` 的内建 `pnpm` cache 兼容性问题，现已为三路桌面打包 job 统一关闭该内建缓存（显式 `package-manager-cache: false`），保留显式 VS2026 Windows 镜像与新的 action 版本；同步扩展 `build-desktop-workflow-source` 护栏，约束 Windows runner 与 cache 策略不再回退。本轮先后完成本地串行验证 `pnpm run build`、`node dist/test/build-desktop-workflow-source.test.js`，以及两次远端 `workflow_dispatch` 验证：`26628082810` 复现了 Windows `Setup Node.js` 失败，`26628387491` 则确认 Windows / macOS 三路桌面打包全部通过，且不再出现 Windows runner 重定向提示。
 - 收口桌面发版 workflow 预警：将 `.github/workflows/build-desktop.yml` 从会触发 GitHub Actions Node 20 弃用与 `windows-latest` 漂移提示的旧配置，升级为显式 `windows-2025` / `ubuntu-24.04` runner，并统一切到 `actions/checkout@v6`、`actions/setup-node@v6`、`pnpm/action-setup@v6`、`actions/upload-artifact@v7`、`actions/download-artifact@v8`，同时显式开启 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` 提前跟随平台默认值；同步新增 `src/test/build-desktop-workflow-source.test.ts` 源码护栏，防止后续回退到会再次报警的 action / runner 组合。本轮按串行顺序完成 `pnpm run build`、`node dist/test/build-desktop-workflow-source.test.js` 验证，结果均通过。
 - 收口设置页日志展示与 renderer 兜底偏好：错误日志面板进一步压紧为更适合日常排查的紧凑 monospace 区块，并为 pin 相关记录补充可读摘要；同时复核 renderer 搜索结果合并评分时，补上对稳定 `app:startapp:*` Windows Store `id` 的偏好，避免前端回退到较弱的旧结果形态。同步新增 `renderer-startapp-source` 与 `search-section-grid-style` 护栏，并在 `pnpm run build` 后串行完成 `node dist/test/renderer-error-log-source.test.js`、`node dist/test/renderer-startapp-source.test.js`、`node dist/test/search-section-grid-style.test.js`、`node dist/test/launcher-main-flow-regression.test.js`、`node dist/test/windows-app-alias-regression.test.js`、`node dist/test/e2e-search-layout-smoke.test.js` 验证，结果均通过。
@@ -98,12 +105,12 @@
 - CodeAgent Switch 修正切换与 Key 配置入口：Profile 列表行直接展示“预览 / 切换”按钮，当前 Profile 的切换按钮显示为“当前”并禁用；Provider 编辑器不再要求手填 `env_key` 名称，而是按 Provider ID 自动生成 `CODEAGENT_<PROVIDER>_API_KEY`，API Key 输入只用于复制本机环境变量设置命令，不会写入配置或保存到插件状态。
 - CodeAgent Switch 继续强化“怎么切换”和“不要手输入名字/Key 名”的体验：右侧 Profile 详情页顶部直接提供“预览 / 设为当前”主操作，列表行文案也统一为“设为当前”；Provider 新增时自动预填不冲突 ID，用户先填 Base URL 时会按域名联动生成 Provider ID、显示名称和 `CODEAGENT_<PROVIDER>_API_KEY`，Key 设置独立成块并使用单独复制反馈。
 - CodeAgent Switch Key 配置改为直接执行：Provider 详情页的主按钮为“写入系统 Key”，会把临时输入的 API Key 写入 Windows 用户级环境变量并同步当前 LiteLauncher 进程环境，诊断可立即识别；复制命令保留为备选，明文 Key 仍不写入 `config.toml` 或插件状态。
-- CodeAgent Switch 修正 Codex 新版 Profile 切换口径：预览和应用现在只管理顶层 `profile = "<profile-id>"`，并清理根部重复的 `model_provider`、`model`、`review_model`、`model_reasoning_effort`、`model_auto_compact_token_limit`，模型参数只保留在 `[profiles.xxx]` 模板段；同时补了中文 Provider 名回归，避免 `淘宝1`、`银河` 这类值在插件链路中再次变成乱码。本机 `C:\Users\lybly\.codex\config.toml` 已备份并清理为顶部仅保留 `profile = "OpenAI"`。
+- CodeAgent Switch 已对齐 Codex 0.134.0+ 的新版配置机制：插件现在会同时读取用户级 `config.toml`、同目录下的独立 `<profile>.config.toml` 文件，以及用户历史保留的 `config - xxx.toml` 快照文件；Profile 新增默认保存为独立 `*.config.toml`，预览 / 应用会把选中 Profile 的字段写回 `config.toml` 顶层，旧的顶层 `profile = "..."` 与嵌入式 `[profiles.xxx]` 会被识别为 legacy 并给出迁移告警；同时保留中文 Provider / Profile 名回归，避免 `淘宝1`、`银河` 这类值在插件链路中再次变成乱码。本轮已按串行顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js` 验证，结果通过。
 - CodeAgent Switch 对齐官方 Codex 配置参考继续补字段：Provider 详情页新增 `env_key_instructions`、`supports_websockets`、`http_headers`、`env_http_headers`、`query_params`；Profile 详情页新增 `plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`service_tier`、`web_search`；详情页新增“运行权限”区，可保存 `approval_policy`、`sandbox_mode`、`default_permissions`、`network_access` 和 `[windows] sandbox / sandbox_private_desktop`。保存路径仍走备份、临时文件、重读校验和替换流程，并新增 parser/plugin/source 回归覆盖。
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.16`
+- 应用版本：`v1.0.20`
 - 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
@@ -111,6 +118,7 @@
 - 完整回归入口：`pnpm run test:regression:full`
 - 搜索首页布局回归：已接入 `pnpm run test:e2e:smoke`
 - 新增默认插件与 Crypto / JWT UI smoke：已接入 `pnpm run test:e2e:smoke`
+- Windows Store Codex 真机回归：`pnpm run test:e2e:windows-codex`
 - Windows 应用别名（如 `codex`）已支持搜索与启动
 
 ## 当前 worktree 状态
@@ -124,16 +132,19 @@
 
 1. round 2 已提交且可验证的样式 / 测试增量，以及 `Clipboard Workbench` 可独立回填的本地化批次、`Hardware Inspector` 可独立回填的 helper/state 下沉批次，已回填到 `main`；`codex/panel-baseline-round2` 也已在 `main` 上补记 merge 关系并完成 worktree 清理，剩余未提交的 `renderer` / `plugin-panel-impls` 大块 WIP 仅保留归档现场，后续若要追查需基于归档 patch 或主线继续收口。
 2. 渲染层执行 helper 与共享状态已大幅迁出，`renderer.ts` 当前剩余的插件尾巴已进一步收敛到状态变量、少量共享常量与 Cashflow / Clipboard 等尚未拆完区域，但仍未完全清空所有历史状态定义。
-3. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
-4. 基于 `dist` 的定向测试如果与 `pnpm run build` 并行执行，会读到旧产物并产生假阳性；后续验证必须采用串行顺序：先 build，再逐个运行 `node dist/test/...`。
-5. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
-6. Cashflow `cash review` 复盘能力还未真正落地。
+3. CodeAgent Switch 的 Root 区虽然已经补齐内嵌完整预览和字段说明，但还没有做一轮新的 Electron / 真实 UI 视角确认，当前主要依赖源码回归 + build + 定向插件回归验证。
+4. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
+5. 基于 `dist` 的定向测试如果与 `pnpm run build` 并行执行，会读到旧产物并产生假阳性；后续验证必须采用串行顺序：先 build，再逐个运行 `node dist/test/...`。
+6. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
+7. Cashflow `cash review` 复盘能力还未真正落地。
 
 ## 下一步建议
 
-1. 继续直接在 `main` 上拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与共享边界，把 `panel-baseline-round2` 时代遗留但未继续保留的拆分目标转成主线上的持续收口工作；如需追溯旧现场，可参考 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/working-tree.patch`。
-2. 继续拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与尚未迁出的 Clipboard / Cashflow 等区域，参考 `docs/superpowers/plans/2026-05-26-renderer-plugin-state-extraction.md`。
-3. 后续继续优先做源码回归 + `pnpm run build`，凡依赖 `dist` 的定向测试都串行执行，smoke / E2E 放到相关批次收尾。
-4. 继续做非新增插件范围的 UI 文案与历史编码巡检。
-5. 推进 Cashflow `cash review` 复盘模块。
-6. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。
+1. 先用 `pnpm dev` 对 CodeAgent Switch 最新 Root 区做一轮真实界面复核，重点看短标签、字段说明、内嵌完整预览和窄宽度下是否还有堆叠。
+2. 在确认 Root 区稳定后，继续补 CodeAgent Switch 的“最终完整配置预览”语义，把 Root 表单预览与整份 `config.toml` 结果的边界再说清楚，避免用户混淆“Root 预览”和“最终切换预览”。
+3. 继续直接在 `main` 上拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与共享边界，把 `panel-baseline-round2` 时代遗留但未继续保留的拆分目标转成主线上的持续收口工作；如需追溯旧现场，可参考 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/working-tree.patch`。
+4. 继续拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与尚未迁出的 Clipboard / Cashflow 等区域，参考 `docs/superpowers/plans/2026-05-26-renderer-plugin-state-extraction.md`。
+5. 后续继续优先做源码回归 + `pnpm run build`，凡依赖 `dist` 的定向测试都串行执行，smoke / E2E 放到相关批次收尾。
+6. 继续做非新增插件范围的 UI 文案与历史编码巡检。
+7. 推进 Cashflow `cash review` 复盘模块。
+8. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。

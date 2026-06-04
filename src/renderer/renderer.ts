@@ -1,3 +1,77 @@
+type SearchInputKeyLike = {
+  key?: string;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+};
+
+const NON_TYPING_SEARCH_INPUT_KEYS = new Set<string>([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Left",
+  "Right",
+  "Up",
+  "Down",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  "Escape",
+  "Esc",
+  "Enter",
+  "Return",
+  "Tab",
+  "Shift",
+  "Control",
+  "Alt",
+  "Meta",
+  "CapsLock",
+  "NumLock",
+  "ScrollLock",
+  "Insert"
+]);
+
+function isKeyboardDrivenSearchInputKey(
+  event: SearchInputKeyLike | null | undefined
+): boolean {
+  const key = String(event?.key ?? "").trim();
+  if (!key) {
+    return false;
+  }
+
+  if (event?.metaKey || event?.altKey) {
+    return false;
+  }
+
+  if (event?.ctrlKey) {
+    return ["v", "x", "z", "y", "Backspace", "Delete", "Del"].includes(key);
+  }
+
+  if (NON_TYPING_SEARCH_INPUT_KEYS.has(key)) {
+    return false;
+  }
+
+  return true;
+}
+
+function shouldDebounceSearchRefresh(
+  query: string,
+  isSearchMode: boolean,
+  fromKeyboard: boolean
+): boolean {
+  if (!isSearchMode) {
+    return false;
+  }
+
+  if (fromKeyboard) {
+    return true;
+  }
+
+  return Boolean(query.trim());
+}
+
 type PinToggleResult = import("../shared/types").PinToggleResult;
 
 type PanelMode =
@@ -161,7 +235,11 @@ interface LauncherApi {
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
   checkForAppUpdates(): Promise<AppUpdaterStatus>;
   installAppUpdateNow(): Promise<boolean>;
-  setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
+  setItemPinned(
+    itemId: string,
+    pinned: boolean,
+    item?: LaunchItem
+  ): Promise<PinToggleResult>;
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
   resolveCommandQuery(query: string): Promise<LaunchItem[]>;
   execute(item: LaunchItem): Promise<ExecuteResult>;
@@ -256,6 +334,7 @@ let debugMode = false;
 let isResultsLoading = false;
 let resultsLoadingTimer: number | null = null;
 let searchInputDebounceTimer: number | null = null;
+let pendingSearchInputFromKeyboard = false;
 let sectionGridResizeFrame: number | null = null;
 const handledEvents = new WeakSet<KeyboardEvent>();
 
@@ -597,11 +676,18 @@ function flushSearchInputDebounce(): void {
   void refreshEntries(currentQuery);
 }
 
-function scheduleSearchRefreshFromInput(nextQuery: string): void {
+function scheduleSearchRefreshFromInput(
+  nextQuery: string,
+  options?: { fromKeyboard?: boolean }
+): void {
   closeSearchContextMenu();
   currentQuery = nextQuery;
 
-  const shouldDebounce = mode === "search" && Boolean(nextQuery.trim());
+  const shouldDebounce = shouldDebounceSearchRefresh(
+    nextQuery,
+    mode === "search",
+    Boolean(options?.fromKeyboard)
+  );
   if (!shouldDebounce) {
     clearSearchInputDebounceTimer();
     void refreshEntries(currentQuery);
@@ -1449,7 +1535,18 @@ function updatePinnedState(itemId: string, pinned: boolean): void {
   }
 }
 
-async function togglePinned(index: number): Promise<void> {
+function findLaunchEntryIndexInCurrentEntries(itemId: string): number {
+  const normalizedId = String(itemId ?? "").trim();
+  if (!normalizedId) {
+    return -1;
+  }
+
+  return entries.findIndex(
+    (entry) => entry.kind === "launch" && entry.item.id === normalizedId
+  );
+}
+
+async function togglePinned(index: number, expectedItemId?: string): Promise<void> {
   if (mode !== "search") {
     return;
   }
@@ -1462,12 +1559,29 @@ async function togglePinned(index: number): Promise<void> {
 
   const selected = entries[index];
   if (!selected || selected.kind !== "launch") {
+    if (expectedItemId) {
+      const relocatedIndex = findLaunchEntryIndexInCurrentEntries(expectedItemId);
+      if (relocatedIndex >= 0 && relocatedIndex !== index) {
+        await togglePinned(relocatedIndex, expectedItemId);
+        return;
+      }
+    }
+    setStatus("置顶失败：当前结果已过期，请重新搜索");
     return;
   }
 
   const item = selected.item;
+  if (expectedItemId && item.id !== expectedItemId) {
+    const relocatedIndex = findLaunchEntryIndexInCurrentEntries(expectedItemId);
+    if (relocatedIndex >= 0 && relocatedIndex !== index) {
+      await togglePinned(relocatedIndex, expectedItemId);
+      return;
+    }
+    setStatus("置顶失败：当前结果已过期，请重新搜索");
+    return;
+  }
   const nextPinned = !Boolean(item.pinned);
-  const pinResult = await launcher.setItemPinned(item.id, nextPinned);
+  const pinResult = await launcher.setItemPinned(item.id, nextPinned, item);
   if (!pinResult.ok) {
     setStatus(formatPinnedToggleStatus(item.title, pinResult));
     return;
@@ -1607,7 +1721,7 @@ function openSearchContextMenu(
   pinButton.textContent = entry.item.pinned ? "取消置顶" : "置顶";
   pinButton.addEventListener("click", () => {
     closeSearchContextMenu();
-    void togglePinned(index);
+    void togglePinned(index, entry.item.id);
   });
   menu.appendChild(pinButton);
 
@@ -3160,6 +3274,10 @@ function handleKeydown(event: KeyboardEvent): void {
   const isMultilineEditorTarget =
     target instanceof HTMLTextAreaElement || target?.isContentEditable === true;
 
+  if (target === input) {
+    pendingSearchInputFromKeyboard = isKeyboardDrivenSearchInputKey(event);
+  }
+
   pushDebugLog(
     `renderer keydown ${formatMods(
       event.ctrlKey,
@@ -3294,7 +3412,10 @@ function registerEvents(): void {
   });
 
   input.addEventListener("input", () => {
-    scheduleSearchRefreshFromInput(input.value);
+    scheduleSearchRefreshFromInput(input.value, {
+      fromKeyboard: pendingSearchInputFromKeyboard
+    });
+    pendingSearchInputFromKeyboard = false;
   });
 
   input.addEventListener("keydown", handleKeydown, true);

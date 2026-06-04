@@ -259,7 +259,11 @@ declare global {
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
       checkForAppUpdates(): Promise<AppUpdaterStatus>;
       installAppUpdateNow(): Promise<boolean>;
-      setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult>;
+      setItemPinned(
+        itemId: string,
+        pinned: boolean,
+        item?: LaunchItem
+      ): Promise<PinToggleResult>;
       search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
       resolveCommandQuery(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;

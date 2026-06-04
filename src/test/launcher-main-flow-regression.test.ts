@@ -137,6 +137,104 @@ test("release config keeps auto-update metadata on non-draft GitHub releases", (
   );
 });
 
+test("desktop packaging clears stale release outputs and verifies updater metadata", () => {
+  const packageJsonPath = path.join(process.cwd(), "package.json");
+  const workflowPath = path.join(
+    process.cwd(),
+    ".github",
+    "workflows",
+    "build-desktop.yml"
+  );
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const workflowSource = fs.readFileSync(workflowPath, "utf8");
+  const scripts = packageJson.scripts ?? {};
+
+  for (const scriptName of [
+    "pack",
+    "dist:mac",
+    "dist:mac:arm64",
+    "dist:mac:x64",
+    "dist:win",
+    "dist:win:portable",
+    "release:mac",
+    "release:win"
+  ]) {
+    assert.match(
+      scripts[scriptName] ?? "",
+      /node scripts\/clean-release\.cjs/,
+      `${scriptName} should remove stale release artifacts before running electron-builder`
+    );
+  }
+
+  for (const [scriptName, platform] of [
+    ["dist:mac", "mac"],
+    ["dist:mac:arm64", "mac"],
+    ["dist:mac:x64", "mac"],
+    ["dist:win", "win"],
+    ["release:mac", "mac"],
+    ["release:win", "win"]
+  ] as const) {
+    assert.match(
+      scripts[scriptName] ?? "",
+      new RegExp(`node scripts/verify-release-output\\.cjs ${platform}`),
+      `${scriptName} should verify ${platform} updater metadata before treating the build as releasable`
+    );
+  }
+
+  assert.match(
+    workflowSource,
+    /node scripts\/clean-release\.cjs/,
+    "desktop workflow should clear the release output directory before packaging"
+  );
+  assert.match(
+    workflowSource,
+    /node scripts\/verify-release-output\.cjs win/,
+    "windows workflow should verify latest.yml against the current package version"
+  );
+  assert.match(
+    workflowSource,
+    /node scripts\/verify-release-output\.cjs mac/,
+    "macOS workflow should verify latest-mac.yml against the current package version"
+  );
+});
+
+test("windows installer artifact naming stays aligned with updater metadata", () => {
+  const packageJsonPath = path.join(process.cwd(), "package.json");
+  const verifyScriptPath = path.join(
+    process.cwd(),
+    "scripts",
+    "verify-release-output.cjs"
+  );
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+    build?: {
+      nsis?: {
+        artifactName?: string;
+      };
+    };
+  };
+  const verifyScriptSource = fs.readFileSync(verifyScriptPath, "utf8");
+
+  assert.equal(
+    packageJson.build?.nsis?.artifactName,
+    "LiteLauncher-Setup-${version}.${ext}",
+    "NSIS artifactName should match the safe GitHub updater asset naming so local builds and latest.yml stay aligned"
+  );
+  assert.match(
+    verifyScriptSource,
+    /const localArtifactPath = path\.join\(releaseDir, metadataPathValue\);/,
+    "release verification should resolve the local artifact path from updater metadata"
+  );
+  assert.match(
+    verifyScriptSource,
+    /fs\.existsSync\(localArtifactPath\)/,
+    "release verification should fail when updater metadata points at a missing local artifact"
+  );
+});
+
 test("validatePinnedItemRequest rejects empty ids and ids missing from the catalog", () => {
   assert.deepEqual(
     validatePinnedItemRequest("   ", new Set(["app:startapp:codex"])),
@@ -165,6 +263,82 @@ test("validatePinnedItemRequest accepts ids present in the catalog", () => {
       normalizedId: "app:startapp:codex"
     }
   );
+});
+
+test("validatePinnedItemRequest accepts dynamically resolved Windows Store app ids", () => {
+  const dynamicCodexItem: LaunchItem = {
+    id: "app:startapp:codex",
+    type: "application",
+    title: "Codex",
+    subtitle:
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.527.7698.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe",
+    target: `command:apps-folder:${encodeURIComponent("OpenAI.Codex_2p2nqsd0c76g0!App")}`,
+    keywords: ["codex", "windowsapps"]
+  };
+
+  assert.deepEqual(
+    validatePinnedItemRequest(
+      "  app:startapp:codex  ",
+      new Set(["app:C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Google Chrome.lnk"]),
+      dynamicCodexItem
+    ),
+    {
+      ok: true,
+      normalizedId: "app:startapp:codex",
+      hydratedItem: dynamicCodexItem
+    }
+  );
+});
+
+test("validatePinnedItemRequest accepts hydrated path-alias items when the live result is newer than the catalog", () => {
+  const dynamicAliasItem: LaunchItem = {
+    id: "app:path-alias:codex",
+    type: "application",
+    title: "Codex",
+    subtitle:
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.601.2237.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe",
+    target:
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.601.2237.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe",
+    keywords: ["codex", "path", "alias", "windowsapps"]
+  };
+
+  assert.deepEqual(
+    validatePinnedItemRequest(
+      "app:path-alias:codex",
+      new Set(["app:startapp:codex"]),
+      dynamicAliasItem
+    ),
+    {
+      ok: true,
+      normalizedId: "app:path-alias:codex",
+      hydratedItem: dynamicAliasItem
+    }
+  );
+});
+
+test("validatePinnedItemRequest keeps path-alias hydration scoped to the live result instead of requiring catalog persistence", () => {
+  const liveAliasItem: LaunchItem = {
+    id: "app:path-alias:codex",
+    type: "application",
+    title: "Codex",
+    subtitle:
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.601.2237.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe",
+    target:
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.601.2237.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe",
+    keywords: ["codex", "path", "alias", "windowsapps"]
+  };
+
+  const validated = validatePinnedItemRequest(
+    "app:path-alias:codex",
+    new Set(["app:startapp:codex"]),
+    liveAliasItem
+  );
+
+  assert.equal(validated.ok, true);
+  if (validated.ok) {
+    assert.equal(validated.normalizedId, "app:path-alias:codex");
+    assert.equal(validated.hydratedItem?.id, "app:path-alias:codex");
+  }
 });
 
 test(

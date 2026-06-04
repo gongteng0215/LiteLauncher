@@ -86,8 +86,12 @@ const api = {
   installAppUpdateNow(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.installAppUpdateNow);
   },
-  setItemPinned(itemId: string, pinned: boolean): Promise<PinToggleResult> {
-    return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned);
+  setItemPinned(
+    itemId: string,
+    pinned: boolean,
+    item?: LaunchItem
+  ): Promise<PinToggleResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned, item);
   },
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.search, query, options);
