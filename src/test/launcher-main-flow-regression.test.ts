@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import * as childProcess from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -93,6 +95,60 @@ function buildCatalogForRegression(): LaunchItem[] {
 function findTarget(items: LaunchItem[], prefix: string): LaunchItem | undefined {
   const normalized = prefix.trim().toLowerCase();
   return items.find((item) => item.target.trim().toLowerCase().startsWith(normalized));
+}
+
+function runReleaseVerificationInTempProject(
+  platform: "win" | "mac",
+  version: string,
+  metadataFileName: "latest.yml" | "latest-mac.yml",
+  metadataSource: string,
+  artifactNames: string[]
+): childProcess.SpawnSyncReturns<string> {
+  const tempProjectDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "litelauncher-release-verify-")
+  );
+  const tempScriptsDir = path.join(tempProjectDir, "scripts");
+  const tempReleaseDir = path.join(tempProjectDir, "release");
+  const sourceVerifyScriptPath = path.join(
+    process.cwd(),
+    "scripts",
+    "verify-release-output.cjs"
+  );
+
+  try {
+    fs.mkdirSync(tempScriptsDir, { recursive: true });
+    fs.mkdirSync(tempReleaseDir, { recursive: true });
+
+    fs.copyFileSync(
+      sourceVerifyScriptPath,
+      path.join(tempScriptsDir, "verify-release-output.cjs")
+    );
+    fs.writeFileSync(
+      path.join(tempProjectDir, "package.json"),
+      JSON.stringify({ version }, null, 2)
+    );
+    fs.writeFileSync(path.join(tempReleaseDir, metadataFileName), metadataSource);
+
+    for (const artifactName of artifactNames) {
+      fs.writeFileSync(path.join(tempReleaseDir, artifactName), "artifact");
+    }
+
+    return childProcess.spawnSync(
+      process.execPath,
+      [path.join(tempScriptsDir, "verify-release-output.cjs"), platform],
+      {
+        encoding: "utf8",
+        cwd: tempProjectDir,
+        env: {
+          ...process.env,
+          NODE_PATH: path.join(process.cwd(), "node_modules")
+        },
+        windowsHide: true
+      }
+    );
+  } finally {
+    fs.rmSync(tempProjectDir, { recursive: true, force: true });
+  }
 }
 
 test("release config keeps auto-update metadata on non-draft GitHub releases", () => {
@@ -233,6 +289,39 @@ test("windows installer artifact naming stays aligned with updater metadata", ()
     /fs\.existsSync\(localArtifactPath\)/,
     "release verification should fail when updater metadata points at a missing local artifact"
   );
+});
+
+test("verify-release-output accepts mac updater metadata with dmg and zip artifacts", () => {
+  for (const [zipName, dmgName] of [
+    ["LiteLauncher-1.0.20-mac.zip", "LiteLauncher-1.0.20.dmg"],
+    ["LiteLauncher-1.0.20-arm64-mac.zip", "LiteLauncher-1.0.20-arm64.dmg"]
+  ] as const) {
+    const result = runReleaseVerificationInTempProject(
+      "mac",
+      "1.0.20",
+      "latest-mac.yml",
+      [
+        "version: 1.0.20",
+        "files:",
+        `  - url: ${zipName}`,
+        "    sha512: zip-sha",
+        "    size: 123",
+        `  - url: ${dmgName}`,
+        "    sha512: dmg-sha",
+        "    size: 456",
+        `path: ${zipName}`,
+        "sha512: zip-sha",
+        "releaseDate: '2026-06-04T00:00:00.000Z'"
+      ].join("\n"),
+      [zipName, dmgName]
+    );
+
+    assert.equal(
+      result.status,
+      0,
+      `verify-release-output should accept ${zipName} + ${dmgName}, stderr: ${result.stderr || "<empty>"}`
+    );
+  }
 });
 
 test("validatePinnedItemRequest rejects empty ids and ids missing from the catalog", () => {

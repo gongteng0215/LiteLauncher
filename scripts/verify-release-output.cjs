@@ -42,13 +42,21 @@ if (actualVersion !== expectedVersion) {
   );
 }
 
-const expectedArtifactPattern =
+const expectedMetadataPathPatterns =
   platform === "win"
-    ? new RegExp(`^LiteLauncher-Setup-${escapeRegExp(expectedVersion)}\\.exe$`, "i")
-    : new RegExp(`^LiteLauncher-${escapeRegExp(expectedVersion)}(?:-(?:arm64-)?mac)?\\.zip$`, "i");
+    ? [new RegExp(`^LiteLauncher-Setup-${escapeRegExp(expectedVersion)}\\.exe$`, "i")]
+    : [new RegExp(`^LiteLauncher-${escapeRegExp(expectedVersion)}(?:-(?:arm64-)?mac)?\\.zip$`, "i")];
+
+const expectedFilePatterns =
+  platform === "win"
+    ? expectedMetadataPathPatterns
+    : [
+        ...expectedMetadataPathPatterns,
+        new RegExp(`^LiteLauncher-${escapeRegExp(expectedVersion)}(?:-arm64)?\\.dmg$`, "i")
+      ];
 
 const metadataPathValue = String(record.path ?? "").trim();
-if (!expectedArtifactPattern.test(metadataPathValue)) {
+if (!matchesAnyPattern(metadataPathValue, expectedMetadataPathPatterns)) {
   fail(
     `${metadataFileName} path ${metadataPathValue || "<empty>"} does not match expected ${platform} artifact for version ${expectedVersion}`
   );
@@ -72,7 +80,7 @@ for (const entry of files) {
   }
 
   const url = String(entry.url ?? "").trim();
-  if (!expectedArtifactPattern.test(url)) {
+  if (!matchesAnyPattern(url, expectedFilePatterns)) {
     fail(
       `${metadataFileName} file url ${url || "<empty>"} does not match expected ${platform} artifact for version ${expectedVersion}`
     );
@@ -88,4 +96,8 @@ for (const entry of files) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesAnyPattern(value, patterns) {
+  return patterns.some((pattern) => pattern.test(value));
 }
