@@ -197,6 +197,7 @@ test("settings panel only exposes the search result limit that still affects ren
 
 test("settings panel exposes app update status and actions in the system section", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const stylesSource = fs.readFileSync(stylesPath, "utf8");
 
   assert.match(
     rendererSource,
@@ -215,7 +216,17 @@ test("settings panel exposes app update status and actions in the system section
   );
   assert.match(
     rendererSource,
-    /自动更新|检查更新|立即安装并重启/,
-    "settings panel should describe app update status and actions in visible copy"
+    /settings-system-update-card/,
+    "system section should render the app update controls inside a dedicated compact card"
+  );
+  assert.match(
+    rendererSource,
+    /settings-system-update-actions/,
+    "system section should group update buttons into a compact action row"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-card\s*\{/,
+    "system section should define dedicated compact update card styles"
   );
 });

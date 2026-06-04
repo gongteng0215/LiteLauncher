@@ -735,6 +735,38 @@ body {
   font-family: Consolas, "Cascadia Code", "Courier New", monospace;
 }
 
+.settings-system-group .settings-row {
+  grid-template-columns: 110px minmax(140px, max-content) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 12px;
+}
+
+.settings-system-value-chip {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.settings-system-update-card {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-system-update-actions {
+  gap: 6px;
+}
+
+.settings-system-action-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .settings-panel-footer {
   display: flex;
   align-items: center;

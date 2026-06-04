@@ -2470,6 +2470,7 @@ function renderSettingsPanel(): void {
     "系统",
     "管理应用的启动行为、自动更新与当前版本信息。"
   );
+  systemGroup.section.classList.add("settings-system-group");
   const {
     row: launchAtLoginRow,
     control: launchAtLoginControl
@@ -2509,7 +2510,7 @@ function renderSettingsPanel(): void {
     "当前运行中的桌面端版本"
   );
   const versionValue = document.createElement("div");
-  versionValue.className = "settings-static-value";
+  versionValue.className = "settings-static-value settings-system-value-chip";
   versionValue.textContent = /^\d/.test(appVersion) ? `v${appVersion}` : appVersion;
   versionControl.appendChild(versionValue);
   versionHint.dataset.compact = "true";
@@ -2523,19 +2524,21 @@ function renderSettingsPanel(): void {
     "自动更新",
     formatAppUpdaterActionHint(appUpdaterStatus)
   );
-  const updaterStack = document.createElement("div");
-  updaterStack.className = "settings-control-stack";
+  updaterRow.classList.add("settings-system-update-row");
+  const updaterCard = document.createElement("div");
+  updaterCard.className = "settings-system-update-card";
 
   const updaterValue = document.createElement("div");
-  updaterValue.className = "settings-static-value";
+  updaterValue.className = "settings-static-value settings-system-value-chip";
   updaterValue.textContent = formatAppUpdaterStatusSummary(appUpdaterStatus);
 
   const updaterActions = document.createElement("div");
-  updaterActions.className = "settings-inline-actions";
+  updaterActions.className = "settings-inline-actions settings-system-update-actions";
 
   const checkUpdatesButton = document.createElement("button");
   checkUpdatesButton.type = "button";
-  checkUpdatesButton.className = "settings-btn settings-btn-secondary";
+  checkUpdatesButton.className =
+    "settings-btn settings-btn-secondary settings-system-action-btn";
   checkUpdatesButton.textContent = "检查更新";
   checkUpdatesButton.disabled =
     appUpdaterStatus.phase === "checking" ||
@@ -2548,7 +2551,8 @@ function renderSettingsPanel(): void {
   if (appUpdaterStatus.downloaded && appUpdaterStatus.phase === "downloaded") {
     const installNowButton = document.createElement("button");
     installNowButton.type = "button";
-    installNowButton.className = "settings-btn settings-btn-primary";
+    installNowButton.className =
+      "settings-btn settings-btn-primary settings-system-action-btn";
     installNowButton.textContent = "立即安装并重启";
     installNowButton.addEventListener("click", () => {
       void installAppUpdateNowFromSettings();
@@ -2556,8 +2560,8 @@ function renderSettingsPanel(): void {
     updaterActions.appendChild(installNowButton);
   }
 
-  updaterStack.append(updaterValue, updaterActions);
-  updaterControl.appendChild(updaterStack);
+  updaterCard.append(updaterValue, updaterActions);
+  updaterControl.appendChild(updaterCard);
   updaterHint.dataset.compact = "true";
   systemGroup.body.appendChild(updaterRow);
   form.appendChild(systemGroup.section);
