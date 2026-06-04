@@ -74,3 +74,33 @@ test("desktop build workflow avoids setup-node's built-in pnpm cache path", () =
     "workflow should explicitly disable setup-node's package-manager cache for these pnpm jobs"
   );
 });
+
+test("desktop build workflow gates mac publish-ready artifacts on signing inputs", () => {
+  const workflow = readWorkflow();
+
+  assert.match(
+    workflow,
+    /if:\s*\$\{\{\s*github\.event_name == 'push'\s*&&\s*startsWith\(github\.ref,\s*'refs\/tags\/v'\)\s*\}\}/,
+    "tag-triggered mac release packaging should validate Apple signing inputs before continuing"
+  );
+  assert.match(
+    workflow,
+    /CSC_LINK:\s*\$\{\{\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*\}\}/,
+    "workflow should wire the Apple certificate secret into electron-builder"
+  );
+  assert.match(
+    workflow,
+    /CSC_KEY_PASSWORD:\s*\$\{\{\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*\}\}/,
+    "workflow should wire the Apple certificate password into electron-builder"
+  );
+  assert.match(
+    workflow,
+    /APPLE_TEAM_ID:\s*\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}/,
+    "workflow should expose the Apple team id for mac signing/notarization preparation"
+  );
+  assert.match(
+    workflow,
+    /if:\s*\$\{\{\s*github\.event_name == 'workflow_dispatch'\s*\|\|\s*\(\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*!=\s*''\s*&&\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*!=\s*''\s*&&\s*secrets\.APPLE_TEAM_ID\s*!=\s*''\s*\)\s*\}\}/,
+    "manual workflow runs should still be allowed to build mac artifacts without release-signing secrets"
+  );
+});

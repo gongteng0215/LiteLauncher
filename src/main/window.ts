@@ -24,6 +24,30 @@ const WINDOW_WORKAREA_MARGIN_X = 40;
 const WINDOW_WORKAREA_MARGIN_Y = 60;
 
 export type WindowSizePreset = "compact" | "cashflow";
+export type LauncherWindowShowTrigger =
+  | "manual"
+  | "global-shortcut"
+  | "tray-click"
+  | "tray-menu"
+  | "tray-double-click"
+  | "startup-e2e"
+  | "second-instance"
+  | "second-instance-dev-reload";
+
+export interface LauncherWindowDiagnosticEvent {
+  trigger: LauncherWindowShowTrigger;
+  phase: "show-immediate-state" | "show-recovery-state" | "show-recovery-skipped";
+  isVisible: boolean;
+  isAlwaysOnTop: boolean;
+  isFocused: boolean;
+  retryDelayMs?: number;
+  note?: string;
+}
+
+export interface ShowLauncherWindowOptions {
+  trigger?: LauncherWindowShowTrigger;
+  reportDiagnostic?: (event: LauncherWindowDiagnosticEvent) => void;
+}
 
 function clampWindowDimension(
   target: number,
@@ -93,6 +117,103 @@ function centerWindow(window: BrowserWindow): void {
   const targetY = Math.round(y + (height - windowHeight) / 2);
 
   window.setPosition(targetX, targetY);
+}
+
+function getLauncherWindowState(window: BrowserWindow): Pick<
+  LauncherWindowDiagnosticEvent,
+  "isVisible" | "isAlwaysOnTop" | "isFocused"
+> {
+  if (window.isDestroyed()) {
+    return {
+      isVisible: false,
+      isAlwaysOnTop: false,
+      isFocused: false
+    };
+  }
+
+  return {
+    isVisible: window.isVisible(),
+    isAlwaysOnTop: window.isAlwaysOnTop(),
+    isFocused: window.isFocused()
+  };
+}
+
+function reportLauncherDiagnostic(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions,
+  phase: LauncherWindowDiagnosticEvent["phase"],
+  note?: string,
+  retryDelayMs?: number
+): void {
+  const { reportDiagnostic, trigger = "manual" } = options;
+  if (!reportDiagnostic) {
+    return;
+  }
+
+  const state = getLauncherWindowState(window);
+  reportDiagnostic({
+    trigger,
+    phase,
+    ...state,
+    retryDelayMs,
+    note
+  });
+}
+
+function reportIfTopmostStateLooksWrong(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions,
+  phase: LauncherWindowDiagnosticEvent["phase"],
+  note: string,
+  retryDelayMs?: number
+): void {
+  const state = getLauncherWindowState(window);
+  if (state.isVisible && state.isAlwaysOnTop) {
+    return;
+  }
+
+  reportLauncherDiagnostic(window, options, phase, note, retryDelayMs);
+}
+
+function scheduleTopmostRecovery(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions,
+  delayMs: number
+): void {
+  setTimeout(() => {
+    if (window.isDestroyed()) {
+      reportLauncherDiagnostic(
+        window,
+        options,
+        "show-recovery-skipped",
+        `window destroyed before ${delayMs}ms recovery`,
+        delayMs
+      );
+      return;
+    }
+    if (!window.isVisible()) {
+      reportLauncherDiagnostic(
+        window,
+        options,
+        "show-recovery-skipped",
+        `window hidden before ${delayMs}ms recovery`,
+        delayMs
+      );
+      return;
+    }
+
+    window.setAlwaysOnTop(true);
+    window.moveTop();
+    window.webContents.send(IPC_CHANNELS.focusInput);
+
+    reportIfTopmostStateLooksWrong(
+      window,
+      options,
+      "show-recovery-state",
+      `launcher remained non-topmost after ${delayMs}ms recovery`,
+      delayMs
+    );
+  }, delayMs);
 }
 
 function getCenteredBounds(
@@ -169,9 +290,14 @@ export function createLauncherWindow(): BrowserWindow {
   return window;
 }
 
-export function showLauncherWindow(window: BrowserWindow): void {
+export function showLauncherWindow(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions = {}
+): void {
   centerWindow(window);
+  window.setAlwaysOnTop(true);
   window.show();
+  window.setAlwaysOnTop(true);
   window.moveTop();
   window.focus();
   window.webContents.focus();
@@ -179,19 +305,20 @@ export function showLauncherWindow(window: BrowserWindow): void {
   // Focus can be dropped by OS focus-stealing prevention.
   // Retry a few times to make the input reliably active.
   window.webContents.send(IPC_CHANNELS.focusInput);
-  setTimeout(() => {
-    if (window.isVisible()) {
-      window.webContents.send(IPC_CHANNELS.focusInput);
-    }
-  }, 40);
-  setTimeout(() => {
-    if (window.isVisible()) {
-      window.webContents.send(IPC_CHANNELS.focusInput);
-    }
-  }, 120);
+  reportIfTopmostStateLooksWrong(
+    window,
+    options,
+    "show-immediate-state",
+    "launcher show completed without visible topmost state"
+  );
+  scheduleTopmostRecovery(window, options, 40);
+  scheduleTopmostRecovery(window, options, 120);
 }
 
-export function toggleLauncherWindow(window: BrowserWindow): void {
+export function toggleLauncherWindow(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions = {}
+): void {
   if (window.isVisible()) {
     applyLauncherWindowSizePreset(window, "compact");
     window.hide();
@@ -199,5 +326,5 @@ export function toggleLauncherWindow(window: BrowserWindow): void {
   }
 
   applyLauncherWindowSizePreset(window, "compact");
-  showLauncherWindow(window);
+  showLauncherWindow(window, options);
 }

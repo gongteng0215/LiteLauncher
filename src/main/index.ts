@@ -49,6 +49,8 @@ import { UsageStore } from "./usage-store";
 import {
   applyLauncherWindowSizePreset,
   createLauncherWindow,
+  LauncherWindowDiagnosticEvent,
+  LauncherWindowShowTrigger,
   showLauncherWindow,
   toggleLauncherWindow
 } from "./window";
@@ -241,6 +243,13 @@ let processErrorHooksRegistered = false;
 let devRendererWatcher: fs.FSWatcher | null = null;
 let devAssetsWatcher: fs.FSWatcher | null = null;
 let devReloadTimer: NodeJS.Timeout | null = null;
+let lastLauncherShowMeta: {
+  trigger: LauncherWindowShowTrigger;
+  at: number;
+} = {
+  trigger: "manual",
+  at: 0
+};
 
 function formatErrorDetail(error: unknown): string {
   if (error instanceof Error) {
@@ -258,6 +267,90 @@ function queueErrorLog(input: AppErrorLogInput): void {
   void activeDatabase.recordErrorLog(input).catch((error) => {
     console.error("[error-log] failed to persist", error);
   });
+}
+
+function formatLauncherWindowState(window: BrowserWindow): string {
+  if (window.isDestroyed()) {
+    return "destroyed=1";
+  }
+
+  const [width, height] = window.getSize();
+  const [x, y] = window.getPosition();
+  return [
+    `visible=${window.isVisible() ? "1" : "0"}`,
+    `focused=${window.isFocused() ? "1" : "0"}`,
+    `alwaysOnTop=${window.isAlwaysOnTop() ? "1" : "0"}`,
+    `bounds=${x},${y},${width},${height}`
+  ].join(" ");
+}
+
+function recordLauncherWindowDiagnostic(
+  window: BrowserWindow,
+  input: {
+    trigger?: LauncherWindowShowTrigger;
+    phase: string;
+    message: string;
+    level?: "warn" | "error";
+    note?: string;
+  }
+): void {
+  const trigger = input.trigger ?? lastLauncherShowMeta.trigger;
+  const showAgeMs =
+    lastLauncherShowMeta.at > 0 ? Date.now() - lastLauncherShowMeta.at : -1;
+  queueErrorLog({
+    scope: "main",
+    level: input.level ?? "warn",
+    message: input.message,
+    context: [
+      `phase=${input.phase}`,
+      `trigger=${trigger}`,
+      `showAgeMs=${showAgeMs}`,
+      formatLauncherWindowState(window)
+    ].join(" "),
+    detail: input.note
+  });
+}
+
+function showLauncherWindowWithTrigger(
+  window: BrowserWindow,
+  trigger: LauncherWindowShowTrigger
+): void {
+  lastLauncherShowMeta = {
+    trigger,
+    at: Date.now()
+  };
+  showLauncherWindow(window, {
+    trigger,
+    reportDiagnostic: (event: LauncherWindowDiagnosticEvent) => {
+      recordLauncherWindowDiagnostic(window, {
+        trigger: event.trigger,
+        phase: event.phase,
+        message: "Launcher topmost recovery diagnostic",
+        note: [
+          event.note ?? "",
+          `visible=${event.isVisible ? "1" : "0"}`,
+          `focused=${event.isFocused ? "1" : "0"}`,
+          `alwaysOnTop=${event.isAlwaysOnTop ? "1" : "0"}`,
+          event.retryDelayMs !== undefined ? `retryDelayMs=${event.retryDelayMs}` : ""
+        ]
+          .filter(Boolean)
+          .join(" ")
+      });
+    }
+  });
+}
+
+function toggleLauncherWindowWithTrigger(
+  window: BrowserWindow,
+  trigger: LauncherWindowShowTrigger
+): void {
+  if (window.isVisible()) {
+    toggleLauncherWindow(window, { trigger });
+    return;
+  }
+
+  applyLauncherWindowSizePreset(window, "compact");
+  showLauncherWindowWithTrigger(window, trigger);
 }
 
 function registerProcessErrorHooks(): void {
@@ -539,6 +632,34 @@ function setupDebugKeyTracing(window: BrowserWindow): void {
       repeat: input.isAutoRepeat,
       ts: Date.now()
     });
+  });
+}
+
+function setupLauncherWindowDiagnostics(window: BrowserWindow): void {
+  window.on("always-on-top-changed", (_event, isAlwaysOnTop) => {
+    if (isAlwaysOnTop || appQuitting || window.isDestroyed()) {
+      return;
+    }
+    recordLauncherWindowDiagnostic(window, {
+      phase: "always-on-top-changed",
+      message: "Launcher lost always-on-top state",
+      note: "Electron emitted always-on-top-changed=false"
+    });
+  });
+
+  window.on("blur", () => {
+    if (appQuitting || window.isDestroyed() || !window.isVisible()) {
+      return;
+    }
+
+    const elapsedMs = lastLauncherShowMeta.at > 0 ? Date.now() - lastLauncherShowMeta.at : -1;
+    if (elapsedMs >= 0 && elapsedMs <= 800) {
+      recordLauncherWindowDiagnostic(window, {
+        phase: "window-blur-after-show",
+        message: "Launcher blurred shortly after showing",
+        note: `blurAfterMs=${elapsedMs}`
+      });
+    }
   });
 }
 
@@ -1326,11 +1447,19 @@ async function bootstrap(): Promise<void> {
   });
 
   setupDebugKeyTracing(launcherWindow);
+  setupLauncherWindowDiagnostics(launcherWindow);
   setupRendererDiagnostics(launcherWindow, (input) => {
     queueErrorLog(input);
   });
   if (!E2E_MODE) {
-    await setupAppTray(launcherWindow);
+    await setupAppTray(launcherWindow, {
+      showLauncherWindow: () =>
+        showLauncherWindowWithTrigger(launcherWindow, "tray-menu"),
+      showLauncherWindowFromDoubleClick: () =>
+        showLauncherWindowWithTrigger(launcherWindow, "tray-double-click"),
+      toggleLauncherWindow: () =>
+        toggleLauncherWindowWithTrigger(launcherWindow, "tray-click")
+    });
   }
 
   const appUpdater = createAppUpdater();
@@ -1463,7 +1592,7 @@ async function bootstrap(): Promise<void> {
   appUpdater.scheduleStartupCheck();
   if (!E2E_MODE) {
     registerGlobalShortcut(
-      () => toggleLauncherWindow(launcherWindow),
+      () => toggleLauncherWindowWithTrigger(launcherWindow, "global-shortcut"),
       (shortcut) => {
         emitDebugKey(launcherWindow, {
           source: "main",
@@ -1480,11 +1609,11 @@ async function bootstrap(): Promise<void> {
     if (launcherWindow.webContents.isLoadingMainFrame()) {
       launcherWindow.webContents.once("did-finish-load", () => {
         if (!launcherWindow.isDestroyed()) {
-          showLauncherWindow(launcherWindow);
+          showLauncherWindowWithTrigger(launcherWindow, "startup-e2e");
         }
       });
     } else {
-      showLauncherWindow(launcherWindow);
+      showLauncherWindowWithTrigger(launcherWindow, "startup-e2e");
     }
   }
 }
@@ -1522,7 +1651,12 @@ app.on("second-instance", (_event, argv) => {
   const windows = BrowserWindow.getAllWindows();
   const first = windows[0];
   if (first) {
-    void setupAppTray(first).catch((error) => {
+    void setupAppTray(first, {
+      showLauncherWindow: () => showLauncherWindowWithTrigger(first, "tray-menu"),
+      showLauncherWindowFromDoubleClick: () =>
+        showLauncherWindowWithTrigger(first, "tray-double-click"),
+      toggleLauncherWindow: () => toggleLauncherWindowWithTrigger(first, "tray-click")
+    }).catch((error) => {
       console.warn("Failed to refresh tray icon on second-instance", error);
     });
 
@@ -1532,14 +1666,14 @@ app.on("second-instance", (_event, argv) => {
       if (shouldShow) {
         first.webContents.once("did-finish-load", () => {
           if (!first.isDestroyed()) {
-            showLauncherWindow(first);
+            showLauncherWindowWithTrigger(first, "second-instance-dev-reload");
           }
         });
       }
       return;
     }
 
-    toggleLauncherWindow(first);
+    toggleLauncherWindowWithTrigger(first, "second-instance");
   }
 });
 

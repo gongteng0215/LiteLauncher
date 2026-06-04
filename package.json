@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -15,7 +15,8 @@
     "test:main-flow": "pnpm run build && node dist/test/launcher-main-flow-regression.test.js",
     "test:windows-alias": "pnpm run build && node dist/test/windows-app-alias-regression.test.js",
     "test:e2e:windows-codex": "pnpm run build && node dist/test/e2e-windows-codex-regression.test.js",
-    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-search-layout-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js && node dist/test/e2e-plugin-panel-layout-smoke.test.js",
+    "test:e2e:topmost": "pnpm run build && node dist/test/e2e-launcher-topmost-smoke.test.js",
+    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-launcher-topmost-smoke.test.js && node dist/test/e2e-settings-error-log-smoke.test.js && node dist/test/e2e-search-layout-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js && node dist/test/e2e-plugin-panel-layout-smoke.test.js",
     "test:regression:full": "pnpm run test:regression && pnpm run test:e2e:smoke",
     "test:path-rules": "pnpm run build && node dist/test/result-path-filter.test.js",
     "test:plugins-visible": "pnpm run build && node dist/test/visible-plugins-regression.test.js",
@@ -24,12 +25,12 @@
     "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
     "check:encoding": "node scripts/check-encoding.cjs",
     "pack": "pnpm run build && node scripts/clean-release.cjs && electron-builder --dir --publish never",
-    "dist:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --publish never && node scripts/verify-release-output.cjs mac",
+    "dist:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --arm64 --publish never && node scripts/verify-release-output.cjs mac-release",
     "dist:mac:arm64": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --arm64 --publish never && node scripts/verify-release-output.cjs mac",
     "dist:mac:x64": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --publish never && node scripts/verify-release-output.cjs mac",
     "dist:win": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win nsis zip --x64 --publish never && node scripts/verify-release-output.cjs win",
     "dist:win:portable": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win portable --x64 --publish never",
-    "release:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip -p always && node scripts/verify-release-output.cjs mac",
+    "release:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --arm64 -p always && node scripts/verify-release-output.cjs mac-release",
     "release:win": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win nsis zip --x64 -p always && node scripts/verify-release-output.cjs win"
   },
   "keywords": [],

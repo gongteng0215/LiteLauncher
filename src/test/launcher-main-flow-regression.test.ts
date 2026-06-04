@@ -98,7 +98,7 @@ function findTarget(items: LaunchItem[], prefix: string): LaunchItem | undefined
 }
 
 function runReleaseVerificationInTempProject(
-  platform: "win" | "mac",
+  platform: "win" | "mac" | "mac-release",
   version: string,
   metadataFileName: "latest.yml" | "latest-mac.yml",
   metadataSource: string,
@@ -226,11 +226,11 @@ test("desktop packaging clears stale release outputs and verifies updater metada
   }
 
   for (const [scriptName, platform] of [
-    ["dist:mac", "mac"],
+    ["dist:mac", "mac-release"],
     ["dist:mac:arm64", "mac"],
     ["dist:mac:x64", "mac"],
     ["dist:win", "win"],
-    ["release:mac", "mac"],
+    ["release:mac", "mac-release"],
     ["release:win", "win"]
   ] as const) {
     assert.match(
@@ -252,8 +252,86 @@ test("desktop packaging clears stale release outputs and verifies updater metada
   );
   assert.match(
     workflowSource,
-    /node scripts\/verify-release-output\.cjs mac/,
-    "macOS workflow should verify latest-mac.yml against the current package version"
+    /node scripts\/verify-release-output\.cjs mac-release/,
+    "macOS workflow should verify combined latest-mac.yml metadata against the current package version"
+  );
+});
+
+test("mac desktop release builds both updater architectures in one pass", () => {
+  const packageJsonPath = path.join(process.cwd(), "package.json");
+  const workflowPath = path.join(
+    process.cwd(),
+    ".github",
+    "workflows",
+    "build-desktop.yml"
+  );
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const workflowSource = fs.readFileSync(workflowPath, "utf8");
+  const scripts = packageJson.scripts ?? {};
+
+  for (const scriptName of ["dist:mac", "release:mac"] as const) {
+    assert.match(
+      scripts[scriptName] ?? "",
+      /--x64/,
+      `${scriptName} should build the Intel mac updater payload in the same run`
+    );
+    assert.match(
+      scripts[scriptName] ?? "",
+      /--arm64/,
+      `${scriptName} should build the Apple Silicon updater payload in the same run`
+    );
+  }
+
+  assert.match(
+    workflowSource,
+    /build-macos:/,
+    "release workflow should build macOS updater assets in one combined job"
+  );
+  assert.doesNotMatch(
+    workflowSource,
+    /build-macos-arm64:/,
+    "release workflow should not split latest-mac.yml generation into a separate arm64 job"
+  );
+  assert.doesNotMatch(
+    workflowSource,
+    /build-macos-intel:/,
+    "release workflow should not split latest-mac.yml generation into a separate x64 job"
+  );
+  assert.match(
+    workflowSource,
+    /pnpm exec electron-builder --mac dmg zip --x64 --arm64 --publish never/,
+    "macOS workflow should build both updater architectures in a single electron-builder invocation"
+  );
+  assert.match(
+    workflowSource,
+    /release\/latest-mac\.yml/,
+    "combined macOS build artifacts should upload latest-mac.yml for publishing"
+  );
+});
+
+test("app updater keeps packaged mac builds eligible for auto-update checks", () => {
+  const updaterSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "app-updater.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    updaterSource,
+    /if \(!app\.isPackaged\) \{\s*return false;\s*\}/,
+    "updater should stay disabled in development builds"
+  );
+  assert.match(
+    updaterSource,
+    /if \(process\.platform === "darwin"\) \{\s*return true;\s*\}/,
+    "packaged mac builds should be considered auto-update capable"
+  );
+  assert.match(
+    updaterSource,
+    /if \(process\.platform !== "win32"\) \{\s*return false;\s*\}/,
+    "only packaged macOS and supported Windows installers should enable auto-update"
   );
 });
 
@@ -292,16 +370,17 @@ test("windows installer artifact naming stays aligned with updater metadata", ()
 });
 
 test("verify-release-output accepts mac updater metadata with dmg and zip artifacts", () => {
+  const version = "1.0.21";
   for (const [zipName, dmgName] of [
-    ["LiteLauncher-1.0.20-mac.zip", "LiteLauncher-1.0.20.dmg"],
-    ["LiteLauncher-1.0.20-arm64-mac.zip", "LiteLauncher-1.0.20-arm64.dmg"]
+    [`LiteLauncher-${version}-mac.zip`, `LiteLauncher-${version}.dmg`],
+    [`LiteLauncher-${version}-arm64-mac.zip`, `LiteLauncher-${version}-arm64.dmg`]
   ] as const) {
     const result = runReleaseVerificationInTempProject(
       "mac",
-      "1.0.20",
+      version,
       "latest-mac.yml",
       [
-        "version: 1.0.20",
+        `version: ${version}`,
         "files:",
         `  - url: ${zipName}`,
         "    sha512: zip-sha",
@@ -322,6 +401,46 @@ test("verify-release-output accepts mac updater metadata with dmg and zip artifa
       `verify-release-output should accept ${zipName} + ${dmgName}, stderr: ${result.stderr || "<empty>"}`
     );
   }
+});
+
+test("verify-release-output accepts combined mac updater metadata with x64 and arm64 files", () => {
+  const version = "1.0.21";
+  const result = runReleaseVerificationInTempProject(
+    "mac-release",
+    version,
+    "latest-mac.yml",
+    [
+      `version: ${version}`,
+      "files:",
+      `  - url: LiteLauncher-${version}-mac.zip`,
+      "    sha512: zip-x64",
+      "    size: 123",
+      `  - url: LiteLauncher-${version}.dmg`,
+      "    sha512: dmg-x64",
+      "    size: 456",
+      `  - url: LiteLauncher-${version}-arm64-mac.zip`,
+      "    sha512: zip-arm64",
+      "    size: 789",
+      `  - url: LiteLauncher-${version}-arm64.dmg`,
+      "    sha512: dmg-arm64",
+      "    size: 101",
+      `path: LiteLauncher-${version}-mac.zip`,
+      "sha512: zip-x64",
+      "releaseDate: '2026-06-04T00:00:00.000Z'"
+    ].join("\n"),
+    [
+      `LiteLauncher-${version}-mac.zip`,
+      `LiteLauncher-${version}.dmg`,
+      `LiteLauncher-${version}-arm64-mac.zip`,
+      `LiteLauncher-${version}-arm64.dmg`
+    ]
+  );
+
+  assert.equal(
+    result.status,
+    0,
+    `verify-release-output should accept a combined latest-mac.yml, stderr: ${result.stderr || "<empty>"}`
+  );
 });
 
 test("validatePinnedItemRequest rejects empty ids and ids missing from the catalog", () => {

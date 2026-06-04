@@ -19,6 +19,12 @@ const FALLBACK_ICON_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComp
 
 let appTray: Tray | null = null;
 
+export interface SetupAppTrayOptions {
+  showLauncherWindow?: () => void;
+  showLauncherWindowFromDoubleClick?: () => void;
+  toggleLauncherWindow?: () => void;
+}
+
 function buildFallbackTrayIcon(): NativeImage {
   return nativeImage.createFromDataURL(FALLBACK_ICON_DATA_URL);
 }
@@ -46,13 +52,18 @@ function resolveTrayIcon(): NativeImage {
   return buildFallbackTrayIcon();
 }
 
-function buildTrayMenu(window: BrowserWindow): Menu {
+function buildTrayMenu(
+  window: BrowserWindow,
+  options: SetupAppTrayOptions
+): Menu {
+  const showWindow = options.showLauncherWindow ?? (() => showLauncherWindow(window));
+
   return Menu.buildFromTemplate([
     {
       label: "\u663e\u793a\u4e3b\u754c\u9762",
       click: () => {
         if (!window.isDestroyed()) {
-          showLauncherWindow(window);
+          showWindow();
         }
       }
     },
@@ -66,9 +77,18 @@ function buildTrayMenu(window: BrowserWindow): Menu {
   ]);
 }
 
-export async function setupAppTray(window: BrowserWindow): Promise<void> {
+export async function setupAppTray(
+  window: BrowserWindow,
+  options: SetupAppTrayOptions = {}
+): Promise<void> {
   const icon = resolveTrayIcon();
-  const menu = buildTrayMenu(window);
+  const menu = buildTrayMenu(window, options);
+  const toggleWindow =
+    options.toggleLauncherWindow ?? (() => toggleLauncherWindow(window));
+  const showWindow =
+    options.showLauncherWindow ?? (() => showLauncherWindow(window));
+  const showWindowFromDoubleClick =
+    options.showLauncherWindowFromDoubleClick ?? showWindow;
 
   if (!appTray) {
     try {
@@ -83,14 +103,14 @@ export async function setupAppTray(window: BrowserWindow): Promise<void> {
       if (window.isDestroyed()) {
         return;
       }
-      toggleLauncherWindow(window);
+      toggleWindow();
     });
 
     appTray.on("double-click", () => {
       if (window.isDestroyed()) {
         return;
       }
-      showLauncherWindow(window);
+      showWindowFromDoubleClick();
     });
   }
 

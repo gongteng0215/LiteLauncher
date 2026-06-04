@@ -45,7 +45,12 @@ test(
       assert.match(finalStatus ?? "", /已打开插件|转换|JSON/);
     } catch (error) {
       if (session) {
-        const artifactDir = await captureE2EFailureArtifacts(session.page, testName, error);
+        const artifactDir = await captureE2EFailureArtifacts(
+          session.page,
+          testName,
+          error,
+          session.electronApp
+        );
         console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
       }
       throw error;

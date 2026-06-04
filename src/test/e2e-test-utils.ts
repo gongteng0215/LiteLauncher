@@ -13,6 +13,13 @@ export interface E2ESession {
   close: () => Promise<void>;
 }
 
+type MainWindowSnapshot = {
+  isVisible: boolean;
+  isFocused: boolean;
+  isAlwaysOnTop: boolean;
+  bounds: { x: number; y: number; width: number; height: number };
+} | null;
+
 export interface LaunchE2ESessionOptions {
   userDataDir?: string;
   cleanupUserDataDir?: boolean;
@@ -179,7 +186,8 @@ export async function returnToSearch(page: Page): Promise<void> {
 export async function captureE2EFailureArtifacts(
   page: Page,
   testName: string,
-  error?: unknown
+  error?: unknown,
+  electronApp?: ElectronApplication
 ): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const artifactDir = path.join(
@@ -192,17 +200,73 @@ export async function captureE2EFailureArtifacts(
   const htmlPath = path.join(artifactDir, "page.html");
   const metadataPath = path.join(artifactDir, "metadata.json");
 
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-  await fs.writeFile(htmlPath, await page.content(), "utf8");
+  const artifactErrors: string[] = [];
 
-  const metadata = await page.evaluate(() => ({
-    url: window.location.href,
-    title: document.title,
-    mode: document.body.dataset.mode ?? null,
-    activePluginId: document.body.dataset.activePluginId ?? null,
-    statusText:
-      document.querySelector<HTMLElement>("#status-text")?.textContent?.trim() ?? null
-  }));
+  try {
+    await page.screenshot({ path: screenshotPath, fullPage: true, timeout: 5000 });
+  } catch (captureError) {
+    artifactErrors.push(`screenshot: ${String(captureError)}`);
+  }
+
+  try {
+    await fs.writeFile(htmlPath, await page.content(), "utf8");
+  } catch (captureError) {
+    artifactErrors.push(`page-content: ${String(captureError)}`);
+  }
+
+  let metadata: {
+    url: string | null;
+    title: string | null;
+    mode: string | null;
+    activePluginId: string | null;
+    statusText: string | null;
+  } = {
+    url: null,
+    title: null,
+    mode: null,
+    activePluginId: null,
+    statusText: null
+  };
+
+  try {
+    metadata = await page.evaluate(() => ({
+      url: window.location.href,
+      title: document.title,
+      mode: document.body.dataset.mode ?? null,
+      activePluginId: document.body.dataset.activePluginId ?? null,
+      statusText:
+        document.querySelector<HTMLElement>("#status-text")?.textContent?.trim() ?? null
+    }));
+  } catch (captureError) {
+    artifactErrors.push(`page-metadata: ${String(captureError)}`);
+  }
+
+  let mainWindowState: MainWindowSnapshot = null;
+  if (electronApp) {
+    try {
+      mainWindowState = await electronApp.evaluate(({ BrowserWindow }) => {
+        const launcherWindow = BrowserWindow.getAllWindows()[0];
+        if (!launcherWindow || launcherWindow.isDestroyed()) {
+          return null;
+        }
+
+        const bounds = launcherWindow.getBounds();
+        return {
+          isVisible: launcherWindow.isVisible(),
+          isFocused: launcherWindow.isFocused(),
+          isAlwaysOnTop: launcherWindow.isAlwaysOnTop(),
+          bounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height
+          }
+        };
+      });
+    } catch (captureError) {
+      artifactErrors.push(`main-window-state: ${String(captureError)}`);
+    }
+  }
 
   await fs.writeFile(
     metadataPath,
@@ -213,7 +277,9 @@ export async function captureE2EFailureArtifacts(
           error instanceof Error
             ? { name: error.name, message: error.message, stack: error.stack ?? null }
             : String(error),
-        ...metadata
+        ...metadata,
+        mainWindowState,
+        artifactErrors
       },
       null,
       2

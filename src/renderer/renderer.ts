@@ -805,6 +805,89 @@ function formatPinErrorReasonText(reason: string | undefined): string {
   }
 }
 
+function isLauncherTopmostDiagnosticEntry(entry: AppErrorLogEntry): boolean {
+  return [
+    "Launcher topmost recovery diagnostic",
+    "Launcher lost always-on-top state",
+    "Launcher blurred shortly after showing"
+  ].includes(entry.message);
+}
+
+function formatLauncherTriggerText(trigger: string | undefined): string {
+  switch ((trigger ?? "").trim()) {
+    case "global-shortcut":
+      return "全局快捷键";
+    case "tray-click":
+      return "托盘单击";
+    case "tray-menu":
+      return "托盘菜单";
+    case "tray-double-click":
+      return "托盘双击";
+    case "startup-e2e":
+      return "E2E 启动";
+    case "second-instance":
+      return "重复启动拉起";
+    case "second-instance-dev-reload":
+      return "开发态重载后拉起";
+    case "manual":
+    default:
+      return "手动显示";
+  }
+}
+
+function formatLauncherPhaseText(phase: string | undefined): string {
+  switch ((phase ?? "").trim()) {
+    case "always-on-top-changed":
+      return "置顶状态掉线";
+    case "window-blur-after-show":
+      return "显示后快速失焦";
+    case "show-immediate-state":
+      return "显示后立即状态异常";
+    case "show-recovery-state":
+      return "恢复重试后仍异常";
+    case "show-recovery-skipped":
+      return "恢复重试未执行";
+    default:
+      return "置顶诊断";
+  }
+}
+
+function formatLauncherTopmostDiagnosticSummary(entry: AppErrorLogEntry): string {
+  const contextMap = parseErrorLogContext(entry.context);
+  const trigger = formatLauncherTriggerText(contextMap.trigger);
+  const phase = formatLauncherPhaseText(contextMap.phase);
+  const state = [
+    contextMap.visible ? `可见 ${contextMap.visible === "1" ? "是" : "否"}` : "",
+    contextMap.alwaysOnTop
+      ? `置顶 ${contextMap.alwaysOnTop === "1" ? "是" : "否"}`
+      : "",
+    contextMap.focused ? `聚焦 ${contextMap.focused === "1" ? "是" : "否"}` : ""
+  ]
+    .filter(Boolean)
+    .join(" / ");
+  const ageText =
+    contextMap.showAgeMs && contextMap.showAgeMs !== "-1"
+      ? `显示后 ${contextMap.showAgeMs}ms`
+      : "";
+  const note = entry.detail?.trim() ? entry.detail.trim() : undefined;
+
+  return [
+    `[${formatErrorLogDate(entry.createdAt)}] ${phase}`,
+    `触发来源: ${trigger}`,
+    ageText,
+    state ? `窗口状态: ${state}` : "",
+    note ? `详情: ${note}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getLauncherTopmostDiagnosticEntries(
+  entries: AppErrorLogEntry[]
+): AppErrorLogEntry[] {
+  return entries.filter((entry) => isLauncherTopmostDiagnosticEntry(entry)).slice(0, 5);
+}
+
 function formatErrorLogEntry(entry: AppErrorLogEntry): string {
   const contextMap = parseErrorLogContext(entry.context);
   const itemId =
@@ -906,7 +989,7 @@ function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
     return status.message ?? "可稍后再次检查";
   }
 
-  return "仅 Windows NSIS 安装版支持自动更新";
+  return "Windows NSIS 安装版与 macOS 打包版支持自动更新，不支持时请前往 GitHub Releases 手动下载";
 }
 
 async function checkForAppUpdatesFromSettings(): Promise<void> {
@@ -2532,6 +2615,27 @@ function renderSettingsPanel(): void {
   updaterValue.className = "settings-static-value settings-system-value-chip";
   updaterValue.textContent = formatAppUpdaterStatusSummary(appUpdaterStatus);
 
+  const updaterMeta = document.createElement("div");
+  updaterMeta.className = "settings-system-update-meta";
+  const updaterVersionText = [
+    appUpdaterStatus.currentVersion
+      ? `当前版本 v${appUpdaterStatus.currentVersion}`
+      : "",
+    appUpdaterStatus.updateVersion
+      ? `目标版本 v${appUpdaterStatus.updateVersion}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join(" -> ");
+  updaterMeta.textContent =
+    updaterVersionText || "支持 Windows NSIS 安装版与 macOS 打包版自动更新";
+
+  const updaterNotes = document.createElement("div");
+  updaterNotes.className = "settings-system-update-notes";
+  updaterNotes.textContent = appUpdaterStatus.releaseNotes
+    ? appUpdaterStatus.releaseNotes
+    : "未附带更新说明时，可前往 GitHub Releases 查看完整发布日志。";
+
   const updaterActions = document.createElement("div");
   updaterActions.className = "settings-inline-actions settings-system-update-actions";
 
@@ -2560,7 +2664,7 @@ function renderSettingsPanel(): void {
     updaterActions.appendChild(installNowButton);
   }
 
-  updaterCard.append(updaterValue, updaterActions);
+  updaterCard.append(updaterValue, updaterMeta, updaterNotes, updaterActions);
   updaterControl.appendChild(updaterCard);
   updaterHint.dataset.compact = "true";
   systemGroup.body.appendChild(updaterRow);
@@ -2573,6 +2677,38 @@ function renderSettingsPanel(): void {
 
   const errorLogContainer = document.createElement("div");
   errorLogContainer.className = "settings-error-log";
+
+  const topmostDiagnosticEntries = getLauncherTopmostDiagnosticEntries(errorLogEntries);
+  if (topmostDiagnosticEntries.length > 0) {
+    const highlightList = document.createElement("div");
+    highlightList.className = "settings-error-log-highlight-list";
+
+    for (const entry of topmostDiagnosticEntries) {
+      const highlightCard = document.createElement("div");
+      highlightCard.className = "settings-error-log-highlight-card";
+
+      const highlightTitle = document.createElement("div");
+      highlightTitle.className = "settings-error-log-highlight-title";
+      highlightTitle.textContent = formatLauncherPhaseText(
+        parseErrorLogContext(entry.context).phase
+      );
+
+      const highlightMeta = document.createElement("div");
+      highlightMeta.className = "settings-error-log-highlight-meta";
+      highlightMeta.textContent = `${formatErrorLogDate(entry.createdAt)} · ${
+        entry.level === "warn" ? "警告" : "错误"
+      }`;
+
+      const highlightBody = document.createElement("pre");
+      highlightBody.className = "settings-error-log-highlight-body";
+      highlightBody.textContent = formatLauncherTopmostDiagnosticSummary(entry);
+
+      highlightCard.append(highlightTitle, highlightMeta, highlightBody);
+      highlightList.appendChild(highlightCard);
+    }
+
+    errorLogContainer.appendChild(highlightList);
+  }
 
   const errorLogActions = document.createElement("div");
   errorLogActions.className = "settings-inline-actions";

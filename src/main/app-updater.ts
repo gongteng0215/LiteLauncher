@@ -64,11 +64,15 @@ function detectPortableEnvironment(): boolean {
 }
 
 function isSupportedEnvironment(): boolean {
-  if (process.platform !== "win32") {
+  if (!app.isPackaged) {
     return false;
   }
 
-  if (!app.isPackaged) {
+  if (process.platform === "darwin") {
+    return true;
+  }
+
+  if (process.platform !== "win32") {
     return false;
   }
 
@@ -106,11 +110,13 @@ export function createAppUpdater(): AppUpdaterProvider {
         downloaded: false,
         autoUpdateEnabled: false,
         message:
-          process.platform !== "win32"
-            ? "当前仅 Windows NSIS 安装版支持自动更新。"
-            : app.isPackaged
-              ? "Portable 版本暂不支持自动更新，请手动下载新版本。"
-              : "开发环境暂不支持自动更新，请打包后再验证。"
+          !app.isPackaged
+            ? "开发环境暂不支持自动更新，请打包后再验证。"
+            : process.platform === "darwin"
+              ? "当前构建暂未启用自动更新，请确认发布资产包含 latest-mac.yml。"
+            : process.platform !== "win32"
+              ? "当前仅 Windows NSIS 安装版和 macOS 打包版支持自动更新。"
+              : "Portable 版本暂不支持自动更新，请手动下载新版本。"
       };
 
   let startupCheckScheduled = false;

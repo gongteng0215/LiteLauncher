@@ -3,7 +3,7 @@
 更新时间：2026-06-04
 
 ## 最近完成
-- 准备发布 `v1.0.20`：将本轮收口到一版可直接发布的桌面更新，当前范围已覆盖置顶稳定性、搜索输入键盘检索规则、自动更新 / 发布链路、密码工具紧凑布局，以及 CodeAgent Switch 的新版 Codex 配置编辑与预览。已按串行顺序完成 `pnpm run build`、搜索 / 置顶 / 可见插件 / CodeAgent Switch / workflow 护栏相关 `dist` 回归、`e2e-launcher-smoke` / `e2e-search-layout-smoke` / `e2e-plugin-panels-smoke` / `e2e-plugin-panel-layout-smoke`，并额外完成 `pnpm run dist:win` 本地打包校验；其中还补修了 Windows NSIS 安装包命名与 `latest.yml` 自动更新元数据一致性，当前 `release/latest.yml` 与 `release/LiteLauncher-Setup-1.0.20.exe` 已对齐。
+- 准备发布 `v1.0.21`：将本轮收口到一版可直接发布的桌面更新，当前范围已覆盖置顶稳定性、搜索输入键盘检索规则、自动更新 / 发布链路、密码工具紧凑布局，以及 CodeAgent Switch 的新版 Codex 配置编辑与预览。已按串行顺序完成 `pnpm run build`、搜索 / 置顶 / 可见插件 / CodeAgent Switch / workflow 护栏相关 `dist` 回归、`e2e-launcher-smoke` / `e2e-search-layout-smoke` / `e2e-plugin-panels-smoke` / `e2e-plugin-panel-layout-smoke`，并额外完成 `pnpm run dist:win` 本地打包校验；其中还补修了 Windows NSIS 安装包命名与 `latest.yml` 自动更新元数据一致性，当前目标将改为对齐新的 `release/LiteLauncher-Setup-1.0.21.exe`。
 - CodeAgent Switch 继续收口 Root 配置编辑体验：Root 区现在直接内嵌“Root 完整预览”，会按当前表单值实时生成顶层 TOML，并在每一行后追加字段说明；同时把长字段名改成更短的可扫描标签，避免 `model_supports_reasoning_summaries` 这类长 key 在窄宽度下互相挤压。当前 `当前 Root 落盘内容` 也会带同样的行尾说明，方便对照“正在编辑的值”和“已经写进文件的值”。本轮按顺序完成 `pnpm run build`、`node dist/test/plugin-panel-impls-regression.test.js`、`node dist/test/codeagent-switch-plugin.test.js`，结果均通过。
 - CodeAgent Switch 本轮补齐新版 Codex Root 配置编辑能力：共享层新增官方常用顶层字段解析与写回，现已支持在面板内直接编辑并预览 `model_provider`、`model`、`review_model`、`openai_base_url`、`model_reasoning_effort`、`plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`model_supports_reasoning_summaries`、`service_tier`、`web_search`、`model_context_window`、`model_auto_compact_token_limit`、`approval_policy`、`approvals_reviewer`、`allow_login_shell`、`sandbox_mode`、`default_permissions`、`disable_response_storage`、`network_access`、`personality`、`project_doc_max_bytes`、`tool_output_token_limit`、`windows_wsl_setup_acknowledged`、`[windows] sandbox / sandbox_private_desktop`、`[history] persistence / max_bytes`；同时保存链路支持显式清空字段时从 `config.toml` 中移除旧值，避免表单恢复默认后文件残留历史配置。面板里的“运行权限”区已升级为分组式 `Root 配置` 编辑器，并与“当前 Root 配置”源码预览保持同步。按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
 - CodeAgent Switch 本轮继续按新版 Codex standalone profile 收口：保存旧 `[profiles.xxx]` 时不再沿用 legacy 写法，而是自动改写为同目录 `~/.codex/<name>.config.toml`，如果该旧 profile 当前正生效，还会同步清理顶层 legacy `profile = "..."` 并把新的生效字段写回主 `config.toml` 顶层，确保“保存一次就转到新版模型”。面板右侧详情页新增“配置预览”区，直接展示所选 Profile 的 standalone TOML 内容、目标文件路径和复制动作；原有 diff 预览继续保留给“预览切换 / 设为当前”使用，legacy 迁移按钮从主流程降权为“保存时自动转换”的说明。本轮按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
@@ -110,7 +110,7 @@
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.20`
+- 应用版本：`v1.0.21`
 - 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`

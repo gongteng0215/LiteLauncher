@@ -512,7 +512,8 @@ test(
         const artifactDir = await captureE2EFailureArtifacts(
           session.page,
           testName,
-          error
+          error,
+          session.electronApp
         );
         console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
       }

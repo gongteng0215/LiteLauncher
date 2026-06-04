@@ -77,6 +77,18 @@ test("settings error log output stays compact and monospace", () => {
   assert.equal(lineHeight, "1.3");
 });
 
+test("settings topmost diagnostic highlights stay compact and scannable", () => {
+  const listBody = getRuleBody(".settings-error-log-highlight-list");
+  const cardBody = getRuleBody(".settings-error-log-highlight-card");
+  const titleBody = getRuleBody(".settings-error-log-highlight-title");
+
+  assert.equal(getProperty(listBody, "display"), "grid");
+  assert.equal(getProperty(listBody, "gap"), "8px");
+  assert.equal(getProperty(cardBody, "padding"), "8px 10px");
+  assert.equal(getProperty(cardBody, "border-left"), "3px solid rgba(248, 113, 113, 0.72)");
+  assert.equal(getProperty(titleBody, "font-size"), "11px");
+});
+
 test("section grid column calculation runs after the grid is attached to the DOM", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
   const renderSearchSectionsMatch = rendererSource.match(
@@ -228,5 +240,25 @@ test("settings panel exposes app update status and actions in the system section
     stylesSource,
     /\.settings-system-update-card\s*\{/,
     "system section should define dedicated compact update card styles"
+  );
+  assert.match(
+    rendererSource,
+    /GitHub Releases/,
+    "system section should explain where unsupported update environments need to fetch releases"
+  );
+  assert.match(
+    rendererSource,
+    /macOS 打包版/,
+    "update action hint should mention packaged mac builds once mac updater support is enabled"
+  );
+  assert.match(
+    rendererSource,
+    /releaseNotes/,
+    "update card should surface release notes when updater metadata includes them"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-notes\s*\{/,
+    "system section should define compact release-notes styling for updater details"
   );
 });

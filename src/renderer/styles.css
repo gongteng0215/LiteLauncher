@@ -713,6 +713,43 @@ body {
   min-width: 0;
 }
 
+.settings-error-log-highlight-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-error-log-highlight-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.18);
+  border-left: 3px solid rgba(248, 113, 113, 0.72);
+  background: rgba(127, 29, 29, 0.12);
+}
+
+.settings-error-log-highlight-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd9de;
+}
+
+.settings-error-log-highlight-meta {
+  font-size: 10px;
+  color: rgba(255, 221, 225, 0.72);
+}
+
+.settings-error-log-highlight-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 237, 240, 0.9);
+}
+
 .settings-log-output {
   width: 100%;
   min-height: clamp(108px, 22vh, 168px);
@@ -753,6 +790,23 @@ body {
   justify-items: start;
   gap: 8px;
   min-width: 0;
+}
+
+.settings-system-update-meta {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(233, 242, 255, 0.72);
+}
+
+.settings-system-update-notes {
+  max-width: min(560px, 100%);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(233, 242, 255, 0.82);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .settings-system-update-actions {

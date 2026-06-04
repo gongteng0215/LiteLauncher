@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const yaml = require("js-yaml");
 
-const VALID_PLATFORMS = new Set(["win", "mac"]);
+const VALID_PLATFORMS = new Set(["win", "mac", "mac-release"]);
 
 function fail(message) {
   console.error(`[verify-release-output] ${message}`);
@@ -11,7 +11,7 @@ function fail(message) {
 
 const platform = String(process.argv[2] ?? "").trim().toLowerCase();
 if (!VALID_PLATFORMS.has(platform)) {
-  fail("usage: node scripts/verify-release-output.cjs <win|mac>");
+  fail("usage: node scripts/verify-release-output.cjs <win|mac|mac-release>");
 }
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -42,18 +42,8 @@ if (actualVersion !== expectedVersion) {
   );
 }
 
-const expectedMetadataPathPatterns =
-  platform === "win"
-    ? [new RegExp(`^LiteLauncher-Setup-${escapeRegExp(expectedVersion)}\\.exe$`, "i")]
-    : [new RegExp(`^LiteLauncher-${escapeRegExp(expectedVersion)}(?:-(?:arm64-)?mac)?\\.zip$`, "i")];
-
-const expectedFilePatterns =
-  platform === "win"
-    ? expectedMetadataPathPatterns
-    : [
-        ...expectedMetadataPathPatterns,
-        new RegExp(`^LiteLauncher-${escapeRegExp(expectedVersion)}(?:-arm64)?\\.dmg$`, "i")
-      ];
+const expectedMetadataPathPatterns = getExpectedMetadataPathPatterns(platform, expectedVersion);
+const expectedFilePatterns = getExpectedFilePatterns(platform, expectedVersion);
 
 const metadataPathValue = String(record.path ?? "").trim();
 if (!matchesAnyPattern(metadataPathValue, expectedMetadataPathPatterns)) {
@@ -72,6 +62,23 @@ if (!fs.existsSync(localArtifactPath)) {
 const files = Array.isArray(record.files) ? record.files : [];
 if (files.length === 0) {
   fail(`${metadataFileName} must include at least one file entry`);
+}
+
+if (platform === "mac-release") {
+  const arm64Zip = new RegExp(
+    `^LiteLauncher-${escapeRegExp(expectedVersion)}-arm64-mac\\.zip$`,
+    "i"
+  );
+  const x64Zip = new RegExp(
+    `^LiteLauncher-${escapeRegExp(expectedVersion)}-mac\\.zip$`,
+    "i"
+  );
+  if (!files.some((entry) => arm64Zip.test(String(entry?.url ?? "").trim()))) {
+    fail(`${metadataFileName} must include an arm64 mac zip artifact for release publishing`);
+  }
+  if (!files.some((entry) => x64Zip.test(String(entry?.url ?? "").trim()))) {
+    fail(`${metadataFileName} must include an x64 mac zip artifact for release publishing`);
+  }
 }
 
 for (const entry of files) {
@@ -100,4 +107,31 @@ function escapeRegExp(value) {
 
 function matchesAnyPattern(value, patterns) {
   return patterns.some((pattern) => pattern.test(value));
+}
+
+function getExpectedMetadataPathPatterns(platformName, version) {
+  if (platformName === "win") {
+    return [new RegExp(`^LiteLauncher-Setup-${escapeRegExp(version)}\\.exe$`, "i")];
+  }
+
+  if (platformName === "mac-release") {
+    return [
+      new RegExp(`^LiteLauncher-${escapeRegExp(version)}-mac\\.zip$`, "i"),
+      new RegExp(`^LiteLauncher-${escapeRegExp(version)}-arm64-mac\\.zip$`, "i")
+    ];
+  }
+
+  return [new RegExp(`^LiteLauncher-${escapeRegExp(version)}(?:-(?:arm64-)?mac)?\\.zip$`, "i")];
+}
+
+function getExpectedFilePatterns(platformName, version) {
+  if (platformName === "win") {
+    return getExpectedMetadataPathPatterns(platformName, version);
+  }
+
+  const basePatterns = getExpectedMetadataPathPatterns(platformName, version);
+  return [
+    ...basePatterns,
+    new RegExp(`^LiteLauncher-${escapeRegExp(version)}(?:-arm64)?\\.dmg$`, "i")
+  ];
 }
