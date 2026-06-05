@@ -85,22 +85,27 @@ test("desktop build workflow gates mac publish-ready artifacts on signing inputs
   );
   assert.match(
     workflow,
-    /CSC_LINK:\s*\$\{\{\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*\}\}/,
-    "workflow should wire the Apple certificate secret into electron-builder"
+    /echo "CSC_LINK=\$\{\{\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*\}\}"/,
+    "workflow should export the Apple certificate secret into GITHUB_ENV before tag-release packaging"
   );
   assert.match(
     workflow,
-    /CSC_KEY_PASSWORD:\s*\$\{\{\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*\}\}/,
-    "workflow should wire the Apple certificate password into electron-builder"
+    /echo "CSC_KEY_PASSWORD=\$\{\{\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*\}\}"/,
+    "workflow should export the Apple certificate password into GITHUB_ENV before tag-release packaging"
   );
   assert.match(
     workflow,
-    /APPLE_TEAM_ID:\s*\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}/,
-    "workflow should expose the Apple team id for mac signing/notarization preparation"
+    /echo "APPLE_TEAM_ID=\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}"/,
+    "workflow should export the Apple team id into GITHUB_ENV before tag-release packaging"
   );
   assert.doesNotMatch(
     workflow,
     /if:\s*\$\{\{[^}]*secrets\./,
     "workflow should not reference secrets directly inside if expressions because GitHub rejects that configuration before jobs start"
+  );
+  assert.doesNotMatch(
+    workflow,
+    /build-macos:\s*[\s\S]*?^ {4}env:\s*(?:\r?\n^ {6}.*)*\r?\n^ {6}CSC_LINK:/m,
+    "workflow_dispatch mac builds should not inherit an empty CSC_LINK at the job level because electron-builder treats that as a broken signing input"
   );
 });
