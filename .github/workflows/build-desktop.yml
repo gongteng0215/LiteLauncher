@@ -95,7 +95,6 @@ jobs:
           fi
 
       - name: Build macOS x64 + arm64 packages
-        if: ${{ github.event_name == 'workflow_dispatch' || ( secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' ) }}
         run: |
           node scripts/clean-release.cjs
           pnpm run build

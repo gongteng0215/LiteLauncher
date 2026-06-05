@@ -98,9 +98,9 @@ test("desktop build workflow gates mac publish-ready artifacts on signing inputs
     /APPLE_TEAM_ID:\s*\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}/,
     "workflow should expose the Apple team id for mac signing/notarization preparation"
   );
-  assert.match(
+  assert.doesNotMatch(
     workflow,
-    /if:\s*\$\{\{\s*github\.event_name == 'workflow_dispatch'\s*\|\|\s*\(\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*!=\s*''\s*&&\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*!=\s*''\s*&&\s*secrets\.APPLE_TEAM_ID\s*!=\s*''\s*\)\s*\}\}/,
-    "manual workflow runs should still be allowed to build mac artifacts without release-signing secrets"
+    /if:\s*\$\{\{[^}]*secrets\./,
+    "workflow should not reference secrets directly inside if expressions because GitHub rejects that configuration before jobs start"
   );
 });
