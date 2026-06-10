@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { IPC_CHANNELS } from "../shared/channels";
+import { buildCodeAgentSwitchPowerShellUserEnvScript } from "../shared/codeagent-switch";
 import { LaunchItem } from "../shared/types";
 import { executePluginCommand } from "../main/plugins";
 
@@ -155,6 +156,49 @@ test("CodeAgent Switch returns empty state when config file does not exist", asy
   assert.deepEqual(payload.data?.config?.providers, []);
   assert.deepEqual(payload.data?.config?.profiles, []);
   assert.ok(payload.data?.diagnostics?.some((item) => item.id === "D010"));
+});
+
+test("CodeAgent Switch ignores empty standalone profile files", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ll-codeagent-switch-empty-profile-"));
+  const configPath = path.join(dir, "config.toml");
+  fs.writeFileSync(
+    configPath,
+    `model_provider = "OpenAI"
+model = "gpt-5.4"
+
+[model_providers.OpenAI]
+name = "TokenRouter"
+base_url = "https://www.tokenrouter.tech/v1"
+wire_api = "responses"
+env_key = "CODEAGENT_TOKEN_ROUTER_API_KEY"
+`,
+    "utf8"
+  );
+  fs.writeFileSync(path.join(dir, "123.config.toml"), "", "utf8");
+  const { window, sent } = createMockWindow();
+  const params = new URLSearchParams();
+  params.set("action", "read");
+  params.set("configPath", configPath);
+
+  const result = await executePluginCommand(
+    `codeagent-switch?${params.toString()}`,
+    window as never,
+    createSelectedItem()
+  );
+
+  assert.equal(result.ok, true);
+  const payload = sent[0]?.payload as {
+    data?: {
+      config?: {
+        modelProvider?: string;
+        model?: string;
+        profiles?: Array<{ id?: string }>;
+      };
+    };
+  };
+  assert.equal(payload.data?.config?.modelProvider, "OpenAI");
+  assert.equal(payload.data?.config?.model, "gpt-5.4");
+  assert.equal(payload.data?.config?.profiles?.length ?? 0, 0);
 });
 
 test("CodeAgent Switch previews a profile switch without writing config", async () => {
@@ -442,6 +486,84 @@ env_key = "${envKey}"
   }
 });
 
+test("CodeAgent Switch writes provider API keys through an encoded PowerShell command", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ll-codeagent-switch-set-key-encoded-"));
+  const configPath = path.join(dir, "config.toml");
+  const envKey = "CODEAGENT_OPEN_AI_API_KEY";
+  const apiKey = "sk-test-$'&();[]{}=`\"";
+  fs.writeFileSync(
+    configPath,
+    `model_provider = "OpenAI"
+model = "gpt-5.5"
+
+[model_providers.OpenAI]
+base_url = "https://relay.example.com/v1"
+env_key = "${envKey}"
+`,
+    "utf8"
+  );
+  const previousEnvValue = process.env[envKey];
+  delete process.env[envKey];
+  const pluginModule = (await import("../main/plugins/codeagent-switch")) as unknown as {
+    setCodeAgentSwitchExecFileForTest?: (
+      runner: (
+        file: string,
+        args: readonly string[],
+        options?: { windowsHide?: boolean }
+      ) => Buffer
+    ) => () => void;
+  };
+  const calls: Array<{
+    file: string;
+    args: readonly string[];
+    options?: { windowsHide?: boolean };
+  }> = [];
+  const restoreExecFile = pluginModule.setCodeAgentSwitchExecFileForTest?.(
+    (file, args, options) => {
+      calls.push({ file, args, options });
+      return Buffer.from("");
+    }
+  );
+  assert.equal(typeof restoreExecFile, "function");
+
+  try {
+    const { window } = createMockWindow();
+    const params = new URLSearchParams();
+    params.set("action", "set-provider-key");
+    params.set("configPath", configPath);
+    params.set("envKey", envKey);
+    params.set("apiKey", apiKey);
+
+    const result = await executePluginCommand(
+      `codeagent-switch?${params.toString()}`,
+      window as never,
+      createSelectedItem()
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.file, "powershell.exe");
+    assert.ok(calls[0]?.args.includes("-EncodedCommand"));
+    assert.equal(calls[0]?.args.includes(envKey), false);
+    assert.equal(calls[0]?.args.includes(apiKey), false);
+    const encodedCommandIndex = calls[0]?.args.indexOf("-EncodedCommand") ?? -1;
+    assert.notEqual(encodedCommandIndex, -1);
+    const encodedCommand = calls[0]?.args[encodedCommandIndex + 1] ?? "";
+    const script = Buffer.from(encodedCommand, "base64").toString("utf16le");
+    assert.equal(script, buildCodeAgentSwitchPowerShellUserEnvScript(envKey, apiKey));
+    assert.equal(script.includes(envKey), false);
+    assert.equal(script.includes(apiKey), false);
+    assert.equal(process.env[envKey], apiKey);
+  } finally {
+    restoreExecFile?.();
+    if (previousEnvValue === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = previousEnvValue;
+    }
+  }
+});
+
 test("CodeAgent Switch saves provider advanced fields through plugin commands", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ll-codeagent-switch-save-provider-advanced-"));
   const configPath = path.join(dir, "config.toml");
@@ -618,6 +740,7 @@ env_key = "RELAY_ONE_API_KEY"
   saveParams.set("configPath", configPath);
   saveParams.set("backupRoot", backupRoot);
   saveParams.set("profile", "daily");
+  saveParams.set("profileName", "日常配置");
   saveParams.set("provider", "relay_one");
   saveParams.set("model", "gpt-5.4");
   saveParams.set("reviewModel", "gpt-5.4");
@@ -634,12 +757,14 @@ env_key = "RELAY_ONE_API_KEY"
   const profilePath = path.join(dir, "daily.config.toml");
   assert.equal(fs.existsSync(profilePath), true);
   assert.doesNotMatch(fs.readFileSync(configPath, "utf8"), /\[profiles\.daily\]/);
+  assert.match(fs.readFileSync(profilePath, "utf8"), /^name = "日常配置"$/m);
   assert.match(fs.readFileSync(profilePath, "utf8"), /^model = "gpt-5.4"$/m);
   const savePayload = sent[0]?.payload as {
-    data?: { savedProfile?: boolean; config?: { profiles?: Array<{ id?: string }> } };
+    data?: { savedProfile?: boolean; config?: { profiles?: Array<{ id?: string; name?: string }> } };
   };
   assert.equal(savePayload.data?.savedProfile, true);
   assert.equal(savePayload.data?.config?.profiles?.[0]?.id, "daily");
+  assert.equal(savePayload.data?.config?.profiles?.[0]?.name, "日常配置");
 
   const deleteParams = new URLSearchParams();
   deleteParams.set("action", "delete-profile");
@@ -660,6 +785,26 @@ env_key = "RELAY_ONE_API_KEY"
   };
   assert.equal(deletePayload.data?.deletedProfile, true);
   assert.equal(deletePayload.data?.config?.profiles?.length, 0);
+});
+
+test("CodeAgent Switch rejects saving an empty standalone profile", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ll-codeagent-switch-save-profile-empty-"));
+  const configPath = path.join(dir, "config.toml");
+  fs.writeFileSync(configPath, "", "utf8");
+  const { window } = createMockWindow();
+  const params = new URLSearchParams();
+  params.set("action", "save-profile");
+  params.set("configPath", configPath);
+  params.set("profile", "empty");
+
+  const result = await executePluginCommand(
+    `codeagent-switch?${params.toString()}`,
+    window as never,
+    createSelectedItem()
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.message ?? "", /配置组至少要填写 Provider、模型或其它关键字段后才能保存|Profile/);
+  assert.equal(fs.existsSync(path.join(dir, "empty.config.toml")), false);
 });
 
 test("CodeAgent Switch saves legacy embedded profiles back out as standalone files", async () => {

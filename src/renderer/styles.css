@@ -6969,6 +6969,34 @@ body {
   font-size: 11px;
 }
 
+.codeagent-switch-empty-state {
+  gap: 6px;
+  border: 1px dashed rgba(125, 211, 252, 0.28);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.codeagent-switch-empty-state .codeagent-switch-list-detail {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.codeagent-switch-empty-tip {
+  color: rgba(233, 242, 255, 0.76);
+  font-size: 11px;
+}
+
+.codeagent-switch-empty-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.codeagent-switch-empty-actions .settings-btn {
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 .codeagent-switch-list-title {
   display: flex;
   align-items: center;

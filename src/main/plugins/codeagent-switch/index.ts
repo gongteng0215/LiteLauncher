@@ -10,6 +10,7 @@ import {
   buildCodeAgentSwitchProfilePreview,
   buildCodeAgentSwitchProfilePreviewFromProfile,
   buildCodeAgentSwitchEnvCommands,
+  buildCodeAgentSwitchPowerShellUserEnvScript,
   buildStandaloneCodexProfileToml,
   CodeAgentSwitchProfilePreview,
   CodexParsedConfig,
@@ -54,6 +55,7 @@ interface CodeAgentSwitchCommand {
   tool?: string;
   configPath?: string;
   profile?: string;
+  profileName?: string;
   provider?: string;
   name?: string;
   baseUrl?: string;
@@ -136,22 +138,38 @@ const QUERY_ALIASES = [
 ];
 
 type CodeAgentSwitchEnvWriter = (name: string, value: string) => void;
+type CodeAgentSwitchExecFileRunner = typeof execFileSync;
+
+function encodeCodeAgentSwitchPowerShellCommand(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+let codeAgentSwitchExecFileRunner: CodeAgentSwitchExecFileRunner = execFileSync;
+
+export function setCodeAgentSwitchExecFileForTest(
+  runner: CodeAgentSwitchExecFileRunner
+): () => void {
+  const previous = codeAgentSwitchExecFileRunner;
+  codeAgentSwitchExecFileRunner = runner;
+  return () => {
+    codeAgentSwitchExecFileRunner = previous;
+  };
+}
 
 function writeUserEnvironmentVariable(name: string, value: string): void {
   if (process.platform !== "win32") {
     throw new Error("当前系统暂只支持自动写入 Windows 用户级环境变量");
   }
-  execFileSync(
+  const script = buildCodeAgentSwitchPowerShellUserEnvScript(name, value);
+  codeAgentSwitchExecFileRunner(
     "powershell.exe",
     [
       "-NoProfile",
       "-NonInteractive",
       "-ExecutionPolicy",
       "Bypass",
-      "-Command",
-      "param([string]$Name,[string]$Value) [Environment]::SetEnvironmentVariable($Name, $Value, 'User')",
-      name,
-      value
+      "-EncodedCommand",
+      encodeCodeAgentSwitchPowerShellCommand(script)
     ],
     { windowsHide: true }
   );
@@ -184,6 +202,7 @@ function parseCommand(optionsText: string | undefined): CodeAgentSwitchCommand {
   const tool = (params.get("tool") ?? "codex").trim().toLowerCase() || "codex";
   const configPath = (params.get("configPath") ?? "").trim() || undefined;
   const profile = (params.get("profile") ?? "").trim() || undefined;
+  const profileName = (params.get("profileName") ?? "").trim() || undefined;
   const provider = (params.get("provider") ?? "").trim() || undefined;
   const name = (params.get("name") ?? "").trim() || undefined;
   const baseUrl = (params.get("baseUrl") ?? "").trim() || undefined;
@@ -259,10 +278,11 @@ function parseCommand(optionsText: string | undefined): CodeAgentSwitchCommand {
   ) {
     return {
       action,
-      tool,
-      configPath,
-      profile,
-      provider,
+    tool,
+    configPath,
+    profile,
+    profileName,
+    provider,
       name,
       baseUrl,
       wireApi,
@@ -500,6 +520,7 @@ function buildStandaloneProfileFromConfig(
 ): CodexProfileConfig {
   return {
     id: profileId,
+    name: config.profileName,
     providerId: config.modelProvider,
     model: config.model,
     reviewModel: config.reviewModel,
@@ -515,6 +536,22 @@ function buildStandaloneProfileFromConfig(
   };
 }
 
+function isMeaningfulStandaloneProfile(config: CodexParsedConfig): boolean {
+  return Boolean(
+    config.modelProvider ||
+      config.model ||
+      config.reviewModel ||
+      config.modelReasoningEffort ||
+      config.planModeReasoningEffort ||
+      config.modelReasoningSummary ||
+      config.modelVerbosity ||
+      config.serviceTier ||
+      config.webSearch ||
+      config.modelAutoCompactTokenLimit !== undefined ||
+      config.providers.length > 0
+  );
+}
+
 function listStandaloneProfiles(configPath: string): CodeAgentSwitchStandaloneProfileEntry[] {
   const directory = path.dirname(configPath);
   if (!fs.existsSync(directory)) {
@@ -528,6 +565,9 @@ function listStandaloneProfiles(configPath: string): CodeAgentSwitchStandalonePr
       const profileId = entry.name.slice(0, -".config.toml".length);
       const source = fs.readFileSync(profilePath, "utf8");
       const parsed = parseCodexTomlConfig(source);
+      if (!isMeaningfulStandaloneProfile(parsed)) {
+        return undefined;
+      }
       return {
         path: profilePath,
         source,
@@ -535,6 +575,7 @@ function listStandaloneProfiles(configPath: string): CodeAgentSwitchStandalonePr
         providers: parsed.providers
       };
     })
+    .filter((entry): entry is CodeAgentSwitchStandaloneProfileEntry => Boolean(entry))
     .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
 }
 
@@ -901,6 +942,7 @@ function createProfileInput(command: CodeAgentSwitchCommand): CodexProfileConfig
   }
   return {
     id: command.profile,
+    name: command.profileName,
     providerId: command.provider,
     model: command.model,
     reviewModel: command.reviewModel,
@@ -1023,6 +1065,20 @@ function saveProfile(command: CodeAgentSwitchCommand): CodeAgentSwitchPanelData 
   }
   const source = readCodexConfigSource(configPath);
   const profileInput = createProfileInput({ ...command, configPath });
+  if (
+    !profileInput.providerId &&
+    !profileInput.model &&
+    !profileInput.reviewModel &&
+    !profileInput.modelReasoningEffort &&
+    !profileInput.planModeReasoningEffort &&
+    !profileInput.modelReasoningSummary &&
+    !profileInput.modelVerbosity &&
+    !profileInput.serviceTier &&
+    !profileInput.webSearch &&
+    profileInput.modelAutoCompactTokenLimit === undefined
+  ) {
+    throw new Error("配置组至少要填写 Provider、模型或其它关键字段后才能保存");
+  }
   const profilePath = getStandaloneProfilePath(configPath, profileInput.id);
   const currentConfig = source ? parseCodexTomlConfig(source) : createEmptyConfig();
   const embeddedProfile = currentConfig.profiles.find((profile) => profile.id === profileInput.id);
@@ -1030,6 +1086,7 @@ function saveProfile(command: CodeAgentSwitchCommand): CodeAgentSwitchPanelData 
   if (embeddedProfile && (embeddedProfile.storageKind === "embedded" || !embeddedProfile.storageKind)) {
     const embeddedSource = upsertCodexProfileInToml(source, {
       id: profileInput.id,
+      name: profileInput.name,
       providerId: profileInput.providerId,
       model: profileInput.model,
       reviewModel: profileInput.reviewModel,

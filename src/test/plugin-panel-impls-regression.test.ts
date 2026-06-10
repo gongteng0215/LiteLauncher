@@ -755,6 +755,41 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     panelImplsSource,
+    /profileName/,
+    "CodeAgent Switch profile editor should expose a separate config-group display name field"
+  );
+  assert.match(
+    panelImplsSource,
+    /profile\.name \|\| profile\.id/,
+    "CodeAgent Switch should prefer the config-group display name in list and detail titles"
+  );
+  assert.match(
+    panelImplsSource,
+    /Provider \/ Key/,
+    "CodeAgent Switch should keep a visible Provider/Key entry point from the config-group workflow"
+  );
+  assert.match(
+    panelImplsSource,
+    /当前 Provider \/ Key/,
+    "CodeAgent Switch current-config actions should make it obvious that Provider\/Key edits belong to the active provider"
+  );
+  assert.match(
+    panelImplsSource,
+    /buildCodeAgentSwitchPowerShellUserEnvScript/,
+    "CodeAgent Switch should generate provider key PowerShell commands through the shared safe script builder"
+  );
+  assert.equal(
+    panelImplsSource.includes("const escapedValue = apiKey.replace(/'/g, \"''\")"),
+    false,
+    "CodeAgent Switch should not interpolate raw API key text directly into PowerShell snippets"
+  );
+  assert.match(
+    panelImplsSource,
+    /selectCodeAgentSwitchDetail\("provider"/,
+    "CodeAgent Switch should let users jump into Provider detail from the config-group UI so the key editor stays discoverable"
+  );
+  assert.match(
+    panelImplsSource,
     /let codeAgentSwitchCopyState:\s*""\s*\|\s*"env"\s*\|\s*"diagnostics"\s*\|\s*"diff"\s*\|\s*"key"\s*=\s*"";/,
     "CodeAgent Switch should keep env, diagnostics, diff, and key copy feedback separate"
   );
@@ -806,12 +841,32 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   assert.match(
     panelImplsSource,
     /codeagent-switch-profile-list/,
-    "CodeAgent Switch should keep a dedicated Profiles list section in the master-detail sidebar"
+    "CodeAgent Switch should always render the config-group section so users can discover where config groups live"
   );
   assert.match(
     panelImplsSource,
-    /codeagent-switch-provider-strip/,
-    "CodeAgent Switch should keep Provider selection as a compact strip"
+    /codeagent-switch-current-actions/,
+    "CodeAgent Switch should move empty config-group actions into the current config card instead of showing a large empty list"
+  );
+  assert.match(
+    panelImplsSource,
+    /当前还没有配置组/,
+    "CodeAgent Switch should explain the empty config-group state instead of hiding the whole section"
+  );
+  assert.match(
+    panelImplsSource,
+    /Root 配置|Root 閰嶇疆/,
+    "CodeAgent Switch empty-state copy should explain that the current live setup still comes from the Root config"
+  );
+  assert.match(
+    panelImplsSource,
+    /从当前配置生成配置组|浠庡綋鍓嶉厤缃敓鎴愰厤缃粍/,
+    "CodeAgent Switch should expose a direct create-from-current-config action when there are no standalone config groups yet"
+  );
+  assert.doesNotMatch(
+    panelImplsSource,
+    /当前配置还没有 Profile|当前还没有 Profile 预设/,
+    "CodeAgent Switch should not keep the old empty Profile wording once config groups become the primary object"
   );
   assert.doesNotMatch(
     panelImplsSource,

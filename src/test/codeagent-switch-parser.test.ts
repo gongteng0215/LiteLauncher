@@ -6,6 +6,7 @@ import {
   buildCodeAgentSwitchProfilePreviewFromProfile,
   buildStandaloneCodexProfileToml,
   buildCodeAgentSwitchEnvCommands,
+  buildCodeAgentSwitchPowerShellUserEnvScript,
   deleteCodexProfileInToml,
   deleteCodexProviderInToml,
   diagnoseCodexConfig,
@@ -62,6 +63,7 @@ base_url = "https://api.openai.com/v1"
 requires_openai_auth = true
 
 [profiles.daily]
+name = "日常配置"
 model_provider = "relay_1"
 model = "gpt-5.4"
 review_model = "gpt-5.4"
@@ -113,6 +115,7 @@ test("parses Codex providers, profiles, history, and top-level model fields", ()
 
   const profile = config.profiles.find((item) => item.id === "daily");
   assert.ok(profile);
+  assert.equal(profile.name, "日常配置");
   assert.equal(profile.providerId, "relay_1");
   assert.equal(profile.model, "gpt-5.4");
   assert.equal(profile.modelReasoningEffort, "high");
@@ -225,6 +228,30 @@ NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
   assert.equal(config.providers[0]?.envKey, "RELAY_1_API_KEY");
 });
 
+test("ignores unknown top-level array assignments from real Codex configs", () => {
+  const config = parseCodexTomlConfig(`
+model_provider = "OpenAI"
+model = "gpt-5.4"
+review_model = "gpt-5.5"
+model_reasoning_effort = "high"
+model_auto_compact_token_limit = 350000
+notify = ["C:\\\\Users\\\\lybly\\\\AppData\\\\Local\\\\OpenAI\\\\Codex\\\\bin\\\\notify.exe", "turn-ended"]
+
+[model_providers.OpenAI]
+name = "TokenRouter"
+base_url = "https://www.tokenrouter.tech/v1"
+wire_api = "responses"
+env_key = "CODEAGENT_TOKEN_ROUTER_API_KEY"
+`);
+
+  assert.equal(config.modelProvider, "OpenAI");
+  assert.equal(config.model, "gpt-5.4");
+  assert.equal(config.reviewModel, "gpt-5.5");
+  assert.equal(config.providers[0]?.id, "OpenAI");
+  assert.equal(config.providers[0]?.wireApi, "responses");
+  assert.equal(config.providers[0]?.envKey, "CODEAGENT_TOKEN_ROUTER_API_KEY");
+});
+
 test("builds copyable env commands without storing a real API key", () => {
   const commands = buildCodeAgentSwitchEnvCommands("RELAY_1_API_KEY");
 
@@ -234,6 +261,20 @@ test("builds copyable env commands without storing a real API key", () => {
   assert.match(commands.powershellUser, /<API_KEY>/);
   assert.match(commands.bash, /<API_KEY>/);
   assert.equal(JSON.stringify(commands).includes("sk-"), false);
+});
+
+test("builds a safe PowerShell env script without embedding raw key text", () => {
+  const envKey = "CODEAGENT_OPEN_AI_API_KEY";
+  const apiKey = "sk-test-$'&();[]{}=`\"";
+  const script = buildCodeAgentSwitchPowerShellUserEnvScript(envKey, apiKey, true);
+
+  assert.equal(script.includes(envKey), false);
+  assert.equal(script.includes(apiKey), false);
+  assert.match(script, /FromBase64String/);
+  assert.ok(script.includes(Buffer.from(envKey, "utf8").toString("base64")));
+  assert.ok(script.includes(Buffer.from(apiKey, "utf8").toString("base64")));
+  assert.match(script, /Set-Item -Path/);
+  assert.match(script, /SetEnvironmentVariable/);
 });
 
 test("summarizes the active Codex provider and exact matching profile", () => {
@@ -828,6 +869,7 @@ model = "gpt-5.4"
 test("builds standalone Codex profile toml without legacy [profiles] wrapper", () => {
   const source = buildStandaloneCodexProfileToml({
     id: "TokenRouter",
+    name: "Token Router 日常",
     providerId: "TokenRouter",
     model: "gpt-5.4",
     modelReasoningEffort: "high",
@@ -836,6 +878,7 @@ test("builds standalone Codex profile toml without legacy [profiles] wrapper", (
   });
 
   assert.doesNotMatch(source, /\[profiles\./);
+  assert.match(source, /^name = "Token Router 日常"$/m);
   assert.match(source, /^model_provider = "TokenRouter"$/m);
   assert.match(source, /^model = "gpt-5.4"$/m);
   assert.match(source, /^plan_mode_reasoning_effort = "xhigh"$/m);

@@ -1897,6 +1897,7 @@ type CodeAgentSwitchProviderView = {
 
 type CodeAgentSwitchProfileView = {
   id: string;
+  name?: string;
   providerId?: string;
   model?: string;
   reviewModel?: string;
@@ -1980,6 +1981,13 @@ let codeAgentSwitchData: {
     activeProvider?: CodeAgentSwitchProviderView;
     activeProfileId?: string;
     activeProfile?: CodeAgentSwitchProfileView;
+    activeSource?: {
+      kind?: "root" | "embedded" | "standalone" | "snapshot";
+      profileId?: string;
+      label?: string;
+      detail?: string;
+      legacy?: boolean;
+    };
     activeProfileMatch?: "exact" | "partial" | "none";
     matchedFields?: string[];
     profileMatches?: CodeAgentSwitchProfileMatchView[];
@@ -2064,16 +2072,23 @@ function chooseDefaultCodeAgentSwitchSelection(): void {
     return;
   }
 
-  const activeProviderId = active.activeProviderId ?? codeAgentSwitchData.config?.modelProvider;
-  if (activeProviderId && providers.some((provider) => provider.id === activeProviderId)) {
-    codeAgentSwitchSelectedKind = "provider";
-    codeAgentSwitchSelectedId = activeProviderId;
+  const partialProfileId = active.profileMatches?.find((match) => match.level === "partial")?.profileId;
+  if (partialProfileId && profiles.some((profile) => profile.id === partialProfileId)) {
+    codeAgentSwitchSelectedKind = "profile";
+    codeAgentSwitchSelectedId = partialProfileId;
     return;
   }
 
   if (profiles[0]) {
     codeAgentSwitchSelectedKind = "profile";
     codeAgentSwitchSelectedId = profiles[0].id;
+    return;
+  }
+
+  const activeProviderId = active.activeProviderId ?? codeAgentSwitchData.config?.modelProvider;
+  if (activeProviderId && providers.some((provider) => provider.id === activeProviderId)) {
+    codeAgentSwitchSelectedKind = "provider";
+    codeAgentSwitchSelectedId = activeProviderId;
     return;
   }
 
@@ -2637,8 +2652,13 @@ function createCodeAgentSwitchProviderEditor(
 
 function createCodeAgentSwitchProfileEditor(
   profile?: CodeAgentSwitchProfileView,
-  providers: CodeAgentSwitchProviderView[] = []
+  providers: CodeAgentSwitchProviderView[] = [],
+  options?: {
+    draftProfile?: CodeAgentSwitchProfileView;
+    submitLabel?: string;
+  }
 ): HTMLDivElement {
+  const seedProfile = profile ?? options?.draftProfile;
   const editor = document.createElement("div");
   editor.className = "codeagent-switch-editor codeagent-switch-profile-editor";
 
@@ -2652,11 +2672,22 @@ function createCodeAgentSwitchProfileEditor(
   const grid = document.createElement("div");
   grid.className = "codeagent-switch-editor-grid";
   grid.append(
-    createCodeAgentSwitchInput("ID", "profileId", profile?.id, "daily"),
-    createCodeAgentSwitchSelect("Provider", "profileProvider", profile?.providerId, providerOptions),
-    createCodeAgentSwitchInput("模型", "profileModel", profile?.model, "gpt-5.5"),
-    createCodeAgentSwitchInput("Review", "profileReviewModel", profile?.reviewModel, "gpt-5.5"),
-    createCodeAgentSwitchSelect("Reasoning", "profileReasoning", profile?.modelReasoningEffort, [
+    createCodeAgentSwitchInput("ID", "profileId", seedProfile?.id, "daily"),
+    createCodeAgentSwitchInput("配置名", "profileName", seedProfile?.name, "日常配置"),
+    createCodeAgentSwitchSelect(
+      "Provider",
+      "profileProvider",
+      seedProfile?.providerId,
+      providerOptions
+    ),
+    createCodeAgentSwitchInput("模型", "profileModel", seedProfile?.model, "gpt-5.5"),
+    createCodeAgentSwitchInput(
+      "Review",
+      "profileReviewModel",
+      seedProfile?.reviewModel,
+      "gpt-5.5"
+    ),
+    createCodeAgentSwitchSelect("Reasoning", "profileReasoning", seedProfile?.modelReasoningEffort, [
       { value: "", label: "默认" },
       { value: "low", label: "low" },
       { value: "medium", label: "medium" },
@@ -2666,7 +2697,7 @@ function createCodeAgentSwitchProfileEditor(
     createCodeAgentSwitchSelect(
       "Plan reasoning",
       "profilePlanReasoning",
-      profile?.planModeReasoningEffort,
+      seedProfile?.planModeReasoningEffort,
       [
         { value: "", label: "默认" },
         { value: "low", label: "low" },
@@ -2678,7 +2709,7 @@ function createCodeAgentSwitchProfileEditor(
     createCodeAgentSwitchSelect(
       "Summary",
       "profileReasoningSummary",
-      profile?.modelReasoningSummary,
+      seedProfile?.modelReasoningSummary,
       [
         { value: "", label: "默认" },
         { value: "auto", label: "auto" },
@@ -2687,19 +2718,19 @@ function createCodeAgentSwitchProfileEditor(
         { value: "none", label: "none" }
       ]
     ),
-    createCodeAgentSwitchSelect("Verbosity", "profileVerbosity", profile?.modelVerbosity, [
+    createCodeAgentSwitchSelect("Verbosity", "profileVerbosity", seedProfile?.modelVerbosity, [
       { value: "", label: "默认" },
       { value: "low", label: "low" },
       { value: "medium", label: "medium" },
       { value: "high", label: "high" }
     ]),
-    createCodeAgentSwitchSelect("Service tier", "profileServiceTier", profile?.serviceTier, [
+    createCodeAgentSwitchSelect("Service tier", "profileServiceTier", seedProfile?.serviceTier, [
       { value: "", label: "默认" },
       { value: "auto", label: "auto" },
       { value: "flex", label: "flex" },
       { value: "fast", label: "fast" }
     ]),
-    createCodeAgentSwitchSelect("Web search", "profileWebSearch", profile?.webSearch, [
+    createCodeAgentSwitchSelect("Web search", "profileWebSearch", seedProfile?.webSearch, [
       { value: "", label: "默认" },
       { value: "disabled", label: "disabled" },
       { value: "cached", label: "cached" },
@@ -2708,7 +2739,7 @@ function createCodeAgentSwitchProfileEditor(
     createCodeAgentSwitchInput(
       "Compact token",
       "profileCompactLimit",
-      profile?.modelAutoCompactTokenLimit,
+      seedProfile?.modelAutoCompactTokenLimit,
       "350000",
       "number"
     )
@@ -2719,7 +2750,7 @@ function createCodeAgentSwitchProfileEditor(
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "settings-btn settings-btn-primary";
-  saveButton.textContent = profile ? "保存 Profile" : "新增 Profile";
+  saveButton.textContent = profile ? "保存配置组" : options?.submitLabel ?? "新增配置组";
   saveButton.addEventListener("click", () => {
     void executeCodeAgentSwitchSaveProfile(editor);
   });
@@ -3001,6 +3032,13 @@ function getCodeAgentSwitchProviderSummary(provider: CodeAgentSwitchProviderView
   return `${provider.id} · ${provider.baseUrl || "未配置 base_url"} · ${auth}`;
 }
 
+function getCodeAgentSwitchProfileLabel(profile: CodeAgentSwitchProfileView | undefined): string {
+  if (!profile) {
+    return "";
+  }
+  return profile.name || profile.id;
+}
+
 function getCodeAgentSwitchProfileSummary(profile: CodeAgentSwitchProfileView): string {
   return `${profile.providerId || "未绑定 Provider"} · ${
     profile.model || "未配置模型"
@@ -3033,6 +3071,65 @@ function getCodeAgentSwitchEffectiveModelInfo(
     reviewModel: config.reviewModel ?? profile?.reviewModel,
     reasoning: config.modelReasoningEffort ?? profile?.modelReasoningEffort
   };
+}
+
+function buildCodeAgentSwitchDraftProfile(
+  active: NonNullable<typeof codeAgentSwitchData.active>,
+  config: NonNullable<typeof codeAgentSwitchData.config>
+): CodeAgentSwitchProfileView {
+  const currentProfile = active.activeProfile ?? getCodeAgentSwitchEffectiveProfile(active, config);
+  const existingIds = new Set((config.profiles ?? []).map((profile) => profile.id));
+  const baseId =
+    active.activeProfileId ??
+    currentProfile?.id ??
+    config.profile ??
+    [
+      active.activeProviderId ?? config.modelProvider ?? currentProfile?.providerId ?? "current",
+      config.model ?? currentProfile?.model ?? "config"
+    ]
+      .filter(Boolean)
+      .join("_");
+
+  return {
+    id: makeUniqueCodeAgentSwitchId(baseId || "current_config", existingIds),
+    name: currentProfile?.name,
+    providerId: active.activeProviderId ?? config.modelProvider ?? currentProfile?.providerId,
+    model: config.model ?? currentProfile?.model,
+    reviewModel: config.reviewModel ?? currentProfile?.reviewModel,
+    modelReasoningEffort: config.modelReasoningEffort ?? currentProfile?.modelReasoningEffort,
+    planModeReasoningEffort:
+      config.planModeReasoningEffort ?? currentProfile?.planModeReasoningEffort,
+    modelReasoningSummary: config.modelReasoningSummary ?? currentProfile?.modelReasoningSummary,
+    modelVerbosity: config.modelVerbosity ?? currentProfile?.modelVerbosity,
+    serviceTier: config.serviceTier ?? currentProfile?.serviceTier,
+    webSearch: config.webSearch ?? currentProfile?.webSearch,
+    modelAutoCompactTokenLimit:
+      config.modelAutoCompactTokenLimit ?? currentProfile?.modelAutoCompactTokenLimit
+  };
+}
+
+function getCodeAgentSwitchActiveConfigLabel(
+  active: NonNullable<typeof codeAgentSwitchData.active>
+): string {
+  return active.activeProfileId || active.activeSource?.label || "当前 Root 配置";
+}
+
+function openCodeAgentSwitchProviderDetail(providerId?: string): void {
+  selectCodeAgentSwitchDetail("provider", providerId ?? "");
+}
+
+function createCodeAgentSwitchProviderKeyButton(
+  providerId: string | undefined,
+  label = "当前 Provider / Key"
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-btn settings-btn-secondary";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    openCodeAgentSwitchProviderDetail(providerId);
+  });
+  return button;
 }
 
 function createCodeAgentSwitchListButton(
@@ -3082,9 +3179,11 @@ function createCodeAgentSwitchListButton(
 
 function createCodeAgentSwitchCurrentCard(
   active: NonNullable<typeof codeAgentSwitchData.active>,
-  config: NonNullable<typeof codeAgentSwitchData.config>
+  config: NonNullable<typeof codeAgentSwitchData.config>,
+  profiles: CodeAgentSwitchProfileView[]
 ): HTMLElement {
   const effective = getCodeAgentSwitchEffectiveModelInfo(active, config);
+  const providerDetailTargetId = effective.providerId;
   const card = document.createElement("section");
   card.className = "codeagent-switch-current-card";
   const head = document.createElement("div");
@@ -3099,9 +3198,32 @@ function createCodeAgentSwitchCurrentCard(
       ? active.activeProfileId
         ? `${active.activeProfileId} · exact`
         : `partial · ${(active.matchedFields ?? []).join(", ") || "字段匹配"}`
-      : "未匹配到 Profile";
+      : "当前配置未绑定配置组";
   titleWrap.append(title, subtitle);
   head.append(titleWrap, createCodeAgentSwitchStateBadge("生效中", "active"));
+
+  if (providerDetailTargetId || profiles.length === 0) {
+    const currentActions = document.createElement("div");
+    currentActions.className = "codeagent-switch-current-actions";
+    currentActions.appendChild(
+      createCodeAgentSwitchProviderKeyButton(
+        providerDetailTargetId,
+        providerDetailTargetId ? "当前 Provider / Key" : "新增 Provider / Key"
+      )
+    );
+    if (profiles.length === 0) {
+      subtitle.textContent = "当前还没有独立配置组，仍在使用 Root 配置";
+      const addConfigButton = document.createElement("button");
+      addConfigButton.type = "button";
+      addConfigButton.className = "settings-btn settings-btn-secondary";
+      addConfigButton.textContent = "从当前配置生成配置组";
+      addConfigButton.addEventListener("click", () => {
+        selectCodeAgentSwitchDetail("profile", "");
+      });
+      currentActions.appendChild(addConfigButton);
+    }
+    head.appendChild(currentActions);
+  }
 
   const overview = createCodeAgentSwitchDetailOverview([
     { label: "Provider", value: effective.providerId },
@@ -3114,91 +3236,59 @@ function createCodeAgentSwitchCurrentCard(
 }
 
 function createCodeAgentSwitchListPanel(
-  providers: CodeAgentSwitchProviderView[],
   profiles: CodeAgentSwitchProfileView[],
   active: NonNullable<typeof codeAgentSwitchData.active>,
   config: NonNullable<typeof codeAgentSwitchData.config>
 ): HTMLDivElement {
+  const createFromCurrentLabel =
+    profiles.length === 0 ? "从当前配置生成配置组" : "新增配置组";
   const listPanel = document.createElement("div");
   listPanel.className = "codeagent-switch-list-panel";
-  listPanel.appendChild(createCodeAgentSwitchCurrentCard(active, config));
-
-  const providerSection = document.createElement("section");
-  providerSection.className = "codeagent-switch-provider-strip";
-  const providerHead = document.createElement("div");
-  providerHead.className = "codeagent-switch-section-head";
-  const providerTitle = document.createElement("h3");
-  providerTitle.textContent = "Provider";
-  const addProviderButton = document.createElement("button");
-  addProviderButton.type = "button";
-  addProviderButton.className = "settings-btn settings-btn-secondary";
-  addProviderButton.textContent = "新增";
-  addProviderButton.addEventListener("click", () => {
-    selectCodeAgentSwitchDetail("provider", "");
-  });
-  providerHead.append(providerTitle, addProviderButton);
-  providerSection.appendChild(providerHead);
-
-  const providerItems = document.createElement("div");
-  providerItems.className = "codeagent-switch-provider-strip-items";
-  if (providers.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "codeagent-switch-list-item";
-    empty.textContent = "当前配置还没有 Provider";
-    providerItems.appendChild(empty);
-  }
-
-  for (const provider of providers) {
-    const isActive = provider.id === active.activeProviderId || provider.id === config.modelProvider;
-    const isSelected =
-      codeAgentSwitchSelectedKind === "provider" && codeAgentSwitchSelectedId === provider.id;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "codeagent-switch-provider-chip";
-    button.dataset.active = String(isActive);
-    button.dataset.selected = String(isSelected);
-    button.addEventListener("click", () => {
-      selectCodeAgentSwitchDetail("provider", provider.id);
-    });
-    const titleLine = document.createElement("span");
-    titleLine.className = "codeagent-switch-provider-chip-title";
-    titleLine.textContent = provider.name || provider.id;
-    const detail = document.createElement("span");
-    detail.className = "codeagent-switch-provider-chip-detail";
-    detail.textContent = provider.envKey || (provider.requiresOpenAiAuth ? "OpenAI 登录态" : provider.id);
-    button.append(titleLine, detail);
-    if (isSelected) {
-      button.appendChild(createCodeAgentSwitchStateBadge("选中", "selected"));
-    }
-    if (isActive) {
-      button.appendChild(createCodeAgentSwitchStateBadge("当前", "active"));
-    }
-    providerItems.appendChild(button);
-  }
-  providerSection.appendChild(providerItems);
-
+  listPanel.appendChild(createCodeAgentSwitchCurrentCard(active, config, profiles));
   const profileSection = document.createElement("section");
   profileSection.className = "codeagent-switch-section codeagent-switch-profile-list";
   const profileHead = document.createElement("div");
   profileHead.className = "codeagent-switch-section-head";
   const profileTitle = document.createElement("h3");
-  profileTitle.textContent = "Profiles";
-  const addProfileButton = document.createElement("button");
-  addProfileButton.type = "button";
-  addProfileButton.className = "settings-btn settings-btn-secondary";
-  addProfileButton.textContent = "新增";
-  addProfileButton.addEventListener("click", () => {
+  profileTitle.textContent = "配置组";
+  const addConfigButton = document.createElement("button");
+  addConfigButton.type = "button";
+  addConfigButton.className = "settings-btn settings-btn-secondary";
+  addConfigButton.textContent = createFromCurrentLabel;
+  addConfigButton.addEventListener("click", () => {
     selectCodeAgentSwitchDetail("profile", "");
   });
-  profileHead.append(profileTitle, addProfileButton);
+  profileHead.append(profileTitle, addConfigButton);
   profileSection.appendChild(profileHead);
 
   const profileItems = document.createElement("div");
   profileItems.className = "codeagent-switch-profile-list-items";
+
   if (profiles.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "codeagent-switch-list-item";
-    empty.textContent = "当前配置还没有 Profile";
+    empty.className = "codeagent-switch-list-item codeagent-switch-empty-state";
+    const emptyTitle = document.createElement("div");
+    emptyTitle.className = "codeagent-switch-list-title";
+    emptyTitle.textContent = "当前还没有配置组";
+    const emptyDetail = document.createElement("div");
+    emptyDetail.className = "codeagent-switch-list-detail";
+    emptyDetail.textContent = `当前生效配置仍然来自 Root 配置（${
+      codeAgentSwitchData.configPath ?? "~/.codex/config.toml"
+    }）。`;
+    const emptyTip = document.createElement("div");
+    emptyTip.className = "codeagent-switch-empty-tip";
+    emptyTip.textContent = "点下面的按钮，可直接把当前配置另存为一组，后续就能一键切换。";
+    const emptyActions = document.createElement("div");
+    emptyActions.className = "codeagent-switch-empty-actions";
+    const createButton = document.createElement("button");
+    createButton.type = "button";
+    createButton.className = "settings-btn settings-btn-secondary";
+    createButton.textContent = createFromCurrentLabel;
+    createButton.addEventListener("click", () => {
+      selectCodeAgentSwitchDetail("profile", "");
+    });
+    emptyActions.appendChild(createButton);
+    empty.append(emptyTitle, emptyDetail, emptyTip, emptyActions);
     profileItems.appendChild(empty);
   }
 
@@ -3219,7 +3309,7 @@ function createCodeAgentSwitchListPanel(
     const row = createCodeAgentSwitchListButton(
       "profile",
       profile.id,
-      profile.id,
+      profile.name || profile.id,
       getCodeAgentSwitchProfileSummary(profile),
       {
         active: isActive,
@@ -3251,8 +3341,7 @@ function createCodeAgentSwitchListPanel(
     profileItems.appendChild(row);
   }
   profileSection.appendChild(profileItems);
-
-  listPanel.append(providerSection, profileSection);
+  listPanel.appendChild(profileSection);
   return listPanel;
 }
 
@@ -3497,6 +3586,17 @@ function createCodeAgentSwitchDetailPanel(
     codeAgentSwitchSelectedKind === "profile"
       ? profiles.find((profile) => profile.id === codeAgentSwitchSelectedId)
       : undefined;
+  const draftProfile =
+    codeAgentSwitchSelectedKind === "profile" && !selectedProfile && profiles.length === 0
+      ? buildCodeAgentSwitchDraftProfile(active, config)
+      : undefined;
+  const profileDetail = selectedProfile ?? draftProfile;
+  const providerDetailTargetId =
+    profileDetail?.providerId ?? active.activeProviderId ?? config.modelProvider;
+  const selectedProviderIsActive =
+    Boolean(selectedProvider?.id) &&
+    (selectedProvider?.id === active.activeProviderId ||
+      selectedProvider?.id === config.modelProvider);
   const isProviderDetail = codeAgentSwitchSelectedKind === "provider";
   const providerDetailEditor = isProviderDetail
     ? createCodeAgentSwitchProviderEditor(selectedProvider, {
@@ -3520,18 +3620,24 @@ function createCodeAgentSwitchDetailPanel(
     ? selectedProvider
       ? selectedProvider.name || selectedProvider.id
       : "新增 Provider"
-      : selectedProfile
-        ? selectedProfile.id
-        : "新增 Profile";
+      : profileDetail
+        ? getCodeAgentSwitchProfileLabel(profileDetail)
+        : "新增配置组";
   const subtitle = document.createElement("div");
   subtitle.className = "codeagent-switch-list-detail";
   subtitle.textContent = isProviderDetail
     ? selectedProvider
-      ? getCodeAgentSwitchProviderSummary(selectedProvider)
-      : "配置 Codex 访问的中转、官方登录态或兼容端点"
+      ? selectedProviderIsActive
+        ? `${getCodeAgentSwitchActiveConfigLabel(
+            active
+          )} 正在使用的底层 Provider · ${getCodeAgentSwitchProviderSummary(selectedProvider)}`
+        : getCodeAgentSwitchProviderSummary(selectedProvider)
+      : "配置当前配置组使用的底层 Provider 连接、登录态和接口参数"
     : selectedProfile
       ? getCodeAgentSwitchProfileSummary(selectedProfile)
-      : "组合 Provider、模型、reasoning 和 compact 限制";
+      : draftProfile
+        ? "当前仍在使用 Root 配置，这里已按当前配置预填，可直接另存为独立配置组。"
+        : "新增一组完整配置，绑定 Provider、模型、review、reasoning 和 compact 限制";
   titleWrap.append(title, subtitle);
 
   const pills = document.createElement("div");
@@ -3540,17 +3646,19 @@ function createCodeAgentSwitchDetailPanel(
   let selectedProfileIsActive = false;
   if (isProviderDetail) {
     const providerId = selectedProvider?.id ?? "";
-    if (providerId && (providerId === active.activeProviderId || providerId === config.modelProvider)) {
+    if (providerId && selectedProviderIsActive) {
       pills.appendChild(createCodeAgentSwitchPill("当前 Provider", "active"));
     }
   } else if (selectedProfile) {
     const match = getCodeAgentSwitchProfileMatch(selectedProfile.id);
     selectedProfileIsActive = match?.level === "exact";
     if (match?.level === "exact") {
-      pills.appendChild(createCodeAgentSwitchPill("当前 Profile", "active"));
+      pills.appendChild(createCodeAgentSwitchPill("当前配置组", "active"));
     } else if (match?.level === "partial") {
       pills.appendChild(createCodeAgentSwitchPill("部分匹配", "muted"));
     }
+  } else if (draftProfile) {
+    pills.appendChild(createCodeAgentSwitchPill("当前配置草稿", "muted"));
   }
   const heroAside = document.createElement("div");
   heroAside.className = "codeagent-switch-detail-hero-aside";
@@ -3572,25 +3680,33 @@ function createCodeAgentSwitchDetailPanel(
     });
     heroActions.appendChild(saveButton);
     heroAside.appendChild(heroActions);
-  } else if (selectedProfile) {
+  } else if (profileDetail) {
     const heroActions = document.createElement("div");
     heroActions.className = "codeagent-switch-detail-hero-actions";
-    const previewButton = document.createElement("button");
-    previewButton.type = "button";
-    previewButton.className = "settings-btn settings-btn-secondary";
-    previewButton.textContent = "预览";
-    previewButton.addEventListener("click", () => {
-      void executeCodeAgentSwitchAction("preview", selectedProfile.id);
-    });
-    const applyButton = document.createElement("button");
-    applyButton.type = "button";
-    applyButton.className = "settings-btn settings-btn-primary";
-    applyButton.textContent = selectedProfileIsActive ? "当前配置" : "设为当前";
-    applyButton.disabled = selectedProfileIsActive;
-    applyButton.addEventListener("click", () => {
-      void executeCodeAgentSwitchAction("apply", selectedProfile.id);
-    });
-    heroActions.append(previewButton, applyButton);
+    heroActions.appendChild(
+      createCodeAgentSwitchProviderKeyButton(
+        providerDetailTargetId,
+        providerDetailTargetId ? "当前 Provider / Key" : "新增 Provider / Key"
+      )
+    );
+    if (selectedProfile) {
+      const previewButton = document.createElement("button");
+      previewButton.type = "button";
+      previewButton.className = "settings-btn settings-btn-secondary";
+      previewButton.textContent = "预览";
+      previewButton.addEventListener("click", () => {
+        void executeCodeAgentSwitchAction("preview", selectedProfile.id);
+      });
+      const applyButton = document.createElement("button");
+      applyButton.type = "button";
+      applyButton.className = "settings-btn settings-btn-primary";
+      applyButton.textContent = selectedProfileIsActive ? "当前配置" : "设为当前";
+      applyButton.disabled = selectedProfileIsActive;
+      applyButton.addEventListener("click", () => {
+        void executeCodeAgentSwitchAction("apply", selectedProfile.id);
+      });
+      heroActions.append(previewButton, applyButton);
+    }
     heroAside.appendChild(heroActions);
   }
   head.append(titleWrap, heroAside);
@@ -3605,10 +3721,10 @@ function createCodeAgentSwitchDetailPanel(
             { label: "env_key", value: selectedProvider?.envKey }
           ]
         : [
-            { label: "ID", value: selectedProfile?.id ?? codeAgentSwitchSelectedId },
-            { label: "Provider", value: selectedProfile?.providerId },
-            { label: "Model", value: selectedProfile?.model },
-            { label: "Reasoning", value: selectedProfile?.modelReasoningEffort }
+            { label: "ID", value: profileDetail?.id ?? codeAgentSwitchSelectedId },
+            { label: "Provider", value: profileDetail?.providerId },
+            { label: "Model", value: profileDetail?.model },
+            { label: "Reasoning", value: profileDetail?.modelReasoningEffort }
           ]
     )
   );
@@ -3655,10 +3771,15 @@ function createCodeAgentSwitchDetailPanel(
   }
 
   const profileConfig = createCodeAgentSwitchDetailSection(
-    "Profile 配置",
-    "选择 Provider，并配置主模型、review 模型、reasoning、summary、verbosity 和 compact。"
+    "配置组",
+    "新增或调整一组完整配置。Provider 在这里作为依赖项选择，不再单独作为主切换对象。"
   );
-  profileConfig.appendChild(createCodeAgentSwitchProfileEditor(selectedProfile, providers));
+  profileConfig.appendChild(
+    createCodeAgentSwitchProfileEditor(selectedProfile, providers, {
+      draftProfile,
+      submitLabel: draftProfile ? "从当前配置生成配置组" : undefined
+    })
+  );
   detailPanel.appendChild(profileConfig);
   if (selectedProfile) {
     const switchActions = createCodeAgentSwitchDetailSection(
@@ -3698,7 +3819,7 @@ function createCodeAgentSwitchDetailPanel(
   if (selectedProfile) {
     const danger = createCodeAgentSwitchDetailSection(
       "危险区",
-      "删除 Profile 只移除预设，不会清理真实环境变量。",
+      "删除配置组只移除这组预设，不会清理真实环境变量。",
       "codeagent-switch-danger-zone"
     );
     const actions = document.createElement("div");
@@ -3706,7 +3827,7 @@ function createCodeAgentSwitchDetailPanel(
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "settings-btn settings-btn-secondary";
-    deleteButton.textContent = "删除 Profile";
+    deleteButton.textContent = "删除配置组";
     deleteButton.addEventListener("click", () => {
       void executeCodeAgentSwitchDeleteProfile(selectedProfile.id);
     });
@@ -3741,7 +3862,7 @@ function renderCodeAgentSwitchPanelV2(): void {
   title.textContent = activePluginPanel?.title || "CodeAgent Switch";
   const subtitle = document.createElement("p");
   subtitle.className = "webtools-tool-subtitle";
-  subtitle.textContent = "Codex 配置管理，Provider / Profile 可编辑，Claude 和 Gemini 适配器规划中";
+  subtitle.textContent = "Codex 配置组管理。新增的是一组完整配置，Provider 作为底层连接资源在配置组里选择。";
   titleGroup.append(title, subtitle);
 
   const toolbar = document.createElement("div");
@@ -3808,11 +3929,11 @@ function renderCodeAgentSwitchPanelV2(): void {
       : codeAgentSwitchData.savedRuntime
         ? "已保存 Codex Root 配置，写入前已备份当前配置。"
       : codeAgentSwitchData.savedProfile
-        ? "已保存 Profile，写入前已备份当前配置。"
+        ? "已保存配置组，写入前已备份当前配置。"
         : codeAgentSwitchData.deletedProvider
           ? "已删除 Provider，写入前已备份当前配置。"
           : codeAgentSwitchData.deletedProfile
-            ? "已删除 Profile，写入前已备份当前配置。"
+            ? "已删除配置组，写入前已备份当前配置。"
             : codeAgentSwitchData.restored
               ? "已从备份恢复 Codex 配置。"
               : codeAgentSwitchData.applied
@@ -3836,7 +3957,7 @@ function renderCodeAgentSwitchPanelV2(): void {
     createCodeAgentSwitchMetric("Review 模型", effective.reviewModel ?? ""),
     createCodeAgentSwitchMetric("Reasoning", effective.reasoning ?? ""),
     createCodeAgentSwitchMetric(
-      "当前 Profile",
+      "当前配置组",
       active.activeProfileId
         ? `${active.activeProfileId} · exact`
         : active.activeProfileMatch === "partial"
@@ -3844,14 +3965,14 @@ function renderCodeAgentSwitchPanelV2(): void {
           : ""
     ),
     createCodeAgentSwitchMetric("Provider 数量", String(providers.length)),
-    createCodeAgentSwitchMetric("Profile 数量", String(profiles.length))
+    createCodeAgentSwitchMetric("配置组数量", String(profiles.length))
   );
 
   const shell = document.createElement("div");
   shell.className = "codeagent-switch-shell codeagent-switch-master-detail";
   shell.append(
     createCodeAgentSwitchToolSidebar(),
-    createCodeAgentSwitchListPanel(providers, profiles, active, config),
+    createCodeAgentSwitchListPanel(profiles, active, config),
     createCodeAgentSwitchDetailPanel(providers, profiles, active, config)
   );
 
@@ -4380,6 +4501,33 @@ async function executeCodeAgentSwitchSaveProvider(container: HTMLElement): Promi
   });
 }
 
+function encodeCodeAgentSwitchUtf8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index] ?? 0);
+  }
+  return window.btoa(binary);
+}
+
+function buildCodeAgentSwitchPowerShellUserEnvScript(
+  envKey: string,
+  apiKey: string,
+  includeCurrentSession = false
+): string {
+  const envKeyBase64 = encodeCodeAgentSwitchUtf8Base64(envKey);
+  const apiKeyBase64 = encodeCodeAgentSwitchUtf8Base64(apiKey);
+  const lines = [
+    `$envName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${envKeyBase64}'))`,
+    `$envValue = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${apiKeyBase64}'))`
+  ];
+  if (includeCurrentSession) {
+    lines.push('Set-Item -Path ("Env:" + $envName) -Value $envValue');
+  }
+  lines.push("[System.Environment]::SetEnvironmentVariable($envName, $envValue, 'User')");
+  return lines.join("\n");
+}
+
 async function copyCodeAgentSwitchProviderKeyCommand(container: HTMLElement): Promise<void> {
   const providerId = getCodeAgentSwitchFormValue(container, "providerId");
   if (!providerId) {
@@ -4392,9 +4540,7 @@ async function copyCodeAgentSwitchProviderKeyCommand(container: HTMLElement): Pr
     return;
   }
   const envKey = deriveCodeAgentSwitchEnvKeyName(providerId);
-  const escapedKey = envKey.replace(/'/g, "''");
-  const escapedValue = apiKey.replace(/'/g, "''");
-  const text = `$env:${envKey}='${escapedValue}'\n[Environment]::SetEnvironmentVariable('${escapedKey}', '${escapedValue}', 'User')`;
+  const text = buildCodeAgentSwitchPowerShellUserEnvScript(envKey, apiKey, true);
   await copyCodeAgentSwitchText(
     "key",
     text,
@@ -4443,6 +4589,7 @@ async function executeCodeAgentSwitchSaveProfile(container: HTMLElement): Promis
   codeAgentSwitchSelectedId = profileId;
   codeAgentSwitchSelectionMode = "manual";
   await executeCodeAgentSwitchAction("save-profile", profileId, undefined, {
+    profileName: getCodeAgentSwitchFormValue(container, "profileName"),
     provider: getCodeAgentSwitchFormValue(container, "profileProvider"),
     model: getCodeAgentSwitchFormValue(container, "profileModel"),
     reviewModel: getCodeAgentSwitchFormValue(container, "profileReviewModel"),

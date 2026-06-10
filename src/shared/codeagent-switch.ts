@@ -19,6 +19,7 @@ export interface CodexProviderConfig {
 
 export interface CodexProfileConfig {
   id: string;
+  name?: string;
   providerId?: string;
   model?: string;
   reviewModel?: string;
@@ -34,6 +35,7 @@ export interface CodexProfileConfig {
 }
 
 export interface CodexParsedConfig {
+  profileName?: string;
   profile?: string;
   modelProvider?: string;
   model?: string;
@@ -88,6 +90,37 @@ export interface CodeAgentSwitchEnvCommands {
   powershellCurrent: string;
   powershellUser: string;
   bash: string;
+}
+
+function encodeCodeAgentSwitchBase64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index] ?? 0);
+  }
+  return globalThis.btoa(binary);
+}
+
+export function buildCodeAgentSwitchPowerShellUserEnvScript(
+  envKey: string,
+  apiKey: string,
+  includeCurrentSession = false
+): string {
+  const envKeyBase64 = encodeCodeAgentSwitchBase64Utf8(envKey);
+  const apiKeyBase64 = encodeCodeAgentSwitchBase64Utf8(apiKey);
+  const lines = [
+    `$envName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${envKeyBase64}'))`,
+    `$envValue = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${apiKeyBase64}'))`
+  ];
+  if (includeCurrentSession) {
+    lines.push('Set-Item -Path ("Env:" + $envName) -Value $envValue');
+  }
+  lines.push("[System.Environment]::SetEnvironmentVariable($envName, $envValue, 'User')");
+  return lines.join("\n");
 }
 
 export interface CodeAgentSwitchProfilePreview {
@@ -245,7 +278,8 @@ export type CodexProviderConfigInput = Omit<
   requiresOpenAiAuth?: boolean;
 };
 
-type TomlPrimitive = string | number | boolean;
+type TomlScalar = string | number | boolean;
+type TomlPrimitive = TomlScalar | TomlScalar[];
 
 const DOTTED_HEADER_PATTERN = /^([A-Za-z0-9_-]+)\.(.+)$/;
 const PROFILE_SWITCH_FIELD_ORDER = [
@@ -391,10 +425,71 @@ function stripTomlComment(line: string): string {
   return splitTomlComment(line).content;
 }
 
+function splitTomlArrayItems(value: string, lineNumber: number): string[] {
+  const items: string[] = [];
+  let buffer = "";
+  let inDoubleString = false;
+  let inLiteralString = false;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (escaped) {
+      buffer += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inDoubleString) {
+      buffer += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"' && !inLiteralString) {
+      inDoubleString = !inDoubleString;
+      buffer += char;
+      continue;
+    }
+    if (char === "'" && !inDoubleString) {
+      inLiteralString = !inLiteralString;
+      buffer += char;
+      continue;
+    }
+    if (char === "," && !inDoubleString && !inLiteralString) {
+      items.push(buffer.trim());
+      buffer = "";
+      continue;
+    }
+    buffer += char;
+  }
+
+  if (inDoubleString || inLiteralString || escaped) {
+    throw new Error(`Invalid TOML array at line ${lineNumber}`);
+  }
+
+  items.push(buffer.trim());
+  return items.filter((item) => item.length > 0);
+}
+
 function parseTomlValue(rawValue: string, lineNumber: number): TomlPrimitive {
   const value = rawValue.trim();
   if (!value) {
     throw new Error(`Invalid TOML value at line ${lineNumber}`);
+  }
+  if (value.startsWith("[")) {
+    if (!value.endsWith("]")) {
+      throw new Error(`Invalid TOML array at line ${lineNumber}`);
+    }
+    const inner = value.slice(1, -1).trim();
+    if (!inner) {
+      return [];
+    }
+    return splitTomlArrayItems(inner, lineNumber).map((item) => {
+      const parsed = parseTomlValue(item, lineNumber);
+      if (Array.isArray(parsed)) {
+        throw new Error(`Nested TOML arrays are not supported at line ${lineNumber}`);
+      }
+      return parsed;
+    });
   }
   if (value.startsWith('"')) {
     if (!value.endsWith('"') || value.length === 1) {
@@ -426,6 +521,11 @@ function parseTomlValue(rawValue: string, lineNumber: number): TomlPrimitive {
 function assignTopLevel(config: CodexParsedConfig, key: string, value: TomlPrimitive): void {
   const camelKey = toCamelCodexKey(key);
   switch (camelKey) {
+    case "name":
+      if (typeof value === "string") {
+        config.profileName = value;
+      }
+      return;
     case "modelProvider":
     case "profile":
     case "model":
@@ -590,6 +690,11 @@ function assignProfile(
 ): void {
   const camelKey = toCamelCodexKey(key);
   switch (camelKey) {
+    case "name":
+      if (typeof value === "string") {
+        profile.name = value;
+      }
+      return;
     case "modelProvider":
       if (typeof value === "string") {
         profile.providerId = value;
@@ -744,6 +849,9 @@ export function parseCodexTomlConfig(source: string): CodexParsedConfig {
 }
 
 function formatTomlValue(value: TomlPrimitive): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatTomlValue(item)).join(", ")}]`;
+  }
   if (typeof value === "string") {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
@@ -894,6 +1002,7 @@ function normalizeProviderInput(input: CodexProviderConfigInput): CodexProviderC
 function normalizeProfileInput(input: CodexProfileConfig): CodexProfileConfig {
   return {
     id: assertTomlSectionId(input.id, "Profile"),
+    name: normalizeOptionalString(input.name),
     providerId: normalizeOptionalString(input.providerId),
     model: normalizeOptionalString(input.model),
     reviewModel: normalizeOptionalString(input.reviewModel),
@@ -984,6 +1093,7 @@ function buildProviderSectionLines(provider: CodexProviderConfig): string[] {
 
 function buildProfileSectionLines(profile: CodexProfileConfig): string[] {
   const lines = [`[profiles.${formatTomlDottedId(profile.id)}]`];
+  appendTomlAssignment(lines, "name", profile.name);
   appendTomlAssignment(lines, "model_provider", profile.providerId);
   appendTomlAssignment(lines, "model", profile.model);
   appendTomlAssignment(lines, "review_model", profile.reviewModel);
@@ -1011,6 +1121,7 @@ function buildProfileSectionLines(profile: CodexProfileConfig): string[] {
 
 function buildStandaloneProfileLines(profile: CodexProfileConfig): string[] {
   const lines: string[] = [];
+  appendTomlAssignment(lines, "name", profile.name);
   appendTomlAssignment(lines, "model_provider", profile.providerId);
   appendTomlAssignment(lines, "model", profile.model);
   appendTomlAssignment(lines, "review_model", profile.reviewModel);
