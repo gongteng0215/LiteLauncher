@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -21,7 +21,7 @@
     "test:path-rules": "pnpm run build && node dist/test/result-path-filter.test.js",
     "test:plugins-visible": "pnpm run build && node dist/test/visible-plugins-regression.test.js",
     "test:plugin-visibility": "pnpm run build && node dist/test/plugin-visibility-config.test.js",
-    "test:regression": "pnpm run build && node dist/test/search-settings-regression.test.js && node dist/test/search-input-debounce.test.js && node dist/test/launcher-main-flow-regression.test.js && node dist/test/windows-app-alias-regression.test.js && node dist/test/result-path-filter.test.js && node dist/test/visible-plugins-regression.test.js && node dist/test/plugin-visibility-config.test.js && node dist/test/search-section-grid-style.test.js && node dist/test/plugin-panel-impls-regression.test.js && node dist/test/image-prompt-builder.test.js && node dist/test/codeagent-switch-parser.test.js && node dist/test/codeagent-switch-plugin.test.js && node dist/test/start-script-regression.test.js",
+    "test:regression": "pnpm run build && node dist/test/search-settings-regression.test.js && node dist/test/search-input-debounce.test.js && node dist/test/launcher-main-flow-regression.test.js && node dist/test/windows-app-alias-regression.test.js && node dist/test/result-path-filter.test.js && node dist/test/visible-plugins-regression.test.js && node dist/test/plugin-visibility-config.test.js && node dist/test/search-section-grid-style.test.js && node dist/test/plugin-panel-impls-regression.test.js && node dist/test/image-prompt-builder.test.js && node dist/test/codeagent-switch-parser.test.js && node dist/test/codeagent-switch-plugin.test.js && node dist/test/start-script-regression.test.js && node dist/test/app-updater-source.test.js",
     "test:cashflow:perf": "pnpm run build && node dist/test/cashflow-performance.test.js",
     "check:encoding": "node scripts/check-encoding.cjs",
     "pack": "pnpm run build && node scripts/clean-release.cjs && electron-builder --dir --publish never",

@@ -8,6 +8,7 @@ import {
 import { AppUpdaterStatus } from "../shared/types";
 
 const AUTO_UPDATE_CHECK_DELAY_MS = 12_000;
+const AUTO_UPDATE_RECHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
 function truncateText(value: string, maxLength = 600): string {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -46,6 +47,7 @@ function formatReleaseNotes(releaseNotes: unknown): string | undefined {
       if (!text) {
         return "";
       }
+
       return version ? `${version}: ${text}` : text;
     })
     .filter(Boolean);
@@ -114,12 +116,13 @@ export function createAppUpdater(): AppUpdaterProvider {
             ? "开发环境暂不支持自动更新，请打包后再验证。"
             : process.platform === "darwin"
               ? "当前构建暂未启用自动更新，请确认发布资产包含 latest-mac.yml。"
-            : process.platform !== "win32"
-              ? "当前仅 Windows NSIS 安装版和 macOS 打包版支持自动更新。"
-              : "Portable 版本暂不支持自动更新，请手动下载新版本。"
+              : process.platform !== "win32"
+                ? "当前仅 Windows NSIS 安装版和 macOS 打包版支持自动更新。"
+                : "Portable 版本暂不支持自动更新，请手动下载新版本。"
       };
 
   let startupCheckScheduled = false;
+  let activeCheckPromise: Promise<AppUpdaterStatus> | null = null;
 
   const setStatus = (next: Partial<AppUpdaterStatus>): AppUpdaterStatus => {
     status = {
@@ -216,27 +219,37 @@ export function createAppUpdater(): AppUpdaterProvider {
         return { ...status };
       }
 
-      try {
-        const result = await autoUpdater.checkForUpdates();
-        if (result?.isUpdateAvailable && result.downloadPromise) {
-          await result.downloadPromise.catch(() => {
-            // Updater events already carry the terminal state.
-          });
-        }
-      } catch (error) {
-        const detail =
-          error instanceof Error && error.message
-            ? error.message
-            : "检查更新失败";
-        setStatus({
-          phase: "error",
-          downloaded: false,
-          progressPercent: undefined,
-          message: truncateText(detail)
-        });
+      if (activeCheckPromise) {
+        return activeCheckPromise;
       }
 
-      return { ...status };
+      activeCheckPromise = (async () => {
+        try {
+          const result = await autoUpdater.checkForUpdates();
+          if (result?.isUpdateAvailable && result.downloadPromise) {
+            await result.downloadPromise.catch(() => {
+              // Updater events already carry the terminal state.
+            });
+          }
+        } catch (error) {
+          const detail =
+            error instanceof Error && error.message
+              ? error.message
+              : "检查更新失败";
+          setStatus({
+            phase: "error",
+            downloaded: false,
+            progressPercent: undefined,
+            message: truncateText(detail)
+          });
+        } finally {
+          activeCheckPromise = null;
+        }
+
+        return { ...status };
+      })();
+
+      return activeCheckPromise;
     },
     async installUpdateNow(): Promise<boolean> {
       if (!supported || status.phase !== "downloaded" || !status.downloaded) {
@@ -255,9 +268,16 @@ export function createAppUpdater(): AppUpdaterProvider {
       }
 
       startupCheckScheduled = true;
-      setTimeout(() => {
+
+      const startupTimer = setTimeout(() => {
         void provider.checkForUpdates();
       }, AUTO_UPDATE_CHECK_DELAY_MS);
+      startupTimer.unref?.();
+
+      const periodicTimer = setInterval(() => {
+        void provider.checkForUpdates();
+      }, AUTO_UPDATE_RECHECK_INTERVAL_MS);
+      periodicTimer.unref?.();
     }
   };
 

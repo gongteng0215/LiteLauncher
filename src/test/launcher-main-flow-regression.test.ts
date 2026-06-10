@@ -370,7 +370,7 @@ test("windows installer artifact naming stays aligned with updater metadata", ()
 });
 
 test("verify-release-output accepts mac updater metadata with dmg and zip artifacts", () => {
-  const version = "1.0.23";
+  const version = "1.0.24";
   for (const [zipName, dmgName] of [
     [`LiteLauncher-${version}-mac.zip`, `LiteLauncher-${version}.dmg`],
     [`LiteLauncher-${version}-arm64-mac.zip`, `LiteLauncher-${version}-arm64.dmg`]
@@ -404,7 +404,7 @@ test("verify-release-output accepts mac updater metadata with dmg and zip artifa
 });
 
 test("verify-release-output accepts combined mac updater metadata with x64 and arm64 files", () => {
-  const version = "1.0.23";
+  const version = "1.0.24";
   const result = runReleaseVerificationInTempProject(
     "mac-release",
     version,
