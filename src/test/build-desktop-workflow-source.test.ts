@@ -75,33 +75,53 @@ test("desktop build workflow avoids setup-node's built-in pnpm cache path", () =
   );
 });
 
-test("desktop build workflow gates mac publish-ready artifacts on signing inputs", () => {
+test("desktop build workflow keeps tag-triggered mac builds releasable even without Apple signing secrets", () => {
   const workflow = readWorkflow();
 
   assert.match(
     workflow,
     /if:\s*\$\{\{\s*github\.event_name == 'push'\s*&&\s*startsWith\(github\.ref,\s*'refs\/tags\/v'\)\s*\}\}/,
-    "tag-triggered mac release packaging should validate Apple signing inputs before continuing"
+    "tag-triggered mac release packaging should still scope the signing export step to release tags"
+  );
+  assert.match(
+    workflow,
+    /if \[ -n "\$\{\{\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*\}\}" \] && \[ -n "\$\{\{\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*\}\}" \] && \[ -n "\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}" \]; then/,
+    "workflow should only export Apple signing inputs when all required secrets are available"
   );
   assert.match(
     workflow,
     /echo "CSC_LINK=\$\{\{\s*secrets\.APPLE_CERTIFICATE_P12_BASE64\s*\}\}"/,
-    "workflow should export the Apple certificate secret into GITHUB_ENV before tag-release packaging"
+    "workflow should still export the Apple certificate secret into GITHUB_ENV when signing is configured"
   );
   assert.match(
     workflow,
     /echo "CSC_KEY_PASSWORD=\$\{\{\s*secrets\.APPLE_CERTIFICATE_PASSWORD\s*\}\}"/,
-    "workflow should export the Apple certificate password into GITHUB_ENV before tag-release packaging"
+    "workflow should still export the Apple certificate password into GITHUB_ENV when signing is configured"
   );
   assert.match(
     workflow,
     /echo "APPLE_TEAM_ID=\$\{\{\s*secrets\.APPLE_TEAM_ID\s*\}\}"/,
-    "workflow should export the Apple team id into GITHUB_ENV before tag-release packaging"
+    "workflow should still export the Apple team id into GITHUB_ENV when signing is configured"
+  );
+  assert.match(
+    workflow,
+    /::warning::Apple signing secrets are missing; continuing with unsigned macOS release artifacts\./,
+    "workflow should warn and keep building unsigned macOS assets when Apple signing secrets are absent"
   );
   assert.doesNotMatch(
     workflow,
     /if:\s*\$\{\{[^}]*secrets\./,
     "workflow should not reference secrets directly inside if expressions because GitHub rejects that configuration before jobs start"
+  );
+  assert.doesNotMatch(
+    workflow,
+    /Missing required Apple signing secrets for tag release packaging\./,
+    "workflow should not hard-fail tagged mac builds just because optional Apple signing secrets are missing"
+  );
+  assert.doesNotMatch(
+    workflow,
+    /Expected secrets: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_TEAM_ID/,
+    "workflow should avoid turning missing Apple signing secrets into a release-blocking preflight error"
   );
   assert.doesNotMatch(
     workflow,

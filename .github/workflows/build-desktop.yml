@@ -84,21 +84,15 @@ jobs:
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
         run: |
-          {
-            echo "CSC_LINK=${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}"
-            echo "CSC_KEY_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
-            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
-          } >> "$GITHUB_ENV"
-
-      - name: Verify mac signing inputs
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${CSC_LINK:-}" ] || [ -z "${CSC_KEY_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
-            echo "Missing required Apple signing secrets for tag release packaging."
-            echo "Expected secrets: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_TEAM_ID"
-            exit 1
+          if [ -n "${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}" ] && [ -n "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" ] && [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            {
+              echo "CSC_LINK=${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}"
+              echo "CSC_KEY_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+              echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+            } >> "$GITHUB_ENV"
+            echo "Using Apple signing secrets for macOS release packaging."
+          else
+            echo "::warning::Apple signing secrets are missing; continuing with unsigned macOS release artifacts."
           fi
 
       - name: Build macOS x64 + arm64 packages
