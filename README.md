@@ -1,7 +1,7 @@
 # LiteLauncher
 
-Last updated: 2026-05-29  
-Version baseline: `v1.0.17`
+Last updated: 2026-06-17
+Version baseline: `v1.0.25`
 
 LiteLauncher is a lightweight desktop launcher built with `Electron + TypeScript + SQLite`.
 It focuses on one fast loop: **invoke -> search -> run**.
@@ -27,6 +27,7 @@ It combines launcher search, clipboard history, plugin panels, indexing controls
   - PATH command aliases
   - StartApps / WindowsApps activation
   - example: `codex`
+- Dynamic Windows app results such as `codex` can be pinned and restored even when they are resolved outside the static catalog.
 - Result card context menu:
   - Pin / Unpin
   - Run as administrator
@@ -36,6 +37,7 @@ It combines launcher search, clipboard history, plugin panels, indexing controls
   - Index Scan
   - System
   - Error Logs
+- Settings update notes render GitHub release notes as constrained rich text instead of showing raw HTML tags.
 - Index controls:
   - Program Files scanning
   - custom scan directories
@@ -289,7 +291,7 @@ pnpm run check:encoding
 
 ### 当前下一步重点
 
-1. 继续拆分 `src/renderer/renderer.ts` 中的剩余执行 helper 与共享状态逻辑。
-2. 继续推进插件面板高 DPI 回归和更细布局断言。
-3. 推进 Cashflow `cash review` 与 WebTools 交互收敛。
-4. 继续做 UI 文案与历史编码巡检；自动更新验证、签名 / 公证保持低优先级。
+1. 先发布 `v1.0.25` 补丁版，覆盖更新说明富文本显示和动态应用置顶失败。
+2. 发布后用线上 `v1.0.24` 客户端实测检查到 `v1.0.25`，确认自动更新发现、下载和安装链路。
+3. 继续做设置页诊断收口、CodeAgent Switch 小范围 UI 复核、历史文案与编码巡检。
+4. `renderer.ts` 大重构、Cashflow `cash review` 和大型新插件继续后置。

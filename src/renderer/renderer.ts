@@ -72,6 +72,106 @@ function shouldDebounceSearchRefresh(
   return Boolean(query.trim());
 }
 
+const APP_UPDATER_RELEASE_NOTES_ALLOWED_TAGS = new Set<string>([
+  "a",
+  "blockquote",
+  "br",
+  "code",
+  "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "strong",
+  "ul"
+]);
+const APP_UPDATER_RELEASE_NOTES_HTML_PATTERN = /<\/?[a-z][\s\S]*>/i;
+const APP_UPDATER_RELEASE_NOTES_SAFE_HREF_PATTERN = /^(https?:|mailto:)/i;
+
+function sanitizeAppUpdaterReleaseNotesNode(node: Node): Node | null {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return document.createTextNode(node.textContent ?? "");
+  }
+
+  if (!(node instanceof HTMLElement)) {
+    return null;
+  }
+
+  const tagName = node.tagName.toLowerCase();
+  const fragment = document.createDocumentFragment();
+  for (const child of Array.from(node.childNodes)) {
+    const sanitizedChild = sanitizeAppUpdaterReleaseNotesNode(child);
+    if (sanitizedChild) {
+      fragment.appendChild(sanitizedChild);
+    }
+  }
+
+  if (!APP_UPDATER_RELEASE_NOTES_ALLOWED_TAGS.has(tagName)) {
+    return fragment;
+  }
+
+  const element = document.createElement(tagName);
+  if (tagName === "a") {
+    const href = String(node.getAttribute("href") ?? "").trim();
+    if (APP_UPDATER_RELEASE_NOTES_SAFE_HREF_PATTERN.test(href)) {
+      element.setAttribute("href", href);
+      element.setAttribute("target", "_blank");
+      element.setAttribute("rel", "noreferrer noopener");
+    }
+  }
+
+  element.appendChild(fragment);
+  return element;
+}
+
+function renderAppUpdaterReleaseNotes(
+  container: HTMLElement,
+  releaseNotes?: string
+): void {
+  const notes = String(releaseNotes ?? "").trim();
+  container.replaceChildren();
+  container.removeAttribute("data-empty");
+  container.removeAttribute("data-format");
+
+  if (!notes) {
+    container.dataset.empty = "true";
+    container.dataset.format = "plain";
+    container.textContent =
+      "未附带更新说明时，可前往 GitHub Releases 查看完整发布日志。";
+    return;
+  }
+
+  if (!APP_UPDATER_RELEASE_NOTES_HTML_PATTERN.test(notes)) {
+    container.dataset.format = "plain";
+    container.textContent = notes;
+    return;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = notes;
+
+  const fragment = document.createDocumentFragment();
+  for (const child of Array.from(template.content.childNodes)) {
+    const sanitizedChild = sanitizeAppUpdaterReleaseNotesNode(child);
+    if (sanitizedChild) {
+      fragment.appendChild(sanitizedChild);
+    }
+  }
+
+  if (!fragment.childNodes.length) {
+    container.dataset.format = "plain";
+    container.textContent = notes;
+    return;
+  }
+
+  container.dataset.format = "rich";
+  container.appendChild(fragment);
+}
+
 type PinToggleResult = import("../shared/types").PinToggleResult;
 
 type PanelMode =
@@ -2632,9 +2732,7 @@ function renderSettingsPanel(): void {
 
   const updaterNotes = document.createElement("div");
   updaterNotes.className = "settings-system-update-notes";
-  updaterNotes.textContent = appUpdaterStatus.releaseNotes
-    ? appUpdaterStatus.releaseNotes
-    : "未附带更新说明时，可前往 GitHub Releases 查看完整发布日志。";
+  renderAppUpdaterReleaseNotes(updaterNotes, appUpdaterStatus.releaseNotes);
 
   const updaterActions = document.createElement("div");
   updaterActions.className = "settings-inline-actions settings-system-update-actions";

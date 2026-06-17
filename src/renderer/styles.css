@@ -806,7 +806,82 @@ body {
   color: rgba(233, 242, 255, 0.82);
   font-size: 11px;
   line-height: 1.45;
+  display: grid;
+  gap: 5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.settings-system-update-notes[data-format="plain"] {
   white-space: pre-wrap;
+}
+
+.settings-system-update-notes[data-empty="true"] {
+  color: rgba(233, 242, 255, 0.7);
+}
+
+.settings-system-update-notes > :first-child {
+  margin-top: 0;
+}
+
+.settings-system-update-notes > :last-child {
+  margin-bottom: 0;
+}
+
+.settings-system-update-notes h1,
+.settings-system-update-notes h2,
+.settings-system-update-notes h3,
+.settings-system-update-notes h4 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: rgba(245, 249, 255, 0.94);
+}
+
+.settings-system-update-notes p,
+.settings-system-update-notes ul,
+.settings-system-update-notes ol,
+.settings-system-update-notes blockquote,
+.settings-system-update-notes pre {
+  margin: 0;
+}
+
+.settings-system-update-notes ul,
+.settings-system-update-notes ol {
+  padding-left: 16px;
+}
+
+.settings-system-update-notes li + li {
+  margin-top: 3px;
+}
+
+.settings-system-update-notes a {
+  color: rgba(133, 203, 255, 0.96);
+  text-decoration: underline;
+}
+
+.settings-system-update-notes code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(18, 27, 42, 0.88);
+  color: rgba(244, 247, 255, 0.95);
+  font-size: 10px;
+  font-family: "Consolas", "SFMono-Regular", monospace;
+}
+
+.settings-system-update-notes pre {
+  overflow-x: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(10, 16, 26, 0.88);
+}
+
+.settings-system-update-notes pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
 }
 
 .settings-system-update-actions {

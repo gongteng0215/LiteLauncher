@@ -1,8 +1,10 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-06-04
+更新时间：2026-06-17
 
 ## 最近完成
+- 收口 `v1.0.25` 补丁版候选：修复设置页自动更新说明把 GitHub Release HTML 当纯文本显示的问题，新增受限富文本渲染和紧凑样式，覆盖标题、列表、链接、行内代码和代码块；同步补了 `search-section-grid-style` 回归，避免后续再次回退到 `textContent` 直出标签。本轮按顺序完成 `pnpm run build`、`node dist/test/search-section-grid-style.test.js`、`node dist/test/app-updater-source.test.js`，结果均通过。
+- 修复 `Codex` 等 Windows Store / StartApps / PATH alias 动态应用偶发置顶失败：根因是主进程允许动态搜索结果通过校验，但保存后又只按静态 catalog ID 清洗，导致 `app:startapp:codex` 这类 ID 被立即删除并返回“当前结果已过期”。现在置顶 ID 清洗规则会识别“静态 catalog 或动态可重新解析”的项目，置顶列表读取时也会按 ID 重新解析动态应用；同步补了 `normalizePinnedItemIds` 回归。本轮按顺序完成 `pnpm run build`、`node dist/test/launcher-main-flow-regression.test.js`、`node dist/test/windows-app-alias-regression.test.js`、`node dist/test/renderer-pinning-regression.test.js`、`node dist/test/renderer-pinning-status.test.js`，结果均通过。
 - 准备发布 `v1.0.21`：将本轮收口到一版可直接发布的桌面更新，当前范围已覆盖置顶稳定性、搜索输入键盘检索规则、自动更新 / 发布链路、密码工具紧凑布局，以及 CodeAgent Switch 的新版 Codex 配置编辑与预览。已按串行顺序完成 `pnpm run build`、搜索 / 置顶 / 可见插件 / CodeAgent Switch / workflow 护栏相关 `dist` 回归、`e2e-launcher-smoke` / `e2e-search-layout-smoke` / `e2e-plugin-panels-smoke` / `e2e-plugin-panel-layout-smoke`，并额外完成 `pnpm run dist:win` 本地打包校验；其中还补修了 Windows NSIS 安装包命名与 `latest.yml` 自动更新元数据一致性，当前目标将改为对齐新的 `release/LiteLauncher-Setup-1.0.21.exe`。
 - CodeAgent Switch 继续收口 Root 配置编辑体验：Root 区现在直接内嵌“Root 完整预览”，会按当前表单值实时生成顶层 TOML，并在每一行后追加字段说明；同时把长字段名改成更短的可扫描标签，避免 `model_supports_reasoning_summaries` 这类长 key 在窄宽度下互相挤压。当前 `当前 Root 落盘内容` 也会带同样的行尾说明，方便对照“正在编辑的值”和“已经写进文件的值”。本轮按顺序完成 `pnpm run build`、`node dist/test/plugin-panel-impls-regression.test.js`、`node dist/test/codeagent-switch-plugin.test.js`，结果均通过。
 - CodeAgent Switch 本轮补齐新版 Codex Root 配置编辑能力：共享层新增官方常用顶层字段解析与写回，现已支持在面板内直接编辑并预览 `model_provider`、`model`、`review_model`、`openai_base_url`、`model_reasoning_effort`、`plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`model_supports_reasoning_summaries`、`service_tier`、`web_search`、`model_context_window`、`model_auto_compact_token_limit`、`approval_policy`、`approvals_reviewer`、`allow_login_shell`、`sandbox_mode`、`default_permissions`、`disable_response_storage`、`network_access`、`personality`、`project_doc_max_bytes`、`tool_output_token_limit`、`windows_wsl_setup_acknowledged`、`[windows] sandbox / sandbox_private_desktop`、`[history] persistence / max_bytes`；同时保存链路支持显式清空字段时从 `config.toml` 中移除旧值，避免表单恢复默认后文件残留历史配置。面板里的“运行权限”区已升级为分组式 `Root 配置` 编辑器，并与“当前 Root 配置”源码预览保持同步。按顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
@@ -110,7 +112,7 @@
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.21`
+- 应用版本：`v1.0.25`
 - 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
@@ -119,7 +121,8 @@
 - 搜索首页布局回归：已接入 `pnpm run test:e2e:smoke`
 - 新增默认插件与 Crypto / JWT UI smoke：已接入 `pnpm run test:e2e:smoke`
 - Windows Store Codex 真机回归：`pnpm run test:e2e:windows-codex`
-- Windows 应用别名（如 `codex`）已支持搜索与启动
+- Windows 应用别名（如 `codex`）已支持搜索、启动、置顶和跨重启恢复
+- 自动更新说明支持受限富文本显示，避免 release notes HTML 标签原样出现在设置页
 
 ## 当前 worktree 状态
 
@@ -140,11 +143,8 @@
 
 ## 下一步建议
 
-1. 先用 `pnpm dev` 对 CodeAgent Switch 最新 Root 区做一轮真实界面复核，重点看短标签、字段说明、内嵌完整预览和窄宽度下是否还有堆叠。
-2. 在确认 Root 区稳定后，继续补 CodeAgent Switch 的“最终完整配置预览”语义，把 Root 表单预览与整份 `config.toml` 结果的边界再说清楚，避免用户混淆“Root 预览”和“最终切换预览”。
-3. 继续直接在 `main` 上拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与共享边界，把 `panel-baseline-round2` 时代遗留但未继续保留的拆分目标转成主线上的持续收口工作；如需追溯旧现场，可参考 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/working-tree.patch`。
-4. 继续拆分 `src/renderer/renderer.ts` 中剩余插件状态定义与尚未迁出的 Clipboard / Cashflow 等区域，参考 `docs/superpowers/plans/2026-05-26-renderer-plugin-state-extraction.md`。
-5. 后续继续优先做源码回归 + `pnpm run build`，凡依赖 `dist` 的定向测试都串行执行，smoke / E2E 放到相关批次收尾。
-6. 继续做非新增插件范围的 UI 文案与历史编码巡检。
-7. 推进 Cashflow `cash review` 复盘模块。
-8. 自动更新验证、签名 / 公证统一放到自用阶段低优先级收尾。
+1. 先按 `docs/version-roadmap.md` 推进 `v1.0.25` 补丁版，把更新日志显示和动态应用置顶两个真实问题发布到线上验证。
+2. 发版前继续遵循“源码回归 -> `pnpm run build` -> 串行 `node dist/test/...` -> 必要时再 smoke / 打包”的顺序，避免 stale `dist` 假阳性。
+3. `v1.0.25` 发版前至少做一次从线上 `v1.0.24` 检查到 `v1.0.25` 的自动更新实测，并复核 GitHub Release 资产完整性。
+4. `v1.0.26` 建议优先做自动更新端到端验证、设置页诊断收口、CodeAgent Switch 小范围 UI 复核和历史文案巡检。
+5. `Cashflow / Clipboard Workbench` 大扩展与 `renderer.ts` 大重构继续后置，优先避免补丁版失控。

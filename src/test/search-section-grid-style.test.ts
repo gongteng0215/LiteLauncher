@@ -261,4 +261,24 @@ test("settings panel exposes app update status and actions in the system section
     /\.settings-system-update-notes\s*\{/,
     "system section should define compact release-notes styling for updater details"
   );
+  assert.doesNotMatch(
+    rendererSource,
+    /updaterNotes\.textContent\s*=\s*appUpdaterStatus\.releaseNotes/,
+    "release notes should not be rendered as literal tags when updater metadata contains rich text"
+  );
+  assert.match(
+    rendererSource,
+    /renderAppUpdaterReleaseNotes\(\s*updaterNotes\s*,\s*appUpdaterStatus\.releaseNotes\s*\)/,
+    "system section should delegate updater notes rendering to a dedicated rich-text helper"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-notes h1,/,
+    "release notes styling should cover headings when updater metadata contains structured content"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-notes code\s*\{/,
+    "release notes styling should keep inline code readable inside updater details"
+  );
 });

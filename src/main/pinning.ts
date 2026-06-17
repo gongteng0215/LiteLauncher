@@ -17,6 +17,41 @@ export type PinRequestValidationResult =
       reason: PinRequestValidationReason;
     };
 
+export function normalizePinnedItemIds(
+  input: unknown,
+  isResolvable?: (itemId: string) => boolean,
+  maxItems = 200
+): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+
+    const id = raw.trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+
+    if (isResolvable && !isResolvable(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    result.push(id);
+    if (result.length >= maxItems) {
+      break;
+    }
+  }
+
+  return result;
+}
+
 export function validatePinnedItemRequest(
   itemId: string,
   catalogIds: ReadonlySet<string>,

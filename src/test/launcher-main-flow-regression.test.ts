@@ -10,7 +10,10 @@ import { IPC_CHANNELS } from "../shared/channels";
 import { LaunchItem } from "../shared/types";
 import { executeItem } from "../main/actions";
 import { buildCatalogWithOptions } from "../main/catalog";
-import { validatePinnedItemRequest } from "../main/pinning";
+import {
+  normalizePinnedItemIds,
+  validatePinnedItemRequest
+} from "../main/pinning";
 import {
   getVisiblePluginIds,
   setVisiblePluginIds
@@ -547,6 +550,28 @@ test("validatePinnedItemRequest keeps path-alias hydration scoped to the live re
     assert.equal(validated.normalizedId, "app:path-alias:codex");
     assert.equal(validated.hydratedItem?.id, "app:path-alias:codex");
   }
+});
+
+test("normalizePinnedItemIds keeps dynamically resolvable app ids", () => {
+  const resolvableIds = new Set([
+    "app:startapp:codex",
+    "app:path-alias:codex",
+    "app:C:\\Program Files\\Example\\Example.exe"
+  ]);
+
+  assert.deepEqual(
+    normalizePinnedItemIds(
+      [
+        " app:startapp:codex ",
+        "app:path-alias:codex",
+        "app:startapp:codex",
+        "app:missing"
+      ],
+      (itemId) => resolvableIds.has(itemId),
+      10
+    ),
+    ["app:startapp:codex", "app:path-alias:codex"]
+  );
 });
 
 test(

@@ -298,7 +298,10 @@ model = "gpt-5.5"
   };
   assert.equal(payload.data?.config?.providers?.[0]?.name, "淘宝1");
   assert.equal(payload.data?.preview?.profileId, "淘宝1");
-  assert.doesNotMatch(payload.data?.preview?.newSource ?? "", /娣|閾|�/);
+  assert.doesNotMatch(
+    payload.data?.preview?.newSource ?? "",
+    new RegExp(["娣", "閾", String.fromCharCode(0xfffd)].join("|"))
+  );
 });
 
 test("CodeAgent Switch applies a profile switch with backup and validation", async () => {

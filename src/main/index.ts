@@ -26,7 +26,7 @@ import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { filterItemsByPathRules } from "./path-rule-filter";
-import { validatePinnedItemRequest } from "./pinning";
+import { normalizePinnedItemIds, validatePinnedItemRequest } from "./pinning";
 import {
   ClipboardWorkbenchService,
   setClipboardWorkbenchService
@@ -918,40 +918,6 @@ function areStringArraysSetEqual(left: string[], right: string[]): boolean {
   return true;
 }
 
-function normalizePinnedItemIds(
-  input: unknown,
-  catalogIds?: Set<string>
-): string[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of input) {
-    if (typeof raw !== "string") {
-      continue;
-    }
-
-    const id = raw.trim();
-    if (!id || seen.has(id)) {
-      continue;
-    }
-
-    if (catalogIds && !catalogIds.has(id)) {
-      continue;
-    }
-
-    seen.add(id);
-    result.push(id);
-    if (result.length >= PINNED_ITEMS_MAX) {
-      break;
-    }
-  }
-
-  return result;
-}
-
 async function loadPinnedItemIds(
   db: LiteDatabase,
   catalogIds: Set<string>
@@ -962,7 +928,11 @@ async function loadPinnedItemIds(
   }
 
   try {
-    return normalizePinnedItemIds(JSON.parse(raw), catalogIds);
+    return normalizePinnedItemIds(
+      JSON.parse(raw),
+      (itemId) => isPinnedItemIdResolvable(itemId, catalogIds),
+      PINNED_ITEMS_MAX
+    );
   } catch {
     return [];
   }
@@ -981,7 +951,11 @@ async function persistCatalogSnapshot(
   catalogInitialized = true;
 
   const catalogIdSet = new Set(catalog.map((item) => item.id));
-  const normalizedPinned = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+  const normalizedPinned = normalizePinnedItemIds(
+    pinnedItemIds,
+    (itemId) => isPinnedItemIdResolvable(itemId, catalogIdSet),
+    PINNED_ITEMS_MAX
+  );
   const pinnedChanged = !areStringArraysEqual(normalizedPinned, pinnedItemIds);
   if (pinnedChanged) {
     pinnedItemIds = normalizedPinned;
@@ -1155,7 +1129,7 @@ function getPinnedItemsFromCatalog(limit: number): LaunchItem[] {
   const picked: LaunchItem[] = [];
 
   for (const itemId of pinnedItemIds) {
-    const item = byId.get(itemId);
+    const item = byId.get(itemId) ?? findDynamicPinCandidate(itemId);
     if (!item) {
       continue;
     }
@@ -1172,6 +1146,22 @@ function getPinnedItemsFromCatalog(limit: number): LaunchItem[] {
   }
 
   return picked;
+}
+
+function isPinnedItemIdResolvable(
+  itemId: string,
+  catalogIdSet = new Set(catalog.map((item) => item.id))
+): boolean {
+  const normalizedId = String(itemId ?? "").trim();
+  if (!normalizedId) {
+    return false;
+  }
+
+  if (catalogIdSet.has(normalizedId)) {
+    return true;
+  }
+
+  return Boolean(findDynamicPinCandidate(normalizedId));
 }
 
 function mergeSearchItems(
@@ -1345,7 +1335,11 @@ async function setItemPinned(
       pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
     }
 
-    pinnedItemIds = normalizePinnedItemIds(pinnedItemIds, catalogIdSet);
+    pinnedItemIds = normalizePinnedItemIds(
+      pinnedItemIds,
+      (itemId) => isPinnedItemIdResolvable(itemId, catalogIdSet),
+      PINNED_ITEMS_MAX
+    );
     const persisted = pinnedItemIds.includes(normalizedId);
     if (pinned && !persisted) {
       await persistPinnedItemIds(db);
