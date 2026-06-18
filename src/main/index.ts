@@ -61,6 +61,7 @@ const FALLBACK_SHORTCUTS = ["Ctrl+Space", "Alt+Shift+Space", "Ctrl+Alt+Space"];
 const DEBUG_KEYS_ENABLED = process.env.LITELAUNCHER_DEBUG_KEYS === "1";
 const DEV_MODE = !app.isPackaged && process.env.LITELAUNCHER_DEV === "1";
 const E2E_MODE = process.env.LITELAUNCHER_E2E === "1";
+const E2E_REAL_BLUR_MODE = process.env.LITELAUNCHER_E2E_REAL_BLUR === "1";
 const E2E_USER_DATA_DIR = (process.env.LITELAUNCHER_E2E_USER_DATA_DIR ?? "").trim();
 const REPLACE_INSTANCE_FLAG = "--replace-instance";
 const APP_USER_MODEL_ID = "LiteLauncher";
@@ -1418,7 +1419,7 @@ async function bootstrap(): Promise<void> {
   });
   launcherWindow.on("blur", () => {
     if (
-      E2E_MODE ||
+      (E2E_MODE && !E2E_REAL_BLUR_MODE) ||
       appQuitting ||
       launcherWindow.isDestroyed() ||
       !launcherWindow.isVisible() ||

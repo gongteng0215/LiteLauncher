@@ -244,6 +244,7 @@ declare global {
       getPluginItems(): Promise<LaunchItem[]>;
       getAppVersion(): Promise<string>;
       getAppUpdaterStatus(): Promise<AppUpdaterStatus>;
+      setE2EAppUpdaterCheckFailure(message: string | null): Promise<boolean>;
       getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
       setSearchDisplayConfig(
         config: Partial<SearchDisplayConfig>

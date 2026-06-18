@@ -23,6 +23,9 @@ type MainWindowSnapshot = {
 export interface LaunchE2ESessionOptions {
   userDataDir?: string;
   cleanupUserDataDir?: boolean;
+  executablePath?: string;
+  workingDirectory?: string;
+  enableRealBlurHandling?: boolean;
 }
 
 function sanitizeArtifactName(name: string): string {
@@ -89,6 +92,20 @@ export async function waitForMode(page: Page, mode: string): Promise<void> {
   );
 }
 
+export async function waitForStatusText(
+  page: Page,
+  expectedText: string
+): Promise<void> {
+  await page.waitForFunction(
+    (text) =>
+      (document.querySelector<HTMLElement>("#status-text")?.textContent ?? "").includes(
+        text
+      ),
+    expectedText,
+    { timeout: 10000 }
+  );
+}
+
 export async function waitForActivePlugin(
   page: Page,
   pluginId: string
@@ -107,10 +124,18 @@ export async function launchE2ESession(
     options.userDataDir ??
     (await fs.mkdtemp(path.join(os.tmpdir(), "litelauncher-e2e-")));
   const cleanupUserDataDir = options.cleanupUserDataDir !== false;
+  const executablePath = options.executablePath?.trim() || undefined;
+  const launchCwd = options.workingDirectory ?? PROJECT_ROOT;
+  const launchArgs = executablePath ? [] : ["."];
+  const env = buildElectronEnv(userDataDir);
+  if (options.enableRealBlurHandling) {
+    env.LITELAUNCHER_E2E_REAL_BLUR = "1";
+  }
   const electronApp = await electron.launch({
-    cwd: PROJECT_ROOT,
-    args: ["."],
-    env: buildElectronEnv(userDataDir)
+    cwd: launchCwd,
+    executablePath,
+    args: launchArgs,
+    env
   });
 
   const page = await electronApp.firstWindow();

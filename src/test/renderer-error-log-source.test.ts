@@ -34,10 +34,65 @@ test("renderer settings surface launcher topmost diagnostics as dedicated summar
   );
   assert.match(
     source,
-    /settings-error-log-highlight-list/,
-    "settings panel should render a dedicated compact highlight list for topmost diagnostics"
+    /settings-diagnostic-summary-list/,
+    "settings panel should render a dedicated compact summary list for topmost diagnostics"
   );
   assert.match(source, /Launcher lost always-on-top state/);
   assert.match(source, /Launcher blurred shortly after showing/);
   assert.match(source, /Launcher topmost recovery diagnostic/);
+});
+
+test("renderer settings surface pin failures as dedicated diagnostics and support copying raw logs", () => {
+  const source = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    source,
+    /function isPinDiagnosticEntry\(entry: AppErrorLogEntry\): boolean/,
+    "renderer should recognize pin failure log entries as dedicated diagnostics"
+  );
+  assert.match(
+    source,
+    /function formatPinDiagnosticSummary\(entry: AppErrorLogEntry\): string/,
+    "renderer should format pin failure diagnostics into readable summaries"
+  );
+  assert.match(
+    source,
+    /copyTextToClipboard\(formatErrorLogs\(errorLogEntries\)\)/,
+    "settings panel should allow copying the raw error log output directly"
+  );
+  assert.match(
+    source,
+    /日志已复制/,
+    "copying settings diagnostics should acknowledge success in Chinese"
+  );
+});
+
+test("renderer suspends blur auto-hide while plugin, settings, and cashflow panels are active", () => {
+  const source = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    source,
+    /function shouldSuspendAutoHideForMode\(nextMode: PanelMode\): boolean/,
+    "renderer should define an explicit mode-based blur-hide policy"
+  );
+  assert.match(
+    source,
+    /nextMode === "cashflow" \|\| nextMode === "plugin" \|\| nextMode === "settings"/,
+    "renderer should keep cashflow, plugin, and settings panels visible on blur"
+  );
+  assert.match(
+    source,
+    /function syncAutoHideSuspension\(nextMode: PanelMode = mode\): void/,
+    "renderer should centralize blur auto-hide synchronization in one helper"
+  );
+  assert.match(
+    source,
+    /shouldSuspendAutoHideForMode\(nextMode\) \|\| pluginNativeInteractionLocked/,
+    "shared blur-hide synchronization should preserve native interaction locks"
+  );
+  assert.match(
+    source,
+    /syncAutoHideSuspension\(nextMode\);/,
+    "mode transitions should toggle blur auto-hide suspension from one shared helper"
+  );
 });

@@ -4,6 +4,8 @@ export const IPC_CHANNELS = {
   getPluginItems: "launcher:get-plugin-items",
   getAppVersion: "launcher:get-app-version",
   getAppUpdaterStatus: "launcher:get-app-updater-status",
+  setE2EAppUpdaterCheckFailure:
+    "launcher:set-e2e-app-updater-check-failure",
   getSearchDisplayConfig: "launcher:get-search-display-config",
   setSearchDisplayConfig: "launcher:set-search-display-config",
   getCatalogScanConfig: "launcher:get-catalog-scan-config",

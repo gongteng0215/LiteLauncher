@@ -49,6 +49,9 @@ const api = {
   getAppUpdaterStatus(): Promise<AppUpdaterStatus> {
     return ipcRenderer.invoke(IPC_CHANNELS.getAppUpdaterStatus);
   },
+  setE2EAppUpdaterCheckFailure(message: string | null): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setE2EAppUpdaterCheckFailure, message);
+  },
   getSearchDisplayConfig(): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.getSearchDisplayConfig);
   },

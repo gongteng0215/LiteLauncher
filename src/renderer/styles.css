@@ -719,6 +719,12 @@ body {
   min-width: 0;
 }
 
+.settings-diagnostic-summary-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .settings-error-log-highlight-card {
   display: grid;
   gap: 4px;
@@ -728,6 +734,10 @@ body {
   border: 1px solid rgba(248, 113, 113, 0.18);
   border-left: 3px solid rgba(248, 113, 113, 0.72);
   background: rgba(127, 29, 29, 0.12);
+}
+
+.settings-diagnostic-summary-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .settings-error-log-highlight-title {
@@ -796,6 +806,30 @@ body {
   font-size: 11px;
   line-height: 1.35;
   color: rgba(233, 242, 255, 0.72);
+}
+
+.settings-system-update-details {
+  display: grid;
+  gap: 5px;
+  width: min(560px, 100%);
+}
+
+.settings-system-update-detail-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-system-update-detail-label {
+  color: rgba(233, 242, 255, 0.58);
+}
+
+.settings-system-update-detail-value {
+  color: rgba(244, 248, 255, 0.9);
+  overflow-wrap: anywhere;
 }
 
 .settings-system-update-notes {

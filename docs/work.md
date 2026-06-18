@@ -1,8 +1,11 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-06-17
+更新时间：2026-06-18
 
 ## 最近完成
+- 收口 `plugin / settings / cashflow` 面板失焦保持可见：当前主进程仍保留搜索态 / 剪贴板态的 blur 自动隐藏，但渲染层已通过统一的 auto-hide suspension 规则，让 `plugin`、`settings`、`cashflow` 进入面板态后不会因点击别处而立刻消失，只会通过 `Esc`、返回按钮或显式隐藏流程退出；同时保留原有“插件原生交互期间临时暂停自动隐藏”的兼容逻辑。本轮按顺序完成 `pnpm run build`、`node dist/test/renderer-error-log-source.test.js`、`node dist/test/e2e-test-utils-source.test.js`、`node dist/test/e2e-launcher-smoke.test.js`，其中已覆盖 plugin / settings / cashflow 三类面板失焦后保持可见、`search` 模式在真实 blur 处理下仍会自动隐藏，并确认 `Esc` 仍可正常回退。
+- 收口 `v1.0.26` 设置页诊断：设置页“自动更新”卡片现在补齐了可直接排查的诊断明细，展示当前版本、目标版本、自动更新是否启用、最近阶段与诊断信息；错误日志区新增“复制日志”按钮，置顶失败记录也会进入独立摘要卡，和置顶窗口掉线诊断一起优先展示。为避免只停留在源码层，这轮除了已有的 `renderer-error-log-source` / `search-section-grid-style` 回归，还新增并跑通了 `e2e-settings-error-log-smoke`，真实覆盖“更新诊断明细可见、置顶失败摘要可见、复制日志后状态提示正确”三条设置页交互链路；本轮按顺序完成 `pnpm run build`、`node dist/test/renderer-error-log-source.test.js`、`node dist/test/search-section-grid-style.test.js`、`node dist/test/e2e-settings-error-log-smoke.test.js`，结果均通过。
+- 完成 `v1.0.24 -> v1.0.25` 自动更新端到端实测收口：先确认 `v1.0.25` GitHub Release 的 `latest.yml` / `LiteLauncher-Setup-1.0.25.exe` / `latest-mac.yml` 资产完整，再在本机下载 `v1.0.24` Windows NSIS 安装包与 `LiteLauncher-1.0.24-win.zip` 做真实回归。过程中定位到一个环境级坑：在这台 Windows 机器上用 PowerShell `Start-Process -ArgumentList` 传 NSIS `/D=...` 会把自定义安装目录写坏，导致安装器和快捷方式落成错误路径；改成 `cmd /c "<installer>" /S /D=...` 后，`v1.0.24` 可正常安装到 `I:\Programs Files\LiteLauncher`。随后使用打包版 `v1.0.24` 真实打开设置页并执行“检查更新”，已确认它能发现线上 `v1.0.25`、读取发布日志、并进入“新版本 v1.0.25 已下载完成 / 立即安装并重启”状态；最终当前正式安装目录、开始菜单快捷方式和卸载注册表均已回到 `v1.0.25`。本轮还补了 `src/test/e2e-test-utils-source.test.ts`，让 Playwright E2E 工具支持直接拉起外部打包版 `LiteLauncher.exe`，并按顺序完成 `pnpm run build`、`node dist/test/e2e-test-utils-source.test.js` 验证，结果通过。
 - 收口 `v1.0.25` 补丁版候选：修复设置页自动更新说明把 GitHub Release HTML 当纯文本显示的问题，新增受限富文本渲染和紧凑样式，覆盖标题、列表、链接、行内代码和代码块；同步补了 `search-section-grid-style` 回归，避免后续再次回退到 `textContent` 直出标签。本轮按顺序完成 `pnpm run build`、`node dist/test/search-section-grid-style.test.js`、`node dist/test/app-updater-source.test.js`，结果均通过。
 - 修复 `Codex` 等 Windows Store / StartApps / PATH alias 动态应用偶发置顶失败：根因是主进程允许动态搜索结果通过校验，但保存后又只按静态 catalog ID 清洗，导致 `app:startapp:codex` 这类 ID 被立即删除并返回“当前结果已过期”。现在置顶 ID 清洗规则会识别“静态 catalog 或动态可重新解析”的项目，置顶列表读取时也会按 ID 重新解析动态应用；同步补了 `normalizePinnedItemIds` 回归。本轮按顺序完成 `pnpm run build`、`node dist/test/launcher-main-flow-regression.test.js`、`node dist/test/windows-app-alias-regression.test.js`、`node dist/test/renderer-pinning-regression.test.js`、`node dist/test/renderer-pinning-status.test.js`，结果均通过。
 - 准备发布 `v1.0.21`：将本轮收口到一版可直接发布的桌面更新，当前范围已覆盖置顶稳定性、搜索输入键盘检索规则、自动更新 / 发布链路、密码工具紧凑布局，以及 CodeAgent Switch 的新版 Codex 配置编辑与预览。已按串行顺序完成 `pnpm run build`、搜索 / 置顶 / 可见插件 / CodeAgent Switch / workflow 护栏相关 `dist` 回归、`e2e-launcher-smoke` / `e2e-search-layout-smoke` / `e2e-plugin-panels-smoke` / `e2e-plugin-panel-layout-smoke`，并额外完成 `pnpm run dist:win` 本地打包校验；其中还补修了 Windows NSIS 安装包命名与 `latest.yml` 自动更新元数据一致性，当前目标将改为对齐新的 `release/LiteLauncher-Setup-1.0.21.exe`。
@@ -112,7 +115,7 @@
 
 ## 当前版本基线
 
-- 应用版本：`v1.0.25`
+- 应用版本：`v1.0.26`
 - 默认可见插件数量：26
 - 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
 - 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
@@ -123,6 +126,7 @@
 - Windows Store Codex 真机回归：`pnpm run test:e2e:windows-codex`
 - Windows 应用别名（如 `codex`）已支持搜索、启动、置顶和跨重启恢复
 - 自动更新说明支持受限富文本显示，避免 release notes HTML 标签原样出现在设置页
+- `plugin / settings / cashflow` 面板态已改为失焦不自动隐藏，仍保留 `Esc` / 返回等显式退出路径
 
 ## 当前 worktree 状态
 
@@ -143,8 +147,8 @@
 
 ## 下一步建议
 
-1. 先按 `docs/version-roadmap.md` 推进 `v1.0.25` 补丁版，把更新日志显示和动态应用置顶两个真实问题发布到线上验证。
+1. 先整理并发布当前收口版，把“面板失焦不自动隐藏”、设置页诊断与更新说明富文本显示一起带到线上验证。
 2. 发版前继续遵循“源码回归 -> `pnpm run build` -> 串行 `node dist/test/...` -> 必要时再 smoke / 打包”的顺序，避免 stale `dist` 假阳性。
-3. `v1.0.25` 发版前至少做一次从线上 `v1.0.24` 检查到 `v1.0.25` 的自动更新实测，并复核 GitHub Release 资产完整性。
-4. `v1.0.26` 建议优先做自动更新端到端验证、设置页诊断收口、CodeAgent Switch 小范围 UI 复核和历史文案巡检。
-5. `Cashflow / Clipboard Workbench` 大扩展与 `renderer.ts` 大重构继续后置，优先避免补丁版失控。
+3. `v1.0.26` 的设置页诊断收口已经完成，下一步更适合补一条“检查更新失败 / unsupported 环境”的定向 smoke，继续把边界状态锁住。
+4. 同步做 CodeAgent Switch 小范围 UI 复核和历史文案 / 编码巡检。
+5. `Cashflow / Clipboard Workbench` 大扩展与 `renderer.ts` 大重构继续后置，优先先把当前版本收口发布。

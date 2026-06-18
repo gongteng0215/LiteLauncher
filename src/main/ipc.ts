@@ -71,6 +71,7 @@ type UpdaterProvider = {
   getStatus: () => AppUpdaterStatus;
   checkForUpdates: () => Promise<AppUpdaterStatus>;
   installUpdateNow: () => Promise<boolean>;
+  setE2ECheckFailure?: (message: string | null) => boolean;
 };
 
 type ErrorLogProvider = {
@@ -117,6 +118,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getLaunchAtLoginStatus,
   IPC_CHANNELS.setLaunchAtLoginEnabled,
   IPC_CHANNELS.getAppUpdaterStatus,
+  IPC_CHANNELS.setE2EAppUpdaterCheckFailure,
   IPC_CHANNELS.checkForAppUpdates,
   IPC_CHANNELS.installAppUpdateNow,
   IPC_CHANNELS.setItemPinned,
@@ -1093,6 +1095,23 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getAppUpdaterStatus, () => {
     return options.updaterProvider.getStatus();
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.setE2EAppUpdaterCheckFailure,
+    async (_, messageInput: unknown) => {
+      if (process.env.LITELAUNCHER_E2E !== "1") {
+        return false;
+      }
+
+      if (!options.updaterProvider.setE2ECheckFailure) {
+        return false;
+      }
+
+      const message =
+        typeof messageInput === "string" ? messageInput : messageInput == null ? null : String(messageInput);
+      return options.updaterProvider.setE2ECheckFailure(message);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.setSearchDisplayConfig,

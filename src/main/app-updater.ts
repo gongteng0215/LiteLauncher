@@ -90,6 +90,7 @@ export type AppUpdaterProvider = {
   checkForUpdates: () => Promise<AppUpdaterStatus>;
   installUpdateNow: () => Promise<boolean>;
   scheduleStartupCheck: () => void;
+  setE2ECheckFailure?: (message: string | null) => boolean;
 };
 
 export function createAppUpdater(): AppUpdaterProvider {
@@ -123,6 +124,7 @@ export function createAppUpdater(): AppUpdaterProvider {
 
   let startupCheckScheduled = false;
   let activeCheckPromise: Promise<AppUpdaterStatus> | null = null;
+  let e2eCheckFailureMessage: string | null = null;
 
   const setStatus = (next: Partial<AppUpdaterStatus>): AppUpdaterStatus => {
     status = {
@@ -215,6 +217,17 @@ export function createAppUpdater(): AppUpdaterProvider {
       return { ...status };
     },
     async checkForUpdates(): Promise<AppUpdaterStatus> {
+      if (e2eCheckFailureMessage) {
+        const detail = truncateText(e2eCheckFailureMessage) || "检查更新失败";
+        setStatus({
+          phase: "error",
+          downloaded: false,
+          progressPercent: undefined,
+          message: detail
+        });
+        throw new Error(detail);
+      }
+
       if (!supported) {
         return { ...status };
       }
@@ -280,6 +293,13 @@ export function createAppUpdater(): AppUpdaterProvider {
       periodicTimer.unref?.();
     }
   };
+
+  if (process.env.LITELAUNCHER_E2E === "1") {
+    provider.setE2ECheckFailure = (message: string | null): boolean => {
+      e2eCheckFailureMessage = String(message ?? "").trim() || null;
+      return true;
+    };
+  }
 
   return provider;
 }

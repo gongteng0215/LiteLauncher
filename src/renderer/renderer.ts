@@ -611,6 +611,16 @@ function setAutoHideSuspended(suspended: boolean): void {
   });
 }
 
+function shouldSuspendAutoHideForMode(nextMode: PanelMode): boolean {
+  return nextMode === "cashflow" || nextMode === "plugin" || nextMode === "settings";
+}
+
+function syncAutoHideSuspension(nextMode: PanelMode = mode): void {
+  setAutoHideSuspended(
+    shouldSuspendAutoHideForMode(nextMode) || pluginNativeInteractionLocked
+  );
+}
+
 function releasePluginNativeInteractionLock(): void {
   clearPluginNativeInteractionReleaseTimer();
   if (!pluginNativeInteractionLocked) {
@@ -618,7 +628,7 @@ function releasePluginNativeInteractionLock(): void {
   }
 
   pluginNativeInteractionLocked = false;
-  setAutoHideSuspended(false);
+  syncAutoHideSuspension();
 }
 
 function schedulePluginNativeInteractionRelease(delayMs = 180): void {
@@ -632,7 +642,7 @@ function beginPluginNativeInteraction(timeoutMs = 15000): void {
   clearPluginNativeInteractionReleaseTimer();
   if (!pluginNativeInteractionLocked) {
     pluginNativeInteractionLocked = true;
-    setAutoHideSuspended(true);
+    syncAutoHideSuspension();
   }
 
   pluginNativeInteractionReleaseTimer = window.setTimeout(() => {
@@ -913,6 +923,10 @@ function isLauncherTopmostDiagnosticEntry(entry: AppErrorLogEntry): boolean {
   ].includes(entry.message);
 }
 
+function isPinDiagnosticEntry(entry: AppErrorLogEntry): boolean {
+  return ["Pin request rejected", "Pin request failed"].includes(entry.message);
+}
+
 function formatLauncherTriggerText(trigger: string | undefined): string {
   switch ((trigger ?? "").trim()) {
     case "global-shortcut":
@@ -982,10 +996,41 @@ function formatLauncherTopmostDiagnosticSummary(entry: AppErrorLogEntry): string
     .join("\n");
 }
 
+function formatPinDiagnosticSummary(entry: AppErrorLogEntry): string {
+  const contextMap = parseErrorLogContext(entry.context);
+  const itemId =
+    contextMap.itemId === "(empty)"
+      ? "（空）"
+      : contextMap.itemId || "未知项目";
+  const action = contextMap.pinned === "0" ? "取消置顶" : "置顶";
+
+  if (entry.message === "Pin request rejected") {
+    const reasonCode = entry.detail?.match(/reason=([a-z-]+)/i)?.[1];
+    return [
+      `[${formatErrorLogDate(entry.createdAt)}] ${action}请求已拒绝`,
+      `项目: ${itemId}`,
+      `原因: ${formatPinErrorReasonText(reasonCode)}`
+    ].join("\n");
+  }
+
+  return [
+    `[${formatErrorLogDate(entry.createdAt)}] ${action}保存失败`,
+    `项目: ${itemId}`,
+    "原因: 保存失败，请重试",
+    entry.detail ? `详情: ${entry.detail}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function getLauncherTopmostDiagnosticEntries(
   entries: AppErrorLogEntry[]
 ): AppErrorLogEntry[] {
   return entries.filter((entry) => isLauncherTopmostDiagnosticEntry(entry)).slice(0, 5);
+}
+
+function getPinDiagnosticEntries(entries: AppErrorLogEntry[]): AppErrorLogEntry[] {
+  return entries.filter((entry) => isPinDiagnosticEntry(entry)).slice(0, 5);
 }
 
 function formatErrorLogEntry(entry: AppErrorLogEntry): string {
@@ -1066,6 +1111,74 @@ function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
     default:
       return status.message ?? "可手动检查更新";
   }
+}
+
+function formatAppUpdaterPhaseText(status: AppUpdaterStatus): string {
+  if (!status.supported) {
+    return "当前环境不支持";
+  }
+
+  switch (status.phase) {
+    case "checking":
+      return "正在检查";
+    case "available":
+      return status.updateVersion ? `发现 v${status.updateVersion}` : "发现新版本";
+    case "downloading":
+      return typeof status.progressPercent === "number"
+        ? `下载中 ${Math.round(status.progressPercent)}%`
+        : "下载中";
+    case "downloaded":
+      return status.updateVersion ? `已下载 v${status.updateVersion}` : "安装包已就绪";
+    case "not-available":
+      return "已是最新版本";
+    case "error":
+      return "检查失败";
+    case "idle":
+      return "等待检查";
+    case "unsupported":
+    default:
+      return "手动更新";
+  }
+}
+
+function formatAppUpdaterDiagnosticDetails(
+  status: AppUpdaterStatus
+): Array<{ label: string; value: string }> {
+  const supportValue = !status.supported
+    ? "自动更新未启用，当前环境暂不支持"
+    : status.autoUpdateEnabled
+      ? "自动更新已启用"
+      : "自动更新未启用，请前往 GitHub Releases 手动安装";
+  const diagnosticValue = status.message?.trim()
+    ? status.message.trim()
+    : status.phase === "not-available"
+      ? "GitHub Releases 未发现比当前版本更新的安装包"
+      : status.phase === "downloaded"
+        ? "安装包已下载完成，可立即安装并重启"
+        : "可在此页手动检查最新版本";
+
+  return [
+    {
+      label: "当前版本",
+      value: status.currentVersion ? `v${status.currentVersion}` : "未知版本"
+    },
+    {
+      label: "目标版本",
+      value: status.updateVersion ? `v${status.updateVersion}` : "尚未检测到"
+    },
+    {
+      label: "自动更新",
+      value: supportValue
+    },
+    {
+      label: "最近阶段",
+      value: formatAppUpdaterPhaseText(status)
+    },
+    {
+      label: "诊断信息",
+      value: diagnosticValue
+    }
+  ];
 }
 
 function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
@@ -1272,6 +1385,7 @@ function setMode(nextMode: PanelMode): void {
     releasePluginNativeInteractionLock();
   }
   mode = nextMode;
+  syncAutoHideSuspension(nextMode);
   syncWindowSizePreset(nextMode);
   applyModeClass(nextMode);
   if (nextMode !== "search" && nextMode !== "clip") {
@@ -2730,6 +2844,24 @@ function renderSettingsPanel(): void {
   updaterMeta.textContent =
     updaterVersionText || "支持 Windows NSIS 安装版与 macOS 打包版自动更新";
 
+  const updaterDetails = document.createElement("div");
+  updaterDetails.className = "settings-system-update-details";
+  for (const detail of formatAppUpdaterDiagnosticDetails(appUpdaterStatus)) {
+    const detailRow = document.createElement("div");
+    detailRow.className = "settings-system-update-detail-row";
+
+    const detailLabel = document.createElement("span");
+    detailLabel.className = "settings-system-update-detail-label";
+    detailLabel.textContent = detail.label;
+
+    const detailValue = document.createElement("span");
+    detailValue.className = "settings-system-update-detail-value";
+    detailValue.textContent = detail.value;
+
+    detailRow.append(detailLabel, detailValue);
+    updaterDetails.appendChild(detailRow);
+  }
+
   const updaterNotes = document.createElement("div");
   updaterNotes.className = "settings-system-update-notes";
   renderAppUpdaterReleaseNotes(updaterNotes, appUpdaterStatus.releaseNotes);
@@ -2762,7 +2894,13 @@ function renderSettingsPanel(): void {
     updaterActions.appendChild(installNowButton);
   }
 
-  updaterCard.append(updaterValue, updaterMeta, updaterNotes, updaterActions);
+  updaterCard.append(
+    updaterValue,
+    updaterMeta,
+    updaterDetails,
+    updaterNotes,
+    updaterActions
+  );
   updaterControl.appendChild(updaterCard);
   updaterHint.dataset.compact = "true";
   systemGroup.body.appendChild(updaterRow);
@@ -2777,13 +2915,14 @@ function renderSettingsPanel(): void {
   errorLogContainer.className = "settings-error-log";
 
   const topmostDiagnosticEntries = getLauncherTopmostDiagnosticEntries(errorLogEntries);
-  if (topmostDiagnosticEntries.length > 0) {
+  const pinDiagnosticEntries = getPinDiagnosticEntries(errorLogEntries);
+  if (topmostDiagnosticEntries.length > 0 || pinDiagnosticEntries.length > 0) {
     const highlightList = document.createElement("div");
-    highlightList.className = "settings-error-log-highlight-list";
+    highlightList.className = "settings-diagnostic-summary-list";
 
     for (const entry of topmostDiagnosticEntries) {
       const highlightCard = document.createElement("div");
-      highlightCard.className = "settings-error-log-highlight-card";
+      highlightCard.className = "settings-error-log-highlight-card settings-diagnostic-summary-card";
 
       const highlightTitle = document.createElement("div");
       highlightTitle.className = "settings-error-log-highlight-title";
@@ -2800,6 +2939,29 @@ function renderSettingsPanel(): void {
       const highlightBody = document.createElement("pre");
       highlightBody.className = "settings-error-log-highlight-body";
       highlightBody.textContent = formatLauncherTopmostDiagnosticSummary(entry);
+
+      highlightCard.append(highlightTitle, highlightMeta, highlightBody);
+      highlightList.appendChild(highlightCard);
+    }
+
+    for (const entry of pinDiagnosticEntries) {
+      const highlightCard = document.createElement("div");
+      highlightCard.className =
+        "settings-error-log-highlight-card settings-diagnostic-summary-card";
+
+      const highlightTitle = document.createElement("div");
+      highlightTitle.className = "settings-error-log-highlight-title";
+      highlightTitle.textContent = entry.message === "Pin request failed" ? "置顶保存失败" : "置顶请求被拒绝";
+
+      const highlightMeta = document.createElement("div");
+      highlightMeta.className = "settings-error-log-highlight-meta";
+      highlightMeta.textContent = `${formatErrorLogDate(entry.createdAt)} · ${
+        entry.level === "warn" ? "警告" : "错误"
+      }`;
+
+      const highlightBody = document.createElement("pre");
+      highlightBody.className = "settings-error-log-highlight-body";
+      highlightBody.textContent = formatPinDiagnosticSummary(entry);
 
       highlightCard.append(highlightTitle, highlightMeta, highlightBody);
       highlightList.appendChild(highlightCard);
@@ -2830,7 +2992,17 @@ function renderSettingsPanel(): void {
     void clearErrorLogsFromSettings();
   });
 
-  errorLogActions.append(refreshErrorLogButton, clearErrorLogButton);
+  const copyErrorLogButton = document.createElement("button");
+  copyErrorLogButton.type = "button";
+  copyErrorLogButton.className = "settings-btn settings-btn-secondary";
+  copyErrorLogButton.textContent = "复制日志";
+  copyErrorLogButton.addEventListener("click", () => {
+    void copyTextToClipboard(formatErrorLogs(errorLogEntries)).then((copied) => {
+      setStatus(copied ? "错误日志已复制" : "复制错误日志失败");
+    });
+  });
+
+  errorLogActions.append(refreshErrorLogButton, copyErrorLogButton, clearErrorLogButton);
 
   const errorLogOutput = document.createElement("textarea");
   errorLogOutput.className = "settings-value settings-textarea settings-log-output";

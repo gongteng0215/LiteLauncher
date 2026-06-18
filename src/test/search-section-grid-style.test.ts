@@ -89,6 +89,31 @@ test("settings topmost diagnostic highlights stay compact and scannable", () => 
   assert.equal(getProperty(titleBody, "font-size"), "11px");
 });
 
+test("settings diagnostics add a compact summary grid and updater detail rows", () => {
+  const stylesSource = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(
+    stylesSource,
+    /\.settings-diagnostic-summary-list\s*\{/,
+    "settings diagnostics should define a compact summary list container"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-diagnostic-summary-card\s*\{/,
+    "settings diagnostics should render pin and launcher summaries inside compact cards"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-details\s*\{/,
+    "updater card should define a compact diagnostic detail grid"
+  );
+  assert.match(
+    stylesSource,
+    /\.settings-system-update-detail-label\s*\{/,
+    "updater detail rows should style labels separately from values"
+  );
+});
+
 test("section grid column calculation runs after the grid is attached to the DOM", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
   const renderSearchSectionsMatch = rendererSource.match(
@@ -270,6 +295,21 @@ test("settings panel exposes app update status and actions in the system section
     rendererSource,
     /renderAppUpdaterReleaseNotes\(\s*updaterNotes\s*,\s*appUpdaterStatus\.releaseNotes\s*\)/,
     "system section should delegate updater notes rendering to a dedicated rich-text helper"
+  );
+  assert.match(
+    rendererSource,
+    /formatAppUpdaterDiagnosticDetails\(appUpdaterStatus\)/,
+    "system section should render explicit updater diagnostic detail rows"
+  );
+  assert.match(
+    rendererSource,
+    /自动更新已启用/,
+    "updater diagnostic copy should explain when automatic background updates are enabled"
+  );
+  assert.match(
+    rendererSource,
+    /自动更新未启用/,
+    "updater diagnostic copy should explain when the current package cannot install updates automatically"
   );
   assert.match(
     stylesSource,
