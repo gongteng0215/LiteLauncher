@@ -141,6 +141,14 @@ function scheduleRestart(reason) {
 
 function shouldRestartForFile(relativePath) {
   const normalized = relativePath.replace(/\\/g, "/");
+  if (
+    normalized.endsWith(".map") ||
+    normalized.endsWith(".d.ts") ||
+    normalized.endsWith(".tsbuildinfo")
+  ) {
+    return false;
+  }
+
   return (
     normalized.startsWith("main/") ||
     normalized.startsWith("preload/") ||

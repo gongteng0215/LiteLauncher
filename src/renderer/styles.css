@@ -615,6 +615,26 @@ body {
   color: rgba(233, 242, 255, 0.62);
 }
 
+.litesnap-settings-inline-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.litesnap-settings-inline-control .settings-number {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.litesnap-settings-inline-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .settings-number {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.2);

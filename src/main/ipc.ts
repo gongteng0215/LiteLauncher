@@ -5,6 +5,15 @@ import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  LiteSnapCommitCaptureInput,
+  LiteSnapCommitCaptureResult,
+  LiteSnapOverlaySelection,
+  LiteSnapOverlayState,
+  LiteSnapPinnedWindowsToggleResult,
+  LiteSnapSettings,
+  LiteSnapSettingsUpdateResult
+} from "../shared/litesnap";
+import {
   AppErrorLogEntry,
   AppErrorLogInput,
   AppUpdaterStatus,
@@ -63,6 +72,25 @@ type SettingsProvider = {
   ) => Promise<LaunchAtLoginStatus>;
 };
 
+type LiteSnapProvider = {
+  getSettings: () => Promise<LiteSnapSettings>;
+  updateSettings: (
+    patch: Partial<LiteSnapSettings>
+  ) => Promise<LiteSnapSettingsUpdateResult>;
+  startCapture: () => Promise<boolean>;
+  pinClipboardImage: () => Promise<boolean>;
+  togglePinnedWindowsVisibility: () => LiteSnapPinnedWindowsToggleResult;
+  getOverlayState: () => Promise<LiteSnapOverlayState | null>;
+  getWindowRectAtPoint: (
+    x: number,
+    y: number
+  ) => Promise<LiteSnapOverlaySelection | null>;
+  commitCapture: (
+    input: LiteSnapCommitCaptureInput
+  ) => Promise<LiteSnapCommitCaptureResult>;
+  cancelCapture: () => Promise<boolean>;
+};
+
 type CatalogProvider = {
   rebuildCatalog: () => Promise<CatalogRebuildResult>;
 };
@@ -92,6 +120,7 @@ type IpcOptions = {
   searchProvider: SearchProvider;
   clipProvider: ClipProvider;
   settingsProvider: SettingsProvider;
+  liteSnapProvider: LiteSnapProvider;
   catalogProvider: CatalogProvider;
   updaterProvider: UpdaterProvider;
   errorLogProvider: ErrorLogProvider;
@@ -111,6 +140,14 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.setCatalogScanConfig,
   IPC_CHANNELS.getVisiblePluginIds,
   IPC_CHANNELS.setVisiblePluginIds,
+  IPC_CHANNELS.getLiteSnapSettings,
+  IPC_CHANNELS.setLiteSnapSettings,
+  IPC_CHANNELS.liteSnapStartCapture,
+  IPC_CHANNELS.liteSnapPinClipboard,
+  IPC_CHANNELS.liteSnapTogglePinnedWindows,
+  IPC_CHANNELS.liteSnapGetOverlayState,
+  IPC_CHANNELS.liteSnapCommitCapture,
+  IPC_CHANNELS.liteSnapCancelCapture,
   IPC_CHANNELS.rebuildCatalog,
   IPC_CHANNELS.reportErrorLog,
   IPC_CHANNELS.getErrorLogs,
@@ -128,6 +165,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.setWindowSizePreset,
   IPC_CHANNELS.setAutoHideSuspended,
   IPC_CHANNELS.pickFilePath,
+  IPC_CHANNELS.pickDirectoryPath,
   IPC_CHANNELS.hide,
   IPC_CHANNELS.getClipItems,
   IPC_CHANNELS.copyClipItem,
@@ -1088,6 +1126,10 @@ export function registerIpcHandlers(
     return options.settingsProvider.getVisiblePluginIds();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getLiteSnapSettings, () => {
+    return options.liteSnapProvider.getSettings();
+  });
+
   ipcMain.handle(IPC_CHANNELS.getLaunchAtLoginStatus, () => {
     return options.settingsProvider.getLaunchAtLoginStatus();
   });
@@ -1141,6 +1183,63 @@ export function registerIpcHandlers(
       return options.settingsProvider.setVisiblePluginIds(ids);
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setLiteSnapSettings,
+    async (_, patchInput: Partial<LiteSnapSettings> | null) => {
+      const patch =
+        patchInput && typeof patchInput === "object" ? patchInput : {};
+      return options.liteSnapProvider.updateSettings(patch);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapStartCapture, async () => {
+    return options.liteSnapProvider.startCapture();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapPinClipboard, async () => {
+    return options.liteSnapProvider.pinClipboardImage();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapTogglePinnedWindows, () => {
+    return options.liteSnapProvider.togglePinnedWindowsVisibility();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapGetOverlayState, async () => {
+    return options.liteSnapProvider.getOverlayState();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapGetWindowRectAtPoint,
+    async (_, xInput: unknown, yInput: unknown) => {
+      const x = typeof xInput === "number" && Number.isFinite(xInput) ? xInput : 0;
+      const y = typeof yInput === "number" && Number.isFinite(yInput) ? yInput : 0;
+      return options.liteSnapProvider.getWindowRectAtPoint(x, y);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapCommitCapture,
+    async (_, input: LiteSnapCommitCaptureInput | null) => {
+      const normalizedInput: LiteSnapCommitCaptureInput =
+        input && typeof input === "object"
+          ? input
+          : {
+              action: "copy",
+              selection: {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0
+              }
+            };
+      return options.liteSnapProvider.commitCapture(normalizedInput);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapCancelCapture, async () => {
+    return options.liteSnapProvider.cancelCapture();
+  });
 
   ipcMain.handle(IPC_CHANNELS.rebuildCatalog, async () => {
     const result = await options.catalogProvider.rebuildCatalog();
@@ -1392,6 +1491,27 @@ export function registerIpcHandlers(
       const result = await dialog.showOpenDialog(window, {
         title: "选择文件",
         properties: ["openFile", "dontAddToRecent"]
+      });
+      if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+        return null;
+      }
+      const selected = result.filePaths[0];
+      return typeof selected === "string" && selected.trim() ? selected : null;
+    } finally {
+      setWindowAutoHideSuspended(window, false);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.pickDirectoryPath, async () => {
+    if (window.isDestroyed()) {
+      return null;
+    }
+
+    setWindowAutoHideSuspended(window, true);
+    try {
+      const result = await dialog.showOpenDialog(window, {
+        title: "选择文件夹",
+        properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
       });
       if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
         return null;

@@ -154,6 +154,55 @@ test("new default plugin panels are implemented through plugin-panel-impls", () 
   assert.match(panelImplsSource, /renderWebtoolsPortHelperPanel\(\): void/);
 });
 
+test("LiteSnap panel is implemented through plugin-panel-impls", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.equal(
+    rendererSource.includes("function renderLiteSnapPanel"),
+    false,
+    "LiteSnap panel implementation should not live in renderer.ts"
+  );
+  assert.match(
+    panelImplsSource,
+    /\[LITESNAP_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
+    "LiteSnap should render through panelImplsSafe"
+  );
+  assert.match(panelImplsSource, /applyLiteSnapPanelPayload\(panel: unknown\): void/);
+  assert.match(panelImplsSource, /renderLiteSnapPanel\(\): void/);
+});
+
+test("LiteSnap settings subview handles Esc inside plugin mode before leaving to search", () => {
+  const rendererSource = readRendererSource();
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    rendererSource,
+    /if \(panelImplsSafe\.handleActivePluginPanelEscape\(\)\) \{\s*return true;\s*\}/,
+    "renderer plugin-mode keydown should delegate plugin-specific Esc handling before backToSearch"
+  );
+  assert.match(
+    panelImplsSource,
+    /handleActivePluginPanelEscape\(\): boolean \{/,
+    "panel impls should expose plugin-specific Esc handling"
+  );
+  assert.match(
+    panelImplsSource,
+    /let liteSnapPanelView: "main" \| "settings" = "main";/,
+    "LiteSnap should keep local main/settings subview state"
+  );
+  assert.match(
+    panelImplsSource,
+    /liteSnapPanelView = "settings";/,
+    "LiteSnap settings action should switch into a local settings subview"
+  );
+  assert.match(
+    panelImplsSource,
+    /liteSnapPanelView === "settings"/,
+    "LiteSnap should detect the settings subview when handling Esc"
+  );
+});
+
 test("standalone password and cashflow panels are implemented through plugin-panel-impls", () => {
   const rendererSource = readRendererSource();
   const panelImplsSource = readPanelImplsSource();

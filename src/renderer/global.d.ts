@@ -13,11 +13,20 @@ import {
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
+import {
+  LiteSnapCommitCaptureInput,
+  LiteSnapCommitCaptureResult,
+  LiteSnapOverlayState,
+  LiteSnapPinnedWindowsToggleResult,
+  LiteSnapSettings,
+  LiteSnapSettingsUpdateResult
+} from "../shared/litesnap";
 
 interface RendererPluginConstants {
   CASHFLOW_PLUGIN_ID: string;
   HARDWARE_INSPECTOR_PLUGIN_ID: string;
   CLIPBOARD_WORKBENCH_PLUGIN_ID: string;
+  LITESNAP_PLUGIN_ID: string;
   WEBTOOLS_PASSWORD_PLUGIN_ID: string;
   WEBTOOLS_JSON_PLUGIN_ID: string;
   WEBTOOLS_URL_PLUGIN_ID: string;
@@ -173,12 +182,15 @@ interface RendererPanelImpls {
   handleCashflowPanelEnter(): void;
   renderActivePluginPanel(): void;
   handleActivePluginPanelEnter(): void;
+  handleActivePluginPanelEscape(): boolean;
   getActivePluginPanelTitle(): string | null;
   cleanupPluginPanelTransientState(activePluginId: string | null): void;
   applyHardwareInspectorPanelPayload(panel: unknown): void;
   renderHardwareInspectorPanel(): void;
   applyClipboardWorkbenchPanelPayload(panel: unknown): void;
   renderClipboardWorkbenchPanel(): void;
+  applyLiteSnapPanelPayload(panel: unknown): void;
+  renderLiteSnapPanel(): void;
   applyWebtoolsPasswordPanelPayload(panel: unknown): void;
   renderWebtoolsPasswordPanel(): void;
   applyWebtoolsJsonPanelPayload(panel: unknown): void;
@@ -255,6 +267,25 @@ declare global {
       ): Promise<CatalogScanConfig>;
       getVisiblePluginIds(): Promise<string[]>;
       setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
+      getLiteSnapSettings(): Promise<LiteSnapSettings>;
+      setLiteSnapSettings(
+        patch: Partial<LiteSnapSettings>
+      ): Promise<LiteSnapSettingsUpdateResult>;
+      liteSnapStartCapture(): Promise<boolean>;
+      liteSnapPinClipboard(): Promise<boolean>;
+      liteSnapTogglePinnedWindows(): Promise<LiteSnapPinnedWindowsToggleResult>;
+      liteSnapGetOverlayState(): Promise<LiteSnapOverlayState | null>;
+      liteSnapGetWindowRectAtPoint(
+        x: number,
+        y: number
+      ): Promise<LiteSnapOverlaySelection | null>;
+      onLiteSnapOverlayStateChanged(
+        handler: (state: LiteSnapOverlayState | null) => void
+      ): () => void;
+      liteSnapCommitCapture(
+        input: LiteSnapCommitCaptureInput
+      ): Promise<LiteSnapCommitCaptureResult>;
+      liteSnapCancelCapture(): Promise<boolean>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
@@ -271,6 +302,7 @@ declare global {
       setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
       setAutoHideSuspended(suspended: boolean): Promise<boolean>;
       pickFilePath(): Promise<string | null>;
+      pickDirectoryPath(): Promise<string | null>;
       hide(): Promise<boolean>;
       getClipItems(query: string): Promise<ClipItem[]>;
       copyClipItem(itemId: string): Promise<boolean>;

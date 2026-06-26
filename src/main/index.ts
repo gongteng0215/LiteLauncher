@@ -4,6 +4,10 @@ import { app, BrowserWindow, globalShortcut } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  type LiteSnapSettings,
+  type LiteSnapShortcutRegistrationResult
+} from "../shared/litesnap";
+import {
   AppErrorLogInput,
   CatalogRebuildResult,
   CatalogScanConfig,
@@ -25,6 +29,10 @@ import { buildCatalogWithOptions } from "./catalog";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
+import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
+import { LiteSnapImageStore } from "./litesnap/image-store";
+import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
+import { LiteSnapSettingsStore } from "./litesnap/settings";
 import { filterItemsByPathRules } from "./path-rule-filter";
 import { normalizePinnedItemIds, validatePinnedItemRequest } from "./pinning";
 import {
@@ -71,6 +79,7 @@ const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
 const REQUIRED_VISIBLE_PLUGIN_IDS = [
   "hardware-inspector",
   "clipboard-workbench",
+  "litesnap",
   "webtools-file-hash",
   "webtools-port-helper",
   "webtools-image-prompt",
@@ -80,6 +89,7 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
   "clipboard-workbench",
+  "litesnap",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -136,6 +146,7 @@ const PRE_CLIPBOARD_WORKBENCH_DEFAULT_VISIBLE_PLUGIN_IDS = [
 const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
+  "clipboard-workbench",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -147,15 +158,19 @@ const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-diff",
   "webtools-http-mock",
   "webtools-image-base64",
+  "webtools-image-prompt",
   "webtools-config-convert",
   "webtools-sql-format",
   "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
   "webtools-regex",
   "webtools-url-parse",
   "webtools-qrcode",
   "webtools-markdown",
   "webtools-ua",
-  "webtools-api-client"
+  "webtools-api-client",
+  "codeagent-switch"
 ] as const;
 const PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -244,6 +259,13 @@ let processErrorHooksRegistered = false;
 let devRendererWatcher: fs.FSWatcher | null = null;
 let devAssetsWatcher: fs.FSWatcher | null = null;
 let devReloadTimer: NodeJS.Timeout | null = null;
+const liteSnapShortcutState: {
+  screenshot: string | null;
+  pin: string | null;
+} = {
+  screenshot: null,
+  pin: null
+};
 let lastLauncherShowMeta: {
   trigger: LauncherWindowShowTrigger;
   at: number;
@@ -811,6 +833,180 @@ async function ensureDataLayer(): Promise<void> {
     await clipboardWorkbenchService.init();
     setClipboardWorkbenchService(clipboardWorkbenchService);
   }
+}
+
+function registerLiteSnapGlobalShortcut(
+  shortcut: string,
+  action: () => boolean | Promise<boolean>,
+  window: BrowserWindow,
+  actionLabel: string
+): boolean {
+  const normalizedShortcut = shortcut.trim();
+  if (!normalizedShortcut) {
+    return false;
+  }
+
+  try {
+    const success = globalShortcut.register(normalizedShortcut, () => {
+      emitDebugKey(window, {
+        source: "main",
+        phase: "global-shortcut",
+        key: normalizedShortcut,
+        ts: Date.now(),
+        note: `LiteSnap ${actionLabel} shortcut callback fired`
+      });
+
+      void Promise.resolve(action())
+        .then((ok) => {
+          if (!ok) {
+            console.warn(
+              `LiteSnap ${actionLabel} shortcut triggered but action returned false`
+            );
+          }
+        })
+        .catch((error) => {
+          console.warn(`LiteSnap ${actionLabel} shortcut failed`, error);
+        });
+    });
+
+    if (!success) {
+      console.warn(
+        `Failed to register LiteSnap ${actionLabel} shortcut: ${normalizedShortcut}`
+      );
+      return false;
+    }
+
+    console.info(
+      `LiteSnap ${actionLabel} shortcut registered: ${normalizedShortcut}`
+    );
+    return true;
+  } catch (error) {
+    console.warn(
+      `LiteSnap ${actionLabel} shortcut registration failed: ${normalizedShortcut}`,
+      error
+    );
+    return false;
+  }
+}
+
+function unregisterLiteSnapGlobalShortcut(kind: keyof typeof liteSnapShortcutState): void {
+  const shortcut = liteSnapShortcutState[kind];
+  if (!shortcut) {
+    return;
+  }
+
+  try {
+    globalShortcut.unregister(shortcut);
+  } catch (error) {
+    console.warn(`Failed to unregister LiteSnap ${kind} shortcut: ${shortcut}`, error);
+  }
+  liteSnapShortcutState[kind] = null;
+}
+
+function registerLiteSnapShortcutSet(
+  settings: LiteSnapSettings,
+  window: BrowserWindow,
+  startCapture: () => Promise<boolean>,
+  pinClipboardImage: () => Promise<boolean>
+): LiteSnapShortcutRegistrationResult {
+  unregisterLiteSnapGlobalShortcut("screenshot");
+  unregisterLiteSnapGlobalShortcut("pin");
+
+  const screenshotShortcut = settings.screenshotShortcut.trim();
+  const pinShortcut = settings.pinShortcut.trim();
+  const screenshot = registerLiteSnapGlobalShortcut(
+    screenshotShortcut,
+    () => startCapture(),
+    window,
+    "capture"
+  );
+  if (screenshot) {
+    liteSnapShortcutState.screenshot = screenshotShortcut;
+  }
+
+  const pin = registerLiteSnapGlobalShortcut(
+    pinShortcut,
+    () => pinClipboardImage(),
+    window,
+    "pin"
+  );
+  if (pin) {
+    liteSnapShortcutState.pin = pinShortcut;
+  }
+
+  const failed = [
+    screenshot ? null : `截图快捷键 ${screenshotShortcut || "(空)"}`,
+    pin ? null : `贴图快捷键 ${pinShortcut || "(空)"}`
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    screenshot,
+    pin,
+    message:
+      failed.length === 0
+        ? "LiteSnap 快捷键已立即生效。"
+        : `${failed.join("、")} 注册失败，可能已被系统或其他应用占用。`
+  };
+}
+
+async function updateLiteSnapSettingsWithShortcutRegistration(
+  store: LiteSnapSettingsStore,
+  patch: Partial<LiteSnapSettings>,
+  window: BrowserWindow,
+  startCapture: () => Promise<boolean>,
+  pinClipboardImage: () => Promise<boolean>
+): Promise<LiteSnapSettings & { shortcutRegistration?: LiteSnapShortcutRegistrationResult }> {
+  const shouldRegisterShortcuts =
+    Object.prototype.hasOwnProperty.call(patch, "screenshotShortcut") ||
+    Object.prototype.hasOwnProperty.call(patch, "pinShortcut");
+  if (!shouldRegisterShortcuts) {
+    return store.updateSettings(patch);
+  }
+
+  const previous = await store.getSettings();
+  const requested = await store.updateSettings(patch);
+  const requestedRegistration = registerLiteSnapShortcutSet(
+    requested,
+    window,
+    startCapture,
+    pinClipboardImage
+  );
+
+  if (requestedRegistration.screenshot && requestedRegistration.pin) {
+    return { ...requested, shortcutRegistration: requestedRegistration };
+  }
+
+  const effective = {
+    ...requested,
+    screenshotShortcut: requestedRegistration.screenshot
+      ? requested.screenshotShortcut
+      : previous.screenshotShortcut,
+    pinShortcut: requestedRegistration.pin
+      ? requested.pinShortcut
+      : previous.pinShortcut
+  };
+  const saved = await store.updateSettings(effective);
+  const fallbackRegistration = registerLiteSnapShortcutSet(
+    saved,
+    window,
+    startCapture,
+    pinClipboardImage
+  );
+  const failed = [
+    requestedRegistration.screenshot
+      ? null
+      : `截图快捷键 ${requested.screenshotShortcut}`,
+    requestedRegistration.pin ? null : `贴图快捷键 ${requested.pinShortcut}`
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    ...saved,
+    shortcutRegistration: {
+      screenshot: requestedRegistration.screenshot && fallbackRegistration.screenshot,
+      pin: requestedRegistration.pin && fallbackRegistration.pin,
+      message: `${failed.join("、")} 注册失败，已保留旧快捷键。可能已被系统或其他应用占用。`
+    }
+  };
 }
 
 async function loadSearchDisplayConfig(
@@ -1402,6 +1598,16 @@ async function bootstrap(): Promise<void> {
     replaceCatalogPluginItems(catalog)
   );
   setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
+  const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
+  const liteSnapImageStore = new LiteSnapImageStore();
+  const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
+  const liteSnapCaptureSessionManager = new LiteSnapCaptureSessionManager(
+    liteSnapSettingsStore,
+    liteSnapImageStore,
+    liteSnapPinWindowManager
+  );
+  void liteSnapCaptureSessionManager.prewarmOverlay();
+  const liteSnapSettings = await liteSnapSettingsStore.getSettings();
   const catalogIdSet = new Set(catalog.map((item) => item.id));
   pinnedItemIds = await loadPinnedItemIds(activeDatabase, catalogIdSet);
   if (pinnedItemIds.length > 0) {
@@ -1458,6 +1664,17 @@ async function bootstrap(): Promise<void> {
   }
 
   const appUpdater = createAppUpdater();
+  const startLiteSnapCapture = async (): Promise<boolean> => {
+    return liteSnapCaptureSessionManager.startCapture(async () => {
+      if (!launcherWindow.isDestroyed()) {
+        applyLauncherWindowSizePreset(launcherWindow, "compact");
+        launcherWindow.hide();
+      }
+    });
+  };
+  const pinLiteSnapClipboardImage = async (): Promise<boolean> => {
+    return liteSnapPinWindowManager.pinClipboardImage();
+  };
 
   registerIpcHandlers(launcherWindow, {
     usageStore: activeUsageStore,
@@ -1563,7 +1780,27 @@ async function bootstrap(): Promise<void> {
       getLaunchAtLoginStatus: () => getLaunchAtLoginStatus(),
       setLaunchAtLoginEnabled: (enabled) =>
         setLaunchAtLoginEnabled(enabled)
-    },
+        },
+        liteSnapProvider: {
+          getSettings: () => liteSnapSettingsStore.getSettings(),
+          updateSettings: (patch) =>
+            updateLiteSnapSettingsWithShortcutRegistration(
+              liteSnapSettingsStore,
+              patch,
+              launcherWindow,
+              startLiteSnapCapture,
+              pinLiteSnapClipboardImage
+            ),
+          startCapture: () => startLiteSnapCapture(),
+          pinClipboardImage: () => pinLiteSnapClipboardImage(),
+          togglePinnedWindowsVisibility: () =>
+            liteSnapPinWindowManager.togglePinnedWindowsVisibility(),
+          getOverlayState: () => liteSnapCaptureSessionManager.getOverlayState(),
+          getWindowRectAtPoint: (x, y) =>
+            liteSnapCaptureSessionManager.getWindowRectAtPoint(x, y),
+          commitCapture: (input) => liteSnapCaptureSessionManager.commitCapture(input),
+          cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture()
+        },
     catalogProvider: {
       rebuildCatalog: () => rebuildCatalogIndex(activeDatabase)
     },
@@ -1597,6 +1834,12 @@ async function bootstrap(): Promise<void> {
           note: "shortcut callback fired"
         });
       }
+    );
+    registerLiteSnapShortcutSet(
+      liteSnapSettings,
+      launcherWindow,
+      startLiteSnapCapture,
+      pinLiteSnapClipboardImage
     );
   }
 

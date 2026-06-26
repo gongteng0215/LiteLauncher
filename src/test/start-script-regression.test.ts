@@ -5,6 +5,7 @@ import test from "node:test";
 
 const packageJsonPath = path.join(process.cwd(), "package.json");
 const startElectronScriptPath = path.join(process.cwd(), "scripts", "start-electron.cjs");
+const devElectronScriptPath = path.join(process.cwd(), "scripts", "dev-electron.cjs");
 
 type SpawnOptions = {
   cwd?: string;
@@ -89,4 +90,34 @@ test("start-electron helper sanitizes env and detaches Electron on Windows", () 
     assert.equal(calls[0]?.options?.windowsHide, true);
     assert.equal(unrefCalled, true);
   }
+});
+
+test("dev-electron only restarts for main-process bundle changes", () => {
+  const source = fs.readFileSync(devElectronScriptPath, "utf8");
+
+  assert.match(
+    source,
+    /normalized\.startsWith\("main\/"\)/,
+    "main bundle updates should still restart the dev Electron instance"
+  );
+  assert.match(
+    source,
+    /normalized\.startsWith\("preload\/"\)/,
+    "preload bundle updates should still restart the dev Electron instance"
+  );
+  assert.match(
+    source,
+    /normalized\.startsWith\("shared\/"\)/,
+    "shared bundle updates should still restart the dev Electron instance"
+  );
+  assert.doesNotMatch(
+    source,
+    /normalized\.startsWith\("renderer\/"\)/,
+    "renderer bundle updates should rely on in-app auto reload instead of restarting Electron"
+  );
+  assert.match(
+    source,
+    /normalized\.endsWith\("\.map"\)|normalized\.endsWith\('\.map'\)/,
+    "source map updates should be ignored so watch mode does not thrash Electron restarts"
+  );
 });

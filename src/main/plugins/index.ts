@@ -5,6 +5,7 @@ import { cashflowGamePlugin } from "./cashflow-game";
 import { clipboardWorkbenchPlugin } from "./clipboard-workbench";
 import { codeAgentSwitchPlugin } from "./codeagent-switch";
 import { hardwareInspectorPlugin } from "./hardware-inspector";
+import { liteSnapPlugin } from "./litesnap";
 import { LauncherPlugin } from "./types";
 import { webtoolsApiClientPlugin } from "./webtools-api-client";
 import { webtoolsColorsPlugin } from "./webtools-colors";
@@ -34,6 +35,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   cashflowGamePlugin,
   hardwareInspectorPlugin,
   clipboardWorkbenchPlugin,
+  liteSnapPlugin,
   webtoolsPasswordPlugin,
   webtoolsCronPlugin,
   webtoolsJsonPlugin,
@@ -64,6 +66,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
   "clipboard-workbench",
+  "litesnap",
   "webtools-password",
   "webtools-cron",
   "webtools-json",

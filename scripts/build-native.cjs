@@ -1,0 +1,190 @@
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const projectRoot = path.resolve(__dirname, "..");
+const nativeRoot = path.join(projectRoot, "native", "litesnap-capture");
+const addonSourcePath = path.join(nativeRoot, "src", "addon.cc");
+const vendorIncludeDir = path.join(nativeRoot, "vendor", "node");
+const vendorNodeLibPath = path.join(nativeRoot, "vendor", "win-x64", "node.lib");
+const builtAddonPath = path.join(
+  nativeRoot,
+  "build",
+  "Release",
+  "litesnap_capture.node"
+);
+const distNativeDir = path.join(projectRoot, "dist", "native");
+const distAddonPath = path.join(distNativeDir, "litesnap-capture.node");
+const requireNativeBuild =
+  process.argv.includes("--require") ||
+  process.env.LITELAUNCHER_REQUIRE_NATIVE_CAPTURE === "1";
+const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+const windowsKitsRoot = path.join(programFilesX86, "Windows Kits", "10");
+
+function resolveVcVars64Path() {
+  const candidates = [
+    path.join(programFilesX86, "Microsoft Visual Studio", "2022", "BuildTools"),
+    path.join(programFiles, "Microsoft Visual Studio", "2022", "BuildTools"),
+    path.join(programFiles, "Microsoft Visual Studio", "2022", "Community"),
+    path.join(programFiles, "Microsoft Visual Studio", "2022", "Professional"),
+    path.join(programFiles, "Microsoft Visual Studio", "2022", "Enterprise")
+  ].map((root) => path.join(root, "VC", "Auxiliary", "Build", "vcvars64.bat"));
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function log(message) {
+  console.info(`[build-native] ${message}`);
+}
+
+function fail(message) {
+  console.error(`[build-native] ${message}`);
+  process.exit(1);
+}
+
+function finishOptionalSkip(message) {
+  log(message);
+  process.exit(0);
+}
+
+function copyBuiltAddon() {
+  fs.mkdirSync(distNativeDir, { recursive: true });
+  try {
+    fs.copyFileSync(builtAddonPath, distAddonPath);
+  } catch (error) {
+    if (error && error.code === "EBUSY") {
+      const message =
+        "dist/native/litesnap-capture.node is locked by a running LiteLauncher/Electron instance. Stop pnpm dev or close Electron before rebuilding the native addon.";
+      if (requireNativeBuild) {
+        fail(message);
+      }
+      finishOptionalSkip(`${message} Keeping the existing native addon.`);
+    }
+    throw error;
+  }
+  log(`published ${path.relative(projectRoot, distAddonPath)}`);
+}
+
+function getLatestWindowsSdkVersion() {
+  const libRoot = path.join(windowsKitsRoot, "Lib");
+  if (!fs.existsSync(libRoot)) {
+    return null;
+  }
+
+  const versions = fs
+    .readdirSync(libRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => /^\d+\.\d+\.\d+\.\d+$/.test(name))
+    .sort((left, right) =>
+      left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })
+    );
+
+  return versions.at(-1) ?? null;
+}
+
+function buildWithCl(vcVars64PathValue, windowsSdkVersion) {
+  const releaseDir = path.join(nativeRoot, "build", "Release");
+  const hookSourcePath = path.join(nativeRoot, "src", "win_delay_load_hook.cc");
+  const addonObjPath = path.join(releaseDir, "addon.obj");
+  const hookObjPath = path.join(releaseDir, "win_delay_load_hook.obj");
+  const buildBatchPath = path.join(nativeRoot, ".build-native.cmd");
+  const buildBatchContents = [
+    `@call "${vcVars64PathValue}"`,
+    `if not exist "${releaseDir}" mkdir "${releaseDir}"`,
+    "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
+    "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /DBUILDING_NODE_EXTENSION /DNODE_GYP_MODULE_NAME=litesnap_capture ^",
+    `  /I"${vendorIncludeDir}" ^`,
+    `  /Fo"${addonObjPath}" ^`,
+    `  "${addonSourcePath}"`,
+    "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
+    "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /DHOST_BINARY=\\\"node.exe\\\" ^",
+    `  /Fo"${hookObjPath}" ^`,
+    `  "${hookSourcePath}"`,
+    "link /nologo /DLL ^",
+    `  /OUT:"${builtAddonPath}" ^`,
+    `  "${addonObjPath}" ^`,
+    `  "${hookObjPath}" ^`,
+    "  delayimp.lib /DELAYLOAD:node.exe /ignore:4199 ^",
+    `  user32.lib gdi32.lib dwmapi.lib "${vendorNodeLibPath}"`,
+    ""
+  ].join("\r\n");
+
+  try {
+    fs.writeFileSync(buildBatchPath, buildBatchContents, "utf8");
+    return spawnSync("cmd.exe", ["/d", "/c", buildBatchPath], {
+      cwd: nativeRoot,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        WindowsSDKDir: `${windowsKitsRoot}\\`,
+        WindowsSdkDir: `${windowsKitsRoot}\\`,
+        WindowsSDKVersion: `${windowsSdkVersion}\\`,
+        WindowsSdkVersion: `${windowsSdkVersion}\\`,
+        UniversalCRTSdkDir: `${windowsKitsRoot}\\`,
+        UCRTVersion: `${windowsSdkVersion}\\`
+      },
+      windowsHide: true
+    });
+  } finally {
+    if (fs.existsSync(buildBatchPath)) {
+      fs.unlinkSync(buildBatchPath);
+    }
+  }
+}
+
+if (process.platform !== "win32") {
+  finishOptionalSkip("skipping native LiteSnap build on non-Windows platform");
+}
+
+if (!fs.existsSync(nativeRoot) || !fs.existsSync(addonSourcePath)) {
+  if (requireNativeBuild) {
+    fail("native/litesnap-capture source is missing");
+  }
+  finishOptionalSkip("native/litesnap-capture source is missing; skipping optional build");
+}
+
+if (!fs.existsSync(path.join(vendorIncludeDir, "node_api.h"))) {
+  if (requireNativeBuild) {
+    fail("native/litesnap-capture vendor N-API headers are missing");
+  }
+  finishOptionalSkip("native/litesnap-capture vendor headers are missing; skipping optional native build");
+}
+
+if (!fs.existsSync(vendorNodeLibPath)) {
+  if (requireNativeBuild) {
+    fail("native/litesnap-capture vendor node.lib is missing");
+  }
+  finishOptionalSkip("native/litesnap-capture vendor node.lib is missing; skipping optional native build");
+}
+
+const vcVars64Path = resolveVcVars64Path();
+const windowsSdkVersion = getLatestWindowsSdkVersion();
+if (!vcVars64Path || !windowsSdkVersion) {
+  if (requireNativeBuild) {
+    fail(
+      "Visual Studio Build Tools 2022 or Windows SDK environment is incomplete. Ensure vcvars64.bat and a Windows 10/11 SDK are installed."
+    );
+  }
+  finishOptionalSkip("VS/Windows SDK environment is incomplete; skipping optional native build");
+}
+
+log("building LiteSnap native capture addon with cl.exe");
+const result = buildWithCl(vcVars64Path, windowsSdkVersion);
+
+if (result.status !== 0) {
+  if (requireNativeBuild) {
+    process.exit(result.status ?? 1);
+  }
+  finishOptionalSkip("native build failed; Electron fallback will remain active");
+}
+
+if (!fs.existsSync(builtAddonPath)) {
+  if (requireNativeBuild) {
+    fail("native build finished without producing build/Release/litesnap_capture.node");
+  }
+  finishOptionalSkip("native build completed without an addon output; keeping Electron fallback");
+}
+
+copyBuiltAddon();

@@ -117,6 +117,25 @@ export async function waitForActivePlugin(
   );
 }
 
+async function waitForLauncherPage(
+  electronApp: ElectronApplication
+): Promise<Page> {
+  const firstPage = await electronApp.firstWindow();
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 15000) {
+    const pages = electronApp.windows();
+    const launcherPage =
+      pages.find((page) => page.url().includes("/renderer/index.html")) ?? null;
+    if (launcherPage) {
+      return launcherPage;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  return firstPage;
+}
+
 export async function launchE2ESession(
   options: LaunchE2ESessionOptions = {}
 ): Promise<E2ESession> {
@@ -138,7 +157,7 @@ export async function launchE2ESession(
     env
   });
 
-  const page = await electronApp.firstWindow();
+  const page = await waitForLauncherPage(electronApp);
   await page.bringToFront();
   await waitForRendererBootstrap(page);
   await waitForMode(page, "search");

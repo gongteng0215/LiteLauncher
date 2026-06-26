@@ -2,7 +2,12 @@ const fs = require("fs");
 const path = require("path");
 
 const WATCH_MODE = process.argv.includes("--watch");
-const WATCHED_RENDERER_FILES = new Set(["index.html", "styles.css"]);
+const WATCHED_RENDERER_FILES = new Set([
+  "index.html",
+  "styles.css",
+  "litesnap-overlay.html",
+  "litesnap-overlay.css"
+]);
 const activeWatchers = [];
 let watchLogTimer = null;
 const pendingWatchLogs = new Set();
@@ -66,7 +71,9 @@ function copyAssetPath(relativePath) {
 function copyAllAssets() {
   const filesToCopy = [
     ["src/renderer/index.html", "dist/renderer/index.html"],
-    ["src/renderer/styles.css", "dist/renderer/styles.css"]
+    ["src/renderer/styles.css", "dist/renderer/styles.css"],
+    ["src/renderer/litesnap-overlay.html", "dist/renderer/litesnap-overlay.html"],
+    ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"]
   ];
 
   for (const [src, dest] of filesToCopy) {

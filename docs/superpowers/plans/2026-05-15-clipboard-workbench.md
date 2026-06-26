@@ -4,9 +4,9 @@
 
 **Goal:** Build a new default-visible `Clipboard Workbench` plugin that can collect, manage, search, and replay multiple clipboard items without modifying the existing `clip`.
 
-**Architecture:** A singleton `ClipboardWorkbenchService` in the main process owns clipboard polling, retention, batch paste orchestration, and view-model assembly. It persists metadata through a dedicated `ClipboardWorkbenchStore` that uses its own sqlite connection against the existing `litelauncher.db` file with new `clipboard_workbench_*` tables plus asset files under `<userData>/clipboard-workbench/assets/`. The renderer keeps only ephemeral UI state such as current selection and draft filters, and always refreshes from plugin payloads returned by plugin actions.
+**Architecture:** A singleton `ClipboardWorkbenchService` in the main process owns clipboard polling, retention, batch paste orchestration, and view-model assembly. It persists metadata through a dedicated `ClipboardWorkbenchStore` that uses its own `node:sqlite` connection against the existing `litelauncher.db` file with new `clipboard_workbench_*` tables plus asset files under `<userData>/clipboard-workbench/assets/`. The renderer keeps only ephemeral UI state such as current selection and draft filters, and always refreshes from plugin payloads returned by plugin actions.
 
-**Tech Stack:** TypeScript, Electron clipboard/dialog APIs, sqlite3, node:test, Playwright, existing LiteLauncher plugin-panel framework.
+**Tech Stack:** TypeScript, Electron clipboard/dialog APIs, `node:sqlite`, node:test, Playwright, existing LiteLauncher plugin-panel framework.
 
 ---
 

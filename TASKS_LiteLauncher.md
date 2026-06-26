@@ -1,6 +1,6 @@
 # LiteLauncher 开发任务清单
 
-更新时间：2026-06-17
+更新时间：2026-06-22
 来源：`PRD_LiteLauncher.md`
 
 状态：`待办` / `进行中` / `阻塞` / `完成`  
@@ -40,7 +40,7 @@
 | [x] | LL-028 | 单实例替换启动链路 | P0 | 完成 | `--replace-instance` 避免旧主进程残留 |
 | [x] | LL-029 | Windows 命令 / StartApps / WindowsApps 命中 | P0 | 完成 | 典型场景：`codex` |
 | [x] | LL-030 | 同目标结果去重与图标优先策略 | P1 | 完成 | 同一 target 合并，优先保留完整项 |
-| [x] | LL-031 | 插件原生交互防隐藏 | P1 | 完成 | 文件选择 / 下载期间暂停自动隐藏 |
+| [x] | LL-031 | 面板态防隐藏 | P1 | 完成 | 文件选择 / 下载期间暂停自动隐藏；`plugin / settings / cashflow` 面板失焦后保持可见，仅通过 `Esc` / 返回 / 显式隐藏退出 |
 
 ## 2. 插件任务
 
@@ -86,6 +86,7 @@
 | [ ] | LL-208 | Cashflow AI 多性格策略 | P1 | 待办 | 当前为基础策略 |
 | [ ] | LL-210 | 插件面板注册器收敛 | P0 | 进行中 | 已完成多批实现外提并引入配置驱动 Enter 分发；多数组件 apply/render 均走 `plugin-panel-impls`，已移除 Password / JSON / URL / Timestamp / Cron / Strings / Colors / QR / UA / API / HTTP Mock 等轻量 wrapper，Markdown 也已改为 `panelImplsSafe` 直连；打开插件后的 keepOpen 二次刷新已加保护，后续继续瘦身执行 helper 与共享状态 |
 | [ ] | LL-232 | WebTools HTTP Mock Server（MVP） | P0 | 进行中 | 已补面板编辑、Enter 启动动作与 E2E（启动 -> 命中 -> 停止）；已转默认可见，默认目录仅保留单入口，后续补生命周期健壮性与更多断言 |
+| [ ] | LL-236 | LiteSnap 截图贴图插件首版 | P0 | 进行中 | 当前已完成共享类型、内置插件注册、默认可见、LiteSnap 面板壳、设置桥接与主进程运行时脚手架；下一步补截图 overlay、贴图窗口和基础标注能力 |
 | [x] | LL-216 | 插件可见性配置化 | P1 | 完成 | 设置页可编辑插件白名单，保存后热更新生效 |
 
 ## 3. UI / 交互任务
@@ -111,7 +112,7 @@
 | [x] | LL-403 | README 打包说明 | P0 | 完成 | pnpm 命令 |
 | [x] | LL-405 | GitHub Actions 自动打包 | P2 | 完成 | `v*` tag 触发 |
 | [x] | LL-406 | Windows `.ico` 图标接入 | P1 | 完成 | 主窗口 + 托盘 + 安装包 |
-| [ ] | LL-404 | 自动更新端到端验证 | P2 | 进行中 | 已补自动检查调度与 release notes 渲染回归；`v1.0.25` 发版后需用线上 `v1.0.24` 客户端实测检查、下载、安装链路 |
+| [x] | LL-404 | 自动更新端到端验证 | P2 | 完成 | 已完成 `v1.0.24 -> v1.0.25` 真实链路验证：打包版 `v1.0.24` 可发现线上 `v1.0.25`、读取发布日志并下载完成；当前正式安装目录、快捷方式与卸载信息已回到 `v1.0.25`。同时确认本机需使用 `cmd /c "<installer>" /S /D=...` 方式调用 NSIS 安装包，避免 PowerShell `Start-Process -ArgumentList` 写坏自定义安装目录 |
 | [ ] | LL-407 | macOS 签名与公证 | P2 | 待办 | 自用阶段降级，证书待接入 |
 | [ ] | LL-411 | macOS `.icns` 图标接入 | P2 | 待办 | 自用阶段降级，仍需补齐 |
 
@@ -123,14 +124,14 @@
 | [x] | LL-502 | Cashflow 持久化测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-503 | Cashflow 插件合约测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-504 | Cashflow 性能基线测试 | P2 | 完成 | 自用阶段降级，已接入 |
-| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已覆盖搜索首页布局、Windows Codex 搜索/置顶/跨重启恢复、Hardware / File Hash / Port Helper、Crypto / JWT、HTTP Mock 启动/命中/停止及多项 WebTools 小屏断言 |
+| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已覆盖搜索首页布局、Windows Codex 搜索/置顶/跨重启恢复、Hardware / File Hash / Port Helper、Crypto / JWT、HTTP Mock 启动/命中/停止、多项 WebTools 小屏断言，以及设置页“更新诊断 / 置顶失败摘要 / 复制日志反馈” smoke，另已补 plugin / settings / cashflow 面板失焦保持可见、`Esc` 回退，以及 `search` 模式真实 blur 自动隐藏 smoke |
 | [x] | LL-506 | WebTools 可见插件回归脚本 | P2 | 完成 | 自用阶段降级，`test:plugins-visible` 已覆盖当前默认可见插件 |
 | [x] | LL-507 | Windows 应用别名回归 | P2 | 完成 | 自用阶段降级，已补 `test:windows-alias`，覆盖 catalog / dynamic search / AppsFolder 启动 |
 
 ## 6. 下一步建议
 
-1. 先发布 `v1.0.25` 补丁版：覆盖更新说明富文本显示和动态应用置顶失败两个真实问题。
-2. 推进 `LL-404`：发布后用线上 `v1.0.24` 客户端实测检查到 `v1.0.25`，确认自动更新链路。
+1. 继续推进 `LL-236`：优先补 LiteSnap 截图 overlay、贴图窗口、基础标注工具与设置持久化 UI。
+2. 视发布节奏决定是否先整理当前 `v1.0.26` 收口版，已有设置页诊断、更新说明富文本显示、动态应用置顶稳定性与面板失焦不自动隐藏改动可一并发布。
 3. 推进 `LL-305`：继续巡检非新增插件范围的 UI 文案与编码问题。
 4. 推进 `LL-307`：补插件面板高 DPI 回归和更细截图断言。
 5. 推进 `LL-210`：继续拆分 `src/renderer/renderer.ts` 里的剩余执行 helper 与共享状态逻辑。

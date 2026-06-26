@@ -97,8 +97,35 @@ test("visible plugin ids are stable and subset of all plugins", () => {
     "clipboard workbench should be visible by default"
   );
   assert.ok(
+    visiblePluginIds.includes("litesnap"),
+    "LiteSnap should be visible by default"
+  );
+  assert.ok(
     visiblePluginIds.includes("codeagent-switch"),
     "CodeAgent Switch plugin should be visible by default"
+  );
+});
+
+test("LiteSnap is visible by default and opens a plugin panel", async () => {
+  const visiblePluginIds = getVisiblePluginIds();
+  assert.ok(
+    visiblePluginIds.includes("litesnap"),
+    "LiteSnap should be visible by default"
+  );
+
+  const { window, sent } = createMockWindow();
+  const result = await executePluginCommand(
+    "litesnap",
+    window as never,
+    createSelectedItem("litesnap")
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.keepOpen, true);
+  assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
+  assert.equal(
+    (sent[0]?.payload as { pluginId?: string }).pluginId,
+    "litesnap"
   );
 });
 

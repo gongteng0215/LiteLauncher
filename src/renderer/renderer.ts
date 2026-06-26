@@ -330,6 +330,11 @@ interface LauncherApi {
   ): Promise<CatalogScanConfig>;
   getVisiblePluginIds(): Promise<string[]>;
   setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
+  getLiteSnapSettings(): Promise<unknown>;
+  setLiteSnapSettings(patch: Record<string, unknown>): Promise<unknown>;
+  liteSnapStartCapture(): Promise<boolean>;
+  liteSnapPinClipboard(): Promise<boolean>;
+  liteSnapTogglePinnedWindows(): Promise<{ hidden: boolean; count: number }>;
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
@@ -346,6 +351,7 @@ interface LauncherApi {
   setWindowSizePreset(preset: "compact" | "cashflow"): Promise<boolean>;
   setAutoHideSuspended(suspended: boolean): Promise<boolean>;
   pickFilePath(): Promise<string | null>;
+  pickDirectoryPath(): Promise<string | null>;
   hide(): Promise<boolean>;
   getClipItems(query: string): Promise<ClipItem[]>;
   copyClipItem(itemId: string): Promise<boolean>;
@@ -3638,6 +3644,9 @@ function handlePanelModeKeydown(
   if (mode === "plugin") {
     if (isEscape) {
       event.preventDefault();
+      if (panelImplsSafe.handleActivePluginPanelEscape()) {
+        return true;
+      }
       pushDebugLog("renderer action: plugin -> backToSearch");
       backToSearch();
       return true;

@@ -1,0 +1,250 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import {
+  desktopCapturer,
+  nativeImage,
+  screen,
+  type Display,
+  type NativeImage,
+  type Rectangle
+} from "electron";
+
+export interface LiteSnapCaptureProvider {
+  capturePreviewImage(display: Display): Promise<NativeImage | null>;
+  captureSourceImage(display: Display): Promise<NativeImage | null>;
+  getWindowRectAtPoint(
+    display: Display,
+    x: number,
+    y: number
+  ): Promise<Rectangle | null>;
+}
+
+type NativeLiteSnapCaptureRequest = {
+  x: number;
+  y: number;
+  captureWidth: number;
+  captureHeight: number;
+  outputWidth: number;
+  outputHeight: number;
+};
+
+type NativeLiteSnapCaptureResult = {
+  width: number;
+  height: number;
+  data: Buffer;
+};
+
+type NativeLiteSnapCaptureAddon = {
+  captureDisplayRect(
+    request: NativeLiteSnapCaptureRequest
+  ): NativeLiteSnapCaptureResult | null;
+  getWindowRectAtPoint?(
+    x: number,
+    y: number
+  ): Rectangle | null;
+};
+
+type ScreenWithDipTransforms = typeof screen & {
+  dipToScreenRect?: (window: null, rect: Rectangle) => Rectangle;
+};
+
+class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
+  public async capturePreviewImage(display: Display): Promise<NativeImage | null> {
+    return this.captureDisplayImage(display, {
+      thumbnailWidth: Math.max(1, display.bounds.width),
+      thumbnailHeight: Math.max(1, display.bounds.height)
+    });
+  }
+
+  public async captureSourceImage(display: Display): Promise<NativeImage | null> {
+    return this.captureDisplayImage(display, {
+      thumbnailWidth: Math.max(
+        1,
+        Math.round(display.bounds.width * display.scaleFactor)
+      ),
+      thumbnailHeight: Math.max(
+        1,
+        Math.round(display.bounds.height * display.scaleFactor)
+      )
+    });
+  }
+
+  public async getWindowRectAtPoint(): Promise<Rectangle | null> {
+    return null;
+  }
+
+  private async captureDisplayImage(
+    display: Display,
+    size: {
+      thumbnailWidth: number;
+      thumbnailHeight: number;
+    }
+  ): Promise<NativeImage | null> {
+    const { thumbnailWidth, thumbnailHeight } = size;
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: {
+        width: thumbnailWidth,
+        height: thumbnailHeight
+      },
+      fetchWindowIcons: false
+    });
+
+    const matchedSource =
+      sources.find((source) => source.display_id === String(display.id)) ?? sources[0];
+    if (!matchedSource || !matchedSource.thumbnail || matchedSource.thumbnail.isEmpty()) {
+      return null;
+    }
+
+    return matchedSource.thumbnail;
+  }
+}
+
+class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
+  public constructor(private readonly addon: NativeLiteSnapCaptureAddon) {}
+
+  public async capturePreviewImage(display: Display): Promise<NativeImage | null> {
+    return this.captureDisplayImage(display, false);
+  }
+
+  public async captureSourceImage(display: Display): Promise<NativeImage | null> {
+    return this.captureDisplayImage(display, true);
+  }
+
+  public async getWindowRectAtPoint(
+    display: Display,
+    x: number,
+    y: number
+  ): Promise<Rectangle | null> {
+    if (typeof this.addon.getWindowRectAtPoint !== "function") {
+      return null;
+    }
+
+    const screenPoint = toPhysicalDisplayPoint(display, x, y);
+    const rect = this.addon.getWindowRectAtPoint(screenPoint.x, screenPoint.y);
+    if (!rect || rect.width <= 8 || rect.height <= 8) {
+      return null;
+    }
+
+    return toDisplayDipRect(display, rect);
+  }
+
+  private async captureDisplayImage(
+    display: Display,
+    highResolution: boolean
+  ): Promise<NativeImage | null> {
+    const physicalBounds = toPhysicalDisplayBounds(display);
+    const request: NativeLiteSnapCaptureRequest = {
+      x: physicalBounds.x,
+      y: physicalBounds.y,
+      captureWidth: Math.max(1, physicalBounds.width),
+      captureHeight: Math.max(1, physicalBounds.height),
+      outputWidth: highResolution
+        ? Math.max(1, physicalBounds.width)
+        : Math.max(1, display.bounds.width),
+      outputHeight: highResolution
+        ? Math.max(1, physicalBounds.height)
+        : Math.max(1, display.bounds.height)
+    };
+
+    const result = this.addon.captureDisplayRect(request);
+    if (!result || !Buffer.isBuffer(result.data) || result.data.length === 0) {
+      return null;
+    }
+
+    const image = nativeImage.createFromBitmap(result.data, {
+      width: result.width,
+      height: result.height
+    });
+    return image.isEmpty() ? null : image;
+  }
+}
+
+function toPhysicalDisplayBounds(display: Display): Rectangle {
+  const screenWithDipTransforms = screen as ScreenWithDipTransforms;
+  if (typeof screenWithDipTransforms.dipToScreenRect === "function") {
+    return screenWithDipTransforms.dipToScreenRect(null, display.bounds);
+  }
+
+  return {
+    x: Math.round(display.bounds.x * display.scaleFactor),
+    y: Math.round(display.bounds.y * display.scaleFactor),
+    width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
+    height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor))
+  };
+}
+
+function toPhysicalDisplayPoint(
+  display: Display,
+  x: number,
+  y: number
+): { x: number; y: number } {
+  const physicalBounds = toPhysicalDisplayBounds(display);
+  return {
+    x: Math.round(physicalBounds.x + x * display.scaleFactor),
+    y: Math.round(physicalBounds.y + y * display.scaleFactor)
+  };
+}
+
+function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
+  const physicalBounds = toPhysicalDisplayBounds(display);
+  const x = (rect.x - physicalBounds.x) / display.scaleFactor;
+  const y = (rect.y - physicalBounds.y) / display.scaleFactor;
+  const width = rect.width / display.scaleFactor;
+  const height = rect.height / display.scaleFactor;
+  const left = Math.max(0, Math.round(x));
+  const top = Math.max(0, Math.round(y));
+  const right = Math.min(
+    display.bounds.width,
+    Math.round(x + width)
+  );
+  const bottom = Math.min(
+    display.bounds.height,
+    Math.round(y + height)
+  );
+  if (right - left <= 8 || bottom - top <= 8) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top
+  };
+}
+
+function resolveNativeAddonPath(): string {
+  return path.join(__dirname, "../../native/litesnap-capture.node");
+}
+
+function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const nativeAddonPath = resolveNativeAddonPath();
+  if (!fs.existsSync(nativeAddonPath)) {
+    return null;
+  }
+
+  try {
+    const addon = require(nativeAddonPath) as NativeLiteSnapCaptureAddon;
+    if (!addon || typeof addon.captureDisplayRect !== "function") {
+      return null;
+    }
+
+    console.info("[litesnap] using Windows native capture provider");
+    return new NativeLiteSnapCaptureProvider(addon);
+  } catch (error) {
+    console.warn("[litesnap] failed to load Windows native capture addon", error);
+    return null;
+  }
+}
+
+export function createLiteSnapCaptureProvider(): LiteSnapCaptureProvider {
+  return (
+    createNativeLiteSnapCaptureProvider() ??
+    new ElectronLiteSnapCaptureProvider()
+  );
+}

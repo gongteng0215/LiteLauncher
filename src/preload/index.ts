@@ -2,6 +2,15 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  LiteSnapCommitCaptureInput,
+  LiteSnapCommitCaptureResult,
+  LiteSnapOverlaySelection,
+  LiteSnapOverlayState,
+  LiteSnapPinnedWindowsToggleResult,
+  LiteSnapSettings,
+  LiteSnapSettingsUpdateResult
+} from "../shared/litesnap";
+import {
   AppErrorLogEntry,
   AppErrorLogInput,
   AppUpdaterStatus,
@@ -74,6 +83,47 @@ const api = {
   setVisiblePluginIds(pluginIds: string[]): Promise<string[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.setVisiblePluginIds, pluginIds);
   },
+  getLiteSnapSettings(): Promise<LiteSnapSettings> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getLiteSnapSettings);
+  },
+  setLiteSnapSettings(
+    patch: Partial<LiteSnapSettings>
+  ): Promise<LiteSnapSettingsUpdateResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setLiteSnapSettings, patch);
+  },
+  liteSnapStartCapture(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartCapture);
+  },
+  liteSnapPinClipboard(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapPinClipboard);
+  },
+  liteSnapTogglePinnedWindows(): Promise<LiteSnapPinnedWindowsToggleResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTogglePinnedWindows);
+  },
+  liteSnapGetOverlayState(): Promise<LiteSnapOverlayState | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetOverlayState);
+  },
+  liteSnapGetWindowRectAtPoint(
+    x: number,
+    y: number
+  ): Promise<LiteSnapOverlaySelection | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetWindowRectAtPoint, x, y);
+  },
+  onLiteSnapOverlayStateChanged(
+    handler: (state: LiteSnapOverlayState | null) => void
+  ): Cleanup {
+    return on(IPC_CHANNELS.liteSnapOverlayStateChanged, (state) =>
+      handler(state as LiteSnapOverlayState | null)
+    );
+  },
+  liteSnapCommitCapture(
+    input: LiteSnapCommitCaptureInput
+  ): Promise<LiteSnapCommitCaptureResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCommitCapture, input);
+  },
+  liteSnapCancelCapture(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCancelCapture);
+  },
   rebuildCatalog(): Promise<CatalogRebuildResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.rebuildCatalog);
   },
@@ -113,6 +163,9 @@ const api = {
   },
   pickFilePath(): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.pickFilePath);
+  },
+  pickDirectoryPath(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.pickDirectoryPath);
   },
   hide(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.hide);

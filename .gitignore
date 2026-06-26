@@ -1,5 +1,12 @@
 node_modules/
 dist/
+native/litesnap-capture/build/
+native/litesnap-capture/*.obj
+native/litesnap-capture/*.lib
+native/litesnap-capture/*.exp
+litesnap-capture.node
+.codegraph/
+artifacts/
 *.log
 *.db
 *.db-wal

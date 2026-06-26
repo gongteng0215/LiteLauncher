@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>LiteSnap Overlay</title>
+    <link rel="stylesheet" href="./litesnap-overlay.css" />
+  </head>
+  <body>
+    <main class="litesnap-overlay" id="litesnap-overlay">
+      <div class="litesnap-overlay__hint" id="litesnap-hint">
+        拖拽选择区域，松开后可标注。Enter 复制，Esc 取消。
+      </div>
+      <canvas class="litesnap-overlay__canvas" id="litesnap-canvas" hidden></canvas>
+      <div class="litesnap-overlay__loupe" id="litesnap-loupe" hidden>
+        <canvas class="litesnap-overlay__loupe-canvas" id="litesnap-loupe-canvas" width="96" height="96"></canvas>
+        <div class="litesnap-overlay__loupe-color" id="litesnap-loupe-color">#000000</div>
+      </div>
+      <div class="litesnap-overlay__brush-preview" id="litesnap-brush-preview" hidden></div>
+      <div class="litesnap-overlay__window-hint" id="litesnap-window-hint" hidden></div>
+      <div class="litesnap-overlay__selection" id="litesnap-selection" hidden>
+        <div class="litesnap-overlay__size" id="litesnap-size"></div>
+        <div class="litesnap-overlay__handle" data-handle="n"></div>
+        <div class="litesnap-overlay__handle" data-handle="s"></div>
+        <div class="litesnap-overlay__handle" data-handle="w"></div>
+        <div class="litesnap-overlay__handle" data-handle="e"></div>
+        <div class="litesnap-overlay__handle" data-handle="nw"></div>
+        <div class="litesnap-overlay__handle" data-handle="ne"></div>
+        <div class="litesnap-overlay__handle" data-handle="sw"></div>
+        <div class="litesnap-overlay__handle" data-handle="se"></div>
+      </div>
+      <input
+        class="litesnap-overlay__text-input"
+        id="litesnap-text-input"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        hidden
+      />
+      <div class="litesnap-overlay__toolbar" id="litesnap-toolbar" hidden>
+        <div class="litesnap-overlay__toolbar-row">
+        <div class="litesnap-overlay__group litesnap-overlay__group--tools" role="group" aria-label="标注工具">
+          <button type="button" class="litesnap-overlay__tool" data-tool="select" title="选择/调整" aria-label="选择">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 4 6 16 2.5-6.5L20 11Z"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="rect" title="矩形" aria-label="矩形">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="ellipse" title="椭圆" aria-label="椭圆">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="line" title="直线" aria-label="直线">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="arrow" title="箭头" aria-label="箭头">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5"/><path d="M11 5h8v8"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="pen" title="画笔" aria-label="画笔">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20c2-1 3-2 4-4 1.5-3 4-9 8-12 2 1 3 2 4 4-3 4-9 6.5-12 8-2 1-3 2-4 4Z"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="highlight" title="荧光笔" aria-label="荧光笔">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15 15 5l4 4L9 19H5Z"/><path d="M4 20h8"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="text" title="文字" aria-label="文字">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14"/><path d="M12 6v13"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="number" title="序号" aria-label="序号">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8.5v7"/><path d="M9.5 10.5h5"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="mosaic" title="马赛克" aria-label="马赛克">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4Z"/><path d="M14 4h6v6h-6Z"/><path d="M4 14h6v6H4Z"/><path d="M14 14h3v3h-3Z"/><path d="M18 14h2v2h-2Z"/><path d="M14 18h2v2h-2Z"/><path d="M18 18h2v2h-2Z"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-tool="blur" title="模糊" aria-label="模糊">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7" opacity="0.55"/><circle cx="12" cy="12" r="10" opacity="0.28"/></svg>
+          </button>
+        </div>
+        </div>
+        <div class="litesnap-overlay__toolbar-row">
+        <div class="litesnap-overlay__group litesnap-overlay__colors" id="litesnap-colors" role="group" aria-label="颜色"></div>
+        <div class="litesnap-overlay__divider"></div>
+        <div class="litesnap-overlay__group litesnap-overlay__widths" id="litesnap-widths" role="group" aria-label="线宽"></div>
+        <div class="litesnap-overlay__divider"></div>
+        <div class="litesnap-overlay__group" role="group" aria-label="填充">
+          <button type="button" class="litesnap-overlay__tool" id="litesnap-fill-toggle" data-command="toggle-fill" title="填充形状" aria-label="填充形状" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5" fill="currentColor" stroke="none"/></svg>
+          </button>
+        </div>
+        </div>
+        <div class="litesnap-overlay__toolbar-row">
+        <div class="litesnap-overlay__group" role="group" aria-label="操作">
+          <button type="button" class="litesnap-overlay__tool" data-command="undo" title="撤销" aria-label="撤销">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5"/><path d="M4 12h11a5 5 0 0 1 0 10h-1"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-command="redo" title="重做" aria-label="重做">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__tool" data-command="delete" title="删除最后一个标注" aria-label="删除最后一个标注">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 7l1 13h6l1-13"/><path d="M9 7V4h6v3"/></svg>
+          </button>
+        </div>
+        <div class="litesnap-overlay__divider"></div>
+        <div class="litesnap-overlay__group" role="group" aria-label="完成">
+          <button type="button" class="litesnap-overlay__action" data-action="cancel" title="取消 (Esc)" aria-label="取消">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18"/><path d="M18 6 6 18"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__action" data-action="pin" title="贴图" aria-label="贴图">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 3H6l4-3-1-6Z"/><path d="M12 13v7"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__action" data-action="save" title="保存" aria-label="保存">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5Z"/><path d="M8 4v5h7V4"/><path d="M8 20v-6h8v6"/></svg>
+          </button>
+          <button type="button" class="litesnap-overlay__action litesnap-overlay__action--primary" data-action="copy" title="复制 (Enter)" aria-label="复制">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h10v10H9Z"/><path d="M5 15V5h10"/></svg>
+          </button>
+        </div>
+        </div>
+      </div>
+      <div class="litesnap-overlay__status" id="litesnap-status" hidden></div>
+    </main>
+    <script src="./litesnap-overlay.js"></script>
+  </body>
+</html>

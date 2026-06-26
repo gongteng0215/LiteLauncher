@@ -15,6 +15,11 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "clipboard-workbench-refresh"
   },
   {
+    pluginId: handlerConstants.LITESNAP_PLUGIN_ID,
+    formSelector: "form.litesnap-form",
+    enterActionKey: "litesnap-start-capture"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_PASSWORD_PLUGIN_ID,
     formSelector: "form.webtools-password-form",
     enterActionKey: "password-generate"
