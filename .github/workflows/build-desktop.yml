@@ -124,6 +124,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v8
         with:
@@ -154,13 +157,32 @@ jobs:
 
           ls -la artifacts/release
 
-      - name: Create release if missing
+      - name: Create or update release notes
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || \
-          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes_zh="docs/releases/${tag}.zh-CN.md"
+          notes_en="docs/releases/${tag}.md"
+          if [ -f "${notes_zh}" ]; then
+            notes_file="${notes_zh}"
+          elif [ -f "${notes_en}" ]; then
+            notes_file="${notes_en}"
+          else
+            notes_file=""
+          fi
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            if [ -n "${notes_file}" ]; then
+              gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --notes-file "${notes_file}"
+            fi
+          elif [ -n "${notes_file}" ]; then
+            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --title "${tag}" --notes-file "${notes_file}"
+          else
+            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --title "${tag}" --generate-notes
+          fi
 
       - name: Publish release if still draft
         env:
