@@ -1887,7 +1887,7 @@
   }
 
   function handleDoubleClick(event: MouseEvent): void {
-    if (committing || !selection || !isValidSelection(selection) || activeTool !== "select") {
+    if (committing || !selection || !isValidSelection(selection)) {
       return;
     }
 

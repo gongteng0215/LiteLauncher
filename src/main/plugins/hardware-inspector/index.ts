@@ -8,10 +8,18 @@ import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { LauncherPlugin } from "../types";
 import {
   collectHardwareInspectorSnapshot,
+  getCachedHardwareInspectorSnapshot,
   HardwareInspectorSnapshot
 } from "./collector";
+import { renderHardwareReportImage } from "./report-image";
 
-type HardwareInspectorAction = "open" | "refresh" | "export-report" | "export-html";
+type HardwareInspectorAction =
+  | "open"
+  | "refresh"
+  | "export-report"
+  | "export-html"
+  | "export-image"
+  | "export-image-compact";
 type BadgeTone = "neutral" | "warning" | "danger" | "success";
 
 interface CardBadge {
@@ -153,6 +161,11 @@ function formatReportFileName(date = new Date()): string {
 
 function formatReportHtmlFileName(date = new Date()): string {
   return formatReportFileName(date).replace(/\.md$/i, ".html");
+}
+
+function formatReportImageFileName(date = new Date(), variant: "full" | "compact" = "full"): string {
+  const suffix = variant === "compact" ? "-精简" : "";
+  return formatReportFileName(date).replace(/\.md$/i, `${suffix}.png`);
 }
 
 function formatOptionalText(value: string | null | undefined): string {
@@ -983,7 +996,11 @@ function parseCommand(optionsText: string | undefined): HardwareInspectorCommand
           ? "export-report"
           : action === "export-html"
             ? "export-html"
-            : "open"
+            : action === "export-image"
+              ? "export-image"
+              : action === "export-image-compact"
+                ? "export-image-compact"
+                : "open"
   };
 }
 
@@ -1010,9 +1027,9 @@ function buildSummaryInfo(snapshot: HardwareInspectorSnapshot): string {
   return `${cpu} / ${board} / 内存 ${memoryCount} 条 / 显卡 ${gpuCount} 张 / 磁盘 ${diskCount} 块`;
 }
 
-async function executeRefresh(): Promise<ExecuteResult> {
+async function executeRefresh(force = true): Promise<ExecuteResult> {
   try {
-    const snapshot = await collectHardwareInspectorSnapshot();
+    const snapshot = await collectHardwareInspectorSnapshot({ force });
     return {
       ok: true,
       keepOpen: true,
@@ -1037,12 +1054,71 @@ async function executeRefresh(): Promise<ExecuteResult> {
   }
 }
 
+async function exportImage(
+  context: Parameters<LauncherPlugin["execute"]>[1],
+  variant: "full" | "compact"
+): Promise<ExecuteResult> {
+  const variantLabel = variant === "compact" ? "精简" : "完整";
+  try {
+    const snapshot = await collectHardwareInspectorSnapshot({ force: false });
+    const png = await renderHardwareReportImage(snapshot, variant);
+    const defaultPath = path.join(
+      app.getPath("documents"),
+      formatReportImageFileName(new Date(), variant)
+    );
+    const result = await dialog.showSaveDialog(context.window, {
+      title: `导出硬件配置图片（${variantLabel}）`,
+      defaultPath,
+      filters: [{ name: "PNG 图片", extensions: ["png"] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return {
+        ok: true,
+        keepOpen: true,
+        message: `已取消导出${variantLabel}图片`,
+        data: {
+          snapshot,
+          info: buildSummaryInfo(snapshot),
+          error: ""
+        }
+      };
+    }
+
+    await fs.writeFile(result.filePath, png);
+    return {
+      ok: true,
+      keepOpen: true,
+      message: `已导出硬件配置${variantLabel}图片：${path.basename(result.filePath)}`,
+      data: {
+        snapshot,
+        info: buildSummaryInfo(snapshot),
+        error: "",
+        reportPath: result.filePath
+      }
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : `导出硬件配置${variantLabel}图片失败`;
+    return {
+      ok: false,
+      keepOpen: true,
+      message,
+      data: {
+        error: message
+      }
+    };
+  }
+}
+
 async function exportReport(
   context: Parameters<LauncherPlugin["execute"]>[1],
   format: "markdown" | "html"
 ): Promise<ExecuteResult> {
   try {
-    const snapshot = await collectHardwareInspectorSnapshot();
+    const snapshot = await collectHardwareInspectorSnapshot({ force: false });
     const report =
       format === "html" ? buildHardwareReportHtml(snapshot) : buildHardwareReport(snapshot);
     const defaultPath = path.join(
@@ -1119,15 +1195,23 @@ export const hardwareInspectorPlugin: LauncherPlugin = {
     const command = parseCommand(optionsText);
 
     if (command.action === "open") {
+      const cachedSnapshot = getCachedHardwareInspectorSnapshot();
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: TITLE,
         subtitle: SUBTITLE,
-        data: {
-          loading: false,
-          info: ""
-        }
+        data: cachedSnapshot
+          ? {
+              snapshot: cachedSnapshot,
+              loading: false,
+              info: `${buildSummaryInfo(cachedSnapshot)}（缓存）`,
+              error: ""
+            }
+          : {
+              loading: false,
+              info: ""
+            }
       });
       return {
         ok: true,
@@ -1138,6 +1222,14 @@ export const hardwareInspectorPlugin: LauncherPlugin = {
 
     if (command.action === "refresh") {
       return executeRefresh();
+    }
+
+    if (command.action === "export-image") {
+      return exportImage(context, "full");
+    }
+
+    if (command.action === "export-image-compact") {
+      return exportImage(context, "compact");
     }
 
     return exportReport(context, command.action === "export-html" ? "html" : "markdown");

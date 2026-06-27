@@ -6108,11 +6108,19 @@ async function executeHardwareInspectorRefresh(): Promise<void> {
 }
 
 async function executeHardwareInspectorExportReport(
-  format: "markdown" | "html"
+  format: "markdown" | "html" | "image" | "image-compact"
 ): Promise<void> {
   const launcher = getLauncherApi();
+  const labelFor = (value: typeof format): string =>
+    value === "html"
+      ? "HTML"
+      : value === "image"
+        ? "完整图片"
+        : value === "image-compact"
+          ? "精简图片"
+          : "Markdown";
   if (!launcher) {
-    setStatus(`桥接层未加载，无法导出${format === "html" ? "HTML" : "Markdown"}报告`);
+    setStatus(`桥接层未加载，无法导出${labelFor(format)}报告`);
     return;
   }
 
@@ -6122,14 +6130,23 @@ async function executeHardwareInspectorExportReport(
   if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
     renderList();
   }
-  setStatus(`正在导出${format === "html" ? "HTML" : "Markdown"}报告...`);
+  const exportLabel = labelFor(format);
+  setStatus(`正在导出${exportLabel}报告...`);
 
+  const action =
+    format === "html"
+      ? "export-html"
+      : format === "image"
+        ? "export-image"
+        : format === "image-compact"
+          ? "export-image-compact"
+          : "export-report";
   const item: LaunchItem = {
-    id: `plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}:${format === "html" ? "export-html" : "export-report"}`,
+    id: `plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}:${action}`,
     type: "command",
     title: "硬件检测",
-    subtitle: `导出硬件${format === "html" ? " HTML" : " Markdown"}报告`,
-    target: `command:plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}?action=${format === "html" ? "export-html" : "export-report"}`,
+    subtitle: `导出硬件${exportLabel}报告`,
+    target: `command:plugin:${HARDWARE_INSPECTOR_PLUGIN_ID}?action=${action}`,
     keywords: ["plugin", "hardware", "report", "导出", "硬件报告", format]
   };
 
@@ -6149,13 +6166,13 @@ async function executeHardwareInspectorExportReport(
         ? data.error
         : result.ok
           ? ""
-          : result.message ?? `导出${format === "html" ? "HTML" : "Markdown"}报告失败`;
+          : result.message ?? `导出${exportLabel}报告失败`;
 
     setStatus(
       result.message ??
         (result.ok
-          ? `${format === "html" ? "HTML" : "Markdown"}报告已导出`
-          : hardwareInspectorError || `导出${format === "html" ? "HTML" : "Markdown"}报告失败`)
+          ? `${exportLabel}报告已导出`
+          : hardwareInspectorError || `导出${exportLabel}报告失败`)
     );
   } finally {
     hardwareInspectorExporting = false;
@@ -12917,10 +12934,16 @@ window.__LL_PANEL_IMPLS__ = {
 
   applyHardwareInspectorPanelPayload(panel: ActivePluginPanelState): void {
     const data = toRecord(panel.data);
-    hardwareInspectorSnapshot = getHardwareInspectorSnapshotFromData(data);
     hardwareInspectorLoading = data?.loading === true;
     hardwareInspectorInfo = typeof data?.info === "string" ? data.info : "";
     hardwareInspectorError = typeof data?.error === "string" ? data.error : "";
+    const snapshot = getHardwareInspectorSnapshotFromData(data);
+    if (snapshot) {
+      applyHardwareInspectorSnapshot(snapshot, hardwareInspectorInfo);
+      return;
+    }
+
+    hardwareInspectorSnapshot = null;
   },
 
   renderHardwareInspectorPanel(): void {
@@ -12980,6 +13003,24 @@ window.__LL_PANEL_IMPLS__ = {
       void executeHardwareInspectorExportReport("html");
     });
 
+    const exportImageCompactButton = document.createElement("button");
+    exportImageCompactButton.type = "button";
+    exportImageCompactButton.className = "settings-btn settings-btn-secondary";
+    exportImageCompactButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出精简图";
+    exportImageCompactButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    exportImageCompactButton.addEventListener("click", () => {
+      void executeHardwareInspectorExportReport("image-compact");
+    });
+
+    const exportImageButton = document.createElement("button");
+    exportImageButton.type = "button";
+    exportImageButton.className = "settings-btn settings-btn-secondary";
+    exportImageButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出长图";
+    exportImageButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    exportImageButton.addEventListener("click", () => {
+      void executeHardwareInspectorExportReport("image");
+    });
+
     const copySummaryButton = document.createElement("button");
     copySummaryButton.type = "button";
     copySummaryButton.className = "settings-btn settings-btn-secondary";
@@ -13020,6 +13061,8 @@ window.__LL_PANEL_IMPLS__ = {
       refreshButton,
       exportMarkdownButton,
       exportHtmlButton,
+      exportImageCompactButton,
+      exportImageButton,
       copySummaryButton,
       copyJsonButton
     );
@@ -13929,24 +13972,6 @@ window.__LL_PANEL_IMPLS__ = {
         card.dataset.marked = String(selected);
         card.dataset.clipboardWorkbenchItemId = item.id;
 
-        const itemTop = document.createElement("div");
-        itemTop.className = "clipboard-workbench-item-top";
-        const itemSelectHint = document.createElement("div");
-        itemSelectHint.className = "clipboard-workbench-item-select-hint";
-        itemSelectHint.textContent = selected ? "已加入批量" : "加入批量";
-        const toggleButton = document.createElement("button");
-        toggleButton.type = "button";
-        toggleButton.className = "clipboard-workbench-item-toggle";
-        toggleButton.dataset.clipboardWorkbenchItemToggle = item.id;
-        toggleButton.dataset.selected = String(selected);
-        toggleButton.textContent = selected ? "已选" : "选择";
-        toggleButton.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          toggleClipboardWorkbenchItemSelection(item.id);
-        });
-        itemTop.append(itemSelectHint, toggleButton);
-
         const button = document.createElement("button");
         button.type = "button";
         button.className = "clipboard-workbench-item-main";
@@ -13965,42 +13990,32 @@ window.__LL_PANEL_IMPLS__ = {
           card.appendChild(thumb);
         }
 
-        const itemHead = document.createElement("div");
-        itemHead.className = "clipboard-workbench-item-head";
         const itemTitle = document.createElement("div");
         itemTitle.className = "clipboard-workbench-item-title";
         itemTitle.textContent = item.title || item.summary;
-        const badgeRow = document.createElement("div");
-        badgeRow.className = "clipboard-workbench-item-badges";
-        badgeRow.append(
-          createClipboardWorkbenchBadge(getClipboardWorkbenchKindLabel(item.kind), "accent"),
-          createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(item.source))
-        );
-        if (item.favorite) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("收藏", "success"));
-        }
-        if (item.pinned) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("置顶", "accent"));
-        }
-        if (item.sensitive) {
-          badgeRow.appendChild(createClipboardWorkbenchBadge("敏感", "warning"));
-        }
-        itemHead.append(itemTitle, badgeRow);
-
-        const itemSummary = document.createElement("div");
-        itemSummary.className = "clipboard-workbench-item-summary";
-        itemSummary.textContent = item.summary;
-
-        const itemPreview = document.createElement("div");
-        itemPreview.className = "clipboard-workbench-item-preview";
-        itemPreview.textContent = getClipboardWorkbenchItemPreview(item);
+        itemTitle.title = item.title || item.summary;
 
         const itemFoot = document.createElement("div");
         itemFoot.className = "clipboard-workbench-item-foot";
         itemFoot.textContent = formatClipboardWorkbenchTime(item.updatedAt);
 
-        button.append(itemHead, itemSummary, itemPreview, itemFoot);
-        card.append(itemTop, button);
+        button.append(itemTitle, itemFoot);
+
+        const copyButton = document.createElement("button");
+        copyButton.type = "button";
+        copyButton.className = "clipboard-workbench-item-copy";
+        copyButton.dataset.clipboardWorkbenchItemCopy = item.id;
+        copyButton.textContent = "复制";
+        copyButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          clipboardWorkbenchActiveItemId = item.id;
+          void executeClipboardWorkbenchAction("restore-item", {
+            itemId: item.id
+          });
+        });
+
+        card.append(button, copyButton);
         itemList.appendChild(card);
       });
     }

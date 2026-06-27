@@ -8570,7 +8570,7 @@ body {
 .clipboard-workbench-panel {
   padding: 0;
   overflow: hidden;
-  height: min(78vh, 760px);
+  height: min(88vh, 920px);
 }
 
 .clipboard-workbench-form {
@@ -8582,12 +8582,12 @@ body {
 
 .clipboard-workbench-shell {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(300px, 0.95fr) minmax(320px, 1.1fr);
+  grid-template-columns: minmax(130px, 160px) minmax(0, 1.3fr) minmax(300px, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   height: 100%;
   min-height: 0;
-  padding: 14px;
+  padding: 8px;
   overflow: hidden;
 }
 
@@ -8595,16 +8595,39 @@ body {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 16px;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(135deg, rgba(8, 15, 27, 0.96), rgba(18, 28, 44, 0.88));
   box-shadow: 0 18px 40px rgba(2, 8, 23, 0.22);
 }
 
+.clipboard-workbench-toolbar .settings-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.clipboard-workbench-toolbar .settings-value,
+.clipboard-workbench-toolbar .settings-textarea {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
 .clipboard-workbench-toolbar-head {
   min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.clipboard-workbench-toolbar-head .settings-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.clipboard-workbench-toolbar-head .settings-description {
+  display: none;
 }
 
 .clipboard-workbench-toolbar-meta {
@@ -8619,13 +8642,18 @@ body {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .clipboard-workbench-toolbar-controls {
   grid-column: 1 / -1;
   display: grid;
-  gap: 8px;
+  gap: 6px;
+}
+
+.clipboard-workbench-search-row,
+.clipboard-workbench-toolbar-actions {
+  gap: 6px;
 }
 
 .clipboard-workbench-search-row,
@@ -8648,22 +8676,26 @@ body {
 }
 
 .clipboard-workbench-stat {
-  padding: 12px 14px;
-  border-radius: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
 }
 
 .clipboard-workbench-stat-label {
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: 10px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(233, 242, 255, 0.66);
 }
 
 .clipboard-workbench-stat-value {
-  margin-top: 4px;
-  font-size: 18px;
+  margin-top: 0;
+  margin-left: auto;
+  font-size: 13px;
   font-weight: 700;
   color: #fef3c7;
 }
@@ -8673,8 +8705,8 @@ body {
 .clipboard-workbench-detail {
   min-width: 0;
   min-height: 0;
-  padding: 16px;
-  border-radius: 16px;
+  padding: 10px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(8, 15, 27, 0.74);
   backdrop-filter: blur(10px);
@@ -8682,8 +8714,8 @@ body {
 }
 
 .clipboard-workbench-section-title {
-  margin-bottom: 10px;
-  font-size: 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -8694,13 +8726,13 @@ body {
 .clipboard-workbench-group-list,
 .clipboard-workbench-item-list {
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .clipboard-workbench-item-list {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  align-items: start;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 4px;
 }
 
 .clipboard-workbench-scope-btn,
@@ -8708,8 +8740,9 @@ body {
   width: 100%;
   text-align: left;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 10px 12px;
+  border-radius: 9px;
+  padding: 6px 10px;
+  font-size: 12px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(233, 242, 255, 0.86);
 }
@@ -8731,7 +8764,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .clipboard-workbench-list-meta {
@@ -8741,14 +8774,14 @@ body {
 
 .clipboard-workbench-item {
   width: 100%;
-  display: grid;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
   gap: 8px;
-  padding: 12px;
-  border-radius: 14px;
+  padding: 4px 8px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
-  align-content: start;
-  height: 100%;
 }
 
 .clipboard-workbench-item[data-active="true"] {
@@ -8761,47 +8794,53 @@ body {
   box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.18);
 }
 
-.clipboard-workbench-item-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
+.clipboard-workbench-item-top,
+.clipboard-workbench-item-toggle,
 .clipboard-workbench-item-select-hint {
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: rgba(233, 242, 255, 0.56);
+  display: none;
 }
 
-.clipboard-workbench-item-toggle {
+.clipboard-workbench-item-copy {
+  order: 3;
+  flex: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(233, 242, 255, 0.88);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.clipboard-workbench-item-toggle[data-selected="true"] {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.16);
-  color: #fef3c7;
+.clipboard-workbench-item-copy:hover {
+  border-color: rgba(56, 189, 248, 0.42);
+  background: rgba(56, 189, 248, 0.12);
+  color: #ffffff;
 }
 
 .clipboard-workbench-item-main {
-  width: 100%;
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 1px;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  align-content: start;
+  align-content: center;
+  overflow: hidden;
+}
+
+.clipboard-workbench-item-main .clipboard-workbench-item-head,
+.clipboard-workbench-item-main .clipboard-workbench-item-summary,
+.clipboard-workbench-item-main .clipboard-workbench-item-preview,
+.clipboard-workbench-item-badges {
+  display: none;
 }
 
 .clipboard-workbench-item-main:hover,
@@ -8809,19 +8848,14 @@ body {
   color: #ffffff;
 }
 
-.clipboard-workbench-item-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
 .clipboard-workbench-item-title {
-  font-size: 14px;
+  min-width: 0;
+  font-size: 13px;
   font-weight: 700;
   color: #ecf5ff;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .clipboard-workbench-item-badges,
@@ -8832,17 +8866,22 @@ body {
   justify-content: flex-end;
 }
 
+.clipboard-workbench-item-badges {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
 .clipboard-workbench-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 10px;
+  min-height: 20px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(233, 242, 255, 0.86);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -8865,28 +8904,35 @@ body {
 }
 
 .clipboard-workbench-item-summary {
-  font-size: 13px;
-  color: rgba(233, 242, 255, 0.92);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .clipboard-workbench-item-thumb {
+  order: 0;
+  flex: none;
   display: block;
-  width: 100%;
-  height: 72px;
+  width: 36px;
+  height: 36px;
   object-fit: cover;
-  border-radius: 12px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.02);
 }
 
 .clipboard-workbench-composer {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(8, 15, 27, 0.26);
+}
+
+.clipboard-workbench-composer .clipboard-workbench-section-title {
+  display: none;
 }
 
 .clipboard-workbench-composer-row {
@@ -8895,8 +8941,8 @@ body {
 }
 
 .clipboard-workbench-manual-text {
-  min-height: 44px;
-  max-height: 44px;
+  min-height: 32px;
+  max-height: 32px;
   resize: none;
   flex: 1 1 auto;
   min-width: 0;
@@ -8913,10 +8959,18 @@ body {
 .clipboard-workbench-item-preview {
   overflow-wrap: anywhere;
   word-break: break-word;
-  display: -webkit-box;
+  display: none;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.clipboard-workbench-item-foot {
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .clipboard-workbench-detail-hero {

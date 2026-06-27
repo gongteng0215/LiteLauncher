@@ -1,10 +1,161 @@
-import { BrowserWindow, clipboard, screen, type NativeImage } from "electron";
+import { BrowserWindow, clipboard, ipcMain, nativeImage, screen, type BrowserWindowConstructorOptions, type NativeImage } from "electron";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { type LiteSnapWindowRect } from "../../shared/litesnap";
 
-function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
-  const shellRadius = exact ? "0" : "14px";
-  const initialShadowClass = exact ? "" : " is-shadow-enabled";
+const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
+const PIN_COPY_CHANNEL = "litesnap-pin:copy";
+
+type PinWindowMeta = {
+  baseWidth: number;
+  baseHeight: number;
+  lastScale: number;
+  lastOpacity: number;
+  imagePath: string;
+};
+
+let pinVisualHandlersRegistered = false;
+let pinCopyHandlerRegistered = false;
+const pinWindowMeta = new Map<number, PinWindowMeta>();
+
+function ensurePinCopyHandler(): void {
+  if (pinCopyHandlerRegistered) {
+    return;
+  }
+
+  pinCopyHandlerRegistered = true;
+  ipcMain.on(PIN_COPY_CHANNEL, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta?.imagePath) {
+      return;
+    }
+
+    const image = nativeImage.createFromPath(meta.imagePath);
+    if (!image.isEmpty()) {
+      clipboard.writeImage(image);
+    }
+  });
+}
+
+function ensurePinVisualHandlers(): void {
+  if (pinVisualHandlersRegistered) {
+    return;
+  }
+
+  pinVisualHandlersRegistered = true;
+  ipcMain.on(PIN_VISUAL_STATE_CHANNEL, (event, scale: number, opacity: number) => {
+    if (!Number.isFinite(scale) || !Number.isFinite(opacity)) {
+      return;
+    }
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta) {
+      return;
+    }
+
+    const nextScale = Math.min(4, Math.max(0.2, scale));
+    const nextOpacity = Math.min(1, Math.max(0.2, opacity));
+    const scaleChanged = Math.abs(nextScale - meta.lastScale) > 0.001;
+    const opacityChanged = Math.abs(nextOpacity - meta.lastOpacity) > 0.001;
+
+    if (scaleChanged) {
+      const [x, y] = window.getPosition();
+      const [currentWidth, currentHeight] = window.getSize();
+      const nextWidth = Math.max(40, Math.round(meta.baseWidth * nextScale));
+      const nextHeight = Math.max(40, Math.round(meta.baseHeight * nextScale));
+      const nextX = Math.round(x + (currentWidth - nextWidth) / 2);
+      const nextY = Math.round(y + (currentHeight - nextHeight) / 2);
+
+      window.setBounds(
+        {
+          x: nextX,
+          y: nextY,
+          width: nextWidth,
+          height: nextHeight
+        },
+        false
+      );
+      meta.lastScale = nextScale;
+    }
+
+    if (opacityChanged) {
+      window.setOpacity(nextOpacity);
+      meta.lastOpacity = nextOpacity;
+    }
+  });
+}
+
+function resolvePinPreloadPath(): string {
+  return path.join(__dirname, "../../preload/litesnap-pin.js");
+}
+
+function preparePinDisplayImage(
+  image: NativeImage,
+  windowWidth: number,
+  windowHeight: number,
+  scaleFactor: number
+): NativeImage {
+  const targetWidth = Math.max(1, Math.round(windowWidth * scaleFactor));
+  const targetHeight = Math.max(1, Math.round(windowHeight * scaleFactor));
+  const size = image.getSize();
+  const targetPixels = targetWidth * targetHeight;
+
+  if (size.width === targetWidth && size.height === targetHeight) {
+    return image;
+  }
+
+  if (size.width * size.height <= targetPixels) {
+    return image.resize({
+      width: targetWidth,
+      height: targetHeight,
+      quality: "good"
+    });
+  }
+
+  return image.resize({
+    width: targetWidth,
+    height: targetHeight,
+    quality: "good"
+  });
+}
+
+function imageLikelyHasTransparency(image: NativeImage): boolean {
+  if (image.isEmpty()) {
+    return false;
+  }
+
+  try {
+    const bitmap = image.toBitmap();
+    const step = Math.max(4, Math.floor(bitmap.length / 4 / 2048)) * 4;
+    for (let offset = 3; offset < bitmap.length; offset += step) {
+      if (bitmap[offset] < 250) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function buildPinWindowHtml(
+  imageFileName: string,
+  options: { exact: boolean; imageWidth: number; imageHeight: number }
+): string {
+  const shellRadius = options.exact ? "0" : "14px";
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -16,7 +167,7 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: transparent;
+        background: #000000;
         font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
       }
       .pin-shell {
@@ -25,29 +176,20 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         -webkit-app-region: drag;
         border-radius: ${shellRadius};
         overflow: hidden;
-        box-shadow: none;
-        background: rgba(15, 23, 42, 0.08);
-      }
-      .pin-shell.is-shadow-enabled {
-        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.35);
+        background: #000000;
       }
       .pin-shell.is-border-enabled {
         outline: 1px solid rgba(255, 255, 255, 0.45);
         outline-offset: -1px;
       }
-      .pin-stage {
-        position: absolute;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        transform-origin: center center;
-      }
       img {
         display: block;
         width: 100%;
         height: 100%;
-        object-fit: contain;
+        object-fit: fill;
         pointer-events: none;
+        user-select: none;
+        -webkit-user-drag: none;
       }
       .pin-close {
         position: absolute;
@@ -104,11 +246,16 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
     </style>
   </head>
   <body>
-    <div class="pin-shell${initialShadowClass}" id="pin-shell">
+    <div class="pin-shell" id="pin-shell">
+      <img
+        src="${imageFileName}"
+        alt="LiteSnap Pinned Image"
+        width="${options.imageWidth}"
+        height="${options.imageHeight}"
+        decoding="sync"
+        draggable="false"
+      />
       <button type="button" class="pin-close" id="close-btn" title="关闭">×</button>
-      <div class="pin-stage" id="pin-stage">
-        <img src="${imageDataUrl}" alt="LiteSnap Pinned Image" />
-      </div>
       <div class="pin-menu" id="pin-menu" hidden>
         <div class="pin-menu__label" id="pin-menu-label">缩放 100% / 透明度 100%</div>
         <button type="button" data-command="zoom-in">放大</button>
@@ -117,7 +264,6 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         <button type="button" data-command="opacity-down">降低不透明度</button>
         <button type="button" data-command="reset">重置缩放和透明度</button>
         <div class="pin-menu__divider"></div>
-        <button type="button" data-command="toggle-shadow">切换阴影</button>
         <button type="button" data-command="toggle-border">切换边框</button>
         <div class="pin-menu__divider"></div>
         <button type="button" data-command="close">关闭贴图</button>
@@ -125,21 +271,26 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
     </div>
     <script>
       const shell = document.getElementById("pin-shell");
-      const stage = document.getElementById("pin-stage");
       const menu = document.getElementById("pin-menu");
       const menuLabel = document.getElementById("pin-menu-label");
+      const pinApi = window.liteSnapPin;
       let scale = 1;
       let opacity = 1;
+      let visualFrame = 0;
 
-      function applyTransform() {
-        if (!stage) {
+      function applyVisualState() {
+        if (visualFrame) {
           return;
         }
-        stage.style.transform = "scale(" + scale.toFixed(3) + ")";
-        stage.style.opacity = opacity.toFixed(2);
-        if (menuLabel) {
-          menuLabel.textContent = "缩放 " + Math.round(scale * 100) + "% / 透明度 " + Math.round(opacity * 100) + "%";
-        }
+
+        visualFrame = requestAnimationFrame(function () {
+          visualFrame = 0;
+          pinApi?.setVisualState(scale, opacity);
+          if (menuLabel) {
+            menuLabel.textContent =
+              "缩放 " + Math.round(scale * 100) + "% / 透明度 " + Math.round(opacity * 100) + "%";
+          }
+        });
       }
 
       function hideMenu() {
@@ -152,7 +303,6 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         if (!menu) {
           return;
         }
-        applyTransform();
         menu.hidden = false;
         const rect = menu.getBoundingClientRect();
         menu.style.left = Math.min(x, window.innerWidth - rect.width - 8) + "px";
@@ -162,7 +312,7 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
       function resetTransform() {
         scale = 1;
         opacity = 1;
-        applyTransform();
+        applyVisualState();
       }
 
       function runCommand(command) {
@@ -177,22 +327,21 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         } else if (command === "reset") {
           resetTransform();
           return;
-        } else if (command === "toggle-shadow") {
-          shell?.classList.toggle("is-shadow-enabled");
         } else if (command === "toggle-border") {
           shell?.classList.toggle("is-border-enabled");
+          return;
         } else if (command === "close") {
           window.close();
           return;
         }
-        applyTransform();
+        applyVisualState();
       }
 
       document.getElementById("close-btn")?.addEventListener("click", function () {
         window.close();
       });
       window.addEventListener("dblclick", function () {
-        window.close();
+        pinApi?.copyToClipboard?.();
       });
       window.addEventListener("wheel", function (event) {
         event.preventDefault();
@@ -201,7 +350,7 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
         } else {
           scale = Math.min(4, Math.max(0.2, scale * (event.deltaY < 0 ? 1.08 : 0.92)));
         }
-        applyTransform();
+        applyVisualState();
       }, { passive: false });
       window.addEventListener("contextmenu", function (event) {
         event.preventDefault();
@@ -234,15 +383,137 @@ function buildPinWindowHtml(imageDataUrl: string, exact: boolean): string {
           resetTransform();
         }
       });
-      applyTransform();
     </script>
   </body>
 </html>`;
 }
 
+async function writePinWindowAssets(
+  displayImage: NativeImage,
+  exact: boolean
+): Promise<{ htmlPath: string; imagePath: string; cleanup: () => Promise<void> }> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ll-pin-"));
+  const imageSize = displayImage.getSize();
+  const usePng = imageLikelyHasTransparency(displayImage);
+  const imageFileName = usePng ? "pin.png" : "pin.jpg";
+  const imagePath = path.join(dir, imageFileName);
+  const htmlPath = path.join(dir, "pin.html");
+  const imageBytes = usePng ? displayImage.toPNG() : displayImage.toJPEG(88);
+
+  await Promise.all([
+    fs.writeFile(imagePath, imageBytes),
+    fs.writeFile(
+      htmlPath,
+      buildPinWindowHtml(imageFileName, {
+        exact,
+        imageWidth: imageSize.width,
+        imageHeight: imageSize.height
+      }),
+      "utf8"
+    )
+  ]);
+
+  return {
+    htmlPath,
+    imagePath,
+    cleanup: async () => {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  };
+}
+
+function createPinBrowserWindowOptions(
+  bounds: { x: number; y: number; width: number; height: number }
+): BrowserWindowConstructorOptions {
+  return {
+    ...bounds,
+    frame: false,
+    transparent: false,
+    backgroundColor: "#000000",
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    thickFrame: false,
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      preload: resolvePinPreloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false
+    }
+  };
+}
+
 export class LiteSnapPinWindowManager {
   private readonly windows = new Set<BrowserWindow>();
   private hiddenByManager = false;
+  private prewarmedWindow: BrowserWindow | null = null;
+
+  public prewarmPinWindow(): void {
+    if (process.platform !== "win32" || this.prewarmedWindow) {
+      return;
+    }
+
+    const window = new BrowserWindow(
+      createPinBrowserWindowOptions({
+        x: -32000,
+        y: -32000,
+        width: 1,
+        height: 1
+      })
+    );
+    window.on("closed", () => {
+      if (this.prewarmedWindow === window) {
+        this.prewarmedWindow = null;
+      }
+    });
+
+    void window.loadURL("about:blank").then(() => {
+      if (!window.isDestroyed()) {
+        this.prewarmedWindow = window;
+      }
+    });
+  }
+
+  private takePrewarmedWindow(
+    bounds: { x: number; y: number; width: number; height: number }
+  ): BrowserWindow {
+    const prewarmed = this.prewarmedWindow;
+    this.prewarmedWindow = null;
+    if (prewarmed && !prewarmed.isDestroyed()) {
+      prewarmed.setBounds(bounds, false);
+      prewarmed.setOpacity(1);
+      return prewarmed;
+    }
+
+    return new BrowserWindow(createPinBrowserWindowOptions(bounds));
+  }
+
+  private async revealPinWindow(window: BrowserWindow): Promise<void> {
+    await new Promise<void>((resolve) => {
+      if (window.isDestroyed()) {
+        resolve();
+        return;
+      }
+
+      if (window.isVisible()) {
+        resolve();
+        return;
+      }
+
+      window.once("ready-to-show", () => resolve());
+    });
+
+    if (!window.isDestroyed()) {
+      window.show();
+    }
+  }
 
   public async pinClipboardImage(): Promise<boolean> {
     const image = clipboard.readImage();
@@ -270,20 +541,20 @@ export class LiteSnapPinWindowManager {
     let y: number;
     let width: number;
     let height: number;
+    let display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
 
     if (
       placement &&
       placement.width > 0 &&
       placement.height > 0
     ) {
-      // Pin exactly where the screenshot was taken, at its original on-screen
-      // size, so the pinned image visually replaces the captured region.
       x = Math.round(placement.x);
       y = Math.round(placement.y);
       width = Math.max(1, Math.round(placement.width));
       height = Math.max(1, Math.round(placement.height));
+      display = screen.getDisplayMatching({ x, y, width, height });
     } else {
-      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
       const maxWidth = Math.max(280, Math.floor(display.workArea.width * 0.42));
       const maxHeight = Math.max(220, Math.floor(display.workArea.height * 0.42));
       const scale = Math.min(maxWidth / size.width, maxHeight / size.height, 1);
@@ -293,33 +564,34 @@ export class LiteSnapPinWindowManager {
       y = Math.round(display.workArea.y + (display.workArea.height - height) / 2);
     }
 
-    const window = new BrowserWindow({
-      x,
-      y,
+    const exactPlacement = Boolean(
+      placement && placement.width > 0 && placement.height > 0
+    );
+    const displayImage = preparePinDisplayImage(
+      image,
       width,
       height,
-      frame: false,
-      transparent: true,
-      backgroundColor: "#00000000",
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      resizable: true,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      hasShadow: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false
-      }
+      display.scaleFactor
+    );
+
+    ensurePinVisualHandlers();
+    ensurePinCopyHandler();
+
+    const window = this.takePrewarmedWindow({ x, y, width, height });
+    void this.prewarmPinWindow();
+
+    const assets = await writePinWindowAssets(displayImage, exactPlacement);
+
+    pinWindowMeta.set(window.id, {
+      baseWidth: width,
+      baseHeight: height,
+      lastScale: 1,
+      lastOpacity: 1,
+      imagePath: assets.imagePath
     });
 
     window.setAlwaysOnTop(true, "screen-saver");
     this.windows.add(window);
-    window.on("closed", () => {
-      this.windows.delete(window);
-    });
     window.webContents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         event.preventDefault();
@@ -327,15 +599,24 @@ export class LiteSnapPinWindowManager {
       }
     });
 
-    const exactPlacement = Boolean(
-      placement && placement.width > 0 && placement.height > 0
-    );
-    await window.loadURL(
-      `data:text/html;charset=UTF-8,${encodeURIComponent(
-        buildPinWindowHtml(image.toDataURL(), exactPlacement)
-      )}`
-    );
-    window.show();
+    window.on("closed", () => {
+      pinWindowMeta.delete(window.id);
+      this.windows.delete(window);
+      void assets.cleanup();
+    });
+
+    try {
+      await window.loadFile(assets.htmlPath);
+      await this.revealPinWindow(window);
+    } catch (error) {
+      pinWindowMeta.delete(window.id);
+      await assets.cleanup();
+      if (!window.isDestroyed()) {
+        window.close();
+      }
+      throw error;
+    }
+
     return true;
   }
 

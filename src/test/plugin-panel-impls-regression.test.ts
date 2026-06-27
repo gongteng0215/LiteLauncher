@@ -584,6 +584,11 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   );
   assert.match(
     panelImplsSource,
+    /clipboard-workbench-item-copy/,
+    "Clipboard Workbench item list should expose per-row copy actions"
+  );
+  assert.match(
+    panelImplsSource,
     /剪贴板工作台/,
     "Clipboard Workbench panel should use localized Chinese copy"
   );
@@ -609,7 +614,7 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   );
   assert.match(
     stylesSource,
-    /\.clipboard-workbench-panel[\s\S]*height:\s*min\(78vh,\s*760px\);/,
+    /\.clipboard-workbench-panel[\s\S]*height:\s*min\(88vh,\s*920px\);/,
     "Clipboard Workbench panel should cap its height for compact browsing"
   );
   assert.match(
@@ -619,7 +624,7 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   );
   assert.match(
     stylesSource,
-    /\.clipboard-workbench-manual-text[\s\S]*max-height:\s*44px;/,
+    /\.clipboard-workbench-manual-text[\s\S]*max-height:\s*32px;/,
     "Clipboard Workbench draft box should stay compact by default"
   );
 });
@@ -2283,7 +2288,7 @@ test("hardware inspector helper flow lives with plugin-panel-impls instead of re
   );
   assert.match(
     panelImplsSource,
-    /async function executeHardwareInspectorExportReport\(\s*format: "markdown" \| "html"\s*\): Promise<void>/s,
+    /async function executeHardwareInspectorExportReport\(\s*format: "markdown" \| "html" \| "image" \| "image-compact"\s*\): Promise<void>/s,
     "Hardware Inspector export executor should live in plugin-panel-impls"
   );
 });

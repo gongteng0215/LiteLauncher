@@ -252,10 +252,14 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /pin-menu[\s\S]*toggle-shadow[\s\S]*toggle-border[\s\S]*contextmenu/,
+    /pin-menu[\s\S]*toggle-border[\s\S]*contextmenu/,
     "LiteSnap pinned images should expose a right-click menu for local pin controls"
   );
-  assert.match(pinSource, /dblclick[\s\S]*window\.close/, "LiteSnap pinned images should close on double-click");
+  assert.match(
+    pinSource,
+    /dblclick[\s\S]*copyToClipboard/,
+    "LiteSnap pinned images should copy to clipboard on double-click"
+  );
   assert.match(
     pinSource,
     /async pinImage\(\s*image: NativeImage,\s*placement\?: LiteSnapWindowRect/,
@@ -265,6 +269,61 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
     captureSource,
     /const placement = \{[\s\S]*session\.display\.bounds\.x \+ input\.selection\.x[\s\S]*\}\s*;\s*const pinned = await this\.pinWindowManager\.pinImage\(cropped, placement\)/,
     "LiteSnap should pin captured screenshots at their original on-screen location and size"
+  );
+  assert.match(
+    pinSource,
+    /function preparePinDisplayImage\(/,
+    "LiteSnap pin windows should downscale oversized bitmaps before rendering"
+  );
+  assert.match(
+    pinSource,
+    /transparent: false[\s\S]*hasShadow: false[\s\S]*preload: resolvePinPreloadPath\(\)/,
+    "LiteSnap pin windows should use opaque windows with a dedicated drag preload"
+  );
+  assert.match(
+    pinSource,
+    /-webkit-app-region: drag/,
+    "LiteSnap pin windows should use native opaque-window dragging instead of per-frame IPC moves"
+  );
+  assert.match(
+    pinSource,
+    /pinApi\?\.setVisualState\(scale, opacity\)/,
+    "LiteSnap pin zoom and opacity should resize the native window instead of CSS transforms"
+  );
+  assert.match(
+    pinSource,
+    /await window\.loadFile\(assets\.htmlPath\)/,
+    "LiteSnap pin windows should load a local image file instead of a giant data URL"
+  );
+  assert.match(
+    pinSource,
+    /resizable: false[\s\S]*backgroundThrottling: false/,
+    "LiteSnap pin windows should avoid resize chrome and background throttling during drag"
+  );
+  assert.match(
+    pinSource,
+    /public prewarmPinWindow\(\): void/,
+    "LiteSnap should prewarm a reusable pin window for faster first pin"
+  );
+  assert.match(
+    pinSource,
+    /ready-to-show[\s\S]*window\.show\(\)/,
+    "LiteSnap pin windows should wait for ready-to-show before becoming visible"
+  );
+  assert.match(
+    pinSource,
+    /toJPEG\(88\)|pin\.jpg/,
+    "LiteSnap pin windows should prefer JPEG assets for faster decode when possible"
+  );
+  assert.match(
+    pinSource,
+    /roundedCorners: false/,
+    "LiteSnap pin windows should disable rounded corners on Windows for cheaper compositing"
+  );
+  assert.match(
+    pinSource,
+    /requestAnimationFrame[\s\S]*setVisualState\(scale, opacity\)/,
+    "LiteSnap pin zoom should coalesce visual state updates per animation frame"
   );
 });
 
@@ -600,6 +659,11 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     mainIndexSource,
     /liteSnapCaptureSessionManager\.prewarmCaptureCache\(\);/,
     "LiteSnap startup should warm the screenshot frame cache immediately"
+  );
+  assert.match(
+    mainIndexSource,
+    /liteSnapPinWindowManager\.prewarmPinWindow\(\);/,
+    "LiteSnap startup should prewarm a reusable pin window"
   );
   assert.match(
     mainIndexSource,

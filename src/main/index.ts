@@ -1599,6 +1599,7 @@ async function bootstrap(): Promise<void> {
     liteSnapPinWindowManager
   );
   liteSnapCaptureSessionManager.prewarmCaptureCache();
+  liteSnapPinWindowManager.prewarmPinWindow();
 
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
   catalogScanConfig = await loadCatalogScanConfig(activeDatabase);

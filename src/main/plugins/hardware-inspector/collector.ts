@@ -7,6 +7,24 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const COLLECTION_TIMEOUT_MS = 90_000;
+const SNAPSHOT_CACHE_TTL_MS = 60_000;
+
+let cachedSnapshot: HardwareInspectorSnapshot | null = null;
+let cachedAt = 0;
+
+export function getCachedHardwareInspectorSnapshot(): HardwareInspectorSnapshot | null {
+  if (!cachedSnapshot || Date.now() - cachedAt >= SNAPSHOT_CACHE_TTL_MS) {
+    return null;
+  }
+
+  return cachedSnapshot;
+}
+
+export function clearHardwareInspectorSnapshotCache(): void {
+  cachedSnapshot = null;
+  cachedAt = 0;
+}
 
 export interface HardwareInspectorComputerSystem {
   name: string | null;
@@ -317,19 +335,9 @@ $memoryModules = @(Get-CimInstance Win32_PhysicalMemory |
   Select-Object BankLabel, DeviceLocator, Manufacturer, PartNumber, SerialNumber,
     Capacity, Speed, ConfiguredClockSpeed, FormFactor, SMBIOSMemoryType)
 
-try {
-  $monitorTemperatureSensors = @()
-  foreach ($sensorNamespace in @('root/LibreHardwareMonitor', 'root/OpenHardwareMonitor')) {
-    try {
-      $monitorTemperatureSensors += @(Get-CimInstance -Namespace $sensorNamespace -ClassName Sensor -ErrorAction Stop |
-        Where-Object { $_.SensorType -eq 'Temperature' } |
-        Select-Object @{ Name = 'SourceNamespace'; Expression = { $sensorNamespace } }, Name, Parent, Identifier, Value)
-    } catch {
-    }
-  }
-} catch {
-  $monitorTemperatureSensors = @()
-}
+$monitorTemperatureSensors = @()
+# Fast scan: skip LibreHardwareMonitor/OpenHardwareMonitor namespace probes.
+# They can block for seconds when the provider is missing or slow to respond.
 
 try {
   $acpiTemperatureZones = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop |
@@ -431,12 +439,9 @@ try {
   $smartStatuses = @()
 }
 
-try {
-  $reliabilityCounters = @(Get-PhysicalDisk | Get-StorageReliabilityCounter -ErrorAction Stop |
-    Select-Object DeviceId, Temperature, TemperatureMax, Wear, PowerOnHours)
-} catch {
-  $reliabilityCounters = @()
-}
+# Fast scan: skip Get-StorageReliabilityCounter, which is often the slowest call on
+# multi-disk systems. SMART status and MSFT_PhysicalDisk health remain available.
+$reliabilityCounters = @()
 
 $disks = @()
 foreach ($disk in @(Get-CimInstance Win32_DiskDrive | Sort-Object Index)) {
@@ -960,7 +965,16 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
   };
 }
 
-export async function collectHardwareInspectorSnapshot(): Promise<HardwareInspectorSnapshot> {
+export async function collectHardwareInspectorSnapshot(
+  options: { force?: boolean } = {}
+): Promise<HardwareInspectorSnapshot> {
+  if (!options.force) {
+    const cached = getCachedHardwareInspectorSnapshot();
+    if (cached) {
+      return cached;
+    }
+  }
+
   const powerShellPath = getPowerShellPath();
   const scriptPath = path.join(
     os.tmpdir(),
@@ -977,7 +991,8 @@ export async function collectHardwareInspectorSnapshot(): Promise<HardwareInspec
       {
         encoding: "buffer",
         windowsHide: true,
-        maxBuffer: MAX_BUFFER_BYTES
+        maxBuffer: MAX_BUFFER_BYTES,
+        timeout: COLLECTION_TIMEOUT_MS
       }
     );
     stdout = result.stdout;
@@ -994,6 +1009,9 @@ export async function collectHardwareInspectorSnapshot(): Promise<HardwareInspec
 
   const text = Buffer.from(encodedText, "base64").toString("utf8").trim();
   const parsed = JSON.parse(text) as Record<string, unknown>;
-  return normalizeSnapshot(parsed);
+  const snapshot = normalizeSnapshot(parsed);
+  cachedSnapshot = snapshot;
+  cachedAt = Date.now();
+  return snapshot;
 }
 

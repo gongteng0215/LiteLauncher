@@ -860,11 +860,15 @@ test(
         .filter({ hasText: betaText })
         .first();
 
-      await alphaCard
-        .locator('[data-clipboard-workbench-item-toggle]')
+      await alphaCard.click();
+
+      const detailActions = form.locator(".clipboard-workbench-detail-actions");
+      await detailActions
+        .locator("button", { hasText: "加入批量" })
         .click();
-      await betaCard
-        .locator('[data-clipboard-workbench-item-toggle]')
+      await betaCard.click();
+      await detailActions
+        .locator("button", { hasText: "加入批量" })
         .click();
 
       const bulkBar = form.locator(".clipboard-workbench-bulk-bar");
