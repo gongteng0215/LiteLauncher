@@ -13,6 +13,9 @@ import {
 export interface LiteSnapCaptureProvider {
   capturePreviewImage(display: Display): Promise<NativeImage | null>;
   captureSourceImage(display: Display): Promise<NativeImage | null>;
+  captureDisplayFrames(
+    display: Display
+  ): Promise<{ previewImage: NativeImage; sourceImage: NativeImage } | null>;
   getWindowRectAtPoint(
     display: Display,
     x: number,
@@ -35,10 +38,27 @@ type NativeLiteSnapCaptureResult = {
   data: Buffer;
 };
 
+type NativeLiteSnapFramesRequest = {
+  x: number;
+  y: number;
+  captureWidth: number;
+  captureHeight: number;
+  previewWidth: number;
+  previewHeight: number;
+};
+
+type NativeLiteSnapFramesResult = {
+  source: NativeLiteSnapCaptureResult;
+  preview: NativeLiteSnapCaptureResult;
+};
+
 type NativeLiteSnapCaptureAddon = {
   captureDisplayRect(
     request: NativeLiteSnapCaptureRequest
   ): NativeLiteSnapCaptureResult | null;
+  captureDisplayFrames?(
+    request: NativeLiteSnapFramesRequest
+  ): NativeLiteSnapFramesResult | null;
   getWindowRectAtPoint?(
     x: number,
     y: number
@@ -49,11 +69,35 @@ type ScreenWithDipTransforms = typeof screen & {
   dipToScreenRect?: (window: null, rect: Rectangle) => Rectangle;
 };
 
+const PREVIEW_JPEG_QUALITY = 92;
+
+function resolvePreviewOutputSize(display: Display): { width: number; height: number } {
+  return {
+    width: Math.max(1, display.bounds.width),
+    height: Math.max(1, display.bounds.height)
+  };
+}
+
+function createNativeImageFromResult(
+  result: NativeLiteSnapCaptureResult | null | undefined
+): NativeImage | null {
+  if (!result || !Buffer.isBuffer(result.data) || result.data.length === 0) {
+    return null;
+  }
+
+  const image = nativeImage.createFromBitmap(result.data, {
+    width: result.width,
+    height: result.height
+  });
+  return image.isEmpty() ? null : image;
+}
+
 class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
   public async capturePreviewImage(display: Display): Promise<NativeImage | null> {
+    const previewSize = resolvePreviewOutputSize(display);
     return this.captureDisplayImage(display, {
-      thumbnailWidth: Math.max(1, display.bounds.width),
-      thumbnailHeight: Math.max(1, display.bounds.height)
+      thumbnailWidth: previewSize.width,
+      thumbnailHeight: previewSize.height
     });
   }
 
@@ -68,6 +112,20 @@ class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
         Math.round(display.bounds.height * display.scaleFactor)
       )
     });
+  }
+
+  public async captureDisplayFrames(
+    display: Display
+  ): Promise<{ previewImage: NativeImage; sourceImage: NativeImage } | null> {
+    const [previewImage, sourceImage] = await Promise.all([
+      this.capturePreviewImage(display),
+      this.captureSourceImage(display)
+    ]);
+    if (!previewImage || previewImage.isEmpty() || !sourceImage || sourceImage.isEmpty()) {
+      return null;
+    }
+
+    return { previewImage, sourceImage };
   }
 
   public async getWindowRectAtPoint(): Promise<Rectangle | null> {
@@ -112,6 +170,40 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     return this.captureDisplayImage(display, true);
   }
 
+  public async captureDisplayFrames(
+    display: Display
+  ): Promise<{ previewImage: NativeImage; sourceImage: NativeImage } | null> {
+    if (typeof this.addon.captureDisplayFrames === "function") {
+      const physicalBounds = toPhysicalDisplayBounds(display);
+      const previewSize = resolvePreviewOutputSize(display);
+      const result = this.addon.captureDisplayFrames({
+        x: physicalBounds.x,
+        y: physicalBounds.y,
+        captureWidth: Math.max(1, physicalBounds.width),
+        captureHeight: Math.max(1, physicalBounds.height),
+        previewWidth: previewSize.width,
+        previewHeight: previewSize.height
+      });
+      const previewImage = createNativeImageFromResult(result?.preview);
+      const sourceImage = createNativeImageFromResult(result?.source);
+      if (!previewImage || !sourceImage) {
+        return null;
+      }
+
+      return { previewImage, sourceImage };
+    }
+
+    const [previewImage, sourceImage] = await Promise.all([
+      this.capturePreviewImage(display),
+      this.captureSourceImage(display)
+    ]);
+    if (!previewImage || previewImage.isEmpty() || !sourceImage || sourceImage.isEmpty()) {
+      return null;
+    }
+
+    return { previewImage, sourceImage };
+  }
+
   public async getWindowRectAtPoint(
     display: Display,
     x: number,
@@ -135,6 +227,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     highResolution: boolean
   ): Promise<NativeImage | null> {
     const physicalBounds = toPhysicalDisplayBounds(display);
+    const previewSize = resolvePreviewOutputSize(display);
     const request: NativeLiteSnapCaptureRequest = {
       x: physicalBounds.x,
       y: physicalBounds.y,
@@ -142,22 +235,14 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
       captureHeight: Math.max(1, physicalBounds.height),
       outputWidth: highResolution
         ? Math.max(1, physicalBounds.width)
-        : Math.max(1, display.bounds.width),
+        : previewSize.width,
       outputHeight: highResolution
         ? Math.max(1, physicalBounds.height)
-        : Math.max(1, display.bounds.height)
+        : previewSize.height
     };
 
     const result = this.addon.captureDisplayRect(request);
-    if (!result || !Buffer.isBuffer(result.data) || result.data.length === 0) {
-      return null;
-    }
-
-    const image = nativeImage.createFromBitmap(result.data, {
-      width: result.width,
-      height: result.height
-    });
-    return image.isEmpty() ? null : image;
+    return createNativeImageFromResult(result);
   }
 }
 

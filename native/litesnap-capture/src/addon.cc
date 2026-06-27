@@ -73,6 +73,104 @@ void CleanupCaptureObjects(
   }
 }
 
+struct FramesRequest {
+  int32_t x;
+  int32_t y;
+  int32_t capture_width;
+  int32_t capture_height;
+  int32_t preview_width;
+  int32_t preview_height;
+};
+
+bool ReadBitmapPixels(
+    HDC dc,
+    HBITMAP bitmap,
+    int32_t width,
+    int32_t height,
+    std::vector<uint8_t>* pixels) {
+  if (pixels == nullptr || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  BITMAPINFO bitmap_info{};
+  bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bitmap_info.bmiHeader.biWidth = width;
+  bitmap_info.bmiHeader.biHeight = -height;
+  bitmap_info.bmiHeader.biPlanes = 1;
+  bitmap_info.bmiHeader.biBitCount = 32;
+  bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+  const size_t bitmap_bytes =
+      static_cast<size_t>(width) * static_cast<size_t>(height) * 4U;
+  pixels->assign(bitmap_bytes, 0);
+
+  const int copied_scanlines = GetDIBits(
+      dc,
+      bitmap,
+      0,
+      static_cast<UINT>(height),
+      pixels->data(),
+      &bitmap_info,
+      DIB_RGB_COLORS);
+  if (copied_scanlines == 0) {
+    pixels->clear();
+    return false;
+  }
+
+  for (size_t offset = 3; offset < pixels->size(); offset += 4) {
+    (*pixels)[offset] = 0xFF;
+  }
+
+  return true;
+}
+
+napi_value BuildBitmapResult(
+    napi_env env,
+    const char* width_key,
+    const char* height_key,
+    const char* data_key,
+    int32_t width,
+    int32_t height,
+    const std::vector<uint8_t>& pixels) {
+  napi_value data_buffer;
+  if (napi_create_buffer_copy(
+          env,
+          pixels.size(),
+          pixels.data(),
+          nullptr,
+          &data_buffer) != napi_ok) {
+    return nullptr;
+  }
+
+  napi_value result;
+  if (napi_create_object(env, &result) != napi_ok) {
+    return nullptr;
+  }
+
+  napi_value width_value;
+  napi_create_int32(env, width, &width_value);
+  napi_set_named_property(env, result, width_key, width_value);
+
+  napi_value height_value;
+  napi_create_int32(env, height, &height_value);
+  napi_set_named_property(env, result, height_key, height_value);
+
+  napi_set_named_property(env, result, data_key, data_buffer);
+  return result;
+}
+
+bool ParseFramesRequest(
+    napi_env env,
+    napi_value input,
+    FramesRequest* request) {
+  return ReadInt32Property(env, input, "x", &request->x) &&
+         ReadInt32Property(env, input, "y", &request->y) &&
+         ReadInt32Property(env, input, "captureWidth", &request->capture_width) &&
+         ReadInt32Property(env, input, "captureHeight", &request->capture_height) &&
+         ReadInt32Property(env, input, "previewWidth", &request->preview_width) &&
+         ReadInt32Property(env, input, "previewHeight", &request->preview_height);
+}
+
 napi_value CreateNull(napi_env env) {
   napi_value result;
   napi_get_null(env, &result);
@@ -121,23 +219,35 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
     return CreateNull(env);
   }
 
-  SetStretchBltMode(memory_dc, HALFTONE);
-  SetBrushOrgEx(memory_dc, 0, 0, nullptr);
+  SetStretchBltMode(memory_dc, COLORONCOLOR);
 
-  const BOOL stretched = StretchBlt(
-      memory_dc,
-      0,
-      0,
-      request.output_width,
-      request.output_height,
-      screen_dc,
-      request.x,
-      request.y,
-      request.capture_width,
-      request.capture_height,
-      SRCCOPY | CAPTUREBLT);
+  const BOOL copied =
+      request.capture_width == request.output_width &&
+              request.capture_height == request.output_height
+          ? BitBlt(
+                memory_dc,
+                0,
+                0,
+                request.output_width,
+                request.output_height,
+                screen_dc,
+                request.x,
+                request.y,
+                SRCCOPY | CAPTUREBLT)
+          : StretchBlt(
+                memory_dc,
+                0,
+                0,
+                request.output_width,
+                request.output_height,
+                screen_dc,
+                request.x,
+                request.y,
+                request.capture_width,
+                request.capture_height,
+                SRCCOPY | CAPTUREBLT);
 
-  if (!stretched) {
+  if (!copied) {
     CleanupCaptureObjects(screen_dc, memory_dc, bitmap, old_bitmap);
     return CreateNull(env);
   }
@@ -150,57 +260,192 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
   bitmap_info.bmiHeader.biBitCount = 32;
   bitmap_info.bmiHeader.biCompression = BI_RGB;
 
-  const size_t bitmap_bytes =
-      static_cast<size_t>(request.output_width) *
-      static_cast<size_t>(request.output_height) * 4U;
-  std::vector<uint8_t> pixels(bitmap_bytes);
-
-  const int copied_scanlines = GetDIBits(
-      memory_dc,
-      bitmap,
-      0,
-      static_cast<UINT>(request.output_height),
-      pixels.data(),
-      &bitmap_info,
-      DIB_RGB_COLORS);
+  std::vector<uint8_t> pixels;
+  if (!ReadBitmapPixels(
+          memory_dc,
+          bitmap,
+          request.output_width,
+          request.output_height,
+          &pixels)) {
+    CleanupCaptureObjects(screen_dc, memory_dc, bitmap, old_bitmap);
+    return CreateNull(env);
+  }
 
   CleanupCaptureObjects(screen_dc, memory_dc, bitmap, old_bitmap);
 
-  if (copied_scanlines == 0) {
+  napi_value result = BuildBitmapResult(
+      env,
+      "width",
+      "height",
+      "data",
+      request.output_width,
+      request.output_height,
+      pixels);
+  return result == nullptr ? CreateNull(env) : result;
+}
+
+napi_value CaptureDisplayFrames(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok ||
+      argc < 1) {
     return CreateNull(env);
   }
 
-  // GDI BitBlt/StretchBlt never writes the alpha byte for 32bpp BI_RGB
-  // bitmaps, so every pixel ends up fully transparent (alpha = 0). Electron's
-  // nativeImage.createFromBitmap interprets that as a transparent image, which
-  // renders as solid black. Force every pixel opaque before handing the buffer
-  // back to JavaScript.
-  for (size_t offset = 3; offset < pixels.size(); offset += 4) {
-    pixels[offset] = 0xFF;
-  }
-
-  napi_value data_buffer;
-  if (napi_create_buffer_copy(
-          env,
-          bitmap_bytes,
-          pixels.data(),
-          nullptr,
-          &data_buffer) != napi_ok) {
+  FramesRequest request{};
+  if (!ParseFramesRequest(env, args[0], &request)) {
     return CreateNull(env);
   }
+
+  if (request.capture_width <= 0 || request.capture_height <= 0 ||
+      request.preview_width <= 0 || request.preview_height <= 0) {
+    return CreateNull(env);
+  }
+
+  HDC screen_dc = GetDC(nullptr);
+  if (screen_dc == nullptr) {
+    return CreateNull(env);
+  }
+
+  HDC source_dc = CreateCompatibleDC(screen_dc);
+  if (source_dc == nullptr) {
+    CleanupCaptureObjects(screen_dc, nullptr, nullptr, nullptr);
+    return CreateNull(env);
+  }
+
+  HBITMAP source_bitmap = CreateCompatibleBitmap(
+      screen_dc,
+      request.capture_width,
+      request.capture_height);
+  if (source_bitmap == nullptr) {
+    CleanupCaptureObjects(screen_dc, source_dc, nullptr, nullptr);
+    return CreateNull(env);
+  }
+
+  HGDIOBJ old_source_bitmap = SelectObject(source_dc, source_bitmap);
+  if (old_source_bitmap == nullptr || old_source_bitmap == HGDI_ERROR) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, nullptr);
+    return CreateNull(env);
+  }
+
+  const BOOL source_copied = BitBlt(
+      source_dc,
+      0,
+      0,
+      request.capture_width,
+      request.capture_height,
+      screen_dc,
+      request.x,
+      request.y,
+      SRCCOPY | CAPTUREBLT);
+  if (!source_copied) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    return CreateNull(env);
+  }
+
+  std::vector<uint8_t> source_pixels;
+  if (!ReadBitmapPixels(
+          source_dc,
+          source_bitmap,
+          request.capture_width,
+          request.capture_height,
+          &source_pixels)) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    return CreateNull(env);
+  }
+
+  HDC preview_dc = CreateCompatibleDC(screen_dc);
+  if (preview_dc == nullptr) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    return CreateNull(env);
+  }
+
+  HBITMAP preview_bitmap = CreateCompatibleBitmap(
+      screen_dc,
+      request.preview_width,
+      request.preview_height);
+  if (preview_bitmap == nullptr) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    DeleteDC(preview_dc);
+    return CreateNull(env);
+  }
+
+  HGDIOBJ old_preview_bitmap = SelectObject(preview_dc, preview_bitmap);
+  if (old_preview_bitmap == nullptr || old_preview_bitmap == HGDI_ERROR) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    DeleteObject(preview_bitmap);
+    DeleteDC(preview_dc);
+    return CreateNull(env);
+  }
+
+  SetStretchBltMode(preview_dc, COLORONCOLOR);
+  const BOOL preview_copied = StretchBlt(
+      preview_dc,
+      0,
+      0,
+      request.preview_width,
+      request.preview_height,
+      source_dc,
+      0,
+      0,
+      request.capture_width,
+      request.capture_height,
+      SRCCOPY);
+  if (!preview_copied) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    SelectObject(preview_dc, old_preview_bitmap);
+    DeleteObject(preview_bitmap);
+    DeleteDC(preview_dc);
+    return CreateNull(env);
+  }
+
+  std::vector<uint8_t> preview_pixels;
+  if (!ReadBitmapPixels(
+          preview_dc,
+          preview_bitmap,
+          request.preview_width,
+          request.preview_height,
+          &preview_pixels)) {
+    CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
+    SelectObject(preview_dc, old_preview_bitmap);
+    DeleteObject(preview_bitmap);
+    DeleteDC(preview_dc);
+    return CreateNull(env);
+  }
+
+  SelectObject(preview_dc, old_preview_bitmap);
+  DeleteObject(preview_bitmap);
+  DeleteDC(preview_dc);
+  CleanupCaptureObjects(screen_dc, source_dc, source_bitmap, old_source_bitmap);
 
   napi_value result;
   napi_create_object(env, &result);
 
-  napi_value width_value;
-  napi_create_int32(env, request.output_width, &width_value);
-  napi_set_named_property(env, result, "width", width_value);
+  napi_value source_result = BuildBitmapResult(
+      env,
+      "width",
+      "height",
+      "data",
+      request.capture_width,
+      request.capture_height,
+      source_pixels);
+  if (source_result == nullptr) {
+    return CreateNull(env);
+  }
+  napi_set_named_property(env, result, "source", source_result);
 
-  napi_value height_value;
-  napi_create_int32(env, request.output_height, &height_value);
-  napi_set_named_property(env, result, "height", height_value);
-
-  napi_set_named_property(env, result, "data", data_buffer);
+  napi_value preview_result = BuildBitmapResult(
+      env,
+      "width",
+      "height",
+      "data",
+      request.preview_width,
+      request.preview_height,
+      preview_pixels);
+  if (preview_result == nullptr) {
+    return CreateNull(env);
+  }
+  napi_set_named_property(env, result, "preview", preview_result);
   return result;
 }
 
@@ -307,6 +552,16 @@ napi_value Init(napi_env env, napi_value exports) {
       nullptr,
       &capture_fn);
   napi_set_named_property(env, exports, "captureDisplayRect", capture_fn);
+
+  napi_value capture_frames_fn;
+  napi_create_function(
+      env,
+      "captureDisplayFrames",
+      NAPI_AUTO_LENGTH,
+      CaptureDisplayFrames,
+      nullptr,
+      &capture_frames_fn);
+  napi_set_named_property(env, exports, "captureDisplayFrames", capture_frames_fn);
 
   napi_value window_rect_fn;
   napi_create_function(

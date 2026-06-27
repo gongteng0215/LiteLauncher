@@ -4,23 +4,13 @@
   overflow: hidden;
   cursor: crosshair;
   user-select: none;
-  background: #0a0f16 center center / cover no-repeat;
+  background: #0a0f16 center center / 100% 100% no-repeat;
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 
 .litesnap-overlay[data-ready="false"] {
-  background: transparent;
-}
-
-.litesnap-overlay::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 12, 18, 0.32);
-}
-
-.litesnap-overlay[data-ready="false"]::before {
-  display: none;
+  background-color: transparent;
+  background-image: none;
 }
 
 .litesnap-overlay[data-ready="false"] .litesnap-overlay__hint,

@@ -1590,14 +1590,6 @@ async function bootstrap(): Promise<void> {
     throw new Error("Clipboard Workbench service was not initialized");
   }
 
-  searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
-  catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
-  visiblePluginIds = await loadVisiblePluginIds(activeDatabase);
-  await persistCatalogSnapshot(
-    activeDatabase,
-    replaceCatalogPluginItems(catalog)
-  );
-  setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
   const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
@@ -1606,6 +1598,16 @@ async function bootstrap(): Promise<void> {
     liteSnapImageStore,
     liteSnapPinWindowManager
   );
+  liteSnapCaptureSessionManager.prewarmCaptureCache();
+
+  searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
+  catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
+  visiblePluginIds = await loadVisiblePluginIds(activeDatabase);
+  await persistCatalogSnapshot(
+    activeDatabase,
+    replaceCatalogPluginItems(catalog)
+  );
+  setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
   void liteSnapCaptureSessionManager.prewarmOverlay();
   const liteSnapSettings = await liteSnapSettingsStore.getSettings();
   const catalogIdSet = new Set(catalog.map((item) => item.id));
@@ -1663,7 +1665,10 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  const appUpdater = createAppUpdater();
+  const appUpdater = createAppUpdater({
+    getWindow: () =>
+      launcherWindow.isDestroyed() ? null : launcherWindow
+  });
   const startLiteSnapCapture = async (): Promise<boolean> => {
     return liteSnapCaptureSessionManager.startCapture(async () => {
       if (!launcherWindow.isDestroyed()) {

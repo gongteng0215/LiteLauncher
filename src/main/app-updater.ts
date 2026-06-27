@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import {
   autoUpdater,
   type ProgressInfo,
@@ -93,7 +93,11 @@ export type AppUpdaterProvider = {
   setE2ECheckFailure?: (message: string | null) => boolean;
 };
 
-export function createAppUpdater(): AppUpdaterProvider {
+export type AppUpdaterOptions = {
+  getWindow?: () => BrowserWindow | null;
+};
+
+export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterProvider {
   const supported = isSupportedEnvironment();
   const currentVersion = app.getVersion();
 
@@ -125,6 +129,8 @@ export function createAppUpdater(): AppUpdaterProvider {
   let startupCheckScheduled = false;
   let activeCheckPromise: Promise<AppUpdaterStatus> | null = null;
   let e2eCheckFailureMessage: string | null = null;
+  let promptedDownloadedVersion: string | null = null;
+  let installPromptInFlight = false;
 
   const setStatus = (next: Partial<AppUpdaterStatus>): AppUpdaterStatus => {
     status = {
@@ -136,81 +142,6 @@ export function createAppUpdater(): AppUpdaterProvider {
     };
     return status;
   };
-
-  if (supported) {
-    autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.allowPrerelease = false;
-
-    autoUpdater.on("checking-for-update", () => {
-      setStatus({
-        phase: "checking",
-        downloaded: false,
-        progressPercent: undefined,
-        message: "正在检查更新…"
-      });
-    });
-
-    autoUpdater.on("update-available", (info) => {
-      setStatus({
-        phase: "available",
-        updateVersion: info.version,
-        downloaded: false,
-        releaseNotes: formatReleaseNotes(info.releaseNotes),
-        message: `发现新版本 v${info.version}，正在下载更新包。`
-      });
-    });
-
-    autoUpdater.on("download-progress", (info: ProgressInfo) => {
-      const percent = Number.isFinite(info.percent)
-        ? Math.max(0, Math.min(100, Math.round(info.percent)))
-        : undefined;
-
-      setStatus({
-        phase: "downloading",
-        progressPercent: percent,
-        message:
-          percent === undefined
-            ? "正在下载更新包…"
-            : `正在下载更新包… ${percent}%`
-      });
-    });
-
-    autoUpdater.on("update-not-available", () => {
-      setStatus({
-        phase: "not-available",
-        downloaded: false,
-        progressPercent: undefined,
-        releaseNotes: undefined,
-        message: "当前已是最新版本。"
-      });
-    });
-
-    autoUpdater.on("update-downloaded", (event: UpdateDownloadedEvent) => {
-      setStatus({
-        phase: "downloaded",
-        updateVersion: event.version,
-        downloaded: true,
-        progressPercent: 100,
-        releaseNotes: formatReleaseNotes(event.releaseNotes),
-        message: `新版本 v${event.version} 已下载完成，重启后即可安装。`
-      });
-    });
-
-    autoUpdater.on("error", (error, message) => {
-      const detail = truncateText(
-        typeof message === "string" && message.trim()
-          ? message
-          : error?.message ?? "检查更新失败"
-      );
-      setStatus({
-        phase: "error",
-        downloaded: false,
-        progressPercent: undefined,
-        message: detail || "检查更新失败"
-      });
-    });
-  }
 
   const provider: AppUpdaterProvider = {
     getStatus(): AppUpdaterStatus {
@@ -293,6 +224,116 @@ export function createAppUpdater(): AppUpdaterProvider {
       periodicTimer.unref?.();
     }
   };
+
+  async function promptForDownloadedUpdate(version: string): Promise<void> {
+    if (installPromptInFlight || promptedDownloadedVersion === version) {
+      return;
+    }
+
+    promptedDownloadedVersion = version;
+    installPromptInFlight = true;
+
+    try {
+      const ownerWindow = options.getWindow?.();
+      const promptOptions = {
+        type: "info" as const,
+        buttons: ["立即安装并重启", "稍后"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        title: "LiteLauncher 更新已准备好",
+        message: `LiteLauncher v${version} 已下载完成`,
+        detail:
+          "现在重启即可完成安装。也可以稍后在设置页点击“立即安装并重启”，或彻底退出应用时自动安装。"
+      };
+      const result =
+        ownerWindow && !ownerWindow.isDestroyed()
+          ? await dialog.showMessageBox(ownerWindow, promptOptions)
+          : await dialog.showMessageBox(promptOptions);
+
+      if (result.response === 0) {
+        await provider.installUpdateNow();
+      }
+    } finally {
+      installPromptInFlight = false;
+    }
+  }
+
+  if (supported) {
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.allowPrerelease = false;
+
+    autoUpdater.on("checking-for-update", () => {
+      setStatus({
+        phase: "checking",
+        downloaded: false,
+        progressPercent: undefined,
+        message: "正在检查更新…"
+      });
+    });
+
+    autoUpdater.on("update-available", (info) => {
+      setStatus({
+        phase: "available",
+        updateVersion: info.version,
+        downloaded: false,
+        releaseNotes: formatReleaseNotes(info.releaseNotes),
+        message: `发现新版本 v${info.version}，正在下载更新包。`
+      });
+    });
+
+    autoUpdater.on("download-progress", (info: ProgressInfo) => {
+      const percent = Number.isFinite(info.percent)
+        ? Math.max(0, Math.min(100, Math.round(info.percent)))
+        : undefined;
+
+      setStatus({
+        phase: "downloading",
+        progressPercent: percent,
+        message:
+          percent === undefined
+            ? "正在下载更新包…"
+            : `正在下载更新包… ${percent}%`
+      });
+    });
+
+    autoUpdater.on("update-not-available", () => {
+      setStatus({
+        phase: "not-available",
+        downloaded: false,
+        progressPercent: undefined,
+        releaseNotes: undefined,
+        message: "当前已是最新版本。"
+      });
+    });
+
+    autoUpdater.on("update-downloaded", (event: UpdateDownloadedEvent) => {
+      setStatus({
+        phase: "downloaded",
+        updateVersion: event.version,
+        downloaded: true,
+        progressPercent: 100,
+        releaseNotes: formatReleaseNotes(event.releaseNotes),
+        message: `新版本 v${event.version} 已下载完成，重启后即可安装。`
+      });
+      void promptForDownloadedUpdate(event.version);
+    });
+
+    autoUpdater.on("error", (error, message) => {
+      const detail = truncateText(
+        typeof message === "string" && message.trim()
+          ? message
+          : error?.message ?? "检查更新失败"
+      );
+      setStatus({
+        phase: "error",
+        downloaded: false,
+        progressPercent: undefined,
+        message: detail || "检查更新失败"
+      });
+    });
+  }
 
   if (process.env.LITELAUNCHER_E2E === "1") {
     provider.setE2ECheckFailure = (message: string | null): boolean => {

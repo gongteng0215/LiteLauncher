@@ -169,6 +169,11 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   const nativeAddonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
 
   assert.match(settingsSource, /export class LiteSnapSettingsStore/);
+  assert.match(
+    settingsSource,
+    /private cachedSettings: LiteSnapSettings \| null = null;/,
+    "LiteSnap settings should keep an in-memory cache to avoid SQLite reads on every capture"
+  );
   assert.match(settingsSource, /async getSettings\(\): Promise<LiteSnapSettings>/);
   assert.match(
     settingsSource,
@@ -222,8 +227,23 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     nativeAddonSource,
+    /captureDisplayFrames/,
+    "LiteSnap native addon should capture preview and source frames from one screen read"
+  );
+  assert.match(
+    nativeAddonSource,
     /getWindowRectAtPoint/,
     "LiteSnap native addon should expose a window-rectangle query for Snipaste-style hover selection"
+  );
+  assert.match(
+    providerSource,
+    /resolvePreviewOutputSize\(display: Display\)[\s\S]*display\.bounds\.width[\s\S]*display\.bounds\.height/,
+    "LiteSnap preview capture should match the overlay viewport at 1:1 for a crisp background"
+  );
+  assert.match(
+    providerSource,
+    /captureDisplayFrames\(/,
+    "LiteSnap capture provider should expose a combined preview+source capture path"
   );
   assert.match(
     pinSource,
@@ -353,8 +373,13 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /async prewarmOverlay\(\): Promise<boolean>/,
-    "LiteSnap should expose a prewarm entry for the reusable overlay window"
+    /public prewarmCaptureCache\(\): void[\s\S]*this\.startFrameCacheRefresh\(\)[\s\S]*this\.warmDisplayFrameCache\(/,
+    "LiteSnap should warm the screenshot frame cache without waiting for the overlay window"
+  );
+  assert.match(
+    captureSource,
+    /async prewarmOverlay\(\): Promise<boolean>[\s\S]*this\.prewarmCaptureCache\(\)[\s\S]*await this\.waitForOverlayReady\(overlayWindow\)/,
+    "LiteSnap overlay prewarm should reuse the capture cache prewarm path"
   );
   assert.match(
     captureSource,
@@ -368,8 +393,8 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /await this\.prepareOverlayRenderer\(overlayWindow\)/,
-    "LiteSnap should wait for the reused overlay renderer to reset before it becomes interactive"
+    /Promise\.all\(\[[\s\S]*this\.prepareOverlayRenderer\(overlayWindow\)/,
+    "LiteSnap should reset the reused overlay renderer before each capture starts"
   );
   assert.match(
     captureSource,
@@ -383,8 +408,13 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /const prepared = await this\.prepareSessionImage\(captureId, display\)[\s\S]*this\.showInteractiveOverlay\(overlayWindow\)/,
-    "LiteSnap should keep the overlay hidden until the screenshot image is ready"
+    /const framesPromise = cachedFrames[\s\S]*captureProvider\.captureDisplayFrames\(display\)/,
+    "LiteSnap should capture the display in parallel with overlay preparation"
+  );
+  assert.match(
+    captureSource,
+    /await this\.showInteractiveOverlay\(overlayWindow\)/,
+    "LiteSnap should reveal the overlay once the screenshot frame is ready"
   );
   assert.match(
     captureSource,
@@ -393,18 +423,33 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /this\.session\.previewImage = image;[\s\S]*this\.session\.previewImageDataUrl = image\.toDataURL\(\);/,
-    "LiteSnap should populate a lightweight preview image before showing the overlay"
+    /const frames = await this\.captureProvider\.captureDisplayFrames\(display\)/,
+    "LiteSnap should capture preview and full-quality source frames in one native pass"
   );
   assert.match(
     captureSource,
-    /await this\.upgradeSessionSourceImage\(captureId, display\);[\s\S]*this\.showInteractiveOverlay\(overlayWindow\)/,
-    "LiteSnap should capture the full-quality source image before showing the overlay so its UI is not baked into the saved screenshot"
+    /PREVIEW_JPEG_QUALITY/,
+    "LiteSnap should encode preview frames at a higher JPEG quality to avoid a soft background"
   );
   assert.match(
     captureSource,
-    /upgradeSessionSourceImage\([\s\S]*captureId: string,[\s\S]*display: Display[\s\S]*\): Promise<void>/,
-    "LiteSnap should own a background source-image upgrade path"
+    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.scheduleSourceImageDataUrlUpgrade\(captureId\)/,
+    "LiteSnap should attach the full-quality source image as soon as the combined capture finishes"
+  );
+  assert.match(
+    captureSource,
+    /private warmDisplayFrameCache\(display: Display\): void/,
+    "LiteSnap should prewarm a short-lived display frame cache for the next capture"
+  );
+  assert.match(
+    captureSource,
+    /startFrameCacheRefresh\(\): void[\s\S]*setInterval\([\s\S]*FRAME_CACHE_REFRESH_MS/,
+    "LiteSnap should refresh the warmed frame cache periodically while idle"
+  );
+  assert.match(
+    captureSource,
+    /if \(this\.session\) \{[\s\S]*await this\.cancelCapture\(\);/,
+    "LiteSnap should skip cancel teardown when no capture session is active"
   );
   assert.match(
     captureSource,
@@ -448,13 +493,13 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /overlayWindow\.show\(\);[\s\S]*await this\.waitForOverlayPaint\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(1\)/,
+    /overlayWindow\.show\(\);[\s\S]*await this\.waitForOverlayFrameReady\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(1\)/,
     "LiteSnap should reveal the overlay only after the new frame has painted into the transparent window"
   );
   assert.match(
     captureSource,
-    /waitForOverlayPaint\([\s\S]*requestAnimationFrame\([\s\S]*requestAnimationFrame/,
-    "LiteSnap should wait for two animation frames before revealing the overlay window"
+    /waitForOverlayFrameReady\([\s\S]*dataset\.ready === "true"[\s\S]*requestAnimationFrame/,
+    "LiteSnap should wait for the renderer to decode and mark the screenshot ready before revealing the overlay"
   );
 });
 
@@ -550,6 +595,11 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     mainIndexSource,
     /const liteSnapSettings = await liteSnapSettingsStore\.getSettings\(\);/,
     "LiteSnap startup should load persisted shortcut settings"
+  );
+  assert.match(
+    mainIndexSource,
+    /liteSnapCaptureSessionManager\.prewarmCaptureCache\(\);/,
+    "LiteSnap startup should warm the screenshot frame cache immediately"
   );
   assert.match(
     mainIndexSource,
@@ -770,12 +820,22 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   assert.match(copyAssetsSource, /litesnap-overlay\.css/);
   assert.match(
     overlayCssSource,
-    /\.litesnap-overlay\[data-ready="false"\][\s\S]*background:\s*transparent/,
+    /\.litesnap-overlay\[data-ready="false"\][\s\S]*background-color:\s*transparent/,
     "LiteSnap preparing overlay should stay visually transparent instead of flashing black"
   );
-  assert.match(
+  assert.doesNotMatch(
     overlayCssSource,
-    /\.litesnap-overlay\[data-ready="false"\]::before[\s\S]*display:\s*none/,
-    "LiteSnap preparing overlay should not draw a dark dimmer before the screenshot is ready"
+    /\.litesnap-overlay::before/,
+    "LiteSnap should not dim the full screenshot before a selection is drawn"
+  );
+  assert.match(
+    overlayRendererSource,
+    /root\.style\.backgroundSize = backgroundSize/,
+    "LiteSnap overlay should paint the preview at exact viewport size without upscaling blur"
+  );
+  assert.match(
+    overlayRendererSource,
+    /await image\.decode\(\)[\s\S]*root\.dataset\.ready = "true"/,
+    "LiteSnap overlay should decode the screenshot before marking the frame ready so the first capture never flashes a grey screen"
   );
 });

@@ -9,10 +9,12 @@ import {
 } from "electron";
 
 import {
+  createDefaultLiteSnapSettings,
   type LiteSnapCommitCaptureInput,
   type LiteSnapCommitCaptureResult,
   type LiteSnapOverlaySelection,
-  type LiteSnapOverlayState
+  type LiteSnapOverlayState,
+  type LiteSnapSettings
 } from "../../shared/litesnap";
 import { IPC_CHANNELS } from "../../shared/channels";
 import {
@@ -28,15 +30,34 @@ type CaptureSession = {
   captureId: string;
   overlayWindow: BrowserWindow;
   display: Display;
+  settings: LiteSnapSettings;
   previewImage: NativeImage | null;
   previewImageDataUrl: string | null;
   sourceImage: NativeImage | null;
   sourceImageDataUrl: string | null;
 };
 
+type DisplayFrameCache = {
+  displayId: number;
+  scaleFactor: number;
+  previewImage: NativeImage;
+  previewImageDataUrl: string;
+  sourceImage: NativeImage;
+  capturedAt: number;
+};
+
+const FRAME_CACHE_TTL_MS = 1200;
+const FRAME_CACHE_REFRESH_MS = 900;
+const PREVIEW_JPEG_QUALITY = 92;
+
 export class LiteSnapCaptureSessionManager {
   private session: CaptureSession | null = null;
   private overlayWindow: BrowserWindow | null = null;
+  private overlayReadyPromise: Promise<void> | null = null;
+  private frameCache: DisplayFrameCache | null = null;
+  private frameCacheWarmPromise: Promise<void> | null = null;
+  private frameCacheWarmDisplayId: number | null = null;
+  private frameCacheRefreshTimer: NodeJS.Timeout | null = null;
   private readonly captureProvider: LiteSnapCaptureProvider;
 
   public constructor(
@@ -47,15 +68,45 @@ export class LiteSnapCaptureSessionManager {
     this.captureProvider = createLiteSnapCaptureProvider();
   }
 
+  public prewarmCaptureCache(): void {
+    if (process.platform !== "win32") {
+      return;
+    }
+
+    this.startFrameCacheRefresh();
+    this.warmDisplayFrameCache(
+      screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    );
+  }
+
   public async prewarmOverlay(): Promise<boolean> {
     if (process.platform !== "win32") {
       return false;
     }
 
-    this.ensureOverlayWindow(
+    this.prewarmCaptureCache();
+
+    const overlayWindow = this.ensureOverlayWindow(
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     );
+    await this.waitForOverlayReady(overlayWindow);
     return true;
+  }
+
+  public startFrameCacheRefresh(): void {
+    if (this.frameCacheRefreshTimer || process.platform !== "win32") {
+      return;
+    }
+
+    this.frameCacheRefreshTimer = setInterval(() => {
+      if (this.session) {
+        return;
+      }
+
+      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      this.warmDisplayFrameCache(display);
+    }, FRAME_CACHE_REFRESH_MS);
+    this.frameCacheRefreshTimer.unref?.();
   }
 
   public async startCapture(
@@ -65,33 +116,91 @@ export class LiteSnapCaptureSessionManager {
       return false;
     }
 
-    await this.cancelCapture();
+    if (this.session) {
+      await this.cancelCapture();
+    }
 
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const overlayWindow = this.ensureOverlayWindow(display);
     this.activateOverlayWindow(overlayWindow, display);
-    await this.prepareOverlayRenderer(overlayWindow);
 
     const captureId = `capture-${Date.now()}`;
     this.session = {
       captureId,
       overlayWindow,
       display,
+      settings: createDefaultLiteSnapSettings(),
       previewImage: null,
       previewImageDataUrl: null,
       sourceImage: null,
       sourceImageDataUrl: null
     };
 
-    await beforeImageCapture?.();
-    const prepared = await this.prepareSessionImage(captureId, display);
-    if (!prepared) {
+    const cachedFrames = this.getCachedFrames(display);
+    const framesPromise = cachedFrames
+      ? Promise.resolve({
+          previewImage: cachedFrames.previewImage,
+          previewImageDataUrl: cachedFrames.previewImageDataUrl,
+          sourceImage: cachedFrames.sourceImage,
+          fromCache: true as const
+        })
+      : this.captureProvider.captureDisplayFrames(display).then((frames) => {
+          if (
+            !frames ||
+            frames.previewImage.isEmpty() ||
+            frames.sourceImage.isEmpty()
+          ) {
+            return null;
+          }
+
+          return {
+            previewImage: frames.previewImage,
+            previewImageDataUrl: this.encodePreviewDataUrl(frames.previewImage),
+            sourceImage: frames.sourceImage,
+            fromCache: false as const
+          };
+        });
+
+    const resolvedFrames = await Promise.all([
+      this.waitForOverlayReady(overlayWindow),
+      this.prepareOverlayRenderer(overlayWindow),
+      beforeImageCapture?.(),
+      this.settingsStore.getSettings().then((settings) => {
+        if (this.session?.captureId === captureId) {
+          this.session.settings = settings;
+        }
+      }),
+      framesPromise
+    ]).then((results) => results[4]);
+
+    if (this.session?.captureId !== captureId) {
       return false;
     }
-    // The high-resolution source image must be captured while the overlay is
-    // still hidden. Capturing it after showInteractiveOverlay would bake the
-    // selection box, handles, and toolbar into the saved screenshot.
-    await this.upgradeSessionSourceImage(captureId, display);
+
+    if (!resolvedFrames) {
+      await this.cancelCapture();
+      return false;
+    }
+
+    this.session.previewImage = resolvedFrames.previewImage;
+    this.session.previewImageDataUrl = resolvedFrames.previewImageDataUrl;
+    this.session.sourceImage = resolvedFrames.sourceImage;
+    this.session.sourceImageDataUrl = null;
+    this.scheduleSourceImageDataUrlUpgrade(captureId);
+
+    if (resolvedFrames.fromCache) {
+      this.warmDisplayFrameCache(display);
+    } else {
+      this.frameCache = {
+        displayId: display.id,
+        scaleFactor: display.scaleFactor,
+        previewImage: resolvedFrames.previewImage,
+        previewImageDataUrl: resolvedFrames.previewImageDataUrl,
+        sourceImage: resolvedFrames.sourceImage,
+        capturedAt: Date.now()
+      };
+    }
+
     await this.emitOverlayStateChanged(await this.getOverlayState());
     await this.showInteractiveOverlay(overlayWindow);
     return true;
@@ -102,7 +211,7 @@ export class LiteSnapCaptureSessionManager {
       return null;
     }
 
-    const settings = await this.settingsStore.getSettings();
+    const settings = this.session.settings;
     return {
       captureId: this.session.captureId,
       imageDataUrl: this.session.previewImageDataUrl,
@@ -229,15 +338,16 @@ export class LiteSnapCaptureSessionManager {
     const session = this.session;
     this.session = null;
     if (!session) {
-      await this.emitOverlayStateChanged(null);
       return false;
     }
 
+    const display = session.display;
     if (!session.overlayWindow.isDestroyed()) {
       session.overlayWindow.hide();
       this.parkOverlayWindow(session.overlayWindow);
     }
     await this.emitOverlayStateChanged(null);
+    this.warmDisplayFrameCache(display);
     return true;
   }
 
@@ -248,6 +358,7 @@ export class LiteSnapCaptureSessionManager {
     }
 
     const overlayWindow = createLiteSnapOverlayWindow(display);
+    this.overlayReadyPromise = null;
     overlayWindow.on("closed", () => {
       if (this.overlayWindow === overlayWindow) {
         this.overlayWindow = null;
@@ -297,21 +408,76 @@ export class LiteSnapCaptureSessionManager {
     ).catch(() => undefined);
   }
 
-  private async waitForOverlayPaint(overlayWindow: BrowserWindow): Promise<void> {
+  private async waitForOverlayFrameReady(overlayWindow: BrowserWindow): Promise<void> {
     if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
       return;
     }
 
-    // Wait for two animation frames so the freshly applied screenshot frame is
-    // actually painted into the (still transparent) window before we reveal it.
-    const painted = overlayWindow.webContents
+    // Wait until the renderer has decoded the screenshot, applied it as the
+    // overlay background (data-ready="true"), and painted two animation frames.
+    // Without this the very first capture (which has no warmed cache) would
+    // flash the overlay's flat fill color for a moment before the screenshot
+    // becomes visible, making the whole screen look grey/blank.
+    const ready = overlayWindow.webContents
       .executeJavaScript(
-        "new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))); });",
+        `new Promise((resolve) => {
+          const settle = () =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => resolve(true))
+            );
+          const start = Date.now();
+          const poll = () => {
+            const node = document.getElementById("litesnap-overlay");
+            if (node && node.dataset.ready === "true") {
+              settle();
+              return;
+            }
+            if (Date.now() - start > 600) {
+              resolve(false);
+              return;
+            }
+            requestAnimationFrame(poll);
+          };
+          poll();
+        });`,
         true
       )
       .catch(() => undefined);
-    const fallback = new Promise<void>((resolve) => setTimeout(resolve, 120));
-    await Promise.race([painted, fallback]);
+    const fallback = new Promise<void>((resolve) => setTimeout(resolve, 700));
+    await Promise.race([ready, fallback]);
+  }
+
+  private waitForOverlayReady(overlayWindow: BrowserWindow): Promise<void> {
+    if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
+      return Promise.resolve();
+    }
+
+    if (!overlayWindow.webContents.isLoading()) {
+      return Promise.resolve();
+    }
+
+    if (!this.overlayReadyPromise) {
+      this.overlayReadyPromise = new Promise<void>((resolve) => {
+        const finish = (): void => {
+          this.overlayReadyPromise = null;
+          resolve();
+        };
+
+        if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
+          finish();
+          return;
+        }
+
+        if (!overlayWindow.webContents.isLoading()) {
+          finish();
+          return;
+        }
+
+        overlayWindow.webContents.once("did-finish-load", finish);
+      });
+    }
+
+    return this.overlayReadyPromise;
   }
 
   private async emitOverlayStateChanged(state: LiteSnapOverlayState | null): Promise<void> {
@@ -332,10 +498,8 @@ export class LiteSnapCaptureSessionManager {
 
     overlayWindow.setIgnoreMouseEvents(false);
     overlayWindow.setFocusable(true);
-    // The window is parked at opacity 0, so showing it cannot flash the stale
-    // previous screenshot. Reveal it only once the new frame has painted.
     overlayWindow.show();
-    await this.waitForOverlayPaint(overlayWindow);
+    await this.waitForOverlayFrameReady(overlayWindow);
     if (overlayWindow.isDestroyed()) {
       return;
     }
@@ -359,40 +523,92 @@ export class LiteSnapCaptureSessionManager {
     }, 250);
   }
 
-  private async prepareSessionImage(
-    captureId: string,
-    display: Display
-  ): Promise<boolean> {
-    const image = await this.captureProvider.capturePreviewImage(display);
-    if (!image || image.isEmpty()) {
-      if (this.session?.captureId === captureId) {
-        await this.cancelCapture();
-      }
-      return false;
-    }
-
-    if (this.session?.captureId === captureId) {
-      this.session.previewImage = image;
-      this.session.previewImageDataUrl = image.toDataURL();
-      return true;
-    }
-
-    return false;
+  private encodePreviewDataUrl(image: NativeImage): string {
+    return `data:image/jpeg;base64,${image.toJPEG(PREVIEW_JPEG_QUALITY).toString("base64")}`;
   }
 
-  private async upgradeSessionSourceImage(
-    captureId: string,
-    display: Display
-  ): Promise<void> {
-    const image = await this.captureProvider.captureSourceImage(display);
-    if (!image || image.isEmpty()) {
+  private getCachedFrames(display: Display): DisplayFrameCache | null {
+    const cache = this.frameCache;
+    if (!cache) {
+      return null;
+    }
+
+    if (
+      cache.displayId !== display.id ||
+      cache.scaleFactor !== display.scaleFactor ||
+      Date.now() - cache.capturedAt > FRAME_CACHE_TTL_MS
+    ) {
+      return null;
+    }
+
+    return cache;
+  }
+
+  private warmDisplayFrameCache(display: Display): void {
+    if (
+      this.frameCacheWarmPromise &&
+      this.frameCacheWarmDisplayId === display.id
+    ) {
       return;
     }
 
-    if (this.session?.captureId === captureId) {
-      this.session.sourceImage = image;
-      this.session.sourceImageDataUrl = image.toDataURL();
+    this.frameCacheWarmDisplayId = display.id;
+    this.frameCacheWarmPromise = this.captureAndStoreFrameCache(display).finally(
+      () => {
+        this.frameCacheWarmPromise = null;
+      }
+    );
+  }
+
+  private async captureAndStoreFrameCache(display: Display): Promise<void> {
+    const frames = await this.captureProvider.captureDisplayFrames(display);
+    if (!frames) {
+      return;
     }
+
+    const { previewImage, sourceImage } = frames;
+    if (previewImage.isEmpty() || sourceImage.isEmpty()) {
+      return;
+    }
+
+    this.frameCache = {
+      displayId: display.id,
+      scaleFactor: display.scaleFactor,
+      previewImage,
+      previewImageDataUrl: this.encodePreviewDataUrl(previewImage),
+      sourceImage,
+      capturedAt: Date.now()
+    };
+  }
+
+  private scheduleSourceImageDataUrlUpgrade(captureId: string): void {
+    setImmediate(() => {
+      const session = this.session;
+      if (
+        !session ||
+        session.captureId !== captureId ||
+        !session.sourceImage ||
+        session.sourceImage.isEmpty() ||
+        session.sourceImageDataUrl
+      ) {
+        return;
+      }
+
+      session.sourceImageDataUrl = session.sourceImage.toDataURL();
+      void this.emitOverlayStateChanged({
+        captureId: session.captureId,
+        imageDataUrl: session.previewImageDataUrl,
+        sourceImageDataUrl: session.sourceImageDataUrl,
+        viewportWidth: session.display.bounds.width,
+        viewportHeight: session.display.bounds.height,
+        selectionMinSize: 24,
+        annotationColor: session.settings.annotationColor,
+        annotationLineWidth: session.settings.annotationLineWidth,
+        annotationTextSize: session.settings.annotationTextSize,
+        annotationTool: session.settings.annotationTool,
+        annotationFillShapes: session.settings.annotationFillShapes
+      });
+    });
   }
 
   private resolveCommitImage(

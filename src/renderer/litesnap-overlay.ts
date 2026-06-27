@@ -2130,8 +2130,31 @@
       return;
     }
 
-    overlayRoot.style.backgroundImage = `url("${state.imageDataUrl}")`;
-    overlayRoot.dataset.ready = "true";
+    const root = overlayRoot;
+    const pendingState = state;
+    const dataUrl = state.imageDataUrl;
+    const backgroundSize = `${state.viewportWidth}px ${state.viewportHeight}px`;
+    // Decode the screenshot before painting it as the overlay background so the
+    // window is only revealed once the image is actually ready. This prevents
+    // the first capture (no warmed cache) from flashing the overlay's flat fill
+    // color, which looked like the whole screen turning grey.
+    void (async () => {
+      try {
+        const image = new Image();
+        image.src = dataUrl;
+        if (typeof image.decode === "function") {
+          await image.decode();
+        }
+      } catch {
+        // Ignore decode failures and fall back to direct assignment below.
+      }
+      if (overlayState !== pendingState) {
+        return;
+      }
+      root.style.backgroundImage = `url("${dataUrl}")`;
+      root.style.backgroundSize = backgroundSize;
+      root.dataset.ready = "true";
+    })();
     void ensureCompositeImage();
     hideStatus();
   }

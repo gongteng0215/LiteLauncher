@@ -86,14 +86,21 @@ function normalizeLiteSnapSettings(
 }
 
 export class LiteSnapSettingsStore {
+  private cachedSettings: LiteSnapSettings | null = null;
+
   public constructor(private readonly db: LiteDatabase) {}
 
   public async getSettings(): Promise<LiteSnapSettings> {
+    if (this.cachedSettings) {
+      return { ...this.cachedSettings };
+    }
+
     const fallback = createDefaultLiteSnapSettings();
     const raw = await this.db.getSetting(LITESNAP_SETTINGS_KEY);
     if (!raw) {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
-      return fallback;
+      this.cachedSettings = fallback;
+      return { ...fallback };
     }
 
     try {
@@ -105,10 +112,12 @@ export class LiteSnapSettingsStore {
           JSON.stringify(normalized)
         );
       }
-      return normalized;
+      this.cachedSettings = normalized;
+      return { ...normalized };
     } catch {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
-      return fallback;
+      this.cachedSettings = fallback;
+      return { ...fallback };
     }
   }
 
@@ -118,6 +127,7 @@ export class LiteSnapSettingsStore {
     const current = await this.getSettings();
     const next = normalizeLiteSnapSettings(patch, current);
     await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(next));
-    return next;
+    this.cachedSettings = next;
+    return { ...next };
   }
 }
