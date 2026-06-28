@@ -20,6 +20,7 @@ import {
   DebugKeyEvent,
   ExecuteResult,
   LaunchItem,
+  HomeSections,
   LaunchAtLoginStatus,
   PinToggleResult,
   SearchRequestOptions,
@@ -51,6 +52,9 @@ const api = {
   },
   getPluginItems(): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getPluginItems);
+  },
+  getHomeSections(): Promise<HomeSections> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getHomeSections);
   },
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC_CHANNELS.getAppVersion);
@@ -123,6 +127,9 @@ const api = {
   },
   liteSnapCancelCapture(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCancelCapture);
+  },
+  liteSnapEnsureSourceImage(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapEnsureSourceImage);
   },
   rebuildCatalog(): Promise<CatalogRebuildResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.rebuildCatalog);

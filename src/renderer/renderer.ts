@@ -318,6 +318,11 @@ interface LauncherApi {
   getInitialItems(): Promise<LaunchItem[]>;
   getPinnedItems(): Promise<LaunchItem[]>;
   getPluginItems(): Promise<LaunchItem[]>;
+  getHomeSections(): Promise<{
+    recent: LaunchItem[];
+    pinned: LaunchItem[];
+    plugin: LaunchItem[];
+  }>;
   getAppVersion(): Promise<string>;
   getAppUpdaterStatus(): Promise<AppUpdaterStatus>;
   getSearchDisplayConfig(): Promise<SearchDisplayConfig>;
@@ -2074,7 +2079,11 @@ function bindResultInteractions(
   entry: ResultEntry
 ): void {
   element.addEventListener("mouseenter", () => {
+    const previousIndex = selectedIndex;
     selectedIndex = index;
+    if (canUpdateSelectionHighlightInPlace()) {
+      updateSelectionHighlight(previousIndex, selectedIndex);
+    }
   });
 
   element.addEventListener("click", (event) => {
@@ -3179,12 +3188,57 @@ function renderList(): void {
   renderDetailList();
 }
 
+function canUpdateSelectionHighlightInPlace(): boolean {
+  if (entries.length === 0) {
+    return false;
+  }
+
+  if (
+    mode === "settings" ||
+    mode === "password" ||
+    mode === "cashflow" ||
+    mode === "plugin"
+  ) {
+    return false;
+  }
+
+  if (isResultsLoading) {
+    return false;
+  }
+
+  return list.querySelector('.result-item[data-index="0"]') !== null;
+}
+
+function updateSelectionHighlight(previousIndex: number, nextIndex: number): void {
+  if (previousIndex === nextIndex) {
+    return;
+  }
+
+  const previousItem = list.querySelector<HTMLElement>(
+    `.result-item[data-index="${previousIndex}"]`
+  );
+  const nextItem = list.querySelector<HTMLElement>(
+    `.result-item[data-index="${nextIndex}"]`
+  );
+
+  previousItem?.classList.remove("active");
+  nextItem?.classList.add("active");
+  nextItem?.scrollIntoView({ block: "nearest" });
+}
+
 function moveSelection(delta: number): void {
   if (entries.length === 0) {
     return;
   }
 
+  const previousIndex = selectedIndex;
   selectedIndex = (selectedIndex + delta + entries.length) % entries.length;
+
+  if (canUpdateSelectionHighlightInPlace()) {
+    updateSelectionHighlight(previousIndex, selectedIndex);
+    return;
+  }
+
   renderList();
 }
 
@@ -3394,14 +3448,14 @@ async function refreshEntries(query: string): Promise<void> {
       pagedSearchQueryKey = "";
       searchResultPage = 0;
 
-      const [recentItems, pinnedItems, pluginItems] = await Promise.all([
-        launcher.getInitialItems(),
-        launcher.getPinnedItems(),
-        launcher.getPluginItems()
-      ]);
+      const homeSections = await launcher.getHomeSections();
       if (token !== latestSearchToken) {
         return;
       }
+
+      const recentItems = homeSections.recent;
+      const pinnedItems = homeSections.pinned;
+      const pluginItems = homeSections.plugin;
 
       const recentDisplayLimit = getAdaptiveSectionDisplayLimit(recentItems);
       const pinnedDisplayLimit = getAdaptiveSectionDisplayLimit(pinnedItems);

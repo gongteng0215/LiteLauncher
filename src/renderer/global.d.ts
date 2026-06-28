@@ -8,6 +8,7 @@ import {
   DebugKeyEvent,
   ExecuteResult,
   LaunchItem,
+  HomeSections,
   LaunchAtLoginStatus,
   PinToggleResult,
   SearchRequestOptions,
@@ -254,6 +255,7 @@ declare global {
       getInitialItems(): Promise<LaunchItem[]>;
       getPinnedItems(): Promise<LaunchItem[]>;
       getPluginItems(): Promise<LaunchItem[]>;
+      getHomeSections(): Promise<HomeSections>;
       getAppVersion(): Promise<string>;
       getAppUpdaterStatus(): Promise<AppUpdaterStatus>;
       setE2EAppUpdaterCheckFailure(message: string | null): Promise<boolean>;
@@ -286,6 +288,7 @@ declare global {
         input: LiteSnapCommitCaptureInput
       ): Promise<LiteSnapCommitCaptureResult>;
       liteSnapCancelCapture(): Promise<boolean>;
+      liteSnapEnsureSourceImage(): Promise<string | null>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
       setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;

@@ -57,6 +57,21 @@ export class ClipService {
     return this.db.getClipItems(query, limit);
   }
 
+  public async saveTextContent(content: string): Promise<boolean> {
+    if (!content.trim()) {
+      return false;
+    }
+
+    const hash = hashContent(content);
+    if (hash === this.lastCapturedHash) {
+      return false;
+    }
+
+    await this.db.saveClipItem(content, hash, this.maxItems);
+    this.lastCapturedHash = hash;
+    return true;
+  }
+
   public async copyClipItem(itemId: string): Promise<boolean> {
     const item = await this.db.getClipItemById(itemId);
     if (!item) {
@@ -87,13 +102,7 @@ export class ClipService {
         return;
       }
 
-      const hash = hashContent(content);
-      if (hash === this.lastCapturedHash) {
-        return;
-      }
-
-      await this.db.saveClipItem(content, hash, this.maxItems);
-      this.lastCapturedHash = hash;
+      await this.saveTextContent(content);
     } catch (error) {
       console.error("Failed to collect clipboard content", error);
     } finally {

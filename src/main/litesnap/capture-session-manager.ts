@@ -1,9 +1,9 @@
 import {
+  BrowserWindow,
   clipboard,
   nativeImage,
   screen,
   shell,
-  type BrowserWindow,
   type Display,
   type NativeImage
 } from "electron";
@@ -42,12 +42,13 @@ type DisplayFrameCache = {
   scaleFactor: number;
   previewImage: NativeImage;
   previewImageDataUrl: string;
-  sourceImage: NativeImage;
+  sourceImage: NativeImage | null;
   capturedAt: number;
 };
 
 const FRAME_CACHE_TTL_MS = 1200;
-const FRAME_CACHE_REFRESH_MS = 900;
+const FRAME_CACHE_REFRESH_MS = 2200;
+const FRAME_CACHE_REFRESH_MAX_MS = 8000;
 const PREVIEW_JPEG_QUALITY = 92;
 
 export class LiteSnapCaptureSessionManager {
@@ -58,6 +59,7 @@ export class LiteSnapCaptureSessionManager {
   private frameCacheWarmPromise: Promise<void> | null = null;
   private frameCacheWarmDisplayId: number | null = null;
   private frameCacheRefreshTimer: NodeJS.Timeout | null = null;
+  private frameCacheIdleRefreshCycles = 0;
   private readonly captureProvider: LiteSnapCaptureProvider;
 
   public constructor(
@@ -98,14 +100,31 @@ export class LiteSnapCaptureSessionManager {
       return;
     }
 
-    this.frameCacheRefreshTimer = setInterval(() => {
-      if (this.session) {
+    this.frameCacheIdleRefreshCycles = 0;
+    this.scheduleNextFrameCacheRefresh();
+  }
+
+  private scheduleNextFrameCacheRefresh(): void {
+    if (process.platform !== "win32") {
+      return;
+    }
+
+    const delay = Math.min(
+      FRAME_CACHE_REFRESH_MAX_MS,
+      FRAME_CACHE_REFRESH_MS * (1 + Math.min(3, this.frameCacheIdleRefreshCycles))
+    );
+    this.frameCacheRefreshTimer = setTimeout(() => {
+      this.frameCacheRefreshTimer = null;
+      if (this.session || !this.shouldRefreshIdleFrameCache()) {
+        this.scheduleNextFrameCacheRefresh();
         return;
       }
 
       const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-      this.warmDisplayFrameCache(display);
-    }, FRAME_CACHE_REFRESH_MS);
+      this.warmPreviewFrameCache(display);
+      this.frameCacheIdleRefreshCycles += 1;
+      this.scheduleNextFrameCacheRefresh();
+    }, delay);
     this.frameCacheRefreshTimer.unref?.();
   }
 
@@ -119,6 +138,8 @@ export class LiteSnapCaptureSessionManager {
     if (this.session) {
       await this.cancelCapture();
     }
+
+    this.frameCacheIdleRefreshCycles = 0;
 
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const overlayWindow = this.ensureOverlayWindow(display);
@@ -136,30 +157,7 @@ export class LiteSnapCaptureSessionManager {
       sourceImageDataUrl: null
     };
 
-    const cachedFrames = this.getCachedFrames(display);
-    const framesPromise = cachedFrames
-      ? Promise.resolve({
-          previewImage: cachedFrames.previewImage,
-          previewImageDataUrl: cachedFrames.previewImageDataUrl,
-          sourceImage: cachedFrames.sourceImage,
-          fromCache: true as const
-        })
-      : this.captureProvider.captureDisplayFrames(display).then((frames) => {
-          if (
-            !frames ||
-            frames.previewImage.isEmpty() ||
-            frames.sourceImage.isEmpty()
-          ) {
-            return null;
-          }
-
-          return {
-            previewImage: frames.previewImage,
-            previewImageDataUrl: this.encodePreviewDataUrl(frames.previewImage),
-            sourceImage: frames.sourceImage,
-            fromCache: false as const
-          };
-        });
+    const framesPromise = this.resolveCaptureFrames(display);
 
     const resolvedFrames = await Promise.all([
       this.waitForOverlayReady(overlayWindow),
@@ -186,7 +184,6 @@ export class LiteSnapCaptureSessionManager {
     this.session.previewImageDataUrl = resolvedFrames.previewImageDataUrl;
     this.session.sourceImage = resolvedFrames.sourceImage;
     this.session.sourceImageDataUrl = null;
-    this.scheduleSourceImageDataUrlUpgrade(captureId);
 
     if (resolvedFrames.fromCache) {
       this.warmDisplayFrameCache(display);
@@ -395,6 +392,9 @@ export class LiteSnapCaptureSessionManager {
     // frame is painted (see showInteractiveOverlay), that stale frame is never
     // visible.
     overlayWindow.setOpacity(0);
+    if (!overlayWindow.webContents.isDestroyed()) {
+      overlayWindow.webContents.setFrameRate(10);
+    }
   }
 
   private async prepareOverlayRenderer(overlayWindow: BrowserWindow): Promise<void> {
@@ -498,6 +498,9 @@ export class LiteSnapCaptureSessionManager {
 
     overlayWindow.setIgnoreMouseEvents(false);
     overlayWindow.setFocusable(true);
+    if (!overlayWindow.webContents.isDestroyed()) {
+      overlayWindow.webContents.setFrameRate(60);
+    }
     overlayWindow.show();
     await this.waitForOverlayFrameReady(overlayWindow);
     if (overlayWindow.isDestroyed()) {
@@ -544,7 +547,24 @@ export class LiteSnapCaptureSessionManager {
     return cache;
   }
 
+  private shouldRefreshIdleFrameCache(): boolean {
+    return BrowserWindow.getAllWindows().some(
+      (window) => !window.isDestroyed() && window.isFocused()
+    );
+  }
+
   private warmDisplayFrameCache(display: Display): void {
+    this.scheduleFrameCacheWarm(display, () => this.captureAndStoreFrameCache(display));
+  }
+
+  private warmPreviewFrameCache(display: Display): void {
+    this.scheduleFrameCacheWarm(display, () => this.captureAndStorePreviewCache(display));
+  }
+
+  private scheduleFrameCacheWarm(
+    display: Display,
+    task: () => Promise<void>
+  ): void {
     if (
       this.frameCacheWarmPromise &&
       this.frameCacheWarmDisplayId === display.id
@@ -553,11 +573,56 @@ export class LiteSnapCaptureSessionManager {
     }
 
     this.frameCacheWarmDisplayId = display.id;
-    this.frameCacheWarmPromise = this.captureAndStoreFrameCache(display).finally(
-      () => {
-        this.frameCacheWarmPromise = null;
+    this.frameCacheWarmPromise = task().finally(() => {
+      this.frameCacheWarmPromise = null;
+    });
+  }
+
+  private async resolveCaptureFrames(display: Display): Promise<{
+    previewImage: NativeImage;
+    previewImageDataUrl: string;
+    sourceImage: NativeImage;
+    fromCache: boolean;
+  } | null> {
+    const cachedFrames = this.getCachedFrames(display);
+    if (cachedFrames) {
+      if (cachedFrames.sourceImage && !cachedFrames.sourceImage.isEmpty()) {
+        return {
+          previewImage: cachedFrames.previewImage,
+          previewImageDataUrl: cachedFrames.previewImageDataUrl,
+          sourceImage: cachedFrames.sourceImage,
+          fromCache: true
+        };
       }
-    );
+
+      const sourceImage = await this.captureProvider.captureSourceImage(display);
+      if (!sourceImage || sourceImage.isEmpty()) {
+        return null;
+      }
+
+      return {
+        previewImage: cachedFrames.previewImage,
+        previewImageDataUrl: cachedFrames.previewImageDataUrl,
+        sourceImage,
+        fromCache: false
+      };
+    }
+
+    const frames = await this.captureProvider.captureDisplayFrames(display);
+    if (
+      !frames ||
+      frames.previewImage.isEmpty() ||
+      frames.sourceImage.isEmpty()
+    ) {
+      return null;
+    }
+
+    return {
+      previewImage: frames.previewImage,
+      previewImageDataUrl: this.encodePreviewDataUrl(frames.previewImage),
+      sourceImage: frames.sourceImage,
+      fromCache: false
+    };
   }
 
   private async captureAndStoreFrameCache(display: Display): Promise<void> {
@@ -581,40 +646,62 @@ export class LiteSnapCaptureSessionManager {
     };
   }
 
-  private scheduleSourceImageDataUrlUpgrade(captureId: string): void {
-    setImmediate(() => {
-      const session = this.session;
-      if (
-        !session ||
-        session.captureId !== captureId ||
-        !session.sourceImage ||
-        session.sourceImage.isEmpty() ||
-        session.sourceImageDataUrl
-      ) {
-        return;
-      }
+  private async captureAndStorePreviewCache(display: Display): Promise<void> {
+    const previewImage = await this.captureProvider.capturePreviewImage(display);
+    if (!previewImage || previewImage.isEmpty()) {
+      return;
+    }
 
+    this.frameCache = {
+      displayId: display.id,
+      scaleFactor: display.scaleFactor,
+      previewImage,
+      previewImageDataUrl: this.encodePreviewDataUrl(previewImage),
+      sourceImage: null,
+      capturedAt: Date.now()
+    };
+  }
+
+  public ensureSourceImageDataUrl(): string | null {
+    const session = this.session;
+    if (!session?.sourceImage || session.sourceImage.isEmpty()) {
+      return null;
+    }
+
+    if (!session.sourceImageDataUrl) {
       session.sourceImageDataUrl = session.sourceImage.toDataURL();
-      void this.emitOverlayStateChanged({
-        captureId: session.captureId,
-        imageDataUrl: session.previewImageDataUrl,
-        sourceImageDataUrl: session.sourceImageDataUrl,
-        viewportWidth: session.display.bounds.width,
-        viewportHeight: session.display.bounds.height,
-        selectionMinSize: 24,
-        annotationColor: session.settings.annotationColor,
-        annotationLineWidth: session.settings.annotationLineWidth,
-        annotationTextSize: session.settings.annotationTextSize,
-        annotationTool: session.settings.annotationTool,
-        annotationFillShapes: session.settings.annotationFillShapes
-      });
-    });
+    }
+
+    return session.sourceImageDataUrl;
+  }
+
+  private resolveCompositedBuffer(input: LiteSnapCommitCaptureInput): Buffer | null {
+    const { imagePngBuffer } = input;
+    if (imagePngBuffer instanceof ArrayBuffer && imagePngBuffer.byteLength > 0) {
+      return Buffer.from(imagePngBuffer);
+    }
+    if (ArrayBuffer.isView(imagePngBuffer) && imagePngBuffer.byteLength > 0) {
+      return Buffer.from(
+        imagePngBuffer.buffer,
+        imagePngBuffer.byteOffset,
+        imagePngBuffer.byteLength
+      );
+    }
+    return null;
   }
 
   private resolveCommitImage(
     session: CaptureSession & { sourceImage: NativeImage },
     input: LiteSnapCommitCaptureInput
   ): NativeImage | null {
+    const compositedBuffer = this.resolveCompositedBuffer(input);
+    if (compositedBuffer) {
+      const composited = nativeImage.createFromBuffer(compositedBuffer);
+      if (!composited.isEmpty()) {
+        return composited;
+      }
+    }
+
     if (typeof input.imageDataUrl === "string" && input.imageDataUrl.startsWith("data:image/")) {
       const composited = nativeImage.createFromDataURL(input.imageDataUrl);
       if (!composited.isEmpty()) {

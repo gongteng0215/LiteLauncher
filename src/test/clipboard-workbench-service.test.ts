@@ -49,6 +49,31 @@ test("sensitive mode pauses auto collection but keeps manual save available", as
   );
 });
 
+test("auto text collection notifies legacy clipboard history bridge", async () => {
+  let mirroredText = "";
+
+  const service = await ClipboardWorkbenchService.createForTest(
+    {
+      readText: () => "auto mirrored text",
+      readBuffer: () => Buffer.alloc(0)
+    },
+    {
+      onAutoTextCollected: (text) => {
+        mirroredText = text;
+      }
+    }
+  );
+
+  try {
+    const collected = await service.collectNow();
+    assert.equal(collected, true);
+    await service.close();
+    assert.equal(mirroredText, "auto mirrored text");
+  } finally {
+    await service.close().catch(() => undefined);
+  }
+});
+
 test("sequential paste falls back to restore-only message when send shortcut fails", async () => {
   await withTestService(
     {

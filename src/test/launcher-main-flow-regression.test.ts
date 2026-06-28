@@ -574,6 +574,139 @@ test("normalizePinnedItemIds keeps dynamically resolvable app ids", () => {
   );
 });
 
+test("main process startup prefers cached catalog before filesystem scan", () => {
+  const mainIndexSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "index.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    mainIndexSource,
+    /const cachedItems = await database\.getItems\(\);/,
+    "ensureDataLayer should try loading the cached catalog index first"
+  );
+  assert.match(
+    mainIndexSource,
+    /if \(cachedItems\.length > 0\) \{\s*catalog = cachedItems;/,
+    "ensureDataLayer should skip filesystem scanning when the database already has items"
+  );
+  assert.match(
+    mainIndexSource,
+    /scheduleCatalogBackgroundRefresh\(activeDatabase\);/,
+    "bootstrap should refresh the filesystem catalog in the background after startup"
+  );
+  assert.doesNotMatch(
+    mainIndexSource,
+    /await persistCatalogSnapshot\(\s*activeDatabase,\s*replaceCatalogPluginItems\(catalog\)\s*\);/,
+    "bootstrap should not synchronously persist the full catalog snapshot during startup"
+  );
+});
+
+test("attachIcons resolves icons with a bounded concurrency pool", () => {
+  const ipcSource = fs.readFileSync(path.join(process.cwd(), "src", "main", "ipc.ts"), "utf8");
+
+  assert.match(
+    ipcSource,
+    /const ICON_RESOLVE_CONCURRENCY = \d+;/,
+    "icon resolution should define an explicit concurrency limit"
+  );
+  assert.match(
+    ipcSource,
+    /return mapWithConcurrency\(items, ICON_RESOLVE_CONCURRENCY, \(item\) =>\s*attachIcon\(item\)\s*\);/,
+    "attachIcons should resolve icons through the bounded concurrency helper"
+  );
+});
+
+test("icon resolution keeps bounded in-memory caches for sources and attached items", () => {
+  const ipcSource = fs.readFileSync(path.join(process.cwd(), "src", "main", "ipc.ts"), "utf8");
+
+  assert.match(ipcSource, /const ICON_DATA_CACHE_MAX = \d+;/);
+  assert.match(ipcSource, /const ATTACHED_ICON_CACHE_MAX = \d+;/);
+  assert.match(ipcSource, /function buildAttachIconCacheKey\(/);
+  assert.match(
+    ipcSource,
+    /const cachedItem = readLruMapValue\(attachedIconCache, cacheKey\);/
+  );
+});
+
+test("home sections use a single IPC path with deduplicated icon attachment", () => {
+  const ipcSource = fs.readFileSync(path.join(process.cwd(), "src", "main", "ipc.ts"), "utf8");
+  const channelsSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "shared", "channels.ts"),
+    "utf8"
+  );
+  const rendererSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "renderer", "renderer.ts"),
+    "utf8"
+  );
+  const preloadSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "preload", "index.ts"),
+    "utf8"
+  );
+
+  assert.match(channelsSource, /getHomeSections:/);
+  assert.match(ipcSource, /IPC_CHANNELS\.getHomeSections/);
+  assert.match(ipcSource, /const mergedById = new Map<string, LaunchItem>\(\);/);
+  assert.match(preloadSource, /getHomeSections\(\): Promise<HomeSections>/);
+  assert.match(rendererSource, /await launcher\.getHomeSections\(\)/);
+});
+
+test("search worker keeps catalog and usage state in the worker thread", () => {
+  const workerClientSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "search-worker.ts"),
+    "utf8"
+  );
+  const workerThreadSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "search-worker-thread.ts"),
+    "utf8"
+  );
+  const mainIndexSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "index.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    workerClientSource,
+    /type: "syncState"/,
+    "search worker client should support explicit state sync requests"
+  );
+  assert.match(
+    workerClientSource,
+    /getInitialItems\(limit: number\)/,
+    "initial item requests should no longer require catalog and usage payloads"
+  );
+  assert.match(
+    workerThreadSource,
+    /if \(request\.type === "syncState"\)/,
+    "search worker thread should persist catalog and usage between searches"
+  );
+  assert.match(
+    mainIndexSource,
+    /async function ensureSearchWorkerState\(\): Promise<void>/,
+    "main process should sync worker state only when catalog or usage changes"
+  );
+});
+
+test("sqlite databases apply WAL and busy timeout pragmas", () => {
+  const databaseSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "database.ts"),
+    "utf8"
+  );
+  const clipboardStoreSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "plugins", "clipboard-workbench", "store.ts"),
+    "utf8"
+  );
+  const pragmaSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "sqlite-pragmas.ts"),
+    "utf8"
+  );
+
+  assert.match(pragmaSource, /PRAGMA journal_mode = WAL/);
+  assert.match(pragmaSource, /PRAGMA busy_timeout = 5000/);
+  assert.match(databaseSource, /applySqlitePerformancePragmas\(this\.db\)/);
+  assert.match(clipboardStoreSource, /applySqlitePerformancePragmas\(this\.db\)/);
+});
+
 test(
   "main launcher flow keeps settings and visible plugin search/execution stable",
   { concurrency: false },

@@ -2118,7 +2118,43 @@ function selectCodeAgentSwitchDetail(kind: CodeAgentSwitchSelectedKind, id: stri
   codeAgentSwitchSelectedKind = kind;
   codeAgentSwitchSelectedId = id;
   codeAgentSwitchSelectionMode = "manual";
-  renderList();
+  syncCodeAgentSwitchSelectionUi();
+}
+
+function getCodeAgentSwitchForm(): HTMLFormElement | null {
+  return list.querySelector<HTMLFormElement>("form.codeagent-switch-form");
+}
+
+function syncCodeAgentSwitchSelectionUi(): void {
+  const form = getCodeAgentSwitchForm();
+  const shell = form?.querySelector<HTMLElement>(".codeagent-switch-shell");
+  if (!form || !shell) {
+    renderList();
+    return;
+  }
+
+  const config = codeAgentSwitchData.config ?? {};
+  const active = codeAgentSwitchData.active ?? {};
+  const providers = config.providers ?? [];
+  const profiles = config.profiles ?? [];
+
+  const nextListPanel = createCodeAgentSwitchListPanel(profiles, active, config);
+  const nextDetailPanel = createCodeAgentSwitchDetailPanel(
+    providers,
+    profiles,
+    active,
+    config
+  );
+
+  const currentListPanel = shell.querySelector(".codeagent-switch-list-panel");
+  const currentDetailPanel = shell.querySelector(".codeagent-switch-detail-panel");
+  if (!currentListPanel || !currentDetailPanel) {
+    renderList();
+    return;
+  }
+
+  shell.replaceChild(nextListPanel, currentListPanel);
+  shell.replaceChild(nextDetailPanel, currentDetailPanel);
 }
 
 function createCodeAgentSwitchMetric(labelText: string, valueText: string): HTMLDivElement {
@@ -5017,7 +5053,7 @@ function toggleClipboardWorkbenchItemSelection(itemId: string): void {
     clipboardWorkbenchSelectedItemIds.add(itemId);
   }
   clipboardWorkbenchActiveItemId = itemId;
-  renderList();
+  syncClipboardWorkbenchSelectionUi();
 }
 
 function clearClipboardWorkbenchSelection(): void {
@@ -5025,7 +5061,7 @@ function clearClipboardWorkbenchSelection(): void {
     return;
   }
   clipboardWorkbenchSelectedItemIds.clear();
-  renderList();
+  syncClipboardWorkbenchSelectionUi();
 }
 
 function buildClipboardWorkbenchQueryParams(
@@ -5126,6 +5162,334 @@ function getClipboardWorkbenchItemPreview(
   return item.previewText ?? item.summary;
 }
 
+function getClipboardWorkbenchForm(): HTMLFormElement | null {
+  return list.querySelector<HTMLFormElement>("form.clipboard-workbench-form");
+}
+
+function clipboardWorkbenchItemIdsSignature(
+  items: ClipboardWorkbenchPanelItemView[]
+): string {
+  return items.map((item) => item.id).join("\u0000");
+}
+
+function shouldFullyRerenderClipboardWorkbenchPanel(
+  previousItems: ClipboardWorkbenchPanelItemView[]
+): boolean {
+  return (
+    clipboardWorkbenchItemIdsSignature(previousItems) !==
+    clipboardWorkbenchItemIdsSignature(clipboardWorkbenchPanelData.items)
+  );
+}
+
+function refreshClipboardWorkbenchListMeta(): void {
+  const meta = getClipboardWorkbenchForm()?.querySelector<HTMLElement>(
+    ".clipboard-workbench-list-meta"
+  );
+  if (!meta) {
+    return;
+  }
+
+  const selectedCount = getClipboardWorkbenchSelectedItems().length;
+  meta.textContent =
+    selectedCount > 0
+      ? `${clipboardWorkbenchPanelData.items.length} 条可见 · ${selectedCount} 条已选`
+      : `${clipboardWorkbenchPanelData.items.length} 条可见`;
+}
+
+function updateClipboardWorkbenchItemMarkedStates(): void {
+  const form = getClipboardWorkbenchForm();
+  if (!form) {
+    return;
+  }
+
+  form.querySelectorAll<HTMLElement>(".clipboard-workbench-item").forEach((card) => {
+    const itemId = card.dataset.clipboardWorkbenchItemId ?? "";
+    card.dataset.marked = String(isClipboardWorkbenchItemSelected(itemId));
+  });
+}
+
+function clearClipboardWorkbenchDetailNode(detail: HTMLElement): void {
+  while (detail.firstChild) {
+    detail.removeChild(detail.firstChild);
+  }
+}
+
+function appendClipboardWorkbenchDetailContent(
+  detail: HTMLElement,
+  activeItem: ClipboardWorkbenchPanelItemView | null
+): void {
+  const detailTitle = document.createElement("div");
+  detailTitle.className = "clipboard-workbench-section-title";
+  detailTitle.textContent = "详情";
+  detail.appendChild(detailTitle);
+
+  if (!activeItem) {
+    const empty = document.createElement("div");
+    empty.className = "clipboard-workbench-empty";
+    empty.textContent = "选择一条记录查看详情。";
+    detail.appendChild(empty);
+    return;
+  }
+
+  const hero = document.createElement("div");
+  hero.className = "clipboard-workbench-detail-hero";
+  const heroTitle = document.createElement("div");
+  heroTitle.className = "clipboard-workbench-detail-title";
+  heroTitle.textContent = activeItem.title || activeItem.summary;
+  const heroMeta = document.createElement("div");
+  heroMeta.className = "clipboard-workbench-detail-meta";
+  heroMeta.append(
+    createClipboardWorkbenchBadge(getClipboardWorkbenchKindLabel(activeItem.kind), "accent"),
+    createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(activeItem.source)),
+    createClipboardWorkbenchBadge(clipboardWorkbenchPanelData.query.scope || "all")
+  );
+  hero.append(heroTitle, heroMeta);
+  detail.appendChild(hero);
+
+  const preview = document.createElement("div");
+  preview.className = "clipboard-workbench-preview";
+  if (activeItem.kind === "text") {
+    const pre = document.createElement("pre");
+    pre.className = "clipboard-workbench-preview-text";
+    pre.textContent = activeItem.previewText ?? activeItem.summary;
+    preview.appendChild(pre);
+  } else if (activeItem.kind === "files") {
+    const listNode = document.createElement("ul");
+    listNode.className = "clipboard-workbench-file-list";
+    (activeItem.filePaths ?? []).forEach((filePath) => {
+      const row = document.createElement("li");
+      row.className = "clipboard-workbench-file-row";
+      row.textContent = filePath;
+      listNode.appendChild(row);
+    });
+    preview.appendChild(listNode);
+  } else if (activeItem.assetUrl) {
+    const image = document.createElement("img");
+    image.className = "clipboard-workbench-preview-image";
+    image.src = activeItem.assetUrl;
+    image.alt = activeItem.summary;
+    preview.appendChild(image);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "clipboard-workbench-image-placeholder";
+    placeholder.textContent = "当前没有可预览图片。";
+    preview.appendChild(placeholder);
+  }
+  detail.appendChild(preview);
+
+  const metaGrid = document.createElement("div");
+  metaGrid.className = "clipboard-workbench-detail-grid";
+  [
+    { label: "摘要", value: activeItem.summary },
+    { label: "更新时间", value: formatClipboardWorkbenchTime(activeItem.updatedAt) },
+    { label: "创建时间", value: formatClipboardWorkbenchTime(activeItem.createdAt) },
+    {
+      label: "标签",
+      value: activeItem.tags.length > 0 ? activeItem.tags.join(", ") : "无"
+    }
+  ].forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "clipboard-workbench-detail-row";
+    const label = document.createElement("div");
+    label.className = "clipboard-workbench-detail-label";
+    label.textContent = entry.label;
+    const value = document.createElement("div");
+    value.className = "clipboard-workbench-detail-value";
+    value.textContent = entry.value;
+    row.append(label, value);
+    metaGrid.appendChild(row);
+  });
+  detail.appendChild(metaGrid);
+
+  const note = document.createElement("div");
+  note.className = "clipboard-workbench-note";
+  note.textContent = activeItem.note || "暂未为这条记录保存备注。";
+  detail.appendChild(note);
+
+  const detailActions = document.createElement("div");
+  detailActions.className = "clipboard-workbench-detail-actions";
+
+  const restoreButton = document.createElement("button");
+  restoreButton.type = "button";
+  restoreButton.className = "settings-btn settings-btn-primary";
+  restoreButton.textContent = "恢复到剪贴板";
+  restoreButton.addEventListener("click", () => {
+    void executeClipboardWorkbenchAction("restore-item", {
+      itemId: activeItem.id
+    });
+  });
+
+  const batchButton = document.createElement("button");
+  batchButton.type = "button";
+  batchButton.className = "settings-btn settings-btn-secondary";
+  batchButton.textContent = isClipboardWorkbenchItemSelected(activeItem.id)
+    ? "移出批量"
+    : "加入批量";
+  batchButton.addEventListener("click", () => {
+    toggleClipboardWorkbenchItemSelection(activeItem.id);
+  });
+
+  detailActions.append(restoreButton, batchButton);
+  detail.appendChild(detailActions);
+}
+
+function createClipboardWorkbenchBulkBar(
+  selectedItems: ClipboardWorkbenchPanelItemView[]
+): HTMLDivElement {
+  const selectedItemIds = selectedItems.map((item) => item.id);
+  const canMergeSelectedItems =
+    selectedItems.length > 0 &&
+    (selectedItems.every((item) => item.kind === "text") ||
+      selectedItems.every((item) => item.kind === "files"));
+
+  const bulkBar = document.createElement("div");
+  bulkBar.className = "clipboard-workbench-bulk-bar";
+
+  const bulkMeta = document.createElement("div");
+  bulkMeta.className = "clipboard-workbench-bulk-meta";
+  bulkMeta.textContent = `${selectedItems.length} 条已选`;
+
+  const bulkActions = document.createElement("div");
+  bulkActions.className = "clipboard-workbench-bulk-actions";
+
+  const sequentialButton = document.createElement("button");
+  sequentialButton.type = "button";
+  sequentialButton.className = "settings-btn settings-btn-primary";
+  sequentialButton.dataset.clipboardWorkbenchBulkAction = "sequential";
+  sequentialButton.textContent = "顺序粘贴";
+  sequentialButton.addEventListener("click", () => {
+    void executeClipboardWorkbenchAction("paste-batch", {
+      itemIds: selectedItemIds,
+      pasteMode: "sequential"
+    });
+  });
+
+  const mergeButton = document.createElement("button");
+  mergeButton.type = "button";
+  mergeButton.className = "settings-btn settings-btn-secondary";
+  mergeButton.dataset.clipboardWorkbenchBulkAction = "merge-once";
+  mergeButton.textContent = "合并一次";
+  mergeButton.disabled = !canMergeSelectedItems;
+  mergeButton.addEventListener("click", () => {
+    void executeClipboardWorkbenchAction("paste-batch", {
+      itemIds: selectedItemIds,
+      pasteMode: "merge-once",
+      mergeSeparatorMode: "newline"
+    });
+  });
+
+  const clearSelectionButton = document.createElement("button");
+  clearSelectionButton.type = "button";
+  clearSelectionButton.className = "settings-btn settings-btn-secondary";
+  clearSelectionButton.textContent = "清空选择";
+  clearSelectionButton.addEventListener("click", () => {
+    clearClipboardWorkbenchSelection();
+  });
+
+  bulkActions.append(sequentialButton, mergeButton, clearSelectionButton);
+  bulkBar.append(bulkMeta, bulkActions);
+
+  if (!canMergeSelectedItems) {
+    const bulkNote = document.createElement("div");
+    bulkNote.className = "clipboard-workbench-note";
+    bulkNote.textContent = "合并粘贴目前仅支持纯文本或纯文件路径记录。";
+    bulkBar.appendChild(bulkNote);
+  }
+
+  return bulkBar;
+}
+
+function refreshClipboardWorkbenchDetail(): void {
+  const detail = getClipboardWorkbenchForm()?.querySelector<HTMLElement>(
+    ".clipboard-workbench-detail"
+  );
+  if (!detail) {
+    renderList();
+    return;
+  }
+
+  clearClipboardWorkbenchDetailNode(detail);
+  appendClipboardWorkbenchDetailContent(detail, getClipboardWorkbenchActiveItem());
+}
+
+function refreshClipboardWorkbenchBulkBar(): void {
+  const listSection = getClipboardWorkbenchForm()?.querySelector<HTMLElement>(
+    ".clipboard-workbench-list"
+  );
+  if (!listSection) {
+    return;
+  }
+
+  listSection.querySelector(".clipboard-workbench-bulk-bar")?.remove();
+  const selectedItems = getClipboardWorkbenchSelectedItems();
+  if (selectedItems.length > 0) {
+    listSection.appendChild(createClipboardWorkbenchBulkBar(selectedItems));
+  }
+}
+
+function updateClipboardWorkbenchActiveItem(previousId: string, nextId: string): void {
+  const form = getClipboardWorkbenchForm();
+  if (!form) {
+    renderList();
+    return;
+  }
+
+  if (previousId) {
+    const previousCard = form.querySelector<HTMLElement>(
+      `.clipboard-workbench-item[data-clipboard-workbench-item-id="${CSS.escape(previousId)}"]`
+    );
+    const previousButton = previousCard?.querySelector<HTMLElement>(
+      ".clipboard-workbench-item-main"
+    );
+    previousCard?.setAttribute("data-active", "false");
+    previousButton?.setAttribute("data-selected", "false");
+  }
+
+  if (nextId) {
+    const nextCard = form.querySelector<HTMLElement>(
+      `.clipboard-workbench-item[data-clipboard-workbench-item-id="${CSS.escape(nextId)}"]`
+    );
+    const nextButton = nextCard?.querySelector<HTMLElement>(
+      ".clipboard-workbench-item-main"
+    );
+    nextCard?.setAttribute("data-active", "true");
+    nextButton?.setAttribute("data-selected", "true");
+    nextButton?.scrollIntoView({ block: "nearest" });
+  }
+
+  refreshClipboardWorkbenchDetail();
+  refreshClipboardWorkbenchListMeta();
+}
+
+function syncClipboardWorkbenchSelectionUi(): void {
+  if (!getClipboardWorkbenchForm()) {
+    renderList();
+    return;
+  }
+
+  updateClipboardWorkbenchItemMarkedStates();
+  refreshClipboardWorkbenchListMeta();
+  refreshClipboardWorkbenchDetail();
+  refreshClipboardWorkbenchBulkBar();
+}
+
+function refreshClipboardWorkbenchPanelAfterPayload(
+  previousItems: ClipboardWorkbenchPanelItemView[],
+  action: string
+): void {
+  if (shouldFullyRerenderClipboardWorkbenchPanel(previousItems)) {
+    renderList();
+    return;
+  }
+
+  if (action === "restore-item") {
+    syncClipboardWorkbenchSelectionUi();
+    return;
+  }
+
+  renderList();
+}
+
 async function executeClipboardWorkbenchAction(
   action: string,
   actionParams: Record<string, string | string[]> = {}
@@ -5169,6 +5533,7 @@ async function executeClipboardWorkbenchAction(
   }
 
   if (activePluginPanel) {
+    const previousItems = clipboardWorkbenchPanelData.items;
     activePluginPanel.data = result.data ?? activePluginPanel.data;
     window.__LL_PANEL_IMPLS__?.applyClipboardWorkbenchPanelPayload(activePluginPanel);
     if (action === "save-manual-text") {
@@ -5177,7 +5542,7 @@ async function executeClipboardWorkbenchAction(
         clipboardWorkbenchManualTextDraft = "";
       }
     }
-    renderList();
+    refreshClipboardWorkbenchPanelAfterPayload(previousItems, action);
   }
 
   setStatus(result.message ?? "剪贴板工作台已更新。");
@@ -13669,11 +14034,7 @@ window.__LL_PANEL_IMPLS__ = {
   renderClipboardWorkbenchPanel(): void {
     ensureClipboardWorkbenchSelection();
     const selectedItems = getClipboardWorkbenchSelectedItems();
-    const selectedItemIds = selectedItems.map((item) => item.id);
-    const canMergeSelectedItems =
-      selectedItems.length > 0 &&
-      (selectedItems.every((item) => item.kind === "text") ||
-        selectedItems.every((item) => item.kind === "files"));
+    const activeItem = getClipboardWorkbenchActiveItem();
 
     const panelItem = document.createElement("li");
     panelItem.className = "settings-panel-item";
@@ -13977,8 +14338,9 @@ window.__LL_PANEL_IMPLS__ = {
         button.className = "clipboard-workbench-item-main";
         button.dataset.selected = String(item.id === clipboardWorkbenchActiveItemId);
         button.addEventListener("click", () => {
+          const previousActiveId = clipboardWorkbenchActiveItemId;
           clipboardWorkbenchActiveItemId = item.id;
-          renderList();
+          updateClipboardWorkbenchActiveItem(previousActiveId, item.id);
         });
 
         if (item.kind === "image" && item.assetUrl) {
@@ -14022,185 +14384,12 @@ window.__LL_PANEL_IMPLS__ = {
     listSection.appendChild(itemList);
 
     if (selectedItems.length > 0) {
-      const bulkBar = document.createElement("div");
-      bulkBar.className = "clipboard-workbench-bulk-bar";
-
-      const bulkMeta = document.createElement("div");
-      bulkMeta.className = "clipboard-workbench-bulk-meta";
-      bulkMeta.textContent = `${selectedItems.length} 条已选`;
-
-      const bulkActions = document.createElement("div");
-      bulkActions.className = "clipboard-workbench-bulk-actions";
-
-      const sequentialButton = document.createElement("button");
-      sequentialButton.type = "button";
-      sequentialButton.className = "settings-btn settings-btn-primary";
-      sequentialButton.dataset.clipboardWorkbenchBulkAction = "sequential";
-      sequentialButton.textContent = "顺序粘贴";
-      sequentialButton.addEventListener("click", () => {
-        void executeClipboardWorkbenchAction("paste-batch", {
-          itemIds: selectedItemIds,
-          pasteMode: "sequential"
-        });
-      });
-
-      const mergeButton = document.createElement("button");
-      mergeButton.type = "button";
-      mergeButton.className = "settings-btn settings-btn-secondary";
-      mergeButton.dataset.clipboardWorkbenchBulkAction = "merge-once";
-      mergeButton.textContent = "合并一次";
-      mergeButton.disabled = !canMergeSelectedItems;
-      mergeButton.addEventListener("click", () => {
-        void executeClipboardWorkbenchAction("paste-batch", {
-          itemIds: selectedItemIds,
-          pasteMode: "merge-once",
-          mergeSeparatorMode: "newline"
-        });
-      });
-
-      const clearSelectionButton = document.createElement("button");
-      clearSelectionButton.type = "button";
-      clearSelectionButton.className = "settings-btn settings-btn-secondary";
-      clearSelectionButton.textContent = "清空选择";
-      clearSelectionButton.addEventListener("click", () => {
-        clearClipboardWorkbenchSelection();
-      });
-
-      bulkActions.append(
-        sequentialButton,
-        mergeButton,
-        clearSelectionButton
-      );
-      bulkBar.append(bulkMeta, bulkActions);
-
-      if (!canMergeSelectedItems) {
-        const bulkNote = document.createElement("div");
-        bulkNote.className = "clipboard-workbench-note";
-        bulkNote.textContent =
-          "合并粘贴目前仅支持纯文本或纯文件路径记录。";
-        bulkBar.appendChild(bulkNote);
-      }
-
-      listSection.appendChild(bulkBar);
+      listSection.appendChild(createClipboardWorkbenchBulkBar(selectedItems));
     }
 
     const detail = document.createElement("aside");
     detail.className = "clipboard-workbench-detail";
-    const detailTitle = document.createElement("div");
-    detailTitle.className = "clipboard-workbench-section-title";
-    detailTitle.textContent = "详情";
-    detail.appendChild(detailTitle);
-
-    const activeItem = getClipboardWorkbenchActiveItem();
-    if (!activeItem) {
-      const empty = document.createElement("div");
-      empty.className = "clipboard-workbench-empty";
-      empty.textContent = "选择一条记录查看详情。";
-      detail.appendChild(empty);
-    } else {
-      const hero = document.createElement("div");
-      hero.className = "clipboard-workbench-detail-hero";
-      const heroTitle = document.createElement("div");
-      heroTitle.className = "clipboard-workbench-detail-title";
-      heroTitle.textContent = activeItem.title || activeItem.summary;
-      const heroMeta = document.createElement("div");
-      heroMeta.className = "clipboard-workbench-detail-meta";
-      heroMeta.append(
-        createClipboardWorkbenchBadge(getClipboardWorkbenchKindLabel(activeItem.kind), "accent"),
-        createClipboardWorkbenchBadge(getClipboardWorkbenchSourceLabel(activeItem.source)),
-        createClipboardWorkbenchBadge(
-          clipboardWorkbenchPanelData.query.scope || "all"
-        )
-      );
-      hero.append(heroTitle, heroMeta);
-      detail.appendChild(hero);
-
-      const preview = document.createElement("div");
-      preview.className = "clipboard-workbench-preview";
-      if (activeItem.kind === "text") {
-        const pre = document.createElement("pre");
-        pre.className = "clipboard-workbench-preview-text";
-        pre.textContent = activeItem.previewText ?? activeItem.summary;
-        preview.appendChild(pre);
-      } else if (activeItem.kind === "files") {
-        const listNode = document.createElement("ul");
-        listNode.className = "clipboard-workbench-file-list";
-        (activeItem.filePaths ?? []).forEach((filePath) => {
-          const row = document.createElement("li");
-          row.className = "clipboard-workbench-file-row";
-          row.textContent = filePath;
-          listNode.appendChild(row);
-        });
-        preview.appendChild(listNode);
-      } else if (activeItem.assetUrl) {
-        const image = document.createElement("img");
-        image.className = "clipboard-workbench-preview-image";
-        image.src = activeItem.assetUrl;
-        image.alt = activeItem.summary;
-        preview.appendChild(image);
-      } else {
-        const placeholder = document.createElement("div");
-        placeholder.className = "clipboard-workbench-image-placeholder";
-        placeholder.textContent = "当前没有可预览图片。";
-        preview.appendChild(placeholder);
-      }
-      detail.appendChild(preview);
-
-      const metaGrid = document.createElement("div");
-      metaGrid.className = "clipboard-workbench-detail-grid";
-      [
-        { label: "摘要", value: activeItem.summary },
-        { label: "更新时间", value: formatClipboardWorkbenchTime(activeItem.updatedAt) },
-        { label: "创建时间", value: formatClipboardWorkbenchTime(activeItem.createdAt) },
-        {
-          label: "标签",
-          value: activeItem.tags.length > 0 ? activeItem.tags.join(", ") : "无"
-        }
-      ].forEach((entry) => {
-        const row = document.createElement("div");
-        row.className = "clipboard-workbench-detail-row";
-        const label = document.createElement("div");
-        label.className = "clipboard-workbench-detail-label";
-        label.textContent = entry.label;
-        const value = document.createElement("div");
-        value.className = "clipboard-workbench-detail-value";
-        value.textContent = entry.value;
-        row.append(label, value);
-        metaGrid.appendChild(row);
-      });
-      detail.appendChild(metaGrid);
-
-      const note = document.createElement("div");
-      note.className = "clipboard-workbench-note";
-      note.textContent = activeItem.note || "暂未为这条记录保存备注。";
-      detail.appendChild(note);
-
-      const detailActions = document.createElement("div");
-      detailActions.className = "clipboard-workbench-detail-actions";
-
-      const restoreButton = document.createElement("button");
-      restoreButton.type = "button";
-      restoreButton.className = "settings-btn settings-btn-primary";
-      restoreButton.textContent = "恢复到剪贴板";
-      restoreButton.addEventListener("click", () => {
-        void executeClipboardWorkbenchAction("restore-item", {
-          itemId: activeItem.id
-        });
-      });
-
-      const batchButton = document.createElement("button");
-      batchButton.type = "button";
-      batchButton.className = "settings-btn settings-btn-secondary";
-      batchButton.textContent = isClipboardWorkbenchItemSelected(activeItem.id)
-        ? "移出批量"
-        : "加入批量";
-      batchButton.addEventListener("click", () => {
-        toggleClipboardWorkbenchItemSelection(activeItem.id);
-      });
-
-      detailActions.append(restoreButton, batchButton);
-      detail.appendChild(detailActions);
-    }
+    appendClipboardWorkbenchDetailContent(detail, activeItem);
 
     shell.append(toolbar, rail, listSection, detail);
     form.appendChild(shell);

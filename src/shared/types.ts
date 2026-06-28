@@ -11,6 +11,12 @@ export interface LaunchItem {
   pinned?: boolean;
 }
 
+export interface HomeSections {
+  recent: LaunchItem[];
+  pinned: LaunchItem[];
+  plugin: LaunchItem[];
+}
+
 export interface UsageRecord {
   count: number;
   lastUsedAt: number;

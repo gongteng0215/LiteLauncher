@@ -9,6 +9,7 @@ import {
   LaunchItem,
   UsageRecord
 } from "../shared/types";
+import { applySqlitePerformancePragmas } from "./sqlite-pragmas";
 
 function ensureParentDirectory(filePath: string): void {
   const parent = path.dirname(filePath);
@@ -299,6 +300,8 @@ export class LiteDatabase {
     await this.run(
       "CREATE INDEX IF NOT EXISTS cashflow_stats_game_turn_idx ON cashflow_stats(gameId, turn DESC)"
     );
+
+    applySqlitePerformancePragmas(this.db);
   }
 
   public async getCashflowActiveSnapshot(): Promise<string | null> {

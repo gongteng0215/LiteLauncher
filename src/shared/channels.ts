@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   getInitialItems: "launcher:get-initial-items",
   getPinnedItems: "launcher:get-pinned-items",
   getPluginItems: "launcher:get-plugin-items",
+  getHomeSections: "launcher:get-home-sections",
   getAppVersion: "launcher:get-app-version",
   getAppUpdaterStatus: "launcher:get-app-updater-status",
   setE2EAppUpdaterCheckFailure:
@@ -22,6 +23,7 @@ export const IPC_CHANNELS = {
   liteSnapOverlayStateChanged: "launcher:litesnap-overlay-state-changed",
   liteSnapCommitCapture: "launcher:litesnap-commit-capture",
   liteSnapCancelCapture: "launcher:litesnap-cancel-capture",
+  liteSnapEnsureSourceImage: "launcher:litesnap-ensure-source-image",
   rebuildCatalog: "launcher:rebuild-catalog",
   reportErrorLog: "launcher:report-error-log",
   getErrorLogs: "launcher:get-error-logs",

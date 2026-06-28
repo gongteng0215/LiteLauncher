@@ -180,6 +180,31 @@ test("search section title rows can wrap instead of forcing horizontal squeeze",
   assert.equal(flexWrap, "wrap");
 });
 
+test("keyboard selection updates active rows without rebuilding the whole list", () => {
+  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    rendererSource,
+    /function updateSelectionHighlight\(/,
+    "renderer should expose a lightweight selection highlight updater"
+  );
+  assert.match(
+    rendererSource,
+    /if \(canUpdateSelectionHighlightInPlace\(\)\) \{\s*updateSelectionHighlight\(previousIndex, selectedIndex\);\s*return;\s*\}/,
+    "moveSelection should prefer partial active-state updates over renderList"
+  );
+});
+
+test("mouse hover updates active rows without rebuilding the whole list", () => {
+  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    rendererSource,
+    /element\.addEventListener\("mouseenter", \(\) => \{[\s\S]*updateSelectionHighlight\(previousIndex, selectedIndex\);/,
+    "mouseenter should reuse the lightweight selection highlight updater"
+  );
+});
+
 test("home search sections are not capped by the legacy display limit of 20", () => {
   const rendererSource = fs.readFileSync(rendererPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");

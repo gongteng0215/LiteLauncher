@@ -69,6 +69,7 @@ export interface LiteSnapCommitCaptureInput {
   action: LiteSnapCaptureAction;
   selection: LiteSnapOverlaySelection;
   imageDataUrl?: string;
+  imagePngBuffer?: ArrayBuffer | Uint8Array;
 }
 
 export interface LiteSnapCommitCaptureResult {

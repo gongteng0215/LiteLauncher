@@ -629,6 +629,31 @@ test("Clipboard Workbench panel is implemented through plugin-panel-impls", () =
   );
 });
 
+test("Clipboard Workbench selection updates detail without rebuilding the whole panel", () => {
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /function updateClipboardWorkbenchActiveItem\(/,
+    "clipboard workbench should expose a lightweight active-item updater"
+  );
+  assert.match(
+    panelImplsSource,
+    /function syncClipboardWorkbenchSelectionUi\(/,
+    "clipboard workbench should expose a partial selection refresh helper"
+  );
+  assert.match(
+    panelImplsSource,
+    /updateClipboardWorkbenchActiveItem\(previousActiveId, item\.id\);/,
+    "item selection should avoid renderList when the panel is already mounted"
+  );
+  assert.match(
+    panelImplsSource,
+    /refreshClipboardWorkbenchPanelAfterPayload\(previousItems, action\);/,
+    "clipboard workbench actions should only fully rerender when item structure changes"
+  );
+});
+
 test("Clipboard Workbench visible copy is localized for the plugin UI", () => {
   const panelImplsSource = readPanelImplsSource();
   const renderSource = extractMethodSource(panelImplsSource, "renderClipboardWorkbenchPanel");
@@ -698,6 +723,24 @@ test("Clipboard Workbench enter flow stays inside plugin-panel-impls", () => {
     panelImplsSource,
     /form\.addEventListener\("submit",\s*\(event\)\s*=>\s*\{[\s\S]*event\.preventDefault\(\);[\s\S]*void executeClipboardWorkbenchAction\(\s*"refresh",[\s\S]*buildClipboardWorkbenchQueryParams\(\)[\s\S]*\);[\s\S]*\}\);/s,
     "Clipboard Workbench form submit should trigger refresh inside plugin-panel-impls"
+  );
+});
+
+test("CodeAgent Switch selection updates list and detail without rebuilding the whole panel", () => {
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(panelImplsSource, /function syncCodeAgentSwitchSelectionUi\(/);
+  assert.match(
+    panelImplsSource,
+    /syncCodeAgentSwitchSelectionUi\(\);/
+  );
+  assert.match(
+    panelImplsSource,
+    /shell\.replaceChild\(nextListPanel, currentListPanel\);/
+  );
+  assert.match(
+    panelImplsSource,
+    /shell\.replaceChild\(nextDetailPanel, currentDetailPanel\);/
   );
 });
 

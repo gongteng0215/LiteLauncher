@@ -241,9 +241,12 @@ let database: LiteDatabase | null = null;
 let usageStore: UsageStore | null = null;
 let catalog: LaunchItem[] = [];
 let catalogInitialized = false;
+let catalogBackgroundRefreshScheduled = false;
 let shortcutRegistered = false;
 let activeShortcut: string | null = null;
 let searchWorker: SearchWorkerClient | null = null;
+let searchWorkerStateRevision = 0;
+let searchWorkerSyncedRevision = -1;
 let clipService: ClipService | null = null;
 let clipboardWorkbenchService: ClipboardWorkbenchService | null = null;
 let appQuitting = false;
@@ -791,6 +794,24 @@ function registerGlobalShortcut(
   );
 }
 
+function markSearchWorkerStateDirty(): void {
+  searchWorkerStateRevision += 1;
+}
+
+async function ensureSearchWorkerState(): Promise<void> {
+  if (!searchWorker || !usageStore) {
+    return;
+  }
+
+  if (searchWorkerSyncedRevision === searchWorkerStateRevision) {
+    return;
+  }
+
+  const filteredCatalog = filterItemsByResultPathRules(catalog);
+  await searchWorker.syncState(filteredCatalog, usageStore.toObject());
+  searchWorkerSyncedRevision = searchWorkerStateRevision;
+}
+
 async function ensureDataLayer(): Promise<void> {
   if (!database) {
     const dbPath = path.join(app.getPath("userData"), "litelauncher.db");
@@ -800,12 +821,16 @@ async function ensureDataLayer(): Promise<void> {
 
   if (!catalogInitialized) {
     catalogScanConfig = await loadCatalogScanConfig(database);
-    catalog = buildCatalogWithOptions(catalogScanConfig);
+    const cachedItems = await database.getItems();
+    if (cachedItems.length > 0) {
+      catalog = cachedItems;
+    } else {
+      catalog = buildCatalogWithOptions(catalogScanConfig);
+      await database.saveItems(catalog);
+      catalog = await database.getItems();
+    }
     catalogInitialized = true;
   }
-
-  await database.saveItems(catalog);
-  catalog = await database.getItems();
 
   if (!usageStore) {
     const usageMap = await database.getUsageMap();
@@ -828,7 +853,10 @@ async function ensureDataLayer(): Promise<void> {
         app.getPath("userData"),
         "clipboard-workbench",
         "assets"
-      )
+      ),
+      onAutoTextCollected: async (text) => {
+        await clipService?.saveTextContent(text);
+      }
     });
     await clipboardWorkbenchService.init();
     setClipboardWorkbenchService(clipboardWorkbenchService);
@@ -1058,6 +1086,7 @@ async function saveCatalogScanConfig(
   const next = normalizeCatalogScanConfig(config, catalogScanConfig);
   await db.setSetting(CATALOG_SCAN_CONFIG_KEY, JSON.stringify(next));
   catalogScanConfig = next;
+  markSearchWorkerStateDirty();
   return next;
 }
 
@@ -1158,6 +1187,8 @@ async function persistCatalogSnapshot(
     pinnedItemIds = normalizedPinned;
     await persistPinnedItemIds(db);
   }
+
+  markSearchWorkerStateDirty();
 }
 
 function replaceCatalogPluginItems(items: LaunchItem[]): LaunchItem[] {
@@ -1284,6 +1315,19 @@ async function saveVisiblePluginIds(
   const nextCatalog = replaceCatalogPluginItems(catalog);
   await persistCatalogSnapshot(db, nextCatalog);
   return ensured;
+}
+
+function scheduleCatalogBackgroundRefresh(db: LiteDatabase): void {
+  if (catalogBackgroundRefreshScheduled || E2E_MODE) {
+    return;
+  }
+
+  catalogBackgroundRefreshScheduled = true;
+  setImmediate(() => {
+    void rebuildCatalogIndex(db).catch((error) => {
+      console.error("[catalog] background refresh failed", error);
+    });
+  });
 }
 
 async function rebuildCatalogIndex(
@@ -1598,18 +1642,13 @@ async function bootstrap(): Promise<void> {
     liteSnapImageStore,
     liteSnapPinWindowManager
   );
-  liteSnapCaptureSessionManager.prewarmCaptureCache();
-  liteSnapPinWindowManager.prewarmPinWindow();
-
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
   catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
   visiblePluginIds = await loadVisiblePluginIds(activeDatabase);
-  await persistCatalogSnapshot(
-    activeDatabase,
-    replaceCatalogPluginItems(catalog)
-  );
+  catalog = replaceCatalogPluginItems(catalog);
+  markSearchWorkerStateDirty();
+  scheduleCatalogBackgroundRefresh(activeDatabase);
   setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
-  void liteSnapCaptureSessionManager.prewarmOverlay();
   const liteSnapSettings = await liteSnapSettingsStore.getSettings();
   const catalogIdSet = new Set(catalog.map((item) => item.id));
   pinnedItemIds = await loadPinnedItemIds(activeDatabase, catalogIdSet);
@@ -1671,12 +1710,16 @@ async function bootstrap(): Promise<void> {
       launcherWindow.isDestroyed() ? null : launcherWindow
   });
   const startLiteSnapCapture = async (): Promise<boolean> => {
-    return liteSnapCaptureSessionManager.startCapture(async () => {
+    const started = await liteSnapCaptureSessionManager.startCapture(async () => {
       if (!launcherWindow.isDestroyed()) {
         applyLauncherWindowSizePreset(launcherWindow, "compact");
         launcherWindow.hide();
       }
     });
+    if (started) {
+      liteSnapCaptureSessionManager.startFrameCacheRefresh();
+    }
+    return started;
   };
   const pinLiteSnapClipboardImage = async (): Promise<boolean> => {
     return liteSnapPinWindowManager.pinClipboardImage();
@@ -1690,11 +1733,8 @@ async function bootstrap(): Promise<void> {
         const usage = activeUsageStore.toObject();
         if (searchWorker) {
           try {
-            const items = await searchWorker.getInitialItems(
-              filteredCatalog,
-              usage,
-              limit
-            );
+            await ensureSearchWorkerState();
+            const items = await searchWorker.getInitialItems(limit);
             return withPinnedState(items);
           } catch (error) {
             console.warn("Search worker initial fallback", error);
@@ -1722,17 +1762,11 @@ async function bootstrap(): Promise<void> {
                 matchesSearchScope(item, scope)
               )
             : [];
-        const usage = activeUsageStore.toObject();
         let baseItems: LaunchItem[] | null = null;
         if (searchWorker) {
           try {
-            baseItems = await searchWorker.searchItems(
-              query,
-              filteredCatalog,
-              usage,
-              limit,
-              options
-            );
+            await ensureSearchWorkerState();
+            baseItems = await searchWorker.searchItems(query, limit, options);
           } catch (error) {
             console.warn("Search worker query fallback", error);
           }
@@ -1805,7 +1839,9 @@ async function bootstrap(): Promise<void> {
           getWindowRectAtPoint: (x, y) =>
             liteSnapCaptureSessionManager.getWindowRectAtPoint(x, y),
           commitCapture: (input) => liteSnapCaptureSessionManager.commitCapture(input),
-          cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture()
+          cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture(),
+          ensureSourceImage: async () =>
+            liteSnapCaptureSessionManager.ensureSourceImageDataUrl()
         },
     catalogProvider: {
       rebuildCatalog: () => rebuildCatalogIndex(activeDatabase)
@@ -1822,10 +1858,10 @@ async function bootstrap(): Promise<void> {
     },
     onItemUsed: async (itemId) => {
       await database?.recordUsage(itemId);
+      markSearchWorkerStateDirty();
     }
   });
 
-  activeClipService.start();
   activeClipboardWorkbenchService.start();
   appUpdater.scheduleStartupCheck();
   if (!E2E_MODE) {
@@ -1952,8 +1988,11 @@ app.on("will-quit", () => {
   }
   setCashflowGamePersistence(null);
   usageStore = null;
+  searchWorkerStateRevision = 0;
+  searchWorkerSyncedRevision = -1;
   catalog = [];
   catalogInitialized = false;
+  catalogBackgroundRefreshScheduled = false;
   catalogScanConfig = { ...DEFAULT_CATALOG_SCAN_CONFIG };
   visiblePluginIds = getDefaultVisiblePluginIds();
   setVisiblePluginIds(visiblePluginIds);

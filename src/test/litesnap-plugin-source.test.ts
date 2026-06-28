@@ -134,6 +134,10 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
     channelsSource,
     /liteSnapCancelCapture:\s*"launcher:litesnap-cancel-capture"/
   );
+  assert.match(
+    channelsSource,
+    /liteSnapEnsureSourceImage:\s*"launcher:litesnap-ensure-source-image"/
+  );
   assert.match(channelsSource, /pickDirectoryPath:\s*"launcher:pick-directory-path"/);
 
   assert.match(preloadSource, /getLiteSnapSettings\(\): Promise<LiteSnapSettings>/);
@@ -152,6 +156,7 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
   assert.match(preloadSource, /liteSnapGetWindowRectAtPoint\(/);
   assert.match(preloadSource, /liteSnapCommitCapture\(/);
   assert.match(preloadSource, /liteSnapCancelCapture\(\): Promise<boolean>/);
+  assert.match(preloadSource, /liteSnapEnsureSourceImage\(\): Promise<string \| null>/);
   assert.match(preloadSource, /pickDirectoryPath\(\): Promise<string \| null>/);
   assert.match(
     ipcSource,
@@ -467,7 +472,7 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /const framesPromise = cachedFrames[\s\S]*captureProvider\.captureDisplayFrames\(display\)/,
+    /const framesPromise = this\.resolveCaptureFrames\(display\)[\s\S]*captureProvider\.captureDisplayFrames\(display\)/,
     "LiteSnap should capture the display in parallel with overlay preparation"
   );
   assert.match(
@@ -492,8 +497,33 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.scheduleSourceImageDataUrlUpgrade\(captureId\)/,
-    "LiteSnap should attach the full-quality source image as soon as the combined capture finishes"
+    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.session\.sourceImageDataUrl = null;/,
+    "LiteSnap should keep the full source image in main memory without eagerly encoding it for the overlay"
+  );
+  assert.match(
+    captureSource,
+    /public ensureSourceImageDataUrl\(\): string \| null/,
+    "LiteSnap should lazily expose the full source image only when the overlay needs it"
+  );
+  assert.match(
+    captureSource,
+    /resolveCompositedBuffer\([\s\S]*ArrayBuffer\.isView[\s\S]*nativeImage\.createFromBuffer/,
+    "LiteSnap should accept binary composited PNG buffers instead of requiring base64 data URLs"
+  );
+  assert.match(
+    captureSource,
+    /scheduleNextFrameCacheRefresh\([\s\S]*warmPreviewFrameCache\(display\)/,
+    "LiteSnap idle frame-cache refresh should warm preview frames only"
+  );
+  assert.match(
+    captureSource,
+    /captureAndStorePreviewCache\([\s\S]*sourceImage: null/,
+    "LiteSnap preview-only cache entries should not retain a full source image"
+  );
+  assert.match(
+    captureSource,
+    /resolveCaptureFrames\([\s\S]*captureSourceImage\(display\)/,
+    "LiteSnap should capture the full source image on demand when only preview cache is warm"
   );
   assert.match(
     captureSource,
@@ -502,7 +532,14 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /startFrameCacheRefresh\(\): void[\s\S]*setInterval\([\s\S]*FRAME_CACHE_REFRESH_MS/,
+    /shouldRefreshIdleFrameCache\([\s\S]*getAllWindows\(\)[\s\S]*isFocused\(\)/,
+    "LiteSnap frame cache refresh should pause while no LiteLauncher window is focused"
+  );
+  assert.match(captureSource, /setFrameRate\(60\)/);
+  assert.match(captureSource, /setFrameRate\(10\)/);
+  assert.match(
+    captureSource,
+    /startFrameCacheRefresh\(\): void[\s\S]*scheduleNextFrameCacheRefresh\(\)/,
     "LiteSnap should refresh the warmed frame cache periodically while idle"
   );
   assert.match(
@@ -655,20 +692,25 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     /const liteSnapSettings = await liteSnapSettingsStore\.getSettings\(\);/,
     "LiteSnap startup should load persisted shortcut settings"
   );
-  assert.match(
+  assert.doesNotMatch(
     mainIndexSource,
-    /liteSnapCaptureSessionManager\.prewarmCaptureCache\(\);/,
-    "LiteSnap startup should warm the screenshot frame cache immediately"
+    /liteSnapCaptureSessionManager\.prewarmCaptureCache\(\);[\s\S]*const launcherWindow = createLauncherWindow\(\)/,
+    "LiteSnap should not warm screenshot frames during main-process startup"
   );
-  assert.match(
+  assert.doesNotMatch(
     mainIndexSource,
-    /liteSnapPinWindowManager\.prewarmPinWindow\(\);/,
-    "LiteSnap startup should prewarm a reusable pin window"
+    /liteSnapPinWindowManager\.prewarmPinWindow\(\);[\s\S]*const launcherWindow = createLauncherWindow\(\)/,
+    "LiteSnap should not prewarm pin windows during main-process startup"
   );
-  assert.match(
+  assert.doesNotMatch(
     mainIndexSource,
     /void liteSnapCaptureSessionManager\.prewarmOverlay\(\);/,
-    "LiteSnap startup should prewarm the reusable overlay window"
+    "LiteSnap should not create the reusable overlay during main-process startup"
+  );
+  assert.match(
+    mainIndexSource,
+    /const started = await liteSnapCaptureSessionManager\.startCapture[\s\S]*if \(started\) \{[\s\S]*liteSnapCaptureSessionManager\.startFrameCacheRefresh\(\);/,
+    "LiteSnap should start follow-up frame-cache refresh only after the first real capture starts"
   );
   assert.match(
     mainIndexSource,
@@ -750,8 +792,43 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     overlayRendererSource,
-    /updateLoupe\([\s\S]*getImageData[\s\S]*hoveredColor/,
-    "LiteSnap overlay should show a magnifier and sample pixel colors"
+    /bakeRegionEffectOntoLayer[\s\S]*rebuildEffectLayer/,
+    "LiteSnap overlay should bake mosaic and blur strokes instead of re-rasterizing every frame"
+  );
+  assert.match(
+    overlayRendererSource,
+    /bakeVectorAnnotationOntoLayer[\s\S]*rebuildVectorLayer/,
+    "LiteSnap overlay should bake finalized vector annotations onto a reusable layer"
+  );
+  assert.match(
+    overlayRendererSource,
+    /renderSelectionDim\([\s\S]*dimTopNode/,
+    "LiteSnap overlay should dim outside the selection with edge panels instead of a giant box-shadow"
+  );
+  assert.match(
+    overlayRendererSource,
+    /scheduleLoupeUpdate\([\s\S]*requestAnimationFrame[\s\S]*updateLoupe\([\s\S]*getImageData[\s\S]*hoveredColor/,
+    "LiteSnap overlay should throttle magnifier updates and sample pixel colors"
+  );
+  assert.match(
+    overlayRendererSource,
+    /liteSnapEnsureSourceImage/,
+    "LiteSnap overlay should request the full source image only when needed"
+  );
+  assert.match(
+    overlayRendererSource,
+    /canvasToPngBuffer[\s\S]*toBlob[\s\S]*imagePngBuffer/,
+    "LiteSnap overlay should send composited annotations as async PNG buffers instead of sync base64"
+  );
+  assert.match(
+    overlayRendererSource,
+    /ensureLoupeSampleImage\([\s\S]*overlayState\?\.imageDataUrl/,
+    "LiteSnap overlay should sample loupe colors from the preview image instead of the full source"
+  );
+  assert.match(
+    overlayRendererSource,
+    /scheduleOverlayRender\([\s\S]*requestAnimationFrame[\s\S]*renderSelection/,
+    "LiteSnap overlay should coalesce selection redraws to animation frames"
   );
   assert.match(
     overlayRendererSource,

@@ -8,29 +8,32 @@ type UsageMap = Record<string, UsageRecord>;
 type SearchRequest =
   | {
       id: string;
-      type: "initial";
+      type: "syncState";
       catalog: LaunchItem[];
       usage: UsageMap;
+    }
+  | {
+      id: string;
+      type: "initial";
       limit: number;
     }
   | {
       id: string;
       type: "search";
       query: string;
-      catalog: LaunchItem[];
-      usage: UsageMap;
       limit: number;
       options?: SearchRequestOptions;
     };
 
 type SearchResponse =
-  | { id: string; ok: true; items: LaunchItem[] }
+  | { id: string; ok: true; items?: LaunchItem[] }
   | { id: string; ok: false; error: string };
 
 type PendingRequest = {
   resolve: (items: LaunchItem[]) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  expectsItems: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 2000;
@@ -41,6 +44,8 @@ export class SearchWorkerClient {
   private readonly pending = new Map<string, PendingRequest>();
 
   private counter = 0;
+
+  private stateSynced = false;
 
   public constructor() {
     const workerPath = path.join(__dirname, "search-worker-thread.js");
@@ -56,7 +61,12 @@ export class SearchWorkerClient {
       this.pending.delete(response.id);
 
       if (response.ok) {
-        pending.resolve(response.items);
+        if (pending.expectsItems) {
+          pending.resolve(response.items ?? []);
+          return;
+        }
+
+        pending.resolve([]);
         return;
       }
 
@@ -66,6 +76,7 @@ export class SearchWorkerClient {
     this.worker.on("error", (error) => {
       const workerError =
         error instanceof Error ? error : new Error(String(error));
+      this.stateSynced = false;
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timeout);
         pending.reject(workerError);
@@ -74,39 +85,54 @@ export class SearchWorkerClient {
     });
   }
 
-  public getInitialItems(
+  public async syncState(
     catalog: LaunchItem[],
-    usage: UsageMap,
-    limit: number
-  ): Promise<LaunchItem[]> {
-    return this.request({
-      id: this.nextId(),
-      type: "initial",
-      catalog,
-      usage,
-      limit
-    });
+    usage: UsageMap
+  ): Promise<void> {
+    await this.request(
+      {
+        id: this.nextId(),
+        type: "syncState",
+        catalog,
+        usage
+      },
+      false
+    );
+    this.stateSynced = true;
   }
 
-  public searchItems(
+  public async getInitialItems(limit: number): Promise<LaunchItem[]> {
+    this.ensureStateSynced();
+    return this.request(
+      {
+        id: this.nextId(),
+        type: "initial",
+        limit
+      },
+      true
+    );
+  }
+
+  public async searchItems(
     query: string,
-    catalog: LaunchItem[],
-    usage: UsageMap,
     limit: number,
     options?: SearchRequestOptions
   ): Promise<LaunchItem[]> {
-    return this.request({
-      id: this.nextId(),
-      type: "search",
-      query,
-      catalog,
-      usage,
-      limit,
-      options
-    });
+    this.ensureStateSynced();
+    return this.request(
+      {
+        id: this.nextId(),
+        type: "search",
+        query,
+        limit,
+        options
+      },
+      true
+    );
   }
 
   public async terminate(): Promise<void> {
+    this.stateSynced = false;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Search worker terminated"));
@@ -115,14 +141,31 @@ export class SearchWorkerClient {
     await this.worker.terminate();
   }
 
-  private request(payload: SearchRequest): Promise<LaunchItem[]> {
+  private ensureStateSynced(): void {
+    if (!this.stateSynced) {
+      throw new Error("Search worker state is not synced");
+    }
+  }
+
+  private request(
+    payload: SearchRequest,
+    expectsItems: boolean
+  ): Promise<LaunchItem[]> {
     return new Promise<LaunchItem[]>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(payload.id);
+        if (payload.type === "syncState") {
+          this.stateSynced = false;
+        }
         reject(new Error("Search worker timed out"));
       }, REQUEST_TIMEOUT_MS);
 
-      this.pending.set(payload.id, { resolve, reject, timeout });
+      this.pending.set(payload.id, {
+        resolve,
+        reject,
+        timeout,
+        expectsItems
+      });
       this.worker.postMessage(payload);
     });
   }

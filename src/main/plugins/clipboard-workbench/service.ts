@@ -116,6 +116,7 @@ type ClipboardWorkbenchServiceOptions = {
   runtime?: ClipboardWorkbenchRuntime;
   pollIntervalMs?: number;
   cleanupRoot?: string | null;
+  onAutoTextCollected?: (text: string) => Promise<void> | void;
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 700;
@@ -270,6 +271,10 @@ export class ClipboardWorkbenchService {
 
   private readonly assetsDir: string;
 
+  private readonly onAutoTextCollected:
+    | ((text: string) => Promise<void> | void)
+    | null;
+
   private store: ClipboardWorkbenchStore | null = null;
 
   private settings: ClipboardWorkbenchSettings =
@@ -289,10 +294,12 @@ export class ClipboardWorkbenchService {
     this.runtime = options.runtime ?? createClipboardWorkbenchRuntime();
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.cleanupRoot = options.cleanupRoot ?? null;
+    this.onAutoTextCollected = options.onAutoTextCollected ?? null;
   }
 
   public static async createForTest(
-    overrides: Partial<ClipboardWorkbenchRuntime> = {}
+    overrides: Partial<ClipboardWorkbenchRuntime> = {},
+    options: Pick<ClipboardWorkbenchServiceOptions, "onAutoTextCollected"> = {}
   ): Promise<ClipboardWorkbenchService> {
     const root = await fsPromises.mkdtemp(
       path.join(os.tmpdir(), "litelauncher-cbw-")
@@ -302,7 +309,8 @@ export class ClipboardWorkbenchService {
       assetsDir: path.join(root, "assets"),
       runtime: createClipboardWorkbenchRuntimeForTests(overrides),
       cleanupRoot: root,
-      pollIntervalMs: 25
+      pollIntervalMs: 25,
+      onAutoTextCollected: options.onAutoTextCollected
     });
     await service.init();
     return service;
@@ -419,6 +427,11 @@ export class ClipboardWorkbenchService {
         sensitive: this.settings.sensitiveMode ? 1 : 0
       });
       this.lastAutoCaptureHash = snapshot.hash;
+      if (snapshot.kind === "text" && snapshot.textContent) {
+        await Promise.resolve(this.onAutoTextCollected?.(snapshot.textContent)).catch(
+          () => undefined
+        );
+      }
       await this.applyRetention();
       return true;
     } catch {

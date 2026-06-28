@@ -145,6 +145,11 @@
   const loupeColorNode = document.getElementById("litesnap-loupe-color");
   const brushPreviewNode = document.getElementById("litesnap-brush-preview");
   const windowHintNode = document.getElementById("litesnap-window-hint");
+  const dimNode = document.getElementById("litesnap-dim");
+  const dimTopNode = document.getElementById("litesnap-dim-top");
+  const dimRightNode = document.getElementById("litesnap-dim-right");
+  const dimBottomNode = document.getElementById("litesnap-dim-bottom");
+  const dimLeftNode = document.getElementById("litesnap-dim-left");
   const selectionNode = document.getElementById("litesnap-selection");
   const sizeNode = document.getElementById("litesnap-size");
   const toolbarNode = document.getElementById("litesnap-toolbar");
@@ -181,7 +186,239 @@
   let hoverWindowRect: SelectionRect | null = null;
   let windowQueryTimer: number | null = null;
   let windowQuerySeq = 0;
+  let lastWindowProbePoint: { x: number; y: number } | null = null;
   let hoveredColor = "#000000";
+  let loupeCtx: CanvasRenderingContext2D | null = null;
+  let loupeSampleImage: HTMLImageElement | null = null;
+  let loupeSampleImageSource = "";
+  let loupeFrame: number | null = null;
+  let pendingLoupePoint: { x: number; y: number } | null = null;
+  let lastLoupeSampleCell: { x: number; y: number } | null = null;
+  let overlayRenderFrame: number | null = null;
+  let overlayRenderMode: "selection" | "annotations" | null = null;
+  let annotationCanvasCtx: CanvasRenderingContext2D | null = null;
+  let annotationCanvasPixelWidth = 0;
+  let annotationCanvasPixelHeight = 0;
+  let effectLayerCanvas: HTMLCanvasElement | null = null;
+  let effectLayerCtx: CanvasRenderingContext2D | null = null;
+  let vectorLayerCanvas: HTMLCanvasElement | null = null;
+  let vectorLayerCtx: CanvasRenderingContext2D | null = null;
+  let pooledTileCanvas: HTMLCanvasElement | null = null;
+  let pooledTileCtx: CanvasRenderingContext2D | null = null;
+  let pooledBlurCanvas: HTMLCanvasElement | null = null;
+  let pooledBlurCtx: CanvasRenderingContext2D | null = null;
+
+  const WINDOW_PROBE_DEBOUNCE_MS = 80;
+  const WINDOW_PROBE_MIN_MOVE_PX = 8;
+  const PEN_POINT_MIN_DISTANCE_PX = 1.5;
+  const REGION_EFFECT_POINT_MIN_DISTANCE_PX = 4;
+
+  function scheduleOverlayRender(mode: "selection" | "annotations"): void {
+    overlayRenderMode = mode;
+    if (overlayRenderFrame !== null) {
+      return;
+    }
+    overlayRenderFrame = window.requestAnimationFrame(() => {
+      overlayRenderFrame = null;
+      const pendingMode = overlayRenderMode;
+      overlayRenderMode = null;
+      if (pendingMode === "annotations") {
+        renderAnnotations();
+        return;
+      }
+      renderSelection();
+    });
+  }
+
+  function cancelScheduledOverlayRender(): void {
+    if (overlayRenderFrame !== null) {
+      window.cancelAnimationFrame(overlayRenderFrame);
+      overlayRenderFrame = null;
+      overlayRenderMode = null;
+    }
+  }
+
+  function regionEffectDestOptions(
+    overrides: Partial<{
+      destScaleX: number;
+      destScaleY: number;
+      destOffsetX: number;
+      destOffsetY: number;
+      destWidth: number;
+      destHeight: number;
+    }> = {}
+  ) {
+    return {
+      destScaleX: 1,
+      destScaleY: 1,
+      destOffsetX: 0,
+      destOffsetY: 0,
+      destWidth: getViewportWidth(),
+      destHeight: getViewportHeight(),
+      ...overrides
+    };
+  }
+
+  function hasBakedRegionEffects(): boolean {
+    return annotations.some(
+      (annotation) => annotation.type === "mosaic" || annotation.type === "blur"
+    );
+  }
+
+  function hasRegionEffectWork(): boolean {
+    return (
+      hasBakedRegionEffects() ||
+      draftAnnotation?.type === "mosaic" ||
+      draftAnnotation?.type === "blur"
+    );
+  }
+
+  function isRegionEffectAnnotation(annotation: Annotation): annotation is RegionEffectAnnotation {
+    return annotation.type === "mosaic" || annotation.type === "blur";
+  }
+
+  function canUseVectorLayer(): boolean {
+    return selectedAnnotationIndex === null && dragMode !== "annotation-moving";
+  }
+
+  function clearEffectLayer(): void {
+    if (!effectLayerCtx || !effectLayerCanvas) {
+      return;
+    }
+    effectLayerCtx.clearRect(0, 0, getViewportWidth(), getViewportHeight());
+  }
+
+  function syncEffectLayerCtx(): CanvasRenderingContext2D | null {
+    const baseCtx = ensureCanvasSize();
+    if (!baseCtx || !canvasNode) {
+      return null;
+    }
+
+    if (!effectLayerCanvas) {
+      effectLayerCanvas = document.createElement("canvas");
+      effectLayerCtx = effectLayerCanvas.getContext("2d");
+    }
+    if (!effectLayerCtx) {
+      return null;
+    }
+
+    if (
+      effectLayerCanvas.width !== canvasNode.width ||
+      effectLayerCanvas.height !== canvasNode.height
+    ) {
+      effectLayerCanvas.width = canvasNode.width;
+      effectLayerCanvas.height = canvasNode.height;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    effectLayerCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return effectLayerCtx;
+  }
+
+  function clearVectorLayer(): void {
+    if (!vectorLayerCtx || !vectorLayerCanvas) {
+      return;
+    }
+    vectorLayerCtx.clearRect(0, 0, getViewportWidth(), getViewportHeight());
+  }
+
+  function syncVectorLayerCtx(): CanvasRenderingContext2D | null {
+    const baseCtx = ensureCanvasSize();
+    if (!baseCtx || !canvasNode) {
+      return null;
+    }
+
+    if (!vectorLayerCanvas) {
+      vectorLayerCanvas = document.createElement("canvas");
+      vectorLayerCtx = vectorLayerCanvas.getContext("2d");
+    }
+    if (!vectorLayerCtx) {
+      return null;
+    }
+
+    if (
+      vectorLayerCanvas.width !== canvasNode.width ||
+      vectorLayerCanvas.height !== canvasNode.height
+    ) {
+      vectorLayerCanvas.width = canvasNode.width;
+      vectorLayerCanvas.height = canvasNode.height;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    vectorLayerCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return vectorLayerCtx;
+  }
+
+  function bakeRegionEffectOntoLayer(annotation: RegionEffectAnnotation): void {
+    if (!compositeImage) {
+      return;
+    }
+    const layerCtx = syncEffectLayerCtx();
+    if (!layerCtx) {
+      return;
+    }
+    paintBrushEffect(layerCtx, compositeImage, annotation, regionEffectDestOptions());
+  }
+
+  function rebuildEffectLayer(): void {
+    clearEffectLayer();
+    if (!compositeImage) {
+      return;
+    }
+    for (const annotation of annotations) {
+      if (annotation.type === "mosaic" || annotation.type === "blur") {
+        bakeRegionEffectOntoLayer(annotation);
+      }
+    }
+  }
+
+  function bakeVectorAnnotationOntoLayer(annotation: Annotation): void {
+    if (isRegionEffectAnnotation(annotation)) {
+      return;
+    }
+    const layerCtx = syncVectorLayerCtx();
+    if (!layerCtx) {
+      return;
+    }
+    drawAnnotation(layerCtx, annotation, compositeImage);
+  }
+
+  function rebuildVectorLayer(): void {
+    clearVectorLayer();
+    for (const annotation of annotations) {
+      bakeVectorAnnotationOntoLayer(annotation);
+    }
+  }
+
+  function resizePooledCanvas(
+    existing: HTMLCanvasElement | null,
+    existingCtx: CanvasRenderingContext2D | null,
+    width: number,
+    height: number,
+    willReadFrequently = false
+  ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null } {
+    const canvas = existing ?? document.createElement("canvas");
+    if (canvas.width !== width) {
+      canvas.width = width;
+    }
+    if (canvas.height !== height) {
+      canvas.height = height;
+    }
+    const ctx = existingCtx ?? canvas.getContext("2d", { willReadFrequently });
+    return { canvas, ctx };
+  }
+
+  function preloadSourceImageForRegionTools(): void {
+    void window.launcher.liteSnapEnsureSourceImage().then((sourceUrl) => {
+      if (!sourceUrl || !overlayState) {
+        return;
+      }
+      overlayState = {
+        ...overlayState,
+        sourceImageDataUrl: sourceUrl
+      };
+    });
+  }
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -228,6 +465,20 @@
       x: clamp(x, selection.x, selection.x + selection.width),
       y: clamp(y, selection.y, selection.y + selection.height)
     };
+  }
+
+  function shouldAppendPoint(
+    points: Point[],
+    point: Point,
+    minDistance: number
+  ): boolean {
+    const previous = points[points.length - 1];
+    if (!previous) {
+      return true;
+    }
+    const dx = point.x - previous.x;
+    const dy = point.y - previous.y;
+    return dx * dx + dy * dy >= minDistance * minDistance;
   }
 
   function normalizeRect(
@@ -322,38 +573,6 @@
     ctx.putImageData(imageData, x, y);
   }
 
-  function applyBlurPixels(
-    ctx: CanvasRenderingContext2D,
-    bounds: SelectionRect,
-    radius: number
-  ): void {
-    const width = Math.max(1, Math.floor(bounds.width));
-    const height = Math.max(1, Math.floor(bounds.height));
-    const x = Math.floor(bounds.x);
-    const y = Math.floor(bounds.y);
-    const temp = document.createElement("canvas");
-    temp.width = width;
-    temp.height = height;
-    const tempCtx = temp.getContext("2d");
-    if (!tempCtx) {
-      return;
-    }
-
-    tempCtx.drawImage(ctx.canvas, x, y, width, height, 0, 0, width, height);
-    const blurred = document.createElement("canvas");
-    blurred.width = width;
-    blurred.height = height;
-    const blurredCtx = blurred.getContext("2d");
-    if (!blurredCtx) {
-      return;
-    }
-
-    blurredCtx.filter = `blur(${radius}px)`;
-    blurredCtx.drawImage(temp, 0, 0, width, height);
-    blurredCtx.filter = "none";
-    ctx.drawImage(blurred, 0, 0, width, height, x, y, width, height);
-  }
-
   function strokeBoundsInDest(
     points: Point[],
     brushDest: number,
@@ -411,13 +630,25 @@
       return;
     }
 
-    const tile = document.createElement("canvas");
-    tile.width = Math.max(1, Math.round(bbox.width));
-    tile.height = Math.max(1, Math.round(bbox.height));
-    const tileCtx = tile.getContext("2d", { willReadFrequently: true });
+    const tileWidth = Math.max(1, Math.round(bbox.width));
+    const tileHeight = Math.max(1, Math.round(bbox.height));
+    const tilePool = resizePooledCanvas(
+      pooledTileCanvas,
+      pooledTileCtx,
+      tileWidth,
+      tileHeight,
+      true
+    );
+    pooledTileCanvas = tilePool.canvas;
+    pooledTileCtx = tilePool.ctx;
+    const tile = pooledTileCanvas;
+    const tileCtx = pooledTileCtx;
     if (!tileCtx) {
       return;
     }
+    tileCtx.setTransform(1, 0, 0, 1, 0, 0);
+    tileCtx.globalCompositeOperation = "source-over";
+    tileCtx.clearRect(0, 0, tileWidth, tileHeight);
 
     // Draw the full source image into the tile aligned to dest space (offset by
     // the bbox origin), so tile pixels correspond 1:1 with the dest region.
@@ -442,13 +673,22 @@
         mosaicBlockSize(annotation.intensity, destScaleX)
       );
     } else {
-      const blurred = document.createElement("canvas");
-      blurred.width = tile.width;
-      blurred.height = tile.height;
-      const blurredCtx = blurred.getContext("2d");
+      const blurPool = resizePooledCanvas(
+        pooledBlurCanvas,
+        pooledBlurCtx,
+        tileWidth,
+        tileHeight
+      );
+      pooledBlurCanvas = blurPool.canvas;
+      pooledBlurCtx = blurPool.ctx;
+      const blurred = pooledBlurCanvas;
+      const blurredCtx = pooledBlurCtx;
       if (!blurredCtx) {
         return;
       }
+      blurredCtx.setTransform(1, 0, 0, 1, 0, 0);
+      blurredCtx.globalCompositeOperation = "source-over";
+      blurredCtx.clearRect(0, 0, tileWidth, tileHeight);
       blurredCtx.filter = `blur(${blurRadius(annotation.intensity, destScaleX)}px)`;
       blurredCtx.drawImage(tile, 0, 0);
       blurredCtx.filter = "none";
@@ -519,6 +759,9 @@
         ? null
         : annotations.length - 1;
     recalculateNumberSequence();
+    if (!isRegionEffectAnnotation(annotation)) {
+      bakeVectorAnnotationOntoLayer(annotation);
+    }
   }
 
   function cloneAnnotation(annotation: Annotation): Annotation {
@@ -736,6 +979,8 @@
     }
     if (tool !== "mosaic" && tool !== "blur") {
       hideBrushPreview();
+    } else {
+      preloadSourceImageForRegionTools();
     }
     if (persist) {
       schedulePersistAnnotationSettings();
@@ -756,6 +1001,28 @@
     finishTextInput(true);
     setToolbarDisabled(false);
     setActiveTool("select", false);
+    cancelScheduledOverlayRender();
+    if (loupeFrame !== null) {
+      window.cancelAnimationFrame(loupeFrame);
+      loupeFrame = null;
+      pendingLoupePoint = null;
+    }
+    lastLoupeSampleCell = null;
+    lastWindowProbePoint = null;
+    loupeSampleImage = null;
+    loupeSampleImageSource = "";
+    clearEffectLayer();
+    effectLayerCanvas = null;
+    effectLayerCtx = null;
+    clearVectorLayer();
+    vectorLayerCanvas = null;
+    vectorLayerCtx = null;
+    annotationCanvasCtx = null;
+    annotationCanvasPixelWidth = 0;
+    annotationCanvasPixelHeight = 0;
+    if (dimNode) {
+      dimNode.hidden = true;
+    }
     if (selectionNode) {
       selectionNode.hidden = true;
       selectionNode.dataset.moving = "false";
@@ -907,9 +1174,17 @@
     if (windowQueryTimer !== null) {
       return;
     }
+    if (lastWindowProbePoint) {
+      const dx = x - lastWindowProbePoint.x;
+      const dy = y - lastWindowProbePoint.y;
+      if (dx * dx + dy * dy < WINDOW_PROBE_MIN_MOVE_PX * WINDOW_PROBE_MIN_MOVE_PX) {
+        return;
+      }
+    }
     const seq = ++windowQuerySeq;
     windowQueryTimer = window.setTimeout(() => {
       windowQueryTimer = null;
+      lastWindowProbePoint = { x, y };
       void window.launcher
         .liteSnapGetWindowRectAtPoint(x, y)
         .then((rect) => {
@@ -924,7 +1199,39 @@
           }
         })
         .catch(() => undefined);
-    }, 45);
+    }, WINDOW_PROBE_DEBOUNCE_MS);
+  }
+
+  function renderSelectionDim(): void {
+    if (
+      !dimNode ||
+      !dimTopNode ||
+      !dimRightNode ||
+      !dimBottomNode ||
+      !dimLeftNode ||
+      !selection ||
+      !isValidSelection(selection)
+    ) {
+      if (dimNode) {
+        dimNode.hidden = true;
+      }
+      return;
+    }
+
+    const viewportWidth = getViewportWidth();
+    const viewportHeight = getViewportHeight();
+    const { x, y, width, height } = selection;
+    dimNode.hidden = false;
+    dimTopNode.style.height = `${y}px`;
+    dimLeftNode.style.top = `${y}px`;
+    dimLeftNode.style.width = `${x}px`;
+    dimLeftNode.style.height = `${height}px`;
+    dimRightNode.style.left = `${x + width}px`;
+    dimRightNode.style.top = `${y}px`;
+    dimRightNode.style.width = `${Math.max(0, viewportWidth - x - width)}px`;
+    dimRightNode.style.height = `${height}px`;
+    dimBottomNode.style.top = `${y + height}px`;
+    dimBottomNode.style.height = `${Math.max(0, viewportHeight - y - height)}px`;
   }
 
   function renderSelection(): void {
@@ -936,6 +1243,9 @@
       selectionNode.hidden = true;
       if (canvasNode) {
         canvasNode.hidden = true;
+      }
+      if (dimNode) {
+        dimNode.hidden = true;
       }
       updateSelectionChrome();
       return;
@@ -956,6 +1266,7 @@
       canvasNode.hidden = false;
     }
 
+    renderSelectionDim();
     updateSelectionChrome();
   }
 
@@ -969,19 +1280,33 @@
     const cssHeight = getViewportHeight();
     const pixelWidth = Math.round(cssWidth * dpr);
     const pixelHeight = Math.round(cssHeight * dpr);
-    if (canvasNode.width !== pixelWidth || canvasNode.height !== pixelHeight) {
+    if (
+      canvasNode.width !== pixelWidth ||
+      canvasNode.height !== pixelHeight ||
+      annotationCanvasPixelWidth !== pixelWidth ||
+      annotationCanvasPixelHeight !== pixelHeight
+    ) {
       canvasNode.width = pixelWidth;
       canvasNode.height = pixelHeight;
+      annotationCanvasCtx = canvasNode.getContext("2d");
+      annotationCanvasPixelWidth = pixelWidth;
+      annotationCanvasPixelHeight = pixelHeight;
+      effectLayerCanvas = null;
+      effectLayerCtx = null;
+      vectorLayerCanvas = null;
+      vectorLayerCtx = null;
     }
     canvasNode.style.width = `${cssWidth}px`;
     canvasNode.style.height = `${cssHeight}px`;
 
-    const ctx = canvasNode.getContext("2d");
-    if (!ctx) {
+    if (!annotationCanvasCtx) {
+      annotationCanvasCtx = canvasNode.getContext("2d");
+    }
+    if (!annotationCanvasCtx) {
       return null;
     }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return ctx;
+    annotationCanvasCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return annotationCanvasCtx;
   }
 
   function drawShape(ctx: CanvasRenderingContext2D, annotation: ShapeAnnotation): void {
@@ -1177,20 +1502,50 @@
     }
     ctx.clearRect(0, 0, getViewportWidth(), getViewportHeight());
 
-    const needsSourcePreview = annotations.some(
-      (annotation) => annotation.type === "mosaic" || annotation.type === "blur"
-    );
-    const draftNeedsSource =
-      draftAnnotation?.type === "mosaic" || draftAnnotation?.type === "blur";
-    if ((needsSourcePreview || draftNeedsSource) && !compositeImage) {
+    if (hasRegionEffectWork() && !compositeImage) {
       void ensureCompositeImage().then(() => renderAnnotations());
       return;
     }
 
-    const items = draftAnnotation ? [...annotations, draftAnnotation] : annotations;
-    for (const annotation of items) {
-      drawAnnotation(ctx, annotation, compositeImage);
+    if (hasBakedRegionEffects() && effectLayerCanvas) {
+      ctx.drawImage(
+        effectLayerCanvas,
+        0,
+        0,
+        canvasNode.width,
+        canvasNode.height,
+        0,
+        0,
+        getViewportWidth(),
+        getViewportHeight()
+      );
     }
+
+    if (canUseVectorLayer() && vectorLayerCanvas) {
+      ctx.drawImage(
+        vectorLayerCanvas,
+        0,
+        0,
+        canvasNode.width,
+        canvasNode.height,
+        0,
+        0,
+        getViewportWidth(),
+        getViewportHeight()
+      );
+    } else {
+      for (const annotation of annotations) {
+        if (isRegionEffectAnnotation(annotation)) {
+          continue;
+        }
+        drawAnnotation(ctx, annotation, compositeImage);
+      }
+    }
+
+    if (draftAnnotation) {
+      drawAnnotation(ctx, draftAnnotation, compositeImage);
+    }
+
     drawSelectedAnnotationBounds(ctx);
   }
 
@@ -1300,8 +1655,20 @@
     return null;
   }
 
-  async function ensureCompositeImage(): Promise<HTMLImageElement | null> {
-    const source = overlayState?.sourceImageDataUrl ?? overlayState?.imageDataUrl ?? null;
+  async function ensureCompositeImage(fullResolution = false): Promise<HTMLImageElement | null> {
+    if (fullResolution) {
+      const sourceUrl = await window.launcher.liteSnapEnsureSourceImage();
+      if (sourceUrl && overlayState) {
+        overlayState = {
+          ...overlayState,
+          sourceImageDataUrl: sourceUrl
+        };
+      }
+    }
+
+    const source = fullResolution
+      ? overlayState?.sourceImageDataUrl ?? overlayState?.imageDataUrl ?? null
+      : overlayState?.imageDataUrl ?? overlayState?.sourceImageDataUrl ?? null;
     if (!source) {
       return null;
     }
@@ -1327,6 +1694,27 @@
       .join("")}`.toUpperCase();
   }
 
+  async function ensureLoupeSampleImage(): Promise<HTMLImageElement | null> {
+    const source = overlayState?.imageDataUrl ?? null;
+    if (!source) {
+      return null;
+    }
+    if (loupeSampleImage && loupeSampleImageSource === source) {
+      return loupeSampleImage;
+    }
+
+    return new Promise<HTMLImageElement | null>((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        loupeSampleImage = image;
+        loupeSampleImageSource = source;
+        resolve(image);
+      };
+      image.onerror = () => resolve(null);
+      image.src = source;
+    });
+  }
+
   function positionLoupe(x: number, y: number): void {
     if (!loupeNode) {
       return;
@@ -1343,57 +1731,128 @@
     loupeNode.style.top = `${top}px`;
   }
 
-  function updateLoupe(x: number, y: number): void {
-    if (!loupeNode || !loupeCanvas || !loupeColorNode || !isOverlayReady()) {
+  function scheduleLoupeUpdate(x: number, y: number): void {
+    if (
+      dragMode !== "idle" ||
+      editingText ||
+      committing ||
+      !isOverlayReady() ||
+      !loupeNode ||
+      !loupeCanvas ||
+      !loupeColorNode
+    ) {
+      if (loupeFrame !== null) {
+        window.cancelAnimationFrame(loupeFrame);
+        loupeFrame = null;
+        pendingLoupePoint = null;
+      }
+      if (loupeNode) {
+        loupeNode.hidden = true;
+      }
       return;
     }
-    positionLoupe(x, y);
-    loupeNode.hidden = false;
 
-    void ensureCompositeImage().then((image) => {
-      const ctx = loupeCanvas.getContext("2d", { willReadFrequently: true });
-      if (!image || !ctx) {
+    pendingLoupePoint = { x, y };
+    if (loupeFrame !== null) {
+      return;
+    }
+
+    loupeFrame = window.requestAnimationFrame(() => {
+      loupeFrame = null;
+      const point = pendingLoupePoint;
+      pendingLoupePoint = null;
+      if (!point) {
         return;
       }
-      const scale = getImageScale(image);
-      const sourceX = clamp(Math.round(x * scale.scaleX), 0, image.naturalWidth - 1);
-      const sourceY = clamp(Math.round(y * scale.scaleY), 0, image.naturalHeight - 1);
-      const sampleSize = 16;
-      const sx = clamp(sourceX - sampleSize / 2, 0, image.naturalWidth - sampleSize);
-      const sy = clamp(sourceY - sampleSize / 2, 0, image.naturalHeight - sampleSize);
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, loupeCanvas.width, loupeCanvas.height);
-      ctx.drawImage(
-        image,
-        sx,
-        sy,
-        sampleSize,
-        sampleSize,
-        0,
-        0,
-        loupeCanvas.width,
-        loupeCanvas.height
-      );
-      ctx.strokeStyle = "rgba(255,255,255,0.95)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(48, 0);
-      ctx.lineTo(48, 96);
-      ctx.moveTo(0, 48);
-      ctx.lineTo(96, 48);
-      ctx.stroke();
-      const pixel = ctx.getImageData(48, 48, 1, 1).data;
-      hoveredColor = rgbToHex(pixel[0], pixel[1], pixel[2]);
-      loupeColorNode.textContent = `${hoveredColor}  RGB(${pixel[0]}, ${pixel[1]}, ${pixel[2]})`;
+      void updateLoupe(point.x, point.y);
     });
   }
 
-  async function buildCompositeDataUrl(rect: SelectionRect): Promise<string | null> {
+  async function updateLoupe(x: number, y: number): Promise<void> {
+    if (!loupeNode || !loupeCanvas || !loupeColorNode || !isOverlayReady()) {
+      return;
+    }
+
+    positionLoupe(x, y);
+    loupeNode.hidden = false;
+
+    if (!loupeCtx) {
+      loupeCtx = loupeCanvas.getContext("2d", { willReadFrequently: true });
+    }
+    const ctx = loupeCtx;
+    if (!ctx) {
+      return;
+    }
+
+    const image = await ensureLoupeSampleImage();
+    if (!image) {
+      return;
+    }
+
+    const scale = getImageScale(image);
+    const sourceX = clamp(Math.round(x * scale.scaleX), 0, image.naturalWidth - 1);
+    const sourceY = clamp(Math.round(y * scale.scaleY), 0, image.naturalHeight - 1);
+    const sampleCell = {
+      x: Math.floor(sourceX / 2),
+      y: Math.floor(sourceY / 2)
+    };
+    if (
+      lastLoupeSampleCell &&
+      lastLoupeSampleCell.x === sampleCell.x &&
+      lastLoupeSampleCell.y === sampleCell.y
+    ) {
+      return;
+    }
+    lastLoupeSampleCell = sampleCell;
+
+    const sampleSize = 16;
+    const sx = clamp(sourceX - sampleSize / 2, 0, image.naturalWidth - sampleSize);
+    const sy = clamp(sourceY - sampleSize / 2, 0, image.naturalHeight - sampleSize);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, loupeCanvas.width, loupeCanvas.height);
+    ctx.drawImage(
+      image,
+      sx,
+      sy,
+      sampleSize,
+      sampleSize,
+      0,
+      0,
+      loupeCanvas.width,
+      loupeCanvas.height
+    );
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(48, 0);
+    ctx.lineTo(48, 96);
+    ctx.moveTo(0, 48);
+    ctx.lineTo(96, 48);
+    ctx.stroke();
+    const pixel = ctx.getImageData(48, 48, 1, 1).data;
+    hoveredColor = rgbToHex(pixel[0], pixel[1], pixel[2]);
+    loupeColorNode.textContent = `${hoveredColor}  RGB(${pixel[0]}, ${pixel[1]}, ${pixel[2]})`;
+  }
+
+  function canvasToPngBuffer(canvas: HTMLCanvasElement): Promise<ArrayBuffer | null> {
+    return new Promise<ArrayBuffer | null>((resolve) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          resolve(null);
+          return;
+        }
+        void blob.arrayBuffer().then(resolve).catch(() => resolve(null));
+      }, "image/png");
+    });
+  }
+
+  async function buildCompositePngBuffer(rect: SelectionRect): Promise<ArrayBuffer | null> {
     if (annotations.length === 0) {
       return null;
     }
 
-    const image = await ensureCompositeImage();
+    const hasRegionEffects = hasBakedRegionEffects();
+    const image = await ensureCompositeImage(hasRegionEffects);
     if (!image) {
       return null;
     }
@@ -1423,16 +1882,27 @@
       outputHeight
     );
 
+    if (hasRegionEffects && effectLayerCanvas && canvasNode) {
+      const dpr = window.devicePixelRatio || 1;
+      const sourceX = rect.x * dpr;
+      const sourceY = rect.y * dpr;
+      const sourceWidth = rect.width * dpr;
+      const sourceHeight = rect.height * dpr;
+      ctx.drawImage(
+        effectLayerCanvas,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        outputWidth,
+        outputHeight
+      );
+    }
+
     for (const annotation of annotations) {
       if (annotation.type === "mosaic" || annotation.type === "blur") {
-        paintBrushEffect(ctx, image, annotation, {
-          destScaleX: scaleX,
-          destScaleY: scaleY,
-          destOffsetX: -rect.x * scaleX,
-          destOffsetY: -rect.y * scaleY,
-          destWidth: outputWidth,
-          destHeight: outputHeight
-        });
         continue;
       }
 
@@ -1441,7 +1911,7 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
-    return canvas.toDataURL("image/png");
+    return canvasToPngBuffer(canvas);
   }
 
   async function commitSelection(action: OverlayAction): Promise<void> {
@@ -1458,17 +1928,17 @@
     committing = true;
     setToolbarDisabled(true);
 
-    let imageDataUrl: string | undefined;
+    let imagePngBuffer: ArrayBuffer | undefined;
     try {
-      imageDataUrl = (await buildCompositeDataUrl(selection)) ?? undefined;
+      imagePngBuffer = (await buildCompositePngBuffer(selection)) ?? undefined;
     } catch {
-      imageDataUrl = undefined;
+      imagePngBuffer = undefined;
     }
 
     const result = await window.launcher.liteSnapCommitCapture({
       action,
       selection,
-      imageDataUrl
+      imagePngBuffer
     });
 
     if (result.ok) {
@@ -1539,6 +2009,13 @@
       draftAnnotation.type === "mosaic" ||
       draftAnnotation.type === "blur"
     ) {
+      const minDistance =
+        draftAnnotation.type === "pen"
+          ? PEN_POINT_MIN_DISTANCE_PX
+          : REGION_EFFECT_POINT_MIN_DISTANCE_PX;
+      if (!shouldAppendPoint(draftAnnotation.points, point, minDistance)) {
+        return;
+      }
       draftAnnotation.points.push(point);
       return;
     }
@@ -1567,7 +2044,18 @@
     }
 
     if (keep) {
-      addAnnotation(draftAnnotation);
+      const finalized = draftAnnotation;
+      addAnnotation(finalized);
+      if (finalized.type === "mosaic" || finalized.type === "blur") {
+        if (compositeImage) {
+          bakeRegionEffectOntoLayer(finalized);
+        } else {
+          void ensureCompositeImage().then(() => {
+            bakeRegionEffectOntoLayer(finalized);
+            renderAnnotations();
+          });
+        }
+      }
     }
     draftAnnotation = null;
     renderAnnotations();
@@ -1635,6 +2123,11 @@
     }
     selectedAnnotationIndex = null;
     recalculateNumberSequence();
+    if (removed?.type === "mosaic" || removed?.type === "blur") {
+      rebuildEffectLayer();
+    } else {
+      rebuildVectorLayer();
+    }
     renderAnnotations();
   }
 
@@ -1653,6 +2146,11 @@
         ? null
         : annotations.length - 1;
     recalculateNumberSequence();
+    if (annotation.type === "mosaic" || annotation.type === "blur") {
+      rebuildEffectLayer();
+    } else {
+      rebuildVectorLayer();
+    }
     renderAnnotations();
   }
 
@@ -1666,6 +2164,11 @@
       redoAnnotations.push(removed);
       selectedAnnotationIndex = null;
       recalculateNumberSequence();
+      if (removed.type === "mosaic" || removed.type === "blur") {
+        rebuildEffectLayer();
+      } else {
+        rebuildVectorLayer();
+      }
       renderAnnotations();
       return;
     }
@@ -1718,7 +2221,7 @@
       };
       beginDraftAnnotation(point);
       updateBrushPreview(point.x, point.y, event.target);
-      renderAnnotations();
+      scheduleOverlayRender("annotations");
       return;
     }
 
@@ -1798,7 +2301,7 @@
   }
 
   function handlePointerMove(event: PointerEvent): void {
-    updateLoupe(event.clientX, event.clientY);
+    scheduleLoupeUpdate(event.clientX, event.clientY);
     updateBrushPreview(event.clientX, event.clientY, event.target);
     if (!pointerStart || event.pointerId !== pointerStart.pointerId) {
       scheduleWindowSelectionProbe(event.clientX, event.clientY);
@@ -1809,7 +2312,7 @@
       const point = clampPointToSelection(event.clientX, event.clientY);
       extendDraftAnnotation(point);
       updateBrushPreview(point.x, point.y, event.target);
-      renderAnnotations();
+      scheduleOverlayRender("annotations");
       return;
     }
 
@@ -1826,11 +2329,11 @@
       applyResize(event.clientX, event.clientY);
     } else if (dragMode === "annotation-moving") {
       applyAnnotationMove(event.clientX, event.clientY);
-      renderAnnotations();
+      scheduleOverlayRender("annotations");
       return;
     }
 
-    renderSelection();
+    scheduleOverlayRender("selection");
   }
 
   function handlePointerUp(event: PointerEvent): void {
@@ -1852,6 +2355,7 @@
     }
 
     if (wasMovingAnnotation) {
+      rebuildVectorLayer();
       renderAnnotations();
       return;
     }
@@ -1881,6 +2385,12 @@
 
   function handlePointerLeave(): void {
     hideBrushPreview();
+    if (loupeFrame !== null) {
+      window.cancelAnimationFrame(loupeFrame);
+      loupeFrame = null;
+      pendingLoupePoint = null;
+    }
+    lastLoupeSampleCell = null;
     if (loupeNode) {
       loupeNode.hidden = true;
     }
@@ -2112,6 +2622,17 @@
       overlayState = null;
       compositeImage = null;
       compositeImageSource = "";
+      loupeSampleImage = null;
+      loupeSampleImageSource = "";
+      effectLayerCanvas = null;
+      effectLayerCtx = null;
+      vectorLayerCanvas = null;
+      vectorLayerCtx = null;
+      annotationCanvasCtx = null;
+      annotationCanvasPixelWidth = 0;
+      annotationCanvasPixelHeight = 0;
+      lastLoupeSampleCell = null;
+      lastWindowProbePoint = null;
       if (overlayRoot) {
         overlayRoot.style.backgroundImage = "";
         overlayRoot.dataset.ready = "false";
@@ -2145,17 +2666,25 @@
         if (typeof image.decode === "function") {
           await image.decode();
         }
+        if (overlayState !== pendingState) {
+          return;
+        }
+        loupeSampleImage = image;
+        loupeSampleImageSource = dataUrl;
+        compositeImage = image;
+        compositeImageSource = dataUrl;
+        root.style.backgroundImage = `url("${dataUrl}")`;
+        root.style.backgroundSize = backgroundSize;
+        root.dataset.ready = "true";
       } catch {
-        // Ignore decode failures and fall back to direct assignment below.
+        if (overlayState !== pendingState) {
+          return;
+        }
+        root.style.backgroundImage = `url("${dataUrl}")`;
+        root.style.backgroundSize = backgroundSize;
+        root.dataset.ready = "true";
       }
-      if (overlayState !== pendingState) {
-        return;
-      }
-      root.style.backgroundImage = `url("${dataUrl}")`;
-      root.style.backgroundSize = backgroundSize;
-      root.dataset.ready = "true";
     })();
-    void ensureCompositeImage();
     hideStatus();
   }
 

@@ -11,6 +11,7 @@ import {
   ClipboardWorkbenchSettings,
   createDefaultClipboardWorkbenchSettings
 } from "../../../shared/clipboard-workbench";
+import { applySqlitePerformancePragmas } from "../../sqlite-pragmas";
 
 type SqlParam = string | number | null;
 
@@ -267,6 +268,8 @@ export class ClipboardWorkbenchStore {
          updatedAt INTEGER NOT NULL
        )`
     );
+
+    applySqlitePerformancePragmas(this.db);
   }
 
   public async close(): Promise<void> {

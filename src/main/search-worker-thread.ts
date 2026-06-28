@@ -8,24 +8,29 @@ type UsageMap = Record<string, UsageRecord>;
 type SearchRequest =
   | {
       id: string;
-      type: "initial";
+      type: "syncState";
       catalog: LaunchItem[];
       usage: UsageMap;
+    }
+  | {
+      id: string;
+      type: "initial";
       limit: number;
     }
   | {
       id: string;
       type: "search";
       query: string;
-      catalog: LaunchItem[];
-      usage: UsageMap;
       limit: number;
       options?: SearchRequestOptions;
     };
 
 type SearchResponse =
-  | { id: string; ok: true; items: LaunchItem[] }
+  | { id: string; ok: true; items?: LaunchItem[] }
   | { id: string; ok: false; error: string };
+
+let catalog: LaunchItem[] = [];
+let usage: UsageMap = {};
 
 if (!parentPort) {
   throw new Error("search worker requires parent port");
@@ -33,13 +38,21 @@ if (!parentPort) {
 
 parentPort.on("message", (request: SearchRequest) => {
   try {
+    if (request.type === "syncState") {
+      catalog = request.catalog;
+      usage = request.usage;
+      const response: SearchResponse = { id: request.id, ok: true };
+      parentPort?.postMessage(response);
+      return;
+    }
+
     const items =
       request.type === "initial"
-        ? computeInitialItems(request.catalog, request.usage, request.limit)
+        ? computeInitialItems(catalog, usage, request.limit)
         : computeSearchItems(
             request.query,
-            request.catalog,
-            request.usage,
+            catalog,
+            usage,
             request.limit,
             request.options
           );

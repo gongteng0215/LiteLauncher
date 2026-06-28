@@ -22,6 +22,7 @@ import {
   ClipItem,
   ExecuteResult,
   LaunchItem,
+  HomeSections,
   LaunchAtLoginStatus,
   PinToggleResult,
   SearchRequestOptions,
@@ -89,6 +90,7 @@ type LiteSnapProvider = {
     input: LiteSnapCommitCaptureInput
   ) => Promise<LiteSnapCommitCaptureResult>;
   cancelCapture: () => Promise<boolean>;
+  ensureSourceImage: () => Promise<string | null>;
 };
 
 type CatalogProvider = {
@@ -133,6 +135,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getInitialItems,
   IPC_CHANNELS.getPinnedItems,
   IPC_CHANNELS.getPluginItems,
+  IPC_CHANNELS.getHomeSections,
   IPC_CHANNELS.getAppVersion,
   IPC_CHANNELS.getSearchDisplayConfig,
   IPC_CHANNELS.setSearchDisplayConfig,
@@ -148,6 +151,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapGetOverlayState,
   IPC_CHANNELS.liteSnapCommitCapture,
   IPC_CHANNELS.liteSnapCancelCapture,
+  IPC_CHANNELS.liteSnapEnsureSourceImage,
   IPC_CHANNELS.rebuildCatalog,
   IPC_CHANNELS.reportErrorLog,
   IPC_CHANNELS.getErrorLogs,
@@ -180,6 +184,9 @@ const ICON_ELIGIBLE_TYPES = new Set<LaunchItem["type"]>([
 ]);
 
 const iconDataCache = new Map<string, string>();
+const attachedIconCache = new Map<string, LaunchItem>();
+const ICON_DATA_CACHE_MAX = 512;
+const ATTACHED_ICON_CACHE_MAX = 1024;
 type ShortcutInfo = {
   target?: string;
   icon?: string;
@@ -626,6 +633,46 @@ function getIconCacheKey(iconSource: string): string {
   return iconSource.toLowerCase();
 }
 
+function readLruMapValue<T>(map: Map<string, T>, key: string): T | undefined {
+  const value = map.get(key);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  map.delete(key);
+  map.set(key, value);
+  return value;
+}
+
+function writeLruMapValue<T>(
+  map: Map<string, T>,
+  key: string,
+  value: T,
+  maxSize: number
+): void {
+  if (map.has(key)) {
+    map.delete(key);
+  }
+
+  map.set(key, value);
+  while (map.size > maxSize) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    map.delete(oldestKey);
+  }
+}
+
+function buildAttachIconCacheKey(item: LaunchItem): string {
+  const iconPath = item.iconPath?.trim() ?? "";
+  if (iconPath.startsWith("data:image/")) {
+    return `data:${item.id}`;
+  }
+
+  return `${item.id}\u0000${item.type}\u0000${item.target}\u0000${iconPath}`;
+}
+
 const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 ]);
@@ -963,7 +1010,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
   for (const candidate of candidates) {
     const iconSource = candidate.source;
     const cacheKey = getIconCacheKey(iconSource);
-    const cached = iconDataCache.get(cacheKey);
+    const cached = readLruMapValue(iconDataCache, cacheKey);
     if (cached) {
       debugIcon(
         `cache-hit reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
@@ -973,7 +1020,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
 
     const staticImageData = tryReadImageFileAsDataUrl(iconSource);
     if (staticImageData) {
-      iconDataCache.set(cacheKey, staticImageData);
+      writeLruMapValue(iconDataCache, cacheKey, staticImageData, ICON_DATA_CACHE_MAX);
       debugIcon(
         `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
       );
@@ -984,7 +1031,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
       const associatedData =
         await tryReadWindowsAssociatedIconAsDataUrl(iconSource);
       if (associatedData) {
-        iconDataCache.set(cacheKey, associatedData);
+        writeLruMapValue(iconDataCache, cacheKey, associatedData, ICON_DATA_CACHE_MAX);
         debugIcon(
           `resolved reason=${candidate.reason}:win-associated title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
         );
@@ -1000,7 +1047,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
       if (icon.isEmpty()) {
         const imageData = tryReadImageFileAsDataUrl(iconSource);
         if (imageData) {
-          iconDataCache.set(cacheKey, imageData);
+          writeLruMapValue(iconDataCache, cacheKey, imageData, ICON_DATA_CACHE_MAX);
           debugIcon(
             `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
           );
@@ -1020,7 +1067,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
         continue;
       }
 
-      iconDataCache.set(cacheKey, iconData);
+      writeLruMapValue(iconDataCache, cacheKey, iconData, ICON_DATA_CACHE_MAX);
       debugIcon(
         `resolved reason=${candidate.reason} title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
       );
@@ -1028,7 +1075,7 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
     } catch {
       const imageData = tryReadImageFileAsDataUrl(iconSource);
       if (imageData) {
-        iconDataCache.set(cacheKey, imageData);
+        writeLruMapValue(iconDataCache, cacheKey, imageData, ICON_DATA_CACHE_MAX);
         debugIcon(
           `resolved reason=${candidate.reason}:image-file title=${escapeForLog(item.title)} source=${escapeForLog(iconSource)}`
         );
@@ -1046,33 +1093,78 @@ async function resolveIconData(item: LaunchItem): Promise<string | null> {
 }
 
 async function attachIcon(item: LaunchItem): Promise<LaunchItem> {
+  const cacheKey = buildAttachIconCacheKey(item);
+  const cachedItem = readLruMapValue(attachedIconCache, cacheKey);
+  if (cachedItem) {
+    return { ...cachedItem };
+  }
+
   const sanitizedItem = stripInvalidIconPath(item);
   const hasPathIcon =
     typeof sanitizedItem.iconPath === "string" &&
     !sanitizedItem.iconPath.startsWith("data:image/");
 
   if (sanitizedItem.iconPath && sanitizedItem.iconPath.startsWith("data:image/")) {
+    writeLruMapValue(attachedIconCache, cacheKey, sanitizedItem, ATTACHED_ICON_CACHE_MAX);
     return sanitizedItem;
   }
 
   if (!ICON_ELIGIBLE_TYPES.has(sanitizedItem.type) && !hasPathIcon) {
+    writeLruMapValue(attachedIconCache, cacheKey, sanitizedItem, ATTACHED_ICON_CACHE_MAX);
     return sanitizedItem;
   }
 
   if (!sanitizedItem.target && !hasPathIcon) {
+    writeLruMapValue(attachedIconCache, cacheKey, sanitizedItem, ATTACHED_ICON_CACHE_MAX);
     return sanitizedItem;
   }
 
   const iconData = await resolveIconData(sanitizedItem);
   if (!iconData) {
-    return stripInvalidIconPath(sanitizedItem);
+    const stripped = stripInvalidIconPath(sanitizedItem);
+    writeLruMapValue(attachedIconCache, cacheKey, stripped, ATTACHED_ICON_CACHE_MAX);
+    return stripped;
   }
 
-  return { ...sanitizedItem, iconPath: iconData };
+  const resolvedItem = { ...sanitizedItem, iconPath: iconData };
+  writeLruMapValue(attachedIconCache, cacheKey, resolvedItem, ATTACHED_ICON_CACHE_MAX);
+  return resolvedItem;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+const ICON_RESOLVE_CONCURRENCY = 6;
+
 async function attachIcons(items: LaunchItem[]): Promise<LaunchItem[]> {
-  return Promise.all(items.map((item) => attachIcon(item)));
+  return mapWithConcurrency(items, ICON_RESOLVE_CONCURRENCY, (item) =>
+    attachIcon(item)
+  );
 }
 
 export function registerIpcHandlers(
@@ -1108,6 +1200,32 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getPluginItems, async () => {
     const items = await options.searchProvider.getPluginItems();
     return attachIcons(items);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getHomeSections, async () => {
+    const [recent, pinned, plugin] = await Promise.all([
+      options.searchProvider.getInitialItems(SEARCH_DISPLAY_LIMIT_MAX),
+      options.searchProvider.getPinnedItems(SEARCH_DISPLAY_LIMIT_MAX),
+      options.searchProvider.getPluginItems()
+    ]);
+
+    const mergedById = new Map<string, LaunchItem>();
+    for (const item of [...recent, ...pinned, ...plugin]) {
+      mergedById.set(item.id, item);
+    }
+
+    const withIcons = await attachIcons([...mergedById.values()]);
+    const iconById = new Map(withIcons.map((item) => [item.id, item]));
+
+    const attachSectionIcons = (items: LaunchItem[]): LaunchItem[] =>
+      items.map((item) => iconById.get(item.id) ?? item);
+
+    const sections: HomeSections = {
+      recent: attachSectionIcons(recent),
+      pinned: attachSectionIcons(pinned),
+      plugin: attachSectionIcons(plugin)
+    };
+    return sections;
   });
 
   ipcMain.handle(IPC_CHANNELS.getAppVersion, () => {
@@ -1239,6 +1357,10 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.liteSnapCancelCapture, async () => {
     return options.liteSnapProvider.cancelCapture();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapEnsureSourceImage, async () => {
+    return options.liteSnapProvider.ensureSourceImage();
   });
 
   ipcMain.handle(IPC_CHANNELS.rebuildCatalog, async () => {
