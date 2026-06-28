@@ -392,9 +392,6 @@ export class LiteSnapCaptureSessionManager {
     // frame is painted (see showInteractiveOverlay), that stale frame is never
     // visible.
     overlayWindow.setOpacity(0);
-    if (!overlayWindow.webContents.isDestroyed()) {
-      overlayWindow.webContents.setFrameRate(10);
-    }
   }
 
   private async prepareOverlayRenderer(overlayWindow: BrowserWindow): Promise<void> {
@@ -408,9 +405,9 @@ export class LiteSnapCaptureSessionManager {
     ).catch(() => undefined);
   }
 
-  private async waitForOverlayFrameReady(overlayWindow: BrowserWindow): Promise<void> {
+  private async waitForOverlayFrameReady(overlayWindow: BrowserWindow): Promise<boolean> {
     if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
-      return;
+      return false;
     }
 
     // Wait until the renderer has decoded the screenshot, applied it as the
@@ -418,7 +415,7 @@ export class LiteSnapCaptureSessionManager {
     // Without this the very first capture (which has no warmed cache) would
     // flash the overlay's flat fill color for a moment before the screenshot
     // becomes visible, making the whole screen look grey/blank.
-    const ready = overlayWindow.webContents
+    const result = await overlayWindow.webContents
       .executeJavaScript(
         `new Promise((resolve) => {
           const settle = () =>
@@ -432,7 +429,7 @@ export class LiteSnapCaptureSessionManager {
               settle();
               return;
             }
-            if (Date.now() - start > 600) {
+            if (Date.now() - start > 2500) {
               resolve(false);
               return;
             }
@@ -442,9 +439,9 @@ export class LiteSnapCaptureSessionManager {
         });`,
         true
       )
-      .catch(() => undefined);
-    const fallback = new Promise<void>((resolve) => setTimeout(resolve, 700));
-    await Promise.race([ready, fallback]);
+      .catch(() => false);
+
+    return result === true;
   }
 
   private waitForOverlayReady(overlayWindow: BrowserWindow): Promise<void> {
@@ -498,11 +495,12 @@ export class LiteSnapCaptureSessionManager {
 
     overlayWindow.setIgnoreMouseEvents(false);
     overlayWindow.setFocusable(true);
-    if (!overlayWindow.webContents.isDestroyed()) {
-      overlayWindow.webContents.setFrameRate(60);
-    }
     overlayWindow.show();
-    await this.waitForOverlayFrameReady(overlayWindow);
+    let frameReady = await this.waitForOverlayFrameReady(overlayWindow);
+    if (!frameReady) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 32));
+      frameReady = await this.waitForOverlayFrameReady(overlayWindow);
+    }
     if (overlayWindow.isDestroyed()) {
       return;
     }

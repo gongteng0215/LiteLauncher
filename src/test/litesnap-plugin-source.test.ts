@@ -535,8 +535,16 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
     /shouldRefreshIdleFrameCache\([\s\S]*getAllWindows\(\)[\s\S]*isFocused\(\)/,
     "LiteSnap frame cache refresh should pause while no LiteLauncher window is focused"
   );
-  assert.match(captureSource, /setFrameRate\(60\)/);
-  assert.match(captureSource, /setFrameRate\(10\)/);
+  assert.match(
+    captureSource,
+    /private async waitForOverlayFrameReady\([\s\S]*Promise<boolean>/,
+    "LiteSnap should report whether the overlay screenshot background is ready"
+  );
+  assert.doesNotMatch(
+    captureSource,
+    /setFrameRate\(/,
+    "LiteSnap overlay should not throttle the visible overlay renderer frame rate"
+  );
   assert.match(
     captureSource,
     /startFrameCacheRefresh\(\): void[\s\S]*scheduleNextFrameCacheRefresh\(\)/,
@@ -589,12 +597,12 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /overlayWindow\.show\(\);[\s\S]*await this\.waitForOverlayFrameReady\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(1\)/,
+    /overlayWindow\.show\(\);[\s\S]*let frameReady = await this\.waitForOverlayFrameReady\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(1\)/,
     "LiteSnap should reveal the overlay only after the new frame has painted into the transparent window"
   );
   assert.match(
     captureSource,
-    /waitForOverlayFrameReady\([\s\S]*dataset\.ready === "true"[\s\S]*requestAnimationFrame/,
+    /waitForOverlayFrameReady\([\s\S]*dataset\.ready === "true"[\s\S]*2500[\s\S]*return result === true/,
     "LiteSnap should wait for the renderer to decode and mark the screenshot ready before revealing the overlay"
   );
 });
