@@ -1852,7 +1852,10 @@
     }
 
     const hasRegionEffects = hasBakedRegionEffects();
-    const image = await ensureCompositeImage(hasRegionEffects);
+    // Always composite annotations onto the full-resolution source image so the
+    // exported/copied screenshot stays sharp. Using the low-resolution preview
+    // here (as an optimization) made annotated captures look blurry.
+    const image = await ensureCompositeImage(true);
     if (!image) {
       return null;
     }

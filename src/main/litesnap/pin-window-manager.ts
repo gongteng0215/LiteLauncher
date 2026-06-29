@@ -497,17 +497,34 @@ export class LiteSnapPinWindowManager {
 
   private async revealPinWindow(window: BrowserWindow): Promise<void> {
     await new Promise<void>((resolve) => {
-      if (window.isDestroyed()) {
+      if (window.isDestroyed() || window.isVisible()) {
         resolve();
         return;
       }
 
-      if (window.isVisible()) {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         resolve();
+      };
+
+      // The pin HTML has already finished loading before revealPinWindow runs,
+      // so if the webContents is idle we can show immediately. A reused
+      // prewarmed window already emitted "ready-to-show" for its about:blank
+      // load and will not emit it again, so relying solely on that event would
+      // hang the second pin onward. Keep the event as a fast path but always
+      // fall back to a short timer so the window is guaranteed to appear.
+      if (!window.webContents.isLoading()) {
+        finish();
         return;
       }
 
-      window.once("ready-to-show", () => resolve());
+      window.once("ready-to-show", finish);
+      const timer = setTimeout(finish, 150);
+      timer.unref?.();
     });
 
     if (!window.isDestroyed()) {
