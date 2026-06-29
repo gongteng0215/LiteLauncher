@@ -183,7 +183,7 @@ export class LiteSnapCaptureSessionManager {
     this.session.previewImage = resolvedFrames.previewImage;
     this.session.previewImageDataUrl = resolvedFrames.previewImageDataUrl;
     this.session.sourceImage = resolvedFrames.sourceImage;
-    this.session.sourceImageDataUrl = null;
+    this.session.sourceImageDataUrl = resolvedFrames.sourceImage.toDataURL();
 
     if (resolvedFrames.fromCache) {
       this.warmDisplayFrameCache(display);
@@ -211,7 +211,7 @@ export class LiteSnapCaptureSessionManager {
     const settings = this.session.settings;
     return {
       captureId: this.session.captureId,
-      imageDataUrl: this.session.previewImageDataUrl,
+      imageDataUrl: this.session.sourceImageDataUrl ?? this.session.previewImageDataUrl,
       sourceImageDataUrl: this.session.sourceImageDataUrl,
       viewportWidth: this.session.display.bounds.width,
       viewportHeight: this.session.display.bounds.height,

@@ -4041,7 +4041,6 @@ function renderWebtoolsCronPanelV2(): void {
     activePluginPanel?.subtitle || "定时表达式解析、模板套用与未来执行预览。";
 
   const cronFieldMeta = getWebtoolsCronFieldMeta();
-  const cronTemplates = getWebtoolsCronTemplates();
 
   const form = document.createElement("form");
   form.className = "settings-form webtools-cron-form";
@@ -4146,29 +4145,85 @@ function renderWebtoolsCronPanelV2(): void {
   templatesHead.append(templatesTitle, templatesMeta);
   const templateGrid = document.createElement("div");
   templateGrid.className = "webtools-cron-template-grid";
-  cronTemplates.forEach((template) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.value = template.key;
-    button.className =
-      template.key === webtoolsCronTemplateKey
-        ? "settings-btn webtools-cron-template-chip is-active"
-        : "settings-btn webtools-cron-template-chip";
-    button.setAttribute("data-webtools-cron-template", template.key);
-    button.textContent = template.summary;
-    button.addEventListener("click", () => {
-      const expressionNode = form.elements.namedItem("webtoolsCronExpression");
-      if (expressionNode instanceof HTMLInputElement) {
-        expressionNode.value = template.expression;
-      }
-      void executeWebtoolsCronAction("parse", template.expression, {
-        render: false,
-        form
-      });
-    });
-    templateGrid.appendChild(button);
+  renderWebtoolsCronTemplateGrid(templateGrid, form);
+
+  const templateEditorRow = document.createElement("div");
+  templateEditorRow.className = "webtools-cron-template-editor-row";
+
+  const summaryField = document.createElement("label");
+  summaryField.className = "webtools-cron-template-editor-field";
+  const summaryLabel = document.createElement("span");
+  summaryLabel.textContent = "名称";
+  const summaryInput = document.createElement("input");
+  summaryInput.className = "settings-value";
+  summaryInput.name = "webtoolsCronTemplateSummary";
+  summaryInput.placeholder = "例如：每 15 分钟";
+  summaryField.append(summaryLabel, summaryInput);
+
+  const templateExpressionField = document.createElement("label");
+  templateExpressionField.className = "webtools-cron-template-editor-field";
+  const templateExpressionLabel = document.createElement("span");
+  templateExpressionLabel.textContent = "表达式";
+  const templateExpressionInput = document.createElement("input");
+  templateExpressionInput.className = "settings-value";
+  templateExpressionInput.name = "webtoolsCronTemplateExpression";
+  templateExpressionInput.placeholder = "0 */15 * * *";
+  templateExpressionField.append(templateExpressionLabel, templateExpressionInput);
+
+  const templateEditorActions = document.createElement("div");
+  templateEditorActions.className = "webtools-cron-template-editor-actions";
+
+  const useCurrentExpressionButton = document.createElement("button");
+  useCurrentExpressionButton.type = "button";
+  useCurrentExpressionButton.className = "settings-btn settings-btn-secondary";
+  useCurrentExpressionButton.textContent = "用当前表达式";
+  useCurrentExpressionButton.addEventListener("click", () => {
+    const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+    if (expressionNode instanceof HTMLInputElement) {
+      templateExpressionInput.value = expressionNode.value;
+    }
+    if (!summaryInput.value.trim() && webtoolsCronReadable.trim()) {
+      summaryInput.value = webtoolsCronReadable.trim().slice(0, 40);
+    }
   });
-  templatesSection.append(templatesHead, templateGrid);
+
+  const saveTemplateButton = document.createElement("button");
+  saveTemplateButton.type = "button";
+  saveTemplateButton.className = "settings-btn settings-btn-primary";
+  saveTemplateButton.setAttribute("data-webtools-cron-template-save", "true");
+  saveTemplateButton.textContent = "保存模板";
+  saveTemplateButton.addEventListener("click", () => {
+    const editorValues = readWebtoolsCronTemplateEditorValues(form);
+    const action: WebtoolsCronTemplateAction = webtoolsCronEditingTemplateKey
+      ? "update-template"
+      : "save-template";
+    void executeWebtoolsCronTemplateAction(
+      action,
+      {
+        summary: editorValues.summary,
+        expression: editorValues.expression,
+        key: webtoolsCronEditingTemplateKey
+      },
+      form
+    );
+  });
+
+  const resetTemplatesButton = document.createElement("button");
+  resetTemplatesButton.type = "button";
+  resetTemplatesButton.className =
+    "settings-btn settings-btn-secondary webtools-cron-template-reset";
+  resetTemplatesButton.textContent = "恢复默认";
+  resetTemplatesButton.addEventListener("click", () => {
+    void executeWebtoolsCronTemplateAction("reset-templates", {}, form);
+  });
+
+  templateEditorActions.append(
+    useCurrentExpressionButton,
+    saveTemplateButton,
+    resetTemplatesButton
+  );
+  templateEditorRow.append(summaryField, templateExpressionField, templateEditorActions);
+  templatesSection.append(templatesHead, templateGrid, templateEditorRow);
 
   const fieldsSection = document.createElement("section");
   fieldsSection.className = "webtools-cron-section";
@@ -4307,6 +4362,7 @@ function renderWebtoolsCronPanelV2(): void {
   list.appendChild(panelItem);
 
   refreshWebtoolsCronResultInForm(form);
+  refreshWebtoolsCronTemplatesInForm(form);
   scheduleWebtoolsCronAutoParse(form, true);
 }
 
@@ -6563,6 +6619,20 @@ let webtoolsCronFieldMeta: WebtoolsCronFieldMeta[] = [];
 let webtoolsCronCopyState: WebtoolsCronCopyState = "";
 let webtoolsCronAutoTimer: number | null = null;
 let webtoolsCronRequestToken = 0;
+let webtoolsCronTemplates: WebtoolsCronTemplateItem[] = [];
+let webtoolsCronEditingTemplateKey = "";
+
+type WebtoolsCronTemplateAction =
+  | "save-template"
+  | "update-template"
+  | "delete-template"
+  | "reset-templates";
+
+type WebtoolsCronTemplateItem = {
+  key: string;
+  expression: string;
+  summary: string;
+};
 
 const WEBTOOLS_CRON_FIELD_FALLBACKS: ReadonlyArray<{
   key: WebtoolsCronFieldKey;
@@ -6576,17 +6646,35 @@ const WEBTOOLS_CRON_FIELD_FALLBACKS: ReadonlyArray<{
   { key: "weekday", label: "Weekday", hint: "Weekday (0-6)" }
 ];
 
-const WEBTOOLS_CRON_TEMPLATES: ReadonlyArray<{
-  key: string;
-  expression: string;
-  summary: string;
-}> = [
-  { key: "weekday-9am", expression: "0 9 * * 1-5", summary: "工作日 09:00 执行" },
-  { key: "daily-noon", expression: "0 12 * * *", summary: "每天 12:00 执行" },
-  { key: "daily-midnight", expression: "0 0 * * *", summary: "每天 00:00 执行" },
-  { key: "hourly-top", expression: "0 * * * *", summary: "每小时整点执行" },
-  { key: "every-minute", expression: "* * * * *", summary: "每分钟执行" }
-];
+function parseWebtoolsCronTemplates(value: unknown): WebtoolsCronTemplateItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const record = toRecord(item);
+      if (!record) {
+        return null;
+      }
+      const key = typeof record.key === "string" ? record.key.trim() : "";
+      const summary = typeof record.summary === "string" ? record.summary.trim() : "";
+      const expression =
+        typeof record.expression === "string" ? record.expression.trim() : "";
+      if (!key || !summary || !expression) {
+        return null;
+      }
+      return { key, summary, expression };
+    })
+    .filter((item): item is WebtoolsCronTemplateItem => item !== null);
+}
+
+function hydrateWebtoolsCronTemplates(data: Record<string, unknown> | null): void {
+  const templates = data ? parseWebtoolsCronTemplates(data.templates) : [];
+  if (templates.length > 0) {
+    webtoolsCronTemplates = templates;
+  }
+}
 
 function normalizeWebtoolsCronStatus(value: unknown): WebtoolsCronStatus {
   return value === "success" || value === "warning" || value === "error" ? value : "";
@@ -6666,12 +6754,189 @@ function getWebtoolsCronFieldMeta(): WebtoolsCronFieldMeta[] {
     : buildWebtoolsCronFallbackFieldMeta(webtoolsCronExpression, webtoolsCronErrorField);
 }
 
-function getWebtoolsCronTemplates(): ReadonlyArray<{
-  key: string;
-  expression: string;
+function getWebtoolsCronTemplates(): ReadonlyArray<WebtoolsCronTemplateItem> {
+  return webtoolsCronTemplates;
+}
+
+function buildWebtoolsCronTemplateTarget(
+  action: WebtoolsCronTemplateAction,
+  input: { expression?: string; summary?: string; key?: string }
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  if (input.expression?.trim()) {
+    params.set("expression", input.expression.trim());
+  }
+  if (input.summary?.trim()) {
+    params.set("summary", input.summary.trim());
+  }
+  if (input.key?.trim()) {
+    params.set("key", input.key.trim());
+  }
+  return `command:plugin:${WEBTOOLS_CRON_PLUGIN_ID}?${params.toString()}`;
+}
+
+function readWebtoolsCronTemplateEditorValues(form: HTMLFormElement): {
   summary: string;
-}> {
-  return WEBTOOLS_CRON_TEMPLATES;
+  expression: string;
+} {
+  const summaryNode = form.elements.namedItem("webtoolsCronTemplateSummary");
+  const expressionNode = form.elements.namedItem("webtoolsCronTemplateExpression");
+  return {
+    summary: summaryNode instanceof HTMLInputElement ? summaryNode.value.trim() : "",
+    expression:
+      expressionNode instanceof HTMLInputElement ? expressionNode.value.trim() : ""
+  };
+}
+
+function fillWebtoolsCronTemplateEditor(
+  form: HTMLFormElement,
+  template: WebtoolsCronTemplateItem | null
+): void {
+  webtoolsCronEditingTemplateKey = template?.key ?? "";
+  const summaryNode = form.elements.namedItem("webtoolsCronTemplateSummary");
+  const expressionNode = form.elements.namedItem("webtoolsCronTemplateExpression");
+  const saveButton = form.querySelector<HTMLButtonElement>("[data-webtools-cron-template-save]");
+  if (summaryNode instanceof HTMLInputElement) {
+    summaryNode.value = template?.summary ?? "";
+  }
+  if (expressionNode instanceof HTMLInputElement) {
+    expressionNode.value = template?.expression ?? "";
+  }
+  if (saveButton) {
+    saveButton.textContent = template ? "更新模板" : "保存模板";
+  }
+}
+
+function renderWebtoolsCronTemplateGrid(
+  templateGrid: HTMLDivElement,
+  form: HTMLFormElement
+): void {
+  templateGrid.replaceChildren();
+  getWebtoolsCronTemplates().forEach((template) => {
+    const item = document.createElement("div");
+    item.className = "webtools-cron-template-item has-delete";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className =
+      template.key === webtoolsCronEditingTemplateKey ||
+      template.key === webtoolsCronTemplateKey
+        ? "settings-btn webtools-cron-template-chip is-active"
+        : "settings-btn webtools-cron-template-chip";
+    button.setAttribute("data-webtools-cron-template", template.key);
+    button.textContent = template.summary;
+    button.title = template.expression;
+    button.addEventListener("click", () => {
+      fillWebtoolsCronTemplateEditor(form, template);
+      const expressionNode = form.elements.namedItem("webtoolsCronExpression");
+      if (expressionNode instanceof HTMLInputElement) {
+        expressionNode.value = template.expression;
+      }
+      renderWebtoolsCronTemplateGrid(templateGrid, form);
+      void executeWebtoolsCronAction("parse", template.expression, {
+        render: false,
+        form
+      });
+    });
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "settings-btn webtools-cron-template-delete";
+    deleteButton.setAttribute("data-webtools-cron-template-delete", template.key);
+    deleteButton.setAttribute("aria-label", `删除模板 ${template.summary}`);
+    deleteButton.textContent = "×";
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void executeWebtoolsCronTemplateAction("delete-template", { key: template.key }, form);
+    });
+
+    item.append(button, deleteButton);
+    templateGrid.appendChild(item);
+  });
+}
+
+function refreshWebtoolsCronTemplatesInForm(form: HTMLFormElement): void {
+  const templateGrid = form.querySelector<HTMLDivElement>(".webtools-cron-template-grid");
+  if (templateGrid) {
+    renderWebtoolsCronTemplateGrid(templateGrid, form);
+  }
+  fillWebtoolsCronTemplateEditor(
+    form,
+    webtoolsCronEditingTemplateKey
+      ? getWebtoolsCronTemplates().find((item) => item.key === webtoolsCronEditingTemplateKey) ??
+          null
+      : null
+  );
+}
+
+async function executeWebtoolsCronTemplateAction(
+  action: WebtoolsCronTemplateAction,
+  input: { expression?: string; summary?: string; key?: string },
+  form: HTMLFormElement
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 Cron 工具");
+    return;
+  }
+
+  if (action === "reset-templates") {
+    const confirmed = window.confirm("确定恢复为默认 5 个模板吗？当前自定义内容将被覆盖。");
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const editorValues = readWebtoolsCronTemplateEditorValues(form);
+  const expression =
+    input.expression?.trim() ||
+    editorValues.expression ||
+    webtoolsCronExpression;
+  const summary = input.summary?.trim() || editorValues.summary;
+  const requestToken = ++webtoolsCronRequestToken;
+
+  const item: LaunchItem = {
+    id: `plugin:${WEBTOOLS_CRON_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "Cron 生成器",
+    subtitle: "模板管理",
+    target: buildWebtoolsCronTemplateTarget(action, {
+      expression,
+      summary,
+      key: input.key ?? webtoolsCronEditingTemplateKey
+    }),
+    keywords: ["plugin", "cron", "template", "定时", "表达式"]
+  };
+
+  const result = await launcher.execute(item);
+  if (requestToken !== webtoolsCronRequestToken) {
+    return;
+  }
+
+  const data = toRecord(result.data);
+  hydrateWebtoolsCronTemplates(data);
+  if (data && typeof data.expression === "string") {
+    hydrateWebtoolsCronState(data);
+  }
+
+  if (action === "delete-template") {
+    if (webtoolsCronEditingTemplateKey === input.key) {
+      webtoolsCronEditingTemplateKey = "";
+    }
+  } else if (action === "reset-templates" && result.ok) {
+    webtoolsCronEditingTemplateKey = "";
+  } else if (
+    (action === "save-template" || action === "update-template") &&
+    result.ok
+  ) {
+    const saved = getWebtoolsCronTemplates().find((item) => item.expression === expression);
+    webtoolsCronEditingTemplateKey = saved?.key ?? "";
+  }
+
+  setStatus(result.message ?? (result.ok ? "模板操作完成" : "模板操作失败"));
+  refreshWebtoolsCronTemplatesInForm(form);
+  refreshWebtoolsCronResultInForm(form);
 }
 
 function rebuildWebtoolsCronExpressionFromFields(form: HTMLFormElement): string {
@@ -6743,6 +7008,7 @@ function hydrateWebtoolsCronState(data: Record<string, unknown> | null): void {
     webtoolsCronExpression,
     webtoolsCronErrorField
   );
+  hydrateWebtoolsCronTemplates(data);
 }
 
 function buildWebtoolsCronTarget(action: "parse" | "random", expression: string): string {
@@ -6790,7 +7056,9 @@ function refreshWebtoolsCronResultInForm(form: HTMLFormElement): void {
   form
     .querySelectorAll<HTMLButtonElement>("[data-webtools-cron-template]")
     .forEach((button) => {
-      const active = button.dataset.webtoolsCronTemplate === webtoolsCronTemplateKey;
+      const active =
+        button.dataset.webtoolsCronTemplate === webtoolsCronTemplateKey ||
+        button.dataset.webtoolsCronTemplate === webtoolsCronEditingTemplateKey;
       button.classList.toggle("is-active", active);
     });
 
@@ -12385,7 +12653,7 @@ const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
     annotationTool: "select",
     annotationFillShapes: false
   },
-  statusMessage: "LiteSnap 首批骨架已接入，可继续补截图、标注和贴图能力。"
+  statusMessage: "按 F1 进入截图，主窗口会保持可见，便于截取启动器界面。"
 };
 
 let liteSnapPanelData: LiteSnapPanelData = {
@@ -12790,6 +13058,26 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   renderList();
 }
 
+async function hydrateLiteSnapPanelFromSettings(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.getLiteSnapSettings) {
+    return;
+  }
+
+  try {
+    const settings = await launcher.getLiteSnapSettings();
+    liteSnapPanelData = normalizeLiteSnapPanelData({
+      ...liteSnapPanelData,
+      settings
+    });
+    if (activePluginPanel?.pluginId === LITESNAP_PLUGIN_ID) {
+      renderList();
+    }
+  } catch {
+    // Keep the last known panel state if settings cannot be loaded.
+  }
+}
+
 async function executeLiteSnapPanelAction(
   action:
     | "start-capture"
@@ -12809,9 +13097,8 @@ async function executeLiteSnapPanelAction(
   }
 
   if (action === "start-capture") {
-    await launcher.hide();
     const ok = await launcher.liteSnapStartCapture();
-    setStatus(ok ? "已启动系统截图，完成后可直接粘贴使用。" : "LiteSnap 截图启动失败。");
+    setStatus(ok ? "已进入截图模式，主窗口保持可见。" : "LiteSnap 截图启动失败。");
     return;
   }
 
@@ -12860,15 +13147,18 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     },
     "form.clipboard-workbench-form"
   ),
-  [LITESNAP_PLUGIN_ID]: createSubmitPluginPanelHandler(
-    () => {
+  [LITESNAP_PLUGIN_ID]: {
+    render: () => {
       getRegisteredPanelImpls().renderLiteSnapPanel();
     },
-    (panel) => {
+    onOpen: (panel) => {
       getRegisteredPanelImpls().applyLiteSnapPanelPayload(panel);
+      void hydrateLiteSnapPanelFromSettings();
     },
-    "form.litesnap-form"
-  ),
+    onEnter: runWithPluginForm("form.litesnap-form", (form) => {
+      form.requestSubmit();
+    })
+  },
   [WEBTOOLS_PASSWORD_PLUGIN_ID]: createSubmitPluginPanelHandler(
     () => {
       getRegisteredPanelImpls().renderWebtoolsPasswordPanel();
@@ -14421,7 +14711,7 @@ window.__LL_PANEL_IMPLS__ = {
     description.className = "settings-description";
     description.textContent =
       activePluginPanel?.subtitle ||
-      "先把截图、贴图和设置入口打通，后续继续补完整 overlay 与标注能力。";
+      "快速截图、基础标注、复制、保存与贴图。";
 
     const form = document.createElement("form");
     form.className = "settings-form litesnap-form";
@@ -14595,25 +14885,26 @@ window.__LL_PANEL_IMPLS__ = {
       form.append(settingsStatusRow, shortcutStatusRow, ...settingsRows, settingsActions);
     } else {
       const statusRow = createLiteSnapInfoRow(
-        "当前状态",
-        liteSnapPanelData.statusMessage
+        "使用提示",
+        "按 F1 进入截图时，主窗口会保持可见，便于截取启动器界面。",
+        "也可在设置中调整快捷键、保存目录与截图后动作"
       );
       const saveDirectory = liteSnapPanelData.settings.saveDirectory.trim();
       const settingsRows = [
         createLiteSnapInfoRow(
           "截图快捷键",
           liteSnapPanelData.settings.screenshotShortcut,
-          "首版按 Snipaste 风格预设为 F1"
+          "默认 F1"
         ),
         createLiteSnapInfoRow(
           "贴图快捷键",
           liteSnapPanelData.settings.pinShortcut,
-          "首版按 Snipaste 风格预设为 F3"
+          "默认 F3"
         ),
         createLiteSnapInfoRow(
           "保存格式",
           liteSnapPanelData.settings.saveFormat.toUpperCase(),
-          saveDirectory ? `保存目录：${saveDirectory}` : "保存目录稍后接入设置持久化"
+          saveDirectory ? `保存目录：${saveDirectory}` : "默认保存到图片/LiteSnap"
         ),
         createLiteSnapInfoRow(
           "截图后动作",
@@ -14624,7 +14915,7 @@ window.__LL_PANEL_IMPLS__ = {
         createLiteSnapInfoRow(
           "标注预设",
           `${liteSnapPanelData.settings.annotationColor} / ${liteSnapPanelData.settings.annotationLineWidth}px / ${liteSnapPanelData.settings.annotationTextSize}px`,
-          "用于后续标注工具默认样式"
+          "标注工具的默认颜色、线宽与字号"
         )
       ];
 
@@ -21498,6 +21789,7 @@ window.__LL_PANEL_IMPLS__ = {
 
   applyWebtoolsCronPanelPayload(panel: ActivePluginPanelState): void {
     const data = toRecord(panel.data);
+    hydrateWebtoolsCronTemplates(data);
     resetWebtoolsCronState(
       data && typeof data.expression === "string" ? data.expression : webtoolsCronExpression
     );

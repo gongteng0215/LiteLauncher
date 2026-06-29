@@ -104,31 +104,33 @@ function parseAction(optionsText: string | undefined): LiteSnapPanelAction {
 
 function createPanelPayload(action: LiteSnapPanelAction): LiteSnapPanelPayload {
   const settings = createDefaultLiteSnapSettings();
+  const statusMessage =
+    "按 F1 进入截图，主窗口会保持可见，便于截取启动器界面。";
 
   switch (action) {
     case "start-capture":
       return {
         settings,
-        statusMessage: "LiteSnap 截图入口已接通，下一步补截图 Overlay。",
+        statusMessage,
         preferredView: "main"
       };
     case "pin-from-clipboard":
       return {
         settings,
-        statusMessage: "LiteSnap 贴图入口已接通，下一步补剪贴板图片贴图窗口。",
+        statusMessage: "按 F3 可将剪贴板图片贴到屏幕上。",
         preferredView: "main"
       };
     case "open-settings":
       return {
         settings,
-        statusMessage: "LiteSnap 设置入口已接通，后续补完整设置持久化。",
+        statusMessage: "可在此调整快捷键、保存目录与标注预设。",
         preferredView: "settings"
       };
     case "open":
     default:
       return {
         settings,
-        statusMessage: "LiteSnap 首批骨架已接入，可继续补截图、标注和贴图能力。",
+        statusMessage,
         preferredView: "main"
       };
   }

@@ -497,13 +497,18 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.session\.sourceImageDataUrl = null;/,
-    "LiteSnap should keep the full source image in main memory without eagerly encoding it for the overlay"
+    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.session\.sourceImageDataUrl = resolvedFrames\.sourceImage\.toDataURL\(\);/,
+    "LiteSnap should eagerly encode the full source image so the visible overlay background stays sharp"
+  );
+  assert.match(
+    captureSource,
+    /imageDataUrl: this\.session\.sourceImageDataUrl \?\? this\.session\.previewImageDataUrl/,
+    "LiteSnap overlay state should prefer the full-resolution source image over the low-resolution preview"
   );
   assert.match(
     captureSource,
     /public ensureSourceImageDataUrl\(\): string \| null/,
-    "LiteSnap should lazily expose the full source image only when the overlay needs it"
+    "LiteSnap should still expose the full source image to renderer tools that request it"
   );
   assert.match(
     captureSource,
@@ -719,6 +724,11 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     mainIndexSource,
     /const started = await liteSnapCaptureSessionManager\.startCapture[\s\S]*if \(started\) \{[\s\S]*liteSnapCaptureSessionManager\.startFrameCacheRefresh\(\);/,
     "LiteSnap should start follow-up frame-cache refresh only after the first real capture starts"
+  );
+  assert.doesNotMatch(
+    mainIndexSource,
+    /startCapture\(async[\s\S]{0,200}launcherWindow\.hide\(\)/,
+    "LiteSnap capture should keep the launcher window visible"
   );
   assert.match(
     mainIndexSource,

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CRON_DEFAULT_TEMPLATES } from "../shared/webtools-cron";
 import { __cronTestUtils } from "../main/plugins/webtools-cron/index";
 
 test("parse returns success state for common weekday schedule", () => {
+  __cronTestUtils.setTemplateCache([...CRON_DEFAULT_TEMPLATES]);
   const result = __cronTestUtils.parseCronExpression("0 9 * * 1-5");
   assert.equal(result.status, "success");
   assert.equal(result.errorMessage, "");
@@ -44,7 +46,21 @@ test("parse returns warning state for every-minute schedules", () => {
 });
 
 test("quick preset generation builds a matching expression", () => {
+  __cronTestUtils.setTemplateCache([...CRON_DEFAULT_TEMPLATES]);
   const preset = __cronTestUtils.applyTemplate("weekday-9am");
   assert.equal(preset.expression, "0 9 * * 1-5");
   assert.equal(preset.templateKey, "weekday-9am");
+});
+
+test("matchTemplate uses persisted templates after preset update", () => {
+  const templates = CRON_DEFAULT_TEMPLATES.map((item) =>
+    item.key === "weekday-9am"
+      ? { ...item, summary: "早会提醒", expression: "30 8 * * 1-5" }
+      : { ...item }
+  );
+  __cronTestUtils.setTemplateCache(templates);
+  const matched = __cronTestUtils.matchTemplate("30 8 * * 1-5");
+  assert.ok(matched);
+  assert.equal(matched?.key, "weekday-9am");
+  assert.equal(matched?.summary, "早会提醒");
 });

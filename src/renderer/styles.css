@@ -8359,6 +8359,60 @@ body {
   gap: 6px;
 }
 
+.webtools-cron-template-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.webtools-cron-template-item .webtools-cron-template-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.webtools-cron-template-delete {
+  flex: 0 0 auto;
+  min-width: 28px;
+  padding: 0 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.webtools-cron-template-editor-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(160px, 1.2fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 8px;
+}
+
+.webtools-cron-template-editor-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.webtools-cron-template-editor-field > span {
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.webtools-cron-template-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.webtools-cron-template-editor-actions .settings-btn {
+  white-space: nowrap;
+}
+
+.webtools-cron-template-reset {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .webtools-cron-template-chip {
   justify-content: flex-start;
   min-height: 30px;
@@ -8398,10 +8452,15 @@ body {
   min-width: 0;
 }
 
-.webtools-cron-guide-list,
 .webtools-cron-results-grid {
   display: grid;
   gap: 6px;
+}
+
+.webtools-cron-guide-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
 }
 
 .webtools-cron-guide-section {
@@ -8411,16 +8470,26 @@ body {
 .webtools-cron-guide-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  padding: 7px 8px;
+  padding: 8px 10px;
   border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
 }
 
 .webtools-cron-guide-token {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(125, 211, 252, 0.32);
+  background: rgba(14, 165, 233, 0.14);
   color: #7dd3fc;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -8506,6 +8575,14 @@ body {
   }
 
   .webtools-cron-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .webtools-cron-template-editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .webtools-cron-template-editor-actions {
     justify-content: flex-start;
   }
 }

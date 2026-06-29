@@ -165,8 +165,18 @@ test("LiteSnap panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     panelImplsSource,
-    /\[LITESNAP_PLUGIN_ID\]:\s*createSubmitPluginPanelHandler\(/,
+    /\[LITESNAP_PLUGIN_ID\]:\s*\{/,
     "LiteSnap should render through panelImplsSafe"
+  );
+  assert.match(
+    panelImplsSource,
+    /void hydrateLiteSnapPanelFromSettings\(\);/,
+    "LiteSnap panel should hydrate persisted settings when opened"
+  );
+  assert.doesNotMatch(
+    panelImplsSource,
+    /liteSnapStartCapture[\s\S]{0,120}launcher\.hide\(\)/,
+    "LiteSnap panel capture should not hide the launcher window"
   );
   assert.match(panelImplsSource, /applyLiteSnapPanelPayload\(panel: unknown\): void/);
   assert.match(panelImplsSource, /renderLiteSnapPanel\(\): void/);
@@ -2032,6 +2042,42 @@ test("Cron panel keeps editing on the left, results on the right, and syntax hel
     stylesSource,
     /\.webtools-cron-guide-section\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1;/,
     "Cron syntax help should explicitly span the full width below the workspace"
+  );
+});
+
+test("Cron panel exposes editable template list with save, update, delete, and reset flows", () => {
+  const panelImplsSource = readPanelImplsSource();
+  const stylesSource = readRendererStylesSource();
+
+  assert.match(
+    panelImplsSource,
+    /templatesSection\.append\(templatesHead,\s*templateGrid,\s*templateEditorRow\);/,
+    "Cron templates should render chips and an editor row in the left column"
+  );
+  assert.match(
+    panelImplsSource,
+    /async function executeWebtoolsCronTemplateAction/,
+    "Cron template CRUD should execute through plugin-panel-impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /buildWebtoolsCronTemplateTarget\([\s\S]*"update-template"/s,
+    "Cron template editor should support update-template actions"
+  );
+  assert.match(
+    panelImplsSource,
+    /executeWebtoolsCronTemplateAction\("reset-templates"/,
+    "Cron template editor should expose reset-templates"
+  );
+  assert.match(
+    panelImplsSource,
+    /hydrateWebtoolsCronTemplates\(/,
+    "Cron panel should hydrate persisted templates from open/CRUD payloads"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-cron-template-editor-row\s*\{/,
+    "Cron template editor row should have dedicated styling"
   );
 });
 

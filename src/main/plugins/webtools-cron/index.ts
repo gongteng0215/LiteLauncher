@@ -2,16 +2,27 @@ import { randomInt } from "node:crypto";
 
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
+import { CRON_DEFAULT_TEMPLATES, CronTemplateItem } from "../../../shared/webtools-cron";
 import { getWebtoolsIconDataUrl } from "../webtools-shared";
 import { LauncherPlugin } from "../types";
+import { getWebtoolsCronStore, isWebtoolsCronStoreReady } from "./store";
 
-type CronAction = "open" | "parse" | "random";
+type CronAction =
+  | "open"
+  | "parse"
+  | "random"
+  | "save-template"
+  | "update-template"
+  | "delete-template"
+  | "reset-templates";
 type CronStatus = "success" | "warning" | "error";
 type CronFieldName = "minute" | "hour" | "day" | "month" | "weekday";
 
 interface CronCommand {
   action: CronAction;
   expression: string;
+  key: string;
+  summary: string;
 }
 
 interface CronFieldMeta {
@@ -44,12 +55,6 @@ interface CronFieldConfig {
   max: number;
 }
 
-interface CronTemplate {
-  key: string;
-  expression: string;
-  summary: string;
-}
-
 class CronFieldParseError extends Error {
   field: CronFieldName;
 
@@ -61,6 +66,12 @@ class CronFieldParseError extends Error {
 
 const PLUGIN_ID = "webtools-cron";
 const ACTION_OPEN: CronAction = "open";
+const TEMPLATE_ACTIONS = new Set<CronAction>([
+  "save-template",
+  "update-template",
+  "delete-template",
+  "reset-templates"
+]);
 const QUERY_ALIASES = ["wt-cron", "cron-tool", "cron", "定时", "表达式"];
 const DEFAULT_EXPRESSION = "5 4 * * *";
 const MAX_SEARCH_MINUTES = 366 * 24 * 60;
@@ -73,37 +84,68 @@ const CRON_FIELDS: readonly CronFieldConfig[] = [
   { key: "month", label: "月", rangeLabel: "1-12", min: 1, max: 12 },
   { key: "weekday", label: "周", rangeLabel: "0-6", min: 0, max: 6 }
 ];
-const CRON_TEMPLATES: readonly CronTemplate[] = [
-  { key: "weekday-9am", expression: "0 9 * * 1-5", summary: "工作日 09:00 执行" },
-  { key: "daily-noon", expression: "0 12 * * *", summary: "每天 12:00 执行" },
-  { key: "daily-midnight", expression: "0 0 * * *", summary: "每天 00:00 执行" },
-  { key: "hourly-top", expression: "0 * * * *", summary: "每小时整点执行" },
-  { key: "every-minute", expression: "* * * * *", summary: "每分钟执行" }
-];
 
-function buildTarget(action: CronAction, expression = ""): string {
+let cachedTemplates: CronTemplateItem[] = [];
+
+function buildTarget(action: CronAction, expression = "", extra?: Record<string, string>): string {
   const params = new URLSearchParams();
   params.set("action", action);
   if (expression.trim()) {
     params.set("expression", expression);
+  }
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (value.trim()) {
+        params.set(key, value);
+      }
+    }
   }
   return `command:plugin:${PLUGIN_ID}?${params.toString()}`;
 }
 
 function parseCommand(optionsText: string | undefined): CronCommand {
   if (!optionsText) {
-    return { action: ACTION_OPEN, expression: DEFAULT_EXPRESSION };
+    return {
+      action: ACTION_OPEN,
+      expression: DEFAULT_EXPRESSION,
+      key: "",
+      summary: ""
+    };
   }
 
   const params = new URLSearchParams(optionsText);
   const actionRaw = (params.get("action") ?? ACTION_OPEN).trim().toLowerCase();
-  const action: CronAction =
-    actionRaw === "parse" || actionRaw === "random" ? actionRaw : ACTION_OPEN;
+  let action: CronAction = ACTION_OPEN;
+  if (
+    actionRaw === "parse" ||
+    actionRaw === "random" ||
+    actionRaw === "save-template" ||
+    actionRaw === "update-template" ||
+    actionRaw === "delete-template" ||
+    actionRaw === "reset-templates"
+  ) {
+    action = actionRaw;
+  }
 
   return {
     action,
-    expression: (params.get("expression") ?? DEFAULT_EXPRESSION).trim()
+    expression: (params.get("expression") ?? DEFAULT_EXPRESSION).trim(),
+    key: (params.get("key") ?? "").trim(),
+    summary: (params.get("summary") ?? "").trim()
   };
+}
+
+async function refreshTemplateCache(): Promise<CronTemplateItem[]> {
+  if (!isWebtoolsCronStoreReady()) {
+    cachedTemplates = CRON_DEFAULT_TEMPLATES.map((item) => ({ ...item }));
+    return cachedTemplates.map((item) => ({ ...item }));
+  }
+  cachedTemplates = await getWebtoolsCronStore().getTemplates();
+  return cachedTemplates.map((item) => ({ ...item }));
+}
+
+function getTemplateCache(): CronTemplateItem[] {
+  return cachedTemplates.map((item) => ({ ...item }));
 }
 
 function matchesAlias(query: string): boolean {
@@ -370,8 +412,8 @@ function buildReadable(parts: string[]): string {
   return `分钟:${formatToken(minute)} 小时:${formatToken(hour)} 日:${formatToken(day)} 月:${formatToken(month)} 周:${formatToken(week)}`;
 }
 
-function matchTemplate(expression: string): CronTemplate | null {
-  return CRON_TEMPLATES.find((template) => template.expression === expression) ?? null;
+function matchTemplate(expression: string, templates = getTemplateCache()): CronTemplateItem | null {
+  return templates.find((template) => template.expression === expression) ?? null;
 }
 
 function buildWarnings(expression: string): string[] {
@@ -420,7 +462,7 @@ function nextRuns(parts: string[], count: number): string[] {
   return upcoming;
 }
 
-function parseCronExpression(expression: string): CronParseResult {
+function parseCronExpression(expression: string, templates = getTemplateCache()): CronParseResult {
   const normalized = expression.trim() || DEFAULT_EXPRESSION;
   const parts = splitExpression(normalized);
   CRON_FIELDS.forEach((field, index) => {
@@ -428,7 +470,7 @@ function parseCronExpression(expression: string): CronParseResult {
   });
 
   const upcoming = nextRuns(parts, 7);
-  const template = matchTemplate(normalized);
+  const template = matchTemplate(normalized, templates);
   const warnings = buildWarnings(normalized);
 
   return {
@@ -446,9 +488,9 @@ function parseCronExpression(expression: string): CronParseResult {
   };
 }
 
-function tryParseCronExpression(expression: string): CronParseResult {
+function tryParseCronExpression(expression: string, templates = getTemplateCache()): CronParseResult {
   try {
-    return parseCronExpression(expression);
+    return parseCronExpression(expression, templates);
   } catch (error) {
     if (error instanceof CronFieldParseError) {
       return buildErrorResult(expression, error.message, error.field);
@@ -461,9 +503,10 @@ function tryParseCronExpression(expression: string): CronParseResult {
 }
 
 function applyTemplate(
-  key: string
+  key: string,
+  templates = getTemplateCache()
 ): Pick<CronParseResult, "expression" | "templateKey" | "templateSummary"> {
-  const template = CRON_TEMPLATES.find((item) => item.key === key);
+  const template = templates.find((item) => item.key === key);
 
   return {
     expression: template?.expression ?? DEFAULT_EXPRESSION,
@@ -526,6 +569,92 @@ function executeCommand(command: CronCommand): ExecuteResult {
   };
 }
 
+async function executeTemplateCommand(command: CronCommand): Promise<ExecuteResult> {
+  const store = getWebtoolsCronStore();
+
+  try {
+    if (command.action === "reset-templates") {
+      const templates = await store.resetTemplates();
+      cachedTemplates = templates;
+      return {
+        ok: true,
+        keepOpen: true,
+        message: "已恢复默认模板",
+        data: {
+          action: command.action,
+          templates
+        }
+      };
+    }
+
+    if (command.action === "delete-template") {
+      const templates = await store.deleteTemplate(command.key);
+      cachedTemplates = templates;
+      return {
+        ok: true,
+        keepOpen: true,
+        message: "已删除模板",
+        data: {
+          action: command.action,
+          templates
+        }
+      };
+    }
+
+    const expression = command.expression.trim();
+    const parsed = tryParseCronExpression(expression);
+    if (parsed.status === "error") {
+      return {
+        ok: false,
+        keepOpen: true,
+        message: parsed.errorMessage || "Cron 表达式无效",
+        data: {
+          action: command.action,
+          templates: getTemplateCache(),
+          ...parsed
+        }
+      };
+    }
+
+    const summary =
+      command.summary.trim() || parsed.readable.trim() || parsed.expression.trim();
+
+    const templates =
+      command.action === "update-template"
+        ? await store.updateTemplate({
+            key: command.key,
+            summary,
+            expression: parsed.expression
+          })
+        : await store.saveTemplate({
+            summary,
+            expression: parsed.expression
+          });
+    cachedTemplates = templates;
+
+    return {
+      ok: true,
+      keepOpen: true,
+      message: command.action === "update-template" ? "已更新模板" : "已保存模板",
+      data: {
+        action: command.action,
+        templates,
+        ...parsed
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      keepOpen: true,
+      message: error instanceof Error ? error.message : "模板操作失败",
+      data: {
+        action: command.action,
+        templates: getTemplateCache()
+      }
+    };
+  }
+}
+
 export const webtoolsCronPlugin: LauncherPlugin = {
   id: PLUGIN_ID,
   name: "Cron 生成器",
@@ -538,17 +667,19 @@ export const webtoolsCronPlugin: LauncherPlugin = {
     }
     return [createCatalogItem()];
   },
-  execute(optionsText, context): ExecuteResult {
+  async execute(optionsText, context): Promise<ExecuteResult> {
     const command = parseCommand(optionsText);
 
     if (command.action === ACTION_OPEN) {
+      const templates = await refreshTemplateCache();
       context.window.webContents.send(IPC_CHANNELS.openPanel, {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "Cron 生成器",
         subtitle: "定时表达式解析与执行时间预测",
         data: {
-          expression: command.expression || DEFAULT_EXPRESSION
+          expression: command.expression || DEFAULT_EXPRESSION,
+          templates
         }
       });
       return {
@@ -558,6 +689,14 @@ export const webtoolsCronPlugin: LauncherPlugin = {
       };
     }
 
+    if (TEMPLATE_ACTIONS.has(command.action)) {
+      return executeTemplateCommand(command);
+    }
+
+    if (cachedTemplates.length === 0) {
+      await refreshTemplateCache();
+    }
+
     return executeCommand(command);
   }
 };
@@ -565,5 +704,10 @@ export const webtoolsCronPlugin: LauncherPlugin = {
 export const __cronTestUtils = {
   parseCronExpression,
   tryParseCronExpression,
-  applyTemplate
+  applyTemplate,
+  matchTemplate,
+  setTemplateCache(templates: CronTemplateItem[]): void {
+    cachedTemplates = templates.map((item) => ({ ...item }));
+  },
+  getTemplateCache
 };

@@ -33,6 +33,7 @@ import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manage
 import { LiteSnapImageStore } from "./litesnap/image-store";
 import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
 import { LiteSnapSettingsStore } from "./litesnap/settings";
+import { initWebtoolsCronStore } from "./plugins/webtools-cron/store";
 import { filterItemsByPathRules } from "./path-rule-filter";
 import { normalizePinnedItemIds, validatePinnedItemRequest } from "./pinning";
 import {
@@ -817,6 +818,7 @@ async function ensureDataLayer(): Promise<void> {
     const dbPath = path.join(app.getPath("userData"), "litelauncher.db");
     database = new LiteDatabase(dbPath);
     await database.init();
+    initWebtoolsCronStore(database);
   }
 
   if (!catalogInitialized) {
@@ -1710,12 +1712,7 @@ async function bootstrap(): Promise<void> {
       launcherWindow.isDestroyed() ? null : launcherWindow
   });
   const startLiteSnapCapture = async (): Promise<boolean> => {
-    const started = await liteSnapCaptureSessionManager.startCapture(async () => {
-      if (!launcherWindow.isDestroyed()) {
-        applyLauncherWindowSizePreset(launcherWindow, "compact");
-        launcherWindow.hide();
-      }
-    });
+    const started = await liteSnapCaptureSessionManager.startCapture();
     if (started) {
       liteSnapCaptureSessionManager.startFrameCacheRefresh();
     }
