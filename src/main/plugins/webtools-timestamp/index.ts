@@ -93,7 +93,9 @@ function formatDateTime(date: Date): string {
   const hh = String(date.getHours()).padStart(2, "0");
   const mi = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  const base = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  const ms = date.getMilliseconds();
+  return ms > 0 ? `${base}.${String(ms).padStart(3, "0")}` : base;
 }
 
 function parseDateInput(input: string): Date | null {
@@ -104,7 +106,7 @@ function parseDateInput(input: string): Date | null {
 
   const fixed = normalized.replace("T", " ");
   const match = fixed.match(
-    /^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,3}))?)?)?$/
   );
   if (match) {
     const year = Number(match[1] ?? "");
@@ -113,14 +115,16 @@ function parseDateInput(input: string): Date | null {
     const hour = Number(match[4] ?? "0");
     const minute = Number(match[5] ?? "0");
     const second = Number(match[6] ?? "0");
-    const date = new Date(year, month - 1, day, hour, minute, second, 0);
+    const millisecond = Number((match[7] ?? "").padEnd(3, "0") || "0");
+    const date = new Date(year, month - 1, day, hour, minute, second, millisecond);
     if (
       date.getFullYear() === year &&
       date.getMonth() + 1 === month &&
       date.getDate() === day &&
       date.getHours() === hour &&
       date.getMinutes() === minute &&
-      date.getSeconds() === second
+      date.getSeconds() === second &&
+      date.getMilliseconds() === millisecond
     ) {
       return date;
     }
@@ -130,6 +134,17 @@ function parseDateInput(input: string): Date | null {
   const fallback = new Date(normalized);
   if (Number.isNaN(fallback.getTime())) {
     return null;
+  }
+  return fallback;
+}
+
+function detectTimestampUnit(normalized: string, fallback: TimestampUnit): TimestampUnit {
+  const digits = normalized.replace(/^[+-]/, "").split(".")[0]?.length ?? 0;
+  if (digits >= 13) {
+    return "ms";
+  }
+  if (digits >= 1 && digits <= 11) {
+    return "s";
   }
   return fallback;
 }
@@ -145,7 +160,10 @@ function toDateOutput(input: string, unit: TimestampUnit): ExecuteResult {
     return { ok: false, keepOpen: true, message: "时间戳必须是数字" };
   }
 
-  const millis = unit === "s" ? Math.round(numeric * 1000) : Math.round(numeric);
+  // A 10-digit value is seconds, a 13-digit value is milliseconds. Auto-detect by
+  // digit count so a seconds timestamp is not misread as milliseconds (and vice versa).
+  const effectiveUnit = detectTimestampUnit(normalized, unit);
+  const millis = effectiveUnit === "s" ? Math.round(numeric * 1000) : Math.round(numeric);
   const date = new Date(millis);
   if (Number.isNaN(date.getTime())) {
     return { ok: false, keepOpen: true, message: "无效时间戳" };
@@ -154,6 +172,8 @@ function toDateOutput(input: string, unit: TimestampUnit): ExecuteResult {
   const local = formatDateTime(date);
   const seconds = Math.floor(millis / 1000);
   const iso = date.toISOString().replace("T", " ").replace("Z", " UTC");
+  const detectionNote =
+    effectiveUnit === unit ? "" : `（已按${effectiveUnit === "s" ? "秒" : "毫秒"}识别）`;
   return {
     ok: true,
     keepOpen: true,
@@ -165,8 +185,8 @@ function toDateOutput(input: string, unit: TimestampUnit): ExecuteResult {
       iso,
       seconds,
       milliseconds: millis,
-      unit,
-      info: `Unix 时间戳：${seconds}（秒） / ${millis}（毫秒）`
+      unit: effectiveUnit,
+      info: `Unix 时间戳：${seconds}（秒） / ${millis}（毫秒）${detectionNote}`
     }
   };
 }

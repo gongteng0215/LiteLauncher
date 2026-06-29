@@ -3797,7 +3797,7 @@ test("timestamp helper flow lives with plugin-panel-impls instead of renderer", 
   );
   assert.match(
     panelImplsSource,
-    /function formatWebtoolsTimestampDate\(value: Date\): string/,
+    /function formatWebtoolsTimestampDate\(value: Date, withMs = false\): string/,
     "Timestamp date formatter should live in plugin-panel-impls"
   );
   assert.match(

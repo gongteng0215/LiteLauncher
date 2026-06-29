@@ -30,7 +30,7 @@ const DEFAULT_LEVEL: QrLevel = "M";
 const DEFAULT_DARK_COLOR = "#102136";
 const DEFAULT_LIGHT_COLOR = "#ffffff";
 const DEFAULT_LOGO_MODE: QrLogoMode = "none";
-const MAX_LOGO_TEXT_LENGTH = 6;
+const MAX_LOGO_TEXT_LENGTH = 40;
 
 function buildTarget(command: QrCommand): string {
   const params = new URLSearchParams();
@@ -199,53 +199,117 @@ function ensureSvgSize(svg: string, size: number): string {
   return next;
 }
 
-function buildTextLogoOverlay(command: QrCommand, size: number): string {
+function trimNumber(value: number): string {
+  return Number(value.toFixed(3)).toString();
+}
+
+function getSvgViewBoxSize(svg: string, fallback: number): number {
+  const matched = svg.match(/viewBox="\s*[\d.+-]+\s+[\d.+-]+\s+([\d.+-]+)\s+([\d.+-]+)\s*"/i);
+  if (!matched) {
+    return fallback;
+  }
+  const width = Number(matched[1]);
+  if (!Number.isFinite(width) || width <= 0) {
+    return fallback;
+  }
+  return width;
+}
+
+function hasCjkChar(value: string): boolean {
+  return /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/.test(value);
+}
+
+function splitLogoTextLines(text: string, charWidthFactor: number, lineHeightFactor: number): string[] {
+  const chars = Array.from(text);
+  const len = chars.length;
+  if (len <= 3) {
+    return [text];
+  }
+
+  // Pick a per-line width that keeps the wrapped block close to a square,
+  // so the centered logo fills the box instead of becoming a tall sliver.
+  const perLine = Math.max(
+    1,
+    Math.round(Math.sqrt((len * lineHeightFactor) / charWidthFactor))
+  );
+  const lines: string[] = [];
+  for (let i = 0; i < len; i += perLine) {
+    lines.push(chars.slice(i, i + perLine).join(""));
+  }
+  return lines;
+}
+
+function buildTextLogoOverlay(command: QrCommand, unit: number): string {
   if (command.logoMode !== "text" || !command.logoText) {
     return "";
   }
 
-  const boxSize = Math.round(size * 0.26);
-  const boxX = Math.round((size - boxSize) / 2);
+  const boxSize = unit * 0.3;
+  const boxX = (unit - boxSize) / 2;
   const boxY = boxX;
-  const radius = Math.max(12, Math.round(boxSize * 0.22));
-  const fontSize = Math.max(20, Math.round(boxSize * (command.logoText.length > 2 ? 0.32 : 0.42)));
+  const radius = boxSize * 0.2;
+  const strokeWidth = boxSize * 0.04;
   const fontFamily =
     "Microsoft YaHei, PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, Segoe UI, Arial, sans-serif";
 
+  const charWidthFactor = hasCjkChar(command.logoText) ? 1.02 : 0.62;
+  const lineHeightFactor = 1.16;
+  const lines = splitLogoTextLines(command.logoText, charWidthFactor, lineHeightFactor);
+  const lineCount = lines.length;
+  const maxLineLength = lines.reduce((max, line) => Math.max(max, Array.from(line).length), 1);
+  const innerPadding = boxSize * 0.12;
+  const innerSize = boxSize - innerPadding * 2;
+
+  const fontByWidth = innerSize / (maxLineLength * charWidthFactor);
+  const fontByHeight = innerSize / (lineCount * lineHeightFactor);
+  const fontSize = Math.min(fontByWidth, fontByHeight);
+  const lineHeight = fontSize * lineHeightFactor;
+  const centerX = unit / 2;
+  const centerY = unit / 2;
+  const firstLineDy = -((lineCount - 1) / 2) * lineHeight;
+
+  const tspans = lines
+    .map((line, index) => {
+      const dy = index === 0 ? firstLineDy : lineHeight;
+      return `<tspan x="${trimNumber(centerX)}" dy="${trimNumber(dy)}">${escapeXml(line)}</tspan>`;
+    })
+    .join("");
+
   return [
     `<g class="qr-logo qr-logo-text">`,
-    `<rect x="${boxX}" y="${boxY}" width="${boxSize}" height="${boxSize}" rx="${radius}" fill="${command.lightColor}" fill-opacity="0.96" stroke="${command.darkColor}" stroke-opacity="0.18" stroke-width="2" />`,
-    `<text x="${Math.round(size / 2)}" y="${Math.round(size / 2)}" fill="${command.darkColor}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="central" dy="0.04em">${escapeXml(command.logoText)}</text>`,
+    `<rect x="${trimNumber(boxX)}" y="${trimNumber(boxY)}" width="${trimNumber(boxSize)}" height="${trimNumber(boxSize)}" rx="${trimNumber(radius)}" fill="${command.lightColor}" fill-opacity="0.96" stroke="${command.darkColor}" stroke-opacity="0.18" stroke-width="${trimNumber(strokeWidth)}" />`,
+    `<text x="${trimNumber(centerX)}" y="${trimNumber(centerY)}" fill="${command.darkColor}" font-family="${fontFamily}" font-size="${trimNumber(fontSize)}" font-weight="700" text-anchor="middle" dominant-baseline="central">${tspans}</text>`,
     `</g>`
   ].join("");
 }
 
-function buildImageLogoOverlay(command: QrCommand, size: number): string {
+function buildImageLogoOverlay(command: QrCommand, unit: number): string {
   if (command.logoMode !== "image" || !command.logoImageDataUrl) {
     return "";
   }
 
-  const boxSize = Math.round(size * 0.28);
-  const boxX = Math.round((size - boxSize) / 2);
+  const boxSize = unit * 0.3;
+  const boxX = (unit - boxSize) / 2;
   const boxY = boxX;
-  const radius = Math.max(14, Math.round(boxSize * 0.2));
-  const imagePadding = Math.max(8, Math.round(boxSize * 0.1));
+  const radius = boxSize * 0.2;
+  const strokeWidth = boxSize * 0.04;
+  const imagePadding = boxSize * 0.1;
   const imageSize = boxSize - imagePadding * 2;
 
   return [
     `<g class="qr-logo qr-logo-image">`,
-    `<rect x="${boxX}" y="${boxY}" width="${boxSize}" height="${boxSize}" rx="${radius}" fill="${command.lightColor}" fill-opacity="0.96" stroke="${command.darkColor}" stroke-opacity="0.18" stroke-width="2" />`,
-    `<image href="${escapeXmlAttribute(command.logoImageDataUrl)}" x="${boxX + imagePadding}" y="${boxY + imagePadding}" width="${imageSize}" height="${imageSize}" preserveAspectRatio="xMidYMid meet" />`,
+    `<rect x="${trimNumber(boxX)}" y="${trimNumber(boxY)}" width="${trimNumber(boxSize)}" height="${trimNumber(boxSize)}" rx="${trimNumber(radius)}" fill="${command.lightColor}" fill-opacity="0.96" stroke="${command.darkColor}" stroke-opacity="0.18" stroke-width="${trimNumber(strokeWidth)}" />`,
+    `<image href="${escapeXmlAttribute(command.logoImageDataUrl)}" x="${trimNumber(boxX + imagePadding)}" y="${trimNumber(boxY + imagePadding)}" width="${trimNumber(imageSize)}" height="${trimNumber(imageSize)}" preserveAspectRatio="xMidYMid meet" />`,
     `</g>`
   ].join("");
 }
 
-function buildLogoOverlay(command: QrCommand, size: number): string {
+function buildLogoOverlay(command: QrCommand, unit: number): string {
   if (command.logoMode === "text") {
-    return buildTextLogoOverlay(command, size);
+    return buildTextLogoOverlay(command, unit);
   }
   if (command.logoMode === "image") {
-    return buildImageLogoOverlay(command, size);
+    return buildImageLogoOverlay(command, unit);
   }
   return "";
 }
@@ -263,7 +327,8 @@ async function buildQrSvg(command: QrCommand): Promise<string> {
   });
 
   const withSize = ensureSvgSize(svg, command.size);
-  const overlay = buildLogoOverlay(command, command.size);
+  const overlayUnit = getSvgViewBoxSize(withSize, command.size);
+  const overlay = buildLogoOverlay(command, overlayUnit);
   if (!overlay) {
     return withSize;
   }

@@ -9439,6 +9439,11 @@ function refreshWebtoolsTimestampResultInForm(form: HTMLFormElement): void {
   if (tsUnitNode instanceof HTMLSpanElement) {
     tsUnitNode.textContent = webtoolsTimestampUnit === "s" ? "秒 (s)" : "毫秒 (ms)";
   }
+
+  const unitSelectNode = form.elements.namedItem("webtoolsTimestampUnit");
+  if (unitSelectNode instanceof HTMLSelectElement && unitSelectNode.value !== webtoolsTimestampUnit) {
+    unitSelectNode.value = webtoolsTimestampUnit;
+  }
 }
 
 function refreshWebtoolsPasswordResultInForm(form: HTMLFormElement): void {
@@ -9568,14 +9573,43 @@ function normalizeWebtoolsTimestampUnit(value: unknown): "s" | "ms" {
   return value === "ms" ? "ms" : "s";
 }
 
-function formatWebtoolsTimestampDate(value: Date): string {
+function formatWebtoolsTimestampDate(value: Date, withMs = false): string {
   const yyyy = String(value.getFullYear());
   const mm = String(value.getMonth() + 1).padStart(2, "0");
   const dd = String(value.getDate()).padStart(2, "0");
   const hh = String(value.getHours()).padStart(2, "0");
   const mi = String(value.getMinutes()).padStart(2, "0");
   const ss = String(value.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  const base = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  if (!withMs) {
+    return base;
+  }
+  return `${base}.${String(value.getMilliseconds()).padStart(3, "0")}`;
+}
+
+function convertWebtoolsTimestampUnixValue(
+  value: string,
+  from: "s" | "ms",
+  to: "s" | "ms"
+): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || from === to) {
+    return null;
+  }
+  if (!/^[+-]?\d+$/.test(trimmed)) {
+    return null;
+  }
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  if (from === "s" && to === "ms") {
+    return String(Math.round(numeric * 1000));
+  }
+  if (from === "ms" && to === "s") {
+    return String(Math.floor(numeric / 1000));
+  }
+  return null;
 }
 
 function getWebtoolsTimestampNowUnix(unit: "s" | "ms"): string {
@@ -9602,7 +9636,10 @@ function clearWebtoolsTimestampClockTimer(): void {
 
 function ensureWebtoolsTimestampDefaults(): void {
   if (!webtoolsTimestampDateInput.trim()) {
-    webtoolsTimestampDateInput = formatWebtoolsTimestampDate(new Date());
+    webtoolsTimestampDateInput = formatWebtoolsTimestampDate(
+      new Date(),
+      webtoolsTimestampUnit === "ms"
+    );
   }
   if (!webtoolsTimestampUnixInput.trim()) {
     webtoolsTimestampUnixInput = getWebtoolsTimestampNowUnix(webtoolsTimestampUnit);
@@ -10855,7 +10892,7 @@ async function executeWebtoolsQrcodeGenerateInForm(
       ? logoModeNode.value
       : "none";
   webtoolsQrLogoText =
-    logoTextNode instanceof HTMLInputElement ? logoTextNode.value.trim().slice(0, 6) : "";
+    logoTextNode instanceof HTMLInputElement ? logoTextNode.value.trim().slice(0, 40) : "";
 
   if (!webtoolsQrText.trim()) {
     webtoolsQrRequestToken += 1;
@@ -17615,7 +17652,20 @@ window.__LL_PANEL_IMPLS__ = {
     });
 
     unitSelect.addEventListener("change", () => {
-      webtoolsTimestampUnit = normalizeWebtoolsTimestampUnit(unitSelect.value);
+      const previousUnit = webtoolsTimestampUnit;
+      const nextUnit = normalizeWebtoolsTimestampUnit(unitSelect.value);
+      // Re-express the existing unix value in the newly selected unit so the left
+      // field visibly tracks the unit (s <-> ms multiplies/divides by 1000).
+      const convertedUnix = convertWebtoolsTimestampUnixValue(
+        webtoolsTimestampUnixInput,
+        previousUnit,
+        nextUnit
+      );
+      if (convertedUnix !== null) {
+        webtoolsTimestampUnixInput = convertedUnix;
+        unixInput.value = convertedUnix;
+      }
+      webtoolsTimestampUnit = nextUnit;
       updateCurrentClock();
       refreshWebtoolsTimestampResultInForm(form);
       void executeWebtoolsTimestampAction("toDate", webtoolsTimestampUnixInput, {
@@ -21154,7 +21204,7 @@ window.__LL_PANEL_IMPLS__ = {
     });
 
     logoText.addEventListener("input", () => {
-      webtoolsQrLogoText = logoText.value.trim().slice(0, 6);
+      webtoolsQrLogoText = logoText.value.trim().slice(0, 40);
       refreshWebtoolsQrcodePanelInForm(form);
       scheduleWebtoolsQrcodeAutoGenerate(form);
     });
