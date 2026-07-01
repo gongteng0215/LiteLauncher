@@ -1,11 +1,17 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app, BrowserWindow, globalShortcut } from "electron";
+import { app, BrowserWindow, globalShortcut, shell, type Event, type Input } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  createDefaultLiteSnapSettings,
+  LITESNAP_PLUGIN_ID,
+  type LiteSnapRecognizeTextInput,
   type LiteSnapSettings,
-  type LiteSnapShortcutRegistrationResult
+  type LiteSnapShortcutRegistrationResult,
+  type LiteSnapTranslateSelectionInput,
+  type LiteSnapTranslateTextInput,
+  type LiteSnapTranslateTextResult
 } from "../shared/litesnap";
 import {
   AppErrorLogInput,
@@ -31,6 +37,7 @@ import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
 import { LiteSnapImageStore } from "./litesnap/image-store";
+import { translateWithBaidu } from "./litesnap/baidu-translator";
 import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
 import { LiteSnapSettingsStore } from "./litesnap/settings";
 import { initWebtoolsCronStore } from "./plugins/webtools-cron/store";
@@ -270,6 +277,8 @@ const liteSnapShortcutState: {
   screenshot: null,
   pin: null
 };
+let liteSnapCaptureShortcutTriggeredAt = 0;
+let liteSnapLocalShortcutHandler: ((event: Event, input: Input) => void) | null = null;
 let lastLauncherShowMeta: {
   trigger: LauncherWindowShowTrigger;
   at: number;
@@ -933,17 +942,119 @@ function unregisterLiteSnapGlobalShortcut(kind: keyof typeof liteSnapShortcutSta
   liteSnapShortcutState[kind] = null;
 }
 
+function matchAcceleratorInput(input: Input, accelerator: string): boolean {
+  const normalized = accelerator.trim();
+  if (!normalized || input.type !== "keyDown") {
+    return false;
+  }
+
+  const tokens = normalized
+    .split("+")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  const keyToken = tokens[tokens.length - 1] ?? "";
+  const modifiers = new Set(tokens.slice(0, -1).map((token) => token.toLowerCase()));
+  const needsCtrl = modifiers.has("ctrl") || modifiers.has("control");
+  const needsAlt = modifiers.has("alt");
+  const needsShift = modifiers.has("shift");
+  const needsMeta =
+    modifiers.has("super") || modifiers.has("meta") || modifiers.has("cmd");
+
+  if (Boolean(input.control) !== needsCtrl) {
+    return false;
+  }
+  if (Boolean(input.alt) !== needsAlt) {
+    return false;
+  }
+  if (Boolean(input.shift) !== needsShift) {
+    return false;
+  }
+  if (Boolean(input.meta) !== needsMeta) {
+    return false;
+  }
+
+  const inputKey = input.key.trim().toUpperCase();
+  const expectedKey = keyToken.toUpperCase();
+  if (inputKey === expectedKey) {
+    return true;
+  }
+
+  if (expectedKey.startsWith("NUM")) {
+    return inputKey === expectedKey.slice(3) || inputKey === expectedKey;
+  }
+
+  return false;
+}
+
+function unregisterLiteSnapLocalShortcut(window: BrowserWindow): void {
+  if (!liteSnapLocalShortcutHandler || window.isDestroyed()) {
+    liteSnapLocalShortcutHandler = null;
+    return;
+  }
+
+  window.webContents.removeListener("before-input-event", liteSnapLocalShortcutHandler);
+  liteSnapLocalShortcutHandler = null;
+}
+
+function registerLiteSnapLocalShortcut(
+  window: BrowserWindow,
+  startCapture: () => Promise<boolean>,
+  pinClipboardImage: () => Promise<boolean>
+): void {
+  unregisterLiteSnapLocalShortcut(window);
+
+  liteSnapLocalShortcutHandler = (event, input) => {
+    if (input.isAutoRepeat) {
+      return;
+    }
+
+    const screenshotShortcut = liteSnapShortcutState.screenshot;
+    if (screenshotShortcut && matchAcceleratorInput(input, screenshotShortcut)) {
+      event.preventDefault();
+      void startCapture().catch((error) => {
+        console.warn("LiteSnap capture local shortcut failed", error);
+      });
+      return;
+    }
+
+    const pinShortcut = liteSnapShortcutState.pin;
+    if (pinShortcut && matchAcceleratorInput(input, pinShortcut)) {
+      event.preventDefault();
+      void pinClipboardImage().catch((error) => {
+        console.warn("LiteSnap pin local shortcut failed", error);
+      });
+    }
+  };
+
+  window.webContents.on("before-input-event", liteSnapLocalShortcutHandler);
+}
+
 function registerLiteSnapShortcutSet(
   settings: LiteSnapSettings,
   window: BrowserWindow,
   startCapture: () => Promise<boolean>,
   pinClipboardImage: () => Promise<boolean>
 ): LiteSnapShortcutRegistrationResult {
-  unregisterLiteSnapGlobalShortcut("screenshot");
-  unregisterLiteSnapGlobalShortcut("pin");
-
   const screenshotShortcut = settings.screenshotShortcut.trim();
   const pinShortcut = settings.pinShortcut.trim();
+
+  if (
+    screenshotShortcut === liteSnapShortcutState.screenshot &&
+    pinShortcut === liteSnapShortcutState.pin
+  ) {
+    return {
+      screenshot: Boolean(screenshotShortcut),
+      pin: Boolean(pinShortcut),
+      message: "LiteSnap 快捷键已立即生效。"
+    };
+  }
+
+  unregisterLiteSnapGlobalShortcut("screenshot");
+  unregisterLiteSnapGlobalShortcut("pin");
   const screenshot = registerLiteSnapGlobalShortcut(
     screenshotShortcut,
     () => startCapture(),
@@ -963,6 +1074,8 @@ function registerLiteSnapShortcutSet(
   if (pin) {
     liteSnapShortcutState.pin = pinShortcut;
   }
+
+  registerLiteSnapLocalShortcut(window, startCapture, pinClipboardImage);
 
   const failed = [
     screenshot ? null : `截图快捷键 ${screenshotShortcut || "(空)"}`,
@@ -986,33 +1099,37 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
   startCapture: () => Promise<boolean>,
   pinClipboardImage: () => Promise<boolean>
 ): Promise<LiteSnapSettings & { shortcutRegistration?: LiteSnapShortcutRegistrationResult }> {
-  const shouldRegisterShortcuts =
-    Object.prototype.hasOwnProperty.call(patch, "screenshotShortcut") ||
-    Object.prototype.hasOwnProperty.call(patch, "pinShortcut");
-  if (!shouldRegisterShortcuts) {
-    return store.updateSettings(patch);
+  const previous = await store.getSettings();
+  const shortcutsChanged =
+    (Object.prototype.hasOwnProperty.call(patch, "screenshotShortcut") &&
+      String(patch.screenshotShortcut ?? "").trim() !==
+        previous.screenshotShortcut.trim()) ||
+    (Object.prototype.hasOwnProperty.call(patch, "pinShortcut") &&
+      String(patch.pinShortcut ?? "").trim() !== previous.pinShortcut.trim());
+
+  const next = await store.updateSettings(patch);
+  if (!shortcutsChanged) {
+    return next;
   }
 
-  const previous = await store.getSettings();
-  const requested = await store.updateSettings(patch);
   const requestedRegistration = registerLiteSnapShortcutSet(
-    requested,
+    next,
     window,
     startCapture,
     pinClipboardImage
   );
 
   if (requestedRegistration.screenshot && requestedRegistration.pin) {
-    return { ...requested, shortcutRegistration: requestedRegistration };
+    return { ...next, shortcutRegistration: requestedRegistration };
   }
 
   const effective = {
-    ...requested,
+    ...next,
     screenshotShortcut: requestedRegistration.screenshot
-      ? requested.screenshotShortcut
+      ? next.screenshotShortcut
       : previous.screenshotShortcut,
     pinShortcut: requestedRegistration.pin
-      ? requested.pinShortcut
+      ? next.pinShortcut
       : previous.pinShortcut
   };
   const saved = await store.updateSettings(effective);
@@ -1025,8 +1142,8 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
   const failed = [
     requestedRegistration.screenshot
       ? null
-      : `截图快捷键 ${requested.screenshotShortcut}`,
-    requestedRegistration.pin ? null : `贴图快捷键 ${requested.pinShortcut}`
+      : `截图快捷键 ${next.screenshotShortcut}`,
+    requestedRegistration.pin ? null : `贴图快捷键 ${next.pinShortcut}`
   ].filter((item): item is string => Boolean(item));
 
   return {
@@ -1639,6 +1756,16 @@ async function bootstrap(): Promise<void> {
   const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
+  liteSnapPinWindowManager.setSaveImageProvider(async (image) => {
+    const settings = await liteSnapSettingsStore.getSettings();
+    const savedPath = await liteSnapImageStore.saveImage(image, settings);
+    try {
+      shell.showItemInFolder(savedPath);
+    } catch {
+      // Revealing in Explorer is best-effort; the file is already saved.
+    }
+    return savedPath;
+  });
   const liteSnapCaptureSessionManager = new LiteSnapCaptureSessionManager(
     liteSnapSettingsStore,
     liteSnapImageStore,
@@ -1690,6 +1817,15 @@ async function bootstrap(): Promise<void> {
     }
     launcherWindow.webContents.send(IPC_CHANNELS.clearInput);
   });
+  launcherWindow.on("focus", () => {
+    liteSnapCaptureSessionManager.pauseIdleFrameCache();
+  });
+  launcherWindow.on("blur", () => {
+    if (launcherWindow.isDestroyed()) {
+      return;
+    }
+    liteSnapCaptureSessionManager.resumeIdleFrameCache();
+  });
 
   setupDebugKeyTracing(launcherWindow);
   setupLauncherWindowDiagnostics(launcherWindow);
@@ -1712,14 +1848,214 @@ async function bootstrap(): Promise<void> {
       launcherWindow.isDestroyed() ? null : launcherWindow
   });
   const startLiteSnapCapture = async (): Promise<boolean> => {
+    const now = Date.now();
+    if (now - liteSnapCaptureShortcutTriggeredAt < 500) {
+      return true;
+    }
+    liteSnapCaptureShortcutTriggeredAt = now;
+
     const started = await liteSnapCaptureSessionManager.startCapture();
-    if (started) {
+    if (started && !launcherWindow.isDestroyed() && !launcherWindow.isFocused()) {
       liteSnapCaptureSessionManager.startFrameCacheRefresh();
     }
     return started;
   };
   const pinLiteSnapClipboardImage = async (): Promise<boolean> => {
     return liteSnapPinWindowManager.pinClipboardImage();
+  };
+  const sendLiteSnapPluginPanel = async (payload: {
+    trigger: "litesnap-ocr" | "litesnap-translate";
+    subtitle: string;
+    statusMessage: string;
+    preferredView: "ocr" | "translate";
+    ocrText?: string;
+    translateSourceText?: string;
+    translateText?: string;
+  }) => {
+    if (launcherWindow.isDestroyed()) {
+      return;
+    }
+
+    if (!launcherWindow.isVisible()) {
+      applyLauncherWindowSizePreset(launcherWindow, "compact");
+    }
+    showLauncherWindowWithTrigger(launcherWindow, payload.trigger);
+    if (launcherWindow.webContents.isDestroyed()) {
+      return;
+    }
+
+    const settings = await liteSnapSettingsStore.getSettings();
+    if (launcherWindow.isDestroyed() || launcherWindow.webContents.isDestroyed()) {
+      return;
+    }
+    launcherWindow.webContents.send(IPC_CHANNELS.openPanel, {
+      panel: "plugin",
+      pluginId: LITESNAP_PLUGIN_ID,
+      title: "截图贴图",
+      subtitle: payload.subtitle,
+      data: {
+        settings: settings ?? createDefaultLiteSnapSettings(),
+        statusMessage: payload.statusMessage,
+        preferredView: payload.preferredView,
+        ocrText: payload.ocrText ?? "",
+        translateSourceText: payload.translateSourceText ?? "",
+        translateText: payload.translateText ?? ""
+      }
+    });
+    launcherWindow.webContents.send(IPC_CHANNELS.focusInput);
+  };
+
+  const recognizeLiteSnapTextAndShowPanel = async (
+    input: LiteSnapRecognizeTextInput
+  ) => {
+    const result = await liteSnapCaptureSessionManager.recognizeSelection(input);
+
+    await sendLiteSnapPluginPanel({
+      trigger: "litesnap-ocr",
+      subtitle: "文字识别结果",
+      statusMessage: result.ok
+        ? "已识别文字，可编辑后复制。"
+        : result.message,
+      preferredView: "ocr",
+      ocrText: result.ok ? result.text : ""
+    });
+
+    return result;
+  };
+
+  const translateLiteSnapText = async (
+    input: LiteSnapTranslateTextInput
+  ): Promise<LiteSnapTranslateTextResult> => {
+    const source = input.text.replace(/\r\n/g, "\n").trim();
+    if (!source) {
+      return {
+        ok: false,
+        sourceText: "",
+        translatedText: "",
+        message: "没有可翻译的文字。"
+      };
+    }
+
+    const settings = await liteSnapSettingsStore.getSettings();
+    const translated = await translateWithBaidu({
+      text: source,
+      appId: input.appId?.trim() || settings.translateBaiduAppId,
+      secret: input.secret?.trim() || settings.translateBaiduSecret,
+      apiKey: input.apiKey?.trim() || settings.translateBaiduApiKey,
+      engine: input.engine ?? settings.translateBaiduEngine
+    });
+
+    if (!translated.ok) {
+      return {
+        ok: false,
+        sourceText: source,
+        translatedText: "",
+        message: translated.message
+      };
+    }
+
+    return {
+      ok: true,
+      sourceText: source,
+      translatedText: translated.text,
+      message: "已翻译为中文。"
+    };
+  };
+
+  const translateLiteSnapSelectionAndShowPanel = async (
+    input: LiteSnapTranslateSelectionInput
+  ) => {
+    const sendTranslatePanel = async (payload: {
+      statusMessage: string;
+      translateSourceText: string;
+      translateText: string;
+    }) => {
+      await sendLiteSnapPluginPanel({
+        trigger: "litesnap-translate",
+        subtitle: "截图翻译结果",
+        statusMessage: payload.statusMessage,
+        preferredView: "translate",
+        translateSourceText: payload.translateSourceText,
+        translateText: payload.translateText
+      });
+    };
+
+    try {
+      const recognized =
+        await liteSnapCaptureSessionManager.recognizeSelectionForTranslate(input);
+      await liteSnapCaptureSessionManager.cancelCapture();
+
+      if (!recognized.ok) {
+        await sendTranslatePanel({
+          statusMessage: recognized.message,
+          translateSourceText: "",
+          translateText: ""
+        });
+        return {
+          ok: false,
+          sourceText: "",
+          translatedText: "",
+          message: recognized.message
+        };
+      }
+
+      await sendTranslatePanel({
+        statusMessage: "正在在线翻译，请稍候…",
+        translateSourceText: recognized.text,
+        translateText: ""
+      });
+
+      const settings = await liteSnapSettingsStore.getSettings();
+      const translated = await translateWithBaidu({
+        text: recognized.text,
+        appId: settings?.translateBaiduAppId ?? "",
+        secret: settings?.translateBaiduSecret ?? "",
+        apiKey: settings?.translateBaiduApiKey ?? "",
+        engine: settings?.translateBaiduEngine ?? "standard"
+      });
+
+      if (!translated.ok) {
+        await sendTranslatePanel({
+          statusMessage: translated.message,
+          translateSourceText: recognized.text,
+          translateText: ""
+        });
+        return {
+          ok: false,
+          sourceText: recognized.text,
+          translatedText: "",
+          message: translated.message
+        };
+      }
+
+      await sendTranslatePanel({
+        statusMessage: "已翻译为中文，可编辑后复制。",
+        translateSourceText: recognized.text,
+        translateText: translated.text
+      });
+
+      return {
+        ok: true,
+        sourceText: recognized.text,
+        translatedText: translated.text,
+        message: "已翻译为中文。"
+      };
+    } catch (error) {
+      console.warn("[litesnap] translate flow failed", error);
+      await liteSnapCaptureSessionManager.cancelCapture().catch(() => false);
+      const message = "截图翻译失败，请检查网络后重试。";
+      await sendTranslatePanel({
+        statusMessage: message,
+        translateSourceText: "",
+        translateText: ""
+      });
+      return {
+        ok: false,
+        sourceText: "",
+        translatedText: "",
+        message
+      };
+    }
   };
 
   registerIpcHandlers(launcherWindow, {
@@ -1836,6 +2172,12 @@ async function bootstrap(): Promise<void> {
           getWindowRectAtPoint: (x, y) =>
             liteSnapCaptureSessionManager.getWindowRectAtPoint(x, y),
           commitCapture: (input) => liteSnapCaptureSessionManager.commitCapture(input),
+          recognizeText: (input: LiteSnapRecognizeTextInput) =>
+            recognizeLiteSnapTextAndShowPanel(input),
+          translateSelection: (input: LiteSnapTranslateSelectionInput) =>
+            translateLiteSnapSelectionAndShowPanel(input),
+          translateText: (input: LiteSnapTranslateTextInput) =>
+            translateLiteSnapText(input),
           cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture(),
           ensureSourceImage: async () =>
             liteSnapCaptureSessionManager.ensureSourceImageDataUrl()
@@ -1916,6 +2258,16 @@ app.on("before-quit", () => {
 app.on("second-instance", (_event, argv) => {
   const replaceRequested = argv.some((value) => value === REPLACE_INSTANCE_FLAG);
   if (replaceRequested) {
+    if (process.env.LITELAUNCHER_DEV === "1") {
+      // dev-electron owns process restarts; exiting here avoids a relaunch ping-pong
+      // with the dev runner that also spawns Electron after each exit.
+      console.info(
+        "[startup] replace-instance ignored in dev mode, quitting for dev runner restart"
+      );
+      app.quit();
+      return;
+    }
+
     const relaunchArgs = process.argv
       .slice(1)
       .filter((value) => value !== REPLACE_INSTANCE_FLAG);
@@ -1928,15 +2280,6 @@ app.on("second-instance", (_event, argv) => {
   const windows = BrowserWindow.getAllWindows();
   const first = windows[0];
   if (first) {
-    void setupAppTray(first, {
-      showLauncherWindow: () => showLauncherWindowWithTrigger(first, "tray-menu"),
-      showLauncherWindowFromDoubleClick: () =>
-        showLauncherWindowWithTrigger(first, "tray-double-click"),
-      toggleLauncherWindow: () => toggleLauncherWindowWithTrigger(first, "tray-click")
-    }).catch((error) => {
-      console.warn("Failed to refresh tray icon on second-instance", error);
-    });
-
     if (!app.isPackaged) {
       const shouldShow = !first.isVisible();
       first.webContents.reloadIgnoringCache();

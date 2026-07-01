@@ -198,8 +198,8 @@ test("LiteSnap settings subview handles Esc inside plugin mode before leaving to
   );
   assert.match(
     panelImplsSource,
-    /let liteSnapPanelView: "main" \| "settings" = "main";/,
-    "LiteSnap should keep local main/settings subview state"
+    /let liteSnapPanelView: "main" \| "settings" \| "ocr" = "main";/,
+    "LiteSnap should keep local main/settings/ocr subview state"
   );
   assert.match(
     panelImplsSource,
@@ -210,6 +210,17 @@ test("LiteSnap settings subview handles Esc inside plugin mode before leaving to
     panelImplsSource,
     /liteSnapPanelView === "settings"/,
     "LiteSnap should detect the settings subview when handling Esc"
+  );
+  assert.match(
+    panelImplsSource,
+    /normalizeLiteSnapOcrPanelText\(rawOcrText\)/,
+    "LiteSnap OCR panel should normalize text when applying payload"
+  );
+  const rendererHtmlSource = fs.readFileSync(rendererHtmlPath, "utf8");
+  assert.match(
+    rendererHtmlSource,
+    /litesnap-text-utils\.js/,
+    "renderer index should load litesnap-text-utils before plugin panels"
   );
 });
 

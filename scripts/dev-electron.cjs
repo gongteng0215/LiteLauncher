@@ -55,7 +55,7 @@ function terminateProcessTree(child) {
         stdio: "ignore"
       });
       killer.once("exit", () => {
-        setTimeout(resolve, 120);
+        setTimeout(resolve, 450);
       });
       killer.once("error", () => {
         resolve();
@@ -85,7 +85,11 @@ function startElectron() {
   delete electronEnv.ELECTRON_RUN_AS_NODE;
 
   log("starting Electron");
-  electronProcess = spawn(electronBinary, [".", "--replace-instance"], {
+  // Dev restarts are managed by killing the old process tree and spawning a
+  // fresh instance. --replace-instance would make the running copy relaunch
+  // itself while dev-electron also spawns another copy, causing a restart loop
+  // and transient SQLite "database is locked / not open" bootstrap failures.
+  electronProcess = spawn(electronBinary, ["."], {
     cwd: projectRoot,
     stdio: "inherit",
     env: electronEnv
@@ -127,6 +131,7 @@ async function restartElectron(reason) {
   log(`bundle changed (${reason}), restarting Electron`);
   pendingRestart = true;
   await terminateProcessTree(electronProcess);
+  await new Promise((resolve) => setTimeout(resolve, 200));
 }
 
 function scheduleRestart(reason) {

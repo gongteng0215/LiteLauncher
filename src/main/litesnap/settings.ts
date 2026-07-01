@@ -81,7 +81,23 @@ function normalizeLiteSnapSettings(
     annotationFillShapes:
       typeof value?.annotationFillShapes === "boolean"
         ? value.annotationFillShapes
-        : base.annotationFillShapes
+        : base.annotationFillShapes,
+    translateBaiduAppId:
+      typeof value?.translateBaiduAppId === "string"
+        ? value.translateBaiduAppId.trim()
+        : base.translateBaiduAppId,
+    translateBaiduSecret:
+      typeof value?.translateBaiduSecret === "string"
+        ? value.translateBaiduSecret.trim()
+        : base.translateBaiduSecret,
+    translateBaiduEngine:
+      value?.translateBaiduEngine === "llm" || value?.translateBaiduEngine === "standard"
+        ? value.translateBaiduEngine
+        : base.translateBaiduEngine,
+    translateBaiduApiKey:
+      typeof value?.translateBaiduApiKey === "string"
+        ? value.translateBaiduApiKey.trim()
+        : base.translateBaiduApiKey
   };
 }
 

@@ -12673,6 +12673,10 @@ interface LiteSnapPanelData {
     annotationTextSize: number;
     annotationTool: string;
     annotationFillShapes: boolean;
+    translateBaiduAppId: string;
+    translateBaiduSecret: string;
+    translateBaiduEngine: "standard" | "llm";
+    translateBaiduApiKey: string;
   };
   statusMessage: string;
 }
@@ -12688,7 +12692,11 @@ const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
     annotationLineWidth: 3,
     annotationTextSize: 16,
     annotationTool: "select",
-    annotationFillShapes: false
+    annotationFillShapes: false,
+    translateBaiduAppId: "",
+    translateBaiduSecret: "",
+    translateBaiduEngine: "standard",
+    translateBaiduApiKey: ""
   },
   statusMessage: "按 F1 进入截图，主窗口会保持可见，便于截取启动器界面。"
 };
@@ -12697,7 +12705,20 @@ let liteSnapPanelData: LiteSnapPanelData = {
   settings: { ...DEFAULT_LITESNAP_PANEL_DATA.settings },
   statusMessage: DEFAULT_LITESNAP_PANEL_DATA.statusMessage
 };
-let liteSnapPanelView: "main" | "settings" = "main";
+let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" = "main";
+let liteSnapOcrText = "";
+let liteSnapTranslateSourceText = "";
+let liteSnapTranslateText = "";
+let liteSnapSettingsTranslateSource = "";
+let liteSnapSettingsTranslateResult = "";
+
+function normalizeLiteSnapOcrPanelText(text: string): string {
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  if (utils?.normalizeLiteSnapOcrText) {
+    return utils.normalizeLiteSnapOcrText(text);
+  }
+  return text;
+}
 
 function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
   const record = toRecord(value);
@@ -12744,7 +12765,24 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
       annotationFillShapes:
         typeof settingsRecord?.annotationFillShapes === "boolean"
           ? settingsRecord.annotationFillShapes
-          : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationFillShapes
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationFillShapes,
+      translateBaiduAppId:
+        typeof settingsRecord?.translateBaiduAppId === "string"
+          ? settingsRecord.translateBaiduAppId
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.translateBaiduAppId,
+      translateBaiduSecret:
+        typeof settingsRecord?.translateBaiduSecret === "string"
+          ? settingsRecord.translateBaiduSecret
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.translateBaiduSecret,
+      translateBaiduEngine:
+        settingsRecord?.translateBaiduEngine === "llm" ||
+        settingsRecord?.translateBaiduEngine === "standard"
+          ? settingsRecord.translateBaiduEngine
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.translateBaiduEngine,
+      translateBaiduApiKey:
+        typeof settingsRecord?.translateBaiduApiKey === "string"
+          ? settingsRecord.translateBaiduApiKey
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.translateBaiduApiKey
     },
     statusMessage:
       typeof record?.statusMessage === "string"
@@ -13041,10 +13079,68 @@ function createLiteSnapCheckbox(
   return input;
 }
 
+async function runLiteSnapSettingsTranslate(
+  form: HTMLFormElement,
+  sourceTextarea: HTMLTextAreaElement,
+  resultTextarea: HTMLTextAreaElement,
+  translateButton: HTMLButtonElement
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapTranslateText) {
+    setStatus("翻译功能未加载，请重启 LiteLauncher。");
+    return;
+  }
+
+  const text = sourceTextarea.value.replace(/\r\n/g, "\n").trim();
+  if (!text) {
+    setStatus("请输入要翻译的文字。");
+    return;
+  }
+
+  const formData = new FormData(form);
+  const previousLabel = translateButton.textContent ?? "翻译";
+  translateButton.disabled = true;
+  translateButton.textContent = "翻译中…";
+  resultTextarea.value = "";
+  resultTextarea.placeholder = "正在翻译，请稍候…";
+
+  try {
+    const result = await launcher.liteSnapTranslateText({
+      text,
+      appId: String(formData.get("translateBaiduAppId") ?? "").trim(),
+      secret: String(formData.get("translateBaiduSecret") ?? "").trim(),
+      apiKey: String(formData.get("translateBaiduApiKey") ?? "").trim(),
+      engine:
+        formData.get("translateBaiduEngine") === "llm" ? "llm" : "standard"
+    });
+    liteSnapSettingsTranslateSource = text;
+    liteSnapSettingsTranslateResult = result.ok ? result.translatedText : "";
+    resultTextarea.value = liteSnapSettingsTranslateResult;
+    resultTextarea.placeholder = result.ok
+      ? ""
+      : result.message || "翻译失败，请检查百度翻译配置。";
+    setStatus(result.ok ? "翻译完成。" : result.message);
+  } catch (error) {
+    console.warn("[litesnap] settings translate failed", error);
+    resultTextarea.placeholder = "翻译失败，请检查网络后重试。";
+    setStatus("翻译失败，请检查网络后重试。");
+  } finally {
+    translateButton.disabled = false;
+    translateButton.textContent = previousLabel;
+  }
+}
+
 async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
     setStatus("启动器桥接暂不可用。");
+    return;
+  }
+
+  const submitButton = form.querySelector<HTMLButtonElement>(
+    'button[type="submit"]'
+  );
+  if (submitButton?.disabled) {
     return;
   }
 
@@ -13077,22 +13173,42 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
     annotationColor: String(formData.get("annotationColor") ?? "").trim(),
     annotationLineWidth: Number(formData.get("annotationLineWidth")),
     annotationTextSize: Number(formData.get("annotationTextSize")),
-    annotationFillShapes: formData.get("annotationFillShapes") === "on"
+    annotationFillShapes: formData.get("annotationFillShapes") === "on",
+    translateBaiduAppId: String(formData.get("translateBaiduAppId") ?? "").trim(),
+    translateBaiduSecret: String(formData.get("translateBaiduSecret") ?? "").trim(),
+    translateBaiduEngine:
+      formData.get("translateBaiduEngine") === "llm" ? "llm" : "standard",
+    translateBaiduApiKey: String(formData.get("translateBaiduApiKey") ?? "").trim()
   };
 
-  const settings = await launcher.setLiteSnapSettings(patch);
-  const shortcutRegistration = toRecord(toRecord(settings)?.shortcutRegistration);
-  const statusMessage =
-    typeof shortcutRegistration?.message === "string"
-      ? `LiteSnap 设置已保存。${shortcutRegistration.message}`
-      : "LiteSnap 设置已保存。";
-  liteSnapPanelData = normalizeLiteSnapPanelData({
-    settings,
-    statusMessage
-  });
-  liteSnapPanelView = "settings";
-  setStatus(statusMessage);
-  renderList();
+  const previousLabel = submitButton?.textContent ?? "保存设置";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "保存中…";
+  }
+
+  try {
+    const settings = await launcher.setLiteSnapSettings(patch);
+    const shortcutRegistration = toRecord(toRecord(settings)?.shortcutRegistration);
+    const statusMessage =
+      typeof shortcutRegistration?.message === "string"
+        ? `LiteSnap 设置已保存。${shortcutRegistration.message}`
+        : "LiteSnap 设置已保存。";
+    liteSnapPanelData = normalizeLiteSnapPanelData({
+      settings,
+      statusMessage
+    });
+    liteSnapPanelView = "settings";
+    setStatus(statusMessage);
+    renderList();
+  } catch (error) {
+    console.warn("[litesnap] save settings failed", error);
+    setStatus("保存设置失败，请重试。");
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = previousLabel;
+    }
+  }
 }
 
 async function hydrateLiteSnapPanelFromSettings(): Promise<void> {
@@ -13431,6 +13547,9 @@ function openGenericPluginPanel(payload: GenericPluginPanelPayload): void {
   handler?.onOpen?.(activePluginPanel);
 
   setMode("plugin");
+  // Render immediately so OCR/translate panels are not dropped when a stale
+  // refreshEntries() call loses the latestSearchToken race.
+  renderList();
   void refreshEntries("");
 }
 
@@ -13539,7 +13658,7 @@ window.__LL_PANEL_IMPLS__ = {
       return false;
     }
 
-    if (liteSnapPanelView === "settings") {
+    if (liteSnapPanelView === "settings" || liteSnapPanelView === "ocr" || liteSnapPanelView === "translate") {
       returnToLiteSnapMainView();
       return true;
     }
@@ -14729,8 +14848,26 @@ window.__LL_PANEL_IMPLS__ = {
     const panelRecord = toRecord(panel);
     const dataRecord = toRecord(panelRecord?.data ?? panel);
     liteSnapPanelData = normalizeLiteSnapPanelData(dataRecord);
-    liteSnapPanelView =
-      dataRecord?.preferredView === "settings" ? "settings" : "main";
+    if (dataRecord?.preferredView === "ocr") {
+      liteSnapPanelView = "ocr";
+      const rawOcrText =
+        typeof dataRecord?.ocrText === "string" ? dataRecord.ocrText : "";
+      liteSnapOcrText = normalizeLiteSnapOcrPanelText(rawOcrText);
+    } else if (dataRecord?.preferredView === "translate") {
+      liteSnapPanelView = "translate";
+      liteSnapTranslateSourceText =
+        typeof dataRecord?.translateSourceText === "string"
+          ? dataRecord.translateSourceText
+          : "";
+      liteSnapTranslateText =
+        typeof dataRecord?.translateText === "string"
+          ? dataRecord.translateText
+          : "";
+    } else if (dataRecord?.preferredView === "settings") {
+      liteSnapPanelView = "settings";
+    } else {
+      liteSnapPanelView = "main";
+    }
   },
 
   renderLiteSnapPanel(): void {
@@ -14756,12 +14893,192 @@ window.__LL_PANEL_IMPLS__ = {
       event.preventDefault();
       if (liteSnapPanelView === "settings") {
         void saveLiteSnapSettings(form);
+      } else if (liteSnapPanelView === "ocr" || liteSnapPanelView === "translate") {
+        // OCR / translate views use explicit buttons; Enter should not start a capture.
       } else {
         void executeLiteSnapPanelAction("start-capture");
       }
     });
 
-    if (liteSnapPanelView === "settings") {
+    if (liteSnapPanelView === "ocr") {
+      const ocrStatusRow = createLiteSnapInfoRow(
+        "文字识别",
+        liteSnapPanelData.statusMessage || "已识别文字，可编辑后复制。",
+        "识别使用 Windows 本地 OCR（中/英引擎自动选择），可在下方编辑"
+      );
+
+      const ocrField = document.createElement("div");
+      ocrField.className = "settings-field litesnap-ocr-field";
+
+      const ocrLabel = document.createElement("label");
+      ocrLabel.className = "settings-field-label";
+      ocrLabel.textContent = "识别结果";
+      ocrLabel.htmlFor = "litesnap-ocr-text";
+
+      const ocrTextarea = document.createElement("textarea");
+      ocrTextarea.id = "litesnap-ocr-text";
+      ocrTextarea.className = "litesnap-ocr-textarea";
+      ocrTextarea.rows = 10;
+      ocrTextarea.spellcheck = false;
+      ocrTextarea.value = liteSnapOcrText;
+      if (!liteSnapOcrText.trim()) {
+        ocrTextarea.placeholder =
+          liteSnapPanelData.statusMessage &&
+          liteSnapPanelData.statusMessage !== "已识别文字，可编辑后复制。"
+            ? liteSnapPanelData.statusMessage
+            : "未识别到文字，请重试或检查 Windows OCR 语言包。";
+      }
+      ocrTextarea.addEventListener("input", () => {
+        liteSnapOcrText = ocrTextarea.value;
+      });
+
+      ocrField.append(ocrLabel, ocrTextarea);
+
+      const ocrActions = document.createElement("div");
+      ocrActions.className = "settings-actions";
+
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "settings-btn settings-btn-primary";
+      copyButton.textContent = "复制文字";
+      copyButton.addEventListener("click", () => {
+        const value = ocrTextarea.value;
+        void navigator.clipboard
+          .writeText(value)
+          .then(() => setStatus("已复制识别文字到剪贴板。"))
+          .catch(() => setStatus("复制失败，请手动选择文字复制。"));
+      });
+
+      const captureAgainButton = document.createElement("button");
+      captureAgainButton.type = "button";
+      captureAgainButton.className = "settings-btn settings-btn-secondary";
+      captureAgainButton.textContent = "重新截图识别";
+      captureAgainButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("start-capture");
+      });
+
+      const backToMainButton = document.createElement("button");
+      backToMainButton.type = "button";
+      backToMainButton.className = "settings-btn settings-btn-secondary";
+      backToMainButton.textContent = "返回主页面";
+      backToMainButton.addEventListener("click", () => {
+        returnToLiteSnapMainView();
+      });
+
+      const backToSearchButton = document.createElement("button");
+      backToSearchButton.type = "button";
+      backToSearchButton.className = "settings-btn settings-btn-secondary";
+      backToSearchButton.textContent = "返回搜索";
+      backToSearchButton.addEventListener("click", () => {
+        backToSearch();
+      });
+
+      ocrActions.append(
+        copyButton,
+        captureAgainButton,
+        backToMainButton,
+        backToSearchButton
+      );
+      form.append(ocrStatusRow, ocrField, ocrActions);
+    } else if (liteSnapPanelView === "translate") {
+      const translateStatusRow = createLiteSnapInfoRow(
+        "截图翻译",
+        liteSnapPanelData.statusMessage || "已翻译为中文，可编辑后复制。",
+        "识别使用 Windows 本地 OCR，翻译使用百度翻译 API（英译中）"
+      );
+
+      const sourceField = document.createElement("div");
+      sourceField.className = "settings-field litesnap-ocr-field";
+
+      const sourceLabel = document.createElement("label");
+      sourceLabel.className = "settings-field-label";
+      sourceLabel.textContent = "识别原文";
+      sourceLabel.htmlFor = "litesnap-translate-source";
+
+      const sourceTextarea = document.createElement("textarea");
+      sourceTextarea.id = "litesnap-translate-source";
+      sourceTextarea.className = "litesnap-ocr-textarea";
+      sourceTextarea.rows = 6;
+      sourceTextarea.spellcheck = false;
+      sourceTextarea.readOnly = true;
+      sourceTextarea.value = liteSnapTranslateSourceText;
+      sourceField.append(sourceLabel, sourceTextarea);
+
+      const translateField = document.createElement("div");
+      translateField.className = "settings-field litesnap-ocr-field";
+
+      const translateLabel = document.createElement("label");
+      translateLabel.className = "settings-field-label";
+      translateLabel.textContent = "中文译文";
+      translateLabel.htmlFor = "litesnap-translate-text";
+
+      const translateTextarea = document.createElement("textarea");
+      translateTextarea.id = "litesnap-translate-text";
+      translateTextarea.className = "litesnap-ocr-textarea";
+      translateTextarea.rows = 8;
+      translateTextarea.spellcheck = false;
+      translateTextarea.placeholder =
+        liteSnapTranslateText.trim().length > 0
+          ? ""
+          : "正在在线翻译，请稍候…";
+      translateTextarea.value = liteSnapTranslateText;
+      translateTextarea.addEventListener("input", () => {
+        liteSnapTranslateText = translateTextarea.value;
+      });
+      translateField.append(translateLabel, translateTextarea);
+
+      const translateActions = document.createElement("div");
+      translateActions.className = "settings-actions";
+
+      const copyTranslationButton = document.createElement("button");
+      copyTranslationButton.type = "button";
+      copyTranslationButton.className = "settings-btn settings-btn-primary";
+      copyTranslationButton.textContent = "复制译文";
+      copyTranslationButton.addEventListener("click", () => {
+        const value = translateTextarea.value;
+        void navigator.clipboard
+          .writeText(value)
+          .then(() => setStatus("已复制译文到剪贴板。"))
+          .catch(() => setStatus("复制失败，请手动选择文字复制。"));
+      });
+
+      const captureAgainButton = document.createElement("button");
+      captureAgainButton.type = "button";
+      captureAgainButton.className = "settings-btn settings-btn-secondary";
+      captureAgainButton.textContent = "重新截图翻译";
+      captureAgainButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("start-capture");
+      });
+
+      const backToMainButton = document.createElement("button");
+      backToMainButton.type = "button";
+      backToMainButton.className = "settings-btn settings-btn-secondary";
+      backToMainButton.textContent = "返回主页面";
+      backToMainButton.addEventListener("click", () => {
+        returnToLiteSnapMainView();
+      });
+
+      const backToSearchButton = document.createElement("button");
+      backToSearchButton.type = "button";
+      backToSearchButton.className = "settings-btn settings-btn-secondary";
+      backToSearchButton.textContent = "返回搜索";
+      backToSearchButton.addEventListener("click", () => {
+        backToSearch();
+      });
+
+      translateActions.append(
+        copyTranslationButton,
+        captureAgainButton,
+        backToMainButton,
+        backToSearchButton
+      );
+      form.append(
+        translateStatusRow,
+        sourceField,
+        translateField,
+        translateActions
+      );
+    } else if (liteSnapPanelView === "settings") {
       const settingsStatusRow = createLiteSnapInfoRow(
         "设置说明",
         "修改后点击保存即可生效",
@@ -14870,8 +15187,131 @@ window.__LL_PANEL_IMPLS__ = {
             liteSnapPanelData.settings.annotationFillShapes
           ),
           "开启后矩形/椭圆默认填充颜色"
+        ),
+        createLiteSnapFieldRow(
+          "翻译引擎",
+          createLiteSnapSelect(
+            "litesnap-translate-baidu-engine",
+            "translateBaiduEngine",
+            liteSnapPanelData.settings.translateBaiduEngine,
+            [
+              { value: "standard", label: "通用文本翻译" },
+              { value: "llm", label: "大模型文本翻译" }
+            ]
+          ),
+          "通用版用 AppID+密钥；大模型版用 AppID+API Key"
+        ),
+        createLiteSnapFieldRow(
+          "百度翻译 AppID",
+          createLiteSnapTextInput(
+            "litesnap-translate-baidu-appid",
+            "translateBaiduAppId",
+            liteSnapPanelData.settings.translateBaiduAppId,
+            "在百度翻译开放平台创建应用后获取"
+          ),
+          "两种翻译引擎都需要"
+        ),
+        createLiteSnapFieldRow(
+          "百度翻译密钥",
+          createLiteSnapTextInput(
+            "litesnap-translate-baidu-secret",
+            "translateBaiduSecret",
+            liteSnapPanelData.settings.translateBaiduSecret,
+            "通用文本翻译使用",
+            "password"
+          ),
+          "仅通用文本翻译需要，保存在本机"
+        ),
+        createLiteSnapFieldRow(
+          "百度翻译 API Key",
+          createLiteSnapTextInput(
+            "litesnap-translate-baidu-apikey",
+            "translateBaiduApiKey",
+            liteSnapPanelData.settings.translateBaiduApiKey,
+            "在开放平台「API Key 管理」创建",
+            "password"
+          ),
+          "仅大模型文本翻译需要，保存在本机"
         )
       ];
+
+      const translateTestInfo = createLiteSnapInfoRow(
+        "文本翻译",
+        "直接输入文字翻译为中文，使用上方所选百度翻译引擎",
+        "可先填写对应凭证再点翻译，无需先保存"
+      );
+
+      const translateSourceField = document.createElement("div");
+      translateSourceField.className = "settings-field litesnap-ocr-field";
+
+      const translateSourceLabel = document.createElement("label");
+      translateSourceLabel.className = "settings-field-label";
+      translateSourceLabel.textContent = "原文";
+      translateSourceLabel.htmlFor = "litesnap-settings-translate-source";
+
+      const translateSourceTextarea = document.createElement("textarea");
+      translateSourceTextarea.id = "litesnap-settings-translate-source";
+      translateSourceTextarea.className = "litesnap-ocr-textarea";
+      translateSourceTextarea.rows = 4;
+      translateSourceTextarea.spellcheck = false;
+      translateSourceTextarea.placeholder = "粘贴或输入要翻译的文字（英译中）";
+      translateSourceTextarea.value = liteSnapSettingsTranslateSource;
+      translateSourceTextarea.addEventListener("input", () => {
+        liteSnapSettingsTranslateSource = translateSourceTextarea.value;
+      });
+      translateSourceField.append(translateSourceLabel, translateSourceTextarea);
+
+      const translateResultField = document.createElement("div");
+      translateResultField.className = "settings-field litesnap-ocr-field";
+
+      const translateResultLabel = document.createElement("label");
+      translateResultLabel.className = "settings-field-label";
+      translateResultLabel.textContent = "中文译文";
+      translateResultLabel.htmlFor = "litesnap-settings-translate-result";
+
+      const translateResultTextarea = document.createElement("textarea");
+      translateResultTextarea.id = "litesnap-settings-translate-result";
+      translateResultTextarea.className = "litesnap-ocr-textarea";
+      translateResultTextarea.rows = 4;
+      translateResultTextarea.spellcheck = false;
+      translateResultTextarea.readOnly = true;
+      translateResultTextarea.value = liteSnapSettingsTranslateResult;
+      translateResultTextarea.placeholder = "翻译结果将显示在这里";
+      translateResultField.append(translateResultLabel, translateResultTextarea);
+
+      const translateTestActions = document.createElement("div");
+      translateTestActions.className = "settings-actions";
+
+      const translateButton = document.createElement("button");
+      translateButton.type = "button";
+      translateButton.className = "settings-btn settings-btn-primary";
+      translateButton.textContent = "翻译";
+      translateButton.addEventListener("click", () => {
+        void runLiteSnapSettingsTranslate(
+          form,
+          translateSourceTextarea,
+          translateResultTextarea,
+          translateButton
+        );
+      });
+
+      const copyTranslateButton = document.createElement("button");
+      copyTranslateButton.type = "button";
+      copyTranslateButton.className = "settings-btn settings-btn-secondary";
+      copyTranslateButton.textContent = "复制译文";
+      copyTranslateButton.addEventListener("click", () => {
+        const value = translateResultTextarea.value;
+        if (!value.trim()) {
+          setStatus("没有可复制的译文。");
+          return;
+        }
+        void navigator.clipboard
+          .writeText(value)
+          .then(() => setStatus("已复制译文到剪贴板。"))
+          .catch(() => setStatus("复制失败，请手动选择文字复制。"));
+      });
+
+      translateTestActions.append(translateButton, copyTranslateButton);
 
       const settingsActions = document.createElement("div");
       settingsActions.className = "settings-actions";
@@ -14919,7 +15359,16 @@ window.__LL_PANEL_IMPLS__ = {
         backToMainButton,
         backToSearchButton
       );
-      form.append(settingsStatusRow, shortcutStatusRow, ...settingsRows, settingsActions);
+      form.append(
+        settingsStatusRow,
+        shortcutStatusRow,
+        ...settingsRows,
+        translateTestInfo,
+        translateSourceField,
+        translateResultField,
+        translateTestActions,
+        settingsActions
+      );
     } else {
       const statusRow = createLiteSnapInfoRow(
         "使用提示",

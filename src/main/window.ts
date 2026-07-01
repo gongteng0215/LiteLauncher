@@ -32,7 +32,9 @@ export type LauncherWindowShowTrigger =
   | "tray-double-click"
   | "startup-e2e"
   | "second-instance"
-  | "second-instance-dev-reload";
+  | "second-instance-dev-reload"
+  | "litesnap-ocr"
+  | "litesnap-translate";
 
 export interface LauncherWindowDiagnosticEvent {
   trigger: LauncherWindowShowTrigger;

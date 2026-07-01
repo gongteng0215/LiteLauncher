@@ -19,6 +19,12 @@ import {
   LiteSnapCommitCaptureResult,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
+  LiteSnapRecognizeTextInput,
+  LiteSnapRecognizeTextResult,
+  LiteSnapTranslateSelectionInput,
+  LiteSnapTranslateSelectionResult,
+  LiteSnapTranslateTextInput,
+  LiteSnapTranslateTextResult,
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult
 } from "../shared/litesnap";
@@ -249,6 +255,9 @@ declare global {
     __LL_PLUGIN_STATIC_DATA__?: RendererPluginStaticData;
     __LL_IMAGE_PROMPT_DATA__?: RendererImagePromptData;
     __LL_PLUGIN_HANDLER_CONFIGS__?: RendererPluginHandlerConfigItem[];
+    __LL_LITESNAP_TEXT_UTILS__?: {
+      normalizeLiteSnapOcrText(text: string): string;
+    };
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
     launcher: {
       isDebugKeysEnabled(): boolean;
@@ -287,6 +296,15 @@ declare global {
       liteSnapCommitCapture(
         input: LiteSnapCommitCaptureInput
       ): Promise<LiteSnapCommitCaptureResult>;
+      liteSnapRecognizeText(
+        input: LiteSnapRecognizeTextInput
+      ): Promise<LiteSnapRecognizeTextResult>;
+      liteSnapTranslateSelection(
+        input: LiteSnapTranslateSelectionInput
+      ): Promise<LiteSnapTranslateSelectionResult>;
+      liteSnapTranslateText(
+        input: LiteSnapTranslateTextInput
+      ): Promise<LiteSnapTranslateTextResult>;
       liteSnapCancelCapture(): Promise<boolean>;
       liteSnapEnsureSourceImage(): Promise<string | null>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;

@@ -14,10 +14,20 @@ import {
   type LiteSnapCommitCaptureResult,
   type LiteSnapOverlaySelection,
   type LiteSnapOverlayState,
-  type LiteSnapSettings
+  type LiteSnapRecognizeTextInput,
+  type LiteSnapRecognizeTextResult,
+  type LiteSnapSettings,
+  normalizeLiteSnapOcrText
 } from "../../shared/litesnap";
+import {
+  looksLikeMisrecognizedEnglish,
+  scoreLiteSnapOcrText,
+  type LiteSnapOcrLanguagePreference
+} from "../../shared/litesnap-ocr-quality";
 import { IPC_CHANNELS } from "../../shared/channels";
 import {
+  captureDisplayFramesWithFallback,
+  captureSourceImageWithFallback,
   createLiteSnapCaptureProvider,
   type LiteSnapCaptureProvider
 } from "./capture-provider";
@@ -48,6 +58,7 @@ type DisplayFrameCache = {
 
 const FRAME_CACHE_TTL_MS = 1200;
 const FRAME_CACHE_REFRESH_MS = 2200;
+const OVERLAY_READY_TIMEOUT_MS = 8000;
 const FRAME_CACHE_REFRESH_MAX_MS = 8000;
 const PREVIEW_JPEG_QUALITY = 92;
 
@@ -55,11 +66,14 @@ export class LiteSnapCaptureSessionManager {
   private session: CaptureSession | null = null;
   private overlayWindow: BrowserWindow | null = null;
   private overlayReadyPromise: Promise<void> | null = null;
+  private startingCapture = false;
   private frameCache: DisplayFrameCache | null = null;
   private frameCacheWarmPromise: Promise<void> | null = null;
   private frameCacheWarmDisplayId: number | null = null;
   private frameCacheRefreshTimer: NodeJS.Timeout | null = null;
   private frameCacheIdleRefreshCycles = 0;
+  private frameCacheWarmGeneration = 0;
+  private idleFrameCachePaused = false;
   private readonly captureProvider: LiteSnapCaptureProvider;
 
   public constructor(
@@ -71,7 +85,7 @@ export class LiteSnapCaptureSessionManager {
   }
 
   public prewarmCaptureCache(): void {
-    if (process.platform !== "win32") {
+    if (process.platform !== "win32" || this.idleFrameCachePaused) {
       return;
     }
 
@@ -79,6 +93,27 @@ export class LiteSnapCaptureSessionManager {
     this.warmDisplayFrameCache(
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     );
+  }
+
+  public pauseIdleFrameCache(): void {
+    if (this.idleFrameCachePaused) {
+      return;
+    }
+
+    this.idleFrameCachePaused = true;
+    this.stopFrameCacheRefresh();
+    this.abortFrameCacheWarm();
+  }
+
+  public resumeIdleFrameCache(): void {
+    if (!this.idleFrameCachePaused) {
+      return;
+    }
+
+    this.idleFrameCachePaused = false;
+    if (!this.session) {
+      this.startFrameCacheRefresh();
+    }
   }
 
   public async prewarmOverlay(): Promise<boolean> {
@@ -102,6 +137,21 @@ export class LiteSnapCaptureSessionManager {
 
     this.frameCacheIdleRefreshCycles = 0;
     this.scheduleNextFrameCacheRefresh();
+  }
+
+  private stopFrameCacheRefresh(): void {
+    if (!this.frameCacheRefreshTimer) {
+      return;
+    }
+
+    clearTimeout(this.frameCacheRefreshTimer);
+    this.frameCacheRefreshTimer = null;
+  }
+
+  private abortFrameCacheWarm(): void {
+    this.frameCacheWarmGeneration += 1;
+    this.frameCacheWarmPromise = null;
+    this.frameCacheWarmDisplayId = null;
   }
 
   private scheduleNextFrameCacheRefresh(): void {
@@ -135,6 +185,27 @@ export class LiteSnapCaptureSessionManager {
       return false;
     }
 
+    // Guard against rapid re-triggering (e.g. holding the global shortcut).
+    // Without this, overlapping startCapture calls each cancel/recreate the
+    // session, race on captureId (returning false), and pile up concurrent
+    // load/executeJavaScript listeners on the overlay webContents.
+    if (this.startingCapture) {
+      return true;
+    }
+    this.startingCapture = true;
+    try {
+      return await this.startCaptureInternal(beforeImageCapture);
+    } finally {
+      this.startingCapture = false;
+    }
+  }
+
+  private async startCaptureInternal(
+    beforeImageCapture?: () => Promise<void> | void
+  ): Promise<boolean> {
+    this.stopFrameCacheRefresh();
+    this.abortFrameCacheWarm();
+
     if (this.session) {
       await this.cancelCapture();
     }
@@ -159,23 +230,28 @@ export class LiteSnapCaptureSessionManager {
 
     const framesPromise = this.resolveCaptureFrames(display);
 
-    const resolvedFrames = await Promise.all([
-      this.waitForOverlayReady(overlayWindow),
-      this.prepareOverlayRenderer(overlayWindow),
-      beforeImageCapture?.(),
+    await this.waitForOverlayReady(overlayWindow);
+    await this.prepareOverlayRenderer(overlayWindow);
+    this.showPreparingOverlay(overlayWindow);
+    await beforeImageCapture?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const [resolvedFrames] = await Promise.all([
+      framesPromise,
       this.settingsStore.getSettings().then((settings) => {
         if (this.session?.captureId === captureId) {
           this.session.settings = settings;
         }
-      }),
-      framesPromise
-    ]).then((results) => results[4]);
+      })
+    ]);
 
     if (this.session?.captureId !== captureId) {
+      console.warn("[litesnap] capture aborted: session was replaced before frames arrived");
       return false;
     }
 
     if (!resolvedFrames) {
+      console.warn("[litesnap] capture failed: no frames available for the target display");
       await this.cancelCapture();
       return false;
     }
@@ -183,7 +259,7 @@ export class LiteSnapCaptureSessionManager {
     this.session.previewImage = resolvedFrames.previewImage;
     this.session.previewImageDataUrl = resolvedFrames.previewImageDataUrl;
     this.session.sourceImage = resolvedFrames.sourceImage;
-    this.session.sourceImageDataUrl = resolvedFrames.sourceImage.toDataURL();
+    this.session.sourceImageDataUrl = null;
 
     if (resolvedFrames.fromCache) {
       this.warmDisplayFrameCache(display);
@@ -211,7 +287,11 @@ export class LiteSnapCaptureSessionManager {
     const settings = this.session.settings;
     return {
       captureId: this.session.captureId,
-      imageDataUrl: this.session.sourceImageDataUrl ?? this.session.previewImageDataUrl,
+      // Send only the display-sized preview to the overlay renderer. Encoding and
+      // IPC-ing the full physical-resolution source as a data URL can take many
+      // seconds (or fail outright) on high-DPI displays, which makes F1 appear
+      // dead. The NativeImage source stays in the main process for sharp crops.
+      imageDataUrl: this.session.previewImageDataUrl,
       sourceImageDataUrl: this.session.sourceImageDataUrl,
       viewportWidth: this.session.display.bounds.width,
       viewportHeight: this.session.display.bounds.height,
@@ -316,6 +396,8 @@ export class LiteSnapCaptureSessionManager {
       width: input.selection.width,
       height: input.selection.height
     };
+    // Pin to screen and copy to clipboard in one step, matching common snipping-tool UX.
+    clipboard.writeImage(cropped);
     const pinned = await this.pinWindowManager.pinImage(cropped, placement);
     if (!pinned) {
       return {
@@ -327,8 +409,171 @@ export class LiteSnapCaptureSessionManager {
     await this.cancelCapture();
     return {
       ok: true,
-      message: "Screenshot pinned to the screen."
+      message: "Screenshot pinned to the screen and copied to the clipboard."
     };
+  }
+
+  private async recognizeWithLanguage(
+    cropped: NativeImage,
+    languagePreference: LiteSnapOcrLanguagePreference
+  ): Promise<string | null> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 80));
+      }
+
+      try {
+        const text = await this.captureProvider.recognizeText(cropped, {
+          languagePreference
+        });
+        if (typeof text === "string" && text.trim()) {
+          return text;
+        }
+      } catch (error) {
+        console.warn("[litesnap] OCR recognition failed", error);
+      }
+    }
+
+    return null;
+  }
+
+  private prepareOcrImage(image: NativeImage): NativeImage {
+    const size = image.getSize();
+    const minEdge = Math.min(size.width, size.height);
+    const minOcrEdge = 56;
+    if (minEdge >= minOcrEdge) {
+      return image;
+    }
+
+    const scale = Math.min(4, Math.ceil(minOcrEdge / Math.max(1, minEdge)));
+    const resized = image.resize({
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+      quality: "best"
+    });
+    return resized.isEmpty() ? image : resized;
+  }
+
+  private async recognizeOcrWithFallback(
+    image: NativeImage,
+    options?: { languagePreference?: LiteSnapOcrLanguagePreference }
+  ): Promise<string | null> {
+    const preference = options?.languagePreference ?? "chinese";
+
+    if (preference === "english") {
+      let text = await this.recognizeWithLanguage(image, "english");
+      if (!text) {
+        text = await this.recognizeWithLanguage(image, "chinese");
+      }
+      return text;
+    }
+
+    const chineseText = await this.recognizeWithLanguage(image, "chinese");
+    if (chineseText) {
+      const normalizedChinese = normalizeLiteSnapOcrText(chineseText);
+      if (
+        normalizedChinese &&
+        !looksLikeMisrecognizedEnglish(normalizedChinese)
+      ) {
+        return chineseText;
+      }
+
+      const englishText = await this.recognizeWithLanguage(image, "english");
+      if (englishText) {
+        const normalizedEnglish = normalizeLiteSnapOcrText(englishText);
+        if (
+          !normalizedChinese ||
+          scoreLiteSnapOcrText(normalizedEnglish) >
+            scoreLiteSnapOcrText(normalizedChinese)
+        ) {
+          return englishText;
+        }
+      }
+
+      return chineseText;
+    }
+
+    return this.recognizeWithLanguage(image, "english");
+  }
+
+  private buildOcrFailureMessage(): string {
+    return [
+      "未识别到文字。",
+      "识别英文请在 Windows 设置 → 时间和语言 → 语言和区域 中，",
+      "为「英语」安装 OCR（语言 → 选项 → 光学字符识别）。",
+      "识别中文请安装「中文（简体）」OCR。",
+      "配置后重启 LiteLauncher 再试。"
+    ].join("");
+  }
+
+  private async recognizeSelectionText(
+    input: LiteSnapRecognizeTextInput,
+    options?: { languagePreference?: LiteSnapOcrLanguagePreference }
+  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+    const session = this.session;
+    if (!session) {
+      return { ok: false, message: "截图会话已结束。" };
+    }
+
+    if (!session.sourceImage || session.sourceImage.isEmpty()) {
+      return { ok: false, message: "截图还在准备中，请稍候。" };
+    }
+
+    const cropped = this.cropSelection(
+      session as CaptureSession & { sourceImage: NativeImage },
+      { action: "copy", selection: input.selection }
+    );
+    if (!cropped || cropped.isEmpty()) {
+      return { ok: false, message: "当前选区无效。" };
+    }
+
+    if (!this.captureProvider.supportsTextRecognition()) {
+      return {
+        ok: false,
+        message:
+          "当前未加载 Windows OCR 模块。请完全退出 LiteLauncher 后重新启动；若仍失败，请重新编译 native 模块。"
+      };
+    }
+
+    const ocrImage = this.prepareOcrImage(cropped);
+    const text = await this.recognizeOcrWithFallback(ocrImage, options);
+
+    if (text === null) {
+      return { ok: false, message: this.buildOcrFailureMessage() };
+    }
+
+    const normalized = normalizeLiteSnapOcrText(text);
+    if (!normalized) {
+      return { ok: false, message: "未识别到文字。" };
+    }
+
+    return { ok: true, text: normalized };
+  }
+
+  public async recognizeSelection(
+    input: LiteSnapRecognizeTextInput
+  ): Promise<LiteSnapRecognizeTextResult> {
+    const result = await this.recognizeSelectionText(input);
+    await this.cancelCapture();
+
+    if (!result.ok) {
+      return { ok: false, text: "", message: result.message };
+    }
+
+    return { ok: true, text: result.text, message: "已识别文字。" };
+  }
+
+  public async recognizeTextFromSelection(
+    input: LiteSnapRecognizeTextInput,
+    options?: { languagePreference?: LiteSnapOcrLanguagePreference }
+  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+    return this.recognizeSelectionText(input, options);
+  }
+
+  public async recognizeSelectionForTranslate(
+    input: LiteSnapRecognizeTextInput
+  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+    return this.recognizeSelectionText(input, { languagePreference: "english" });
   }
 
   public async cancelCapture(): Promise<boolean> {
@@ -340,11 +585,16 @@ export class LiteSnapCaptureSessionManager {
 
     const display = session.display;
     if (!session.overlayWindow.isDestroyed()) {
+      await this.emitOverlayStateChanged(null);
       session.overlayWindow.hide();
       this.parkOverlayWindow(session.overlayWindow);
+    } else {
+      await this.emitOverlayStateChanged(null);
     }
-    await this.emitOverlayStateChanged(null);
     this.warmDisplayFrameCache(display);
+    if (!this.idleFrameCachePaused) {
+      this.startFrameCacheRefresh();
+    }
     return true;
   }
 
@@ -392,6 +642,21 @@ export class LiteSnapCaptureSessionManager {
     // frame is painted (see showInteractiveOverlay), that stale frame is never
     // visible.
     overlayWindow.setOpacity(0);
+  }
+
+  private showPreparingOverlay(overlayWindow: BrowserWindow): void {
+    if (overlayWindow.isDestroyed()) {
+      return;
+    }
+
+    // Keep the preparing overlay transparent until the new screenshot is painted.
+    // Showing the previous dim/selection state here looked like a full-screen grey
+    // overlay, especially right after OCR closes the previous capture session.
+    overlayWindow.setIgnoreMouseEvents(true);
+    overlayWindow.setFocusable(false);
+    overlayWindow.setOpacity(0);
+    overlayWindow.show();
+    overlayWindow.moveTop();
   }
 
   private async prepareOverlayRenderer(overlayWindow: BrowserWindow): Promise<void> {
@@ -453,28 +718,52 @@ export class LiteSnapCaptureSessionManager {
       return Promise.resolve();
     }
 
-    if (!this.overlayReadyPromise) {
-      this.overlayReadyPromise = new Promise<void>((resolve) => {
-        const finish = (): void => {
-          this.overlayReadyPromise = null;
+    const waitForLoad = (): Promise<void> => {
+      if (!this.overlayReadyPromise) {
+        this.overlayReadyPromise = new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = (): void => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            if (!overlayWindow.webContents.isDestroyed()) {
+              overlayWindow.webContents.removeListener("did-finish-load", finish);
+              overlayWindow.webContents.removeListener("did-stop-loading", finish);
+              overlayWindow.webContents.removeListener("did-fail-load", finish);
+            }
+            this.overlayReadyPromise = null;
+            resolve();
+          };
+
+          if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
+            finish();
+            return;
+          }
+
+          if (!overlayWindow.webContents.isLoading()) {
+            finish();
+            return;
+          }
+
+          overlayWindow.webContents.once("did-finish-load", finish);
+          overlayWindow.webContents.once("did-stop-loading", finish);
+          overlayWindow.webContents.once("did-fail-load", finish);
+        });
+      }
+
+      return this.overlayReadyPromise;
+    };
+
+    return Promise.race([
+      waitForLoad(),
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          console.warn("[litesnap] overlay ready wait timed out, continuing capture");
           resolve();
-        };
-
-        if (overlayWindow.isDestroyed() || overlayWindow.webContents.isDestroyed()) {
-          finish();
-          return;
-        }
-
-        if (!overlayWindow.webContents.isLoading()) {
-          finish();
-          return;
-        }
-
-        overlayWindow.webContents.once("did-finish-load", finish);
-      });
-    }
-
-    return this.overlayReadyPromise;
+        }, OVERLAY_READY_TIMEOUT_MS);
+      })
+    ]);
   }
 
   private async emitOverlayStateChanged(state: LiteSnapOverlayState | null): Promise<void> {
@@ -528,6 +817,11 @@ export class LiteSnapCaptureSessionManager {
     return `data:image/jpeg;base64,${image.toJPEG(PREVIEW_JPEG_QUALITY).toString("base64")}`;
   }
 
+  private async encodePreviewDataUrlAsync(image: NativeImage): Promise<string> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return this.encodePreviewDataUrl(image);
+  }
+
   private getCachedFrames(display: Display): DisplayFrameCache | null {
     const cache = this.frameCache;
     if (!cache) {
@@ -546,6 +840,10 @@ export class LiteSnapCaptureSessionManager {
   }
 
   private shouldRefreshIdleFrameCache(): boolean {
+    if (this.idleFrameCachePaused) {
+      return false;
+    }
+
     return BrowserWindow.getAllWindows().some(
       (window) => !window.isDestroyed() && window.isFocused()
     );
@@ -570,9 +868,12 @@ export class LiteSnapCaptureSessionManager {
       return;
     }
 
+    const generation = this.frameCacheWarmGeneration;
     this.frameCacheWarmDisplayId = display.id;
     this.frameCacheWarmPromise = task().finally(() => {
-      this.frameCacheWarmPromise = null;
+      if (this.frameCacheWarmGeneration === generation) {
+        this.frameCacheWarmPromise = null;
+      }
     });
   }
 
@@ -593,7 +894,10 @@ export class LiteSnapCaptureSessionManager {
         };
       }
 
-      const sourceImage = await this.captureProvider.captureSourceImage(display);
+      const sourceImage = await captureSourceImageWithFallback(
+        this.captureProvider,
+        display
+      );
       if (!sourceImage || sourceImage.isEmpty()) {
         return null;
       }
@@ -606,24 +910,29 @@ export class LiteSnapCaptureSessionManager {
       };
     }
 
-    const frames = await this.captureProvider.captureDisplayFrames(display);
-    if (
-      !frames ||
-      frames.previewImage.isEmpty() ||
-      frames.sourceImage.isEmpty()
-    ) {
+    const frames = await captureDisplayFramesWithFallback(
+      this.captureProvider,
+      display
+    );
+    if (!frames) {
       return null;
     }
 
     return {
       previewImage: frames.previewImage,
-      previewImageDataUrl: this.encodePreviewDataUrl(frames.previewImage),
+      previewImageDataUrl: await this.encodePreviewDataUrlAsync(frames.previewImage),
       sourceImage: frames.sourceImage,
       fromCache: false
     };
   }
 
   private async captureAndStoreFrameCache(display: Display): Promise<void> {
+    const generation = this.frameCacheWarmGeneration;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (generation !== this.frameCacheWarmGeneration) {
+      return;
+    }
+
     const frames = await this.captureProvider.captureDisplayFrames(display);
     if (!frames) {
       return;
@@ -645,6 +954,12 @@ export class LiteSnapCaptureSessionManager {
   }
 
   private async captureAndStorePreviewCache(display: Display): Promise<void> {
+    const generation = this.frameCacheWarmGeneration;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (generation !== this.frameCacheWarmGeneration) {
+      return;
+    }
+
     const previewImage = await this.captureProvider.capturePreviewImage(display);
     if (!previewImage || previewImage.isEmpty()) {
       return;

@@ -251,14 +251,29 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
     "LiteSnap capture provider should expose a combined preview+source capture path"
   );
   assert.match(
+    providerSource,
+    /captureDisplayFrames\([\s\S]*setImmediate\(resolve\)[\s\S]*this\.addon\.captureDisplayFrames/,
+    "LiteSnap native display capture should yield the event loop before blocking the main thread"
+  );
+  assert.match(
     pinSource,
     /wheel[\s\S]*event\.ctrlKey[\s\S]*opacity[\s\S]*scale/,
     "LiteSnap pinned images should support wheel zoom and Ctrl+wheel opacity"
   );
   assert.match(
     pinSource,
-    /pin-menu[\s\S]*toggle-border[\s\S]*contextmenu/,
-    "LiteSnap pinned images should expose a right-click menu for local pin controls"
+    /pin-menu[\s\S]*pin-opacity-slider[\s\S]*toggle-border[\s\S]*contextmenu/,
+    "LiteSnap pinned images should expose a right-click menu with an opacity slider"
+  );
+  assert.match(
+    pinSource,
+    /\.pin-shell \{[\s\S]*-webkit-app-region: no-drag/,
+    "LiteSnap pin windows should let DOM contextmenu events reach the custom right-click menu"
+  );
+  assert.match(
+    pinSource,
+    /PIN_MOVE_CHANNEL[\s\S]*window\.setPosition\(/,
+    "LiteSnap pin windows should move through IPC instead of a CSS drag region"
   );
   assert.match(
     pinSource,
@@ -267,12 +282,32 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
+    /data-command="save"[\s\S]*保存图片/,
+    "LiteSnap pin right-click menu should offer a save-to-file command"
+  );
+  assert.match(
+    pinSource,
+    /ipcMain\.on\(PIN_SAVE_CHANNEL[\s\S]*pinSaveImageProvider\(image\)/,
+    "LiteSnap pin manager should save pinned images via the injected provider"
+  );
+  assert.match(
+    pinSource,
+    /setSaveImageProvider\(provider: PinSaveImageProvider \| null\)/,
+    "LiteSnap pin manager should accept a save-image provider"
+  );
+  assert.match(
+    pinSource,
     /async pinImage\(\s*image: NativeImage,\s*placement\?: LiteSnapWindowRect/,
     "LiteSnap pin should accept an explicit placement so captured pins keep their original size and position"
   );
   assert.match(
     captureSource,
-    /const placement = \{[\s\S]*session\.display\.bounds\.x \+ input\.selection\.x[\s\S]*\}\s*;\s*const pinned = await this\.pinWindowManager\.pinImage\(cropped, placement\)/,
+    /clipboard\.writeImage\(cropped\)[\s\S]*pinWindowManager\.pinImage\(cropped, placement\)/,
+    "LiteSnap pin action should also copy the screenshot to the clipboard"
+  );
+  assert.match(
+    captureSource,
+    /const placement = \{[\s\S]*session\.display\.bounds\.x \+ input\.selection\.x[\s\S]*\}\s*;[\s\S]*clipboard\.writeImage\(cropped\)[\s\S]*pinWindowManager\.pinImage\(cropped, placement\)/,
     "LiteSnap should pin captured screenshots at their original on-screen location and size"
   );
   assert.match(
@@ -287,8 +322,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /-webkit-app-region: drag/,
-    "LiteSnap pin windows should use native opaque-window dragging instead of per-frame IPC moves"
+    /PIN_MOVE_CHANNEL[\s\S]*-webkit-app-region: no-drag/,
+    "LiteSnap pin windows should avoid CSS drag regions so the custom right-click menu receives events"
   );
   assert.match(
     pinSource,
@@ -457,8 +492,8 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /Promise\.all\(\[[\s\S]*this\.prepareOverlayRenderer\(overlayWindow\)/,
-    "LiteSnap should reset the reused overlay renderer before each capture starts"
+    /await this\.prepareOverlayRenderer\(overlayWindow\)[\s\S]*this\.showPreparingOverlay\(overlayWindow\)/,
+    "LiteSnap should reset the reused overlay renderer before showing the preparing overlay"
   );
   assert.match(
     captureSource,
@@ -472,7 +507,7 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /const framesPromise = this\.resolveCaptureFrames\(display\)[\s\S]*captureProvider\.captureDisplayFrames\(display\)/,
+    /const framesPromise = this\.resolveCaptureFrames\(display\)[\s\S]*captureDisplayFramesWithFallback\(/,
     "LiteSnap should capture the display in parallel with overlay preparation"
   );
   assert.match(
@@ -487,8 +522,13 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /const frames = await this\.captureProvider\.captureDisplayFrames\(display\)/,
-    "LiteSnap should capture preview and full-quality source frames in one native pass"
+    /this\.showPreparingOverlay\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(0\)/,
+    "LiteSnap should keep the preparing overlay transparent until the screenshot is painted"
+  );
+  assert.match(
+    captureSource,
+    /const frames = await captureDisplayFramesWithFallback\(/,
+    "LiteSnap should fall back to desktopCapturer when native capture fails"
   );
   assert.match(
     captureSource,
@@ -497,13 +537,13 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.session\.sourceImageDataUrl = resolvedFrames\.sourceImage\.toDataURL\(\);/,
-    "LiteSnap should eagerly encode the full source image so the visible overlay background stays sharp"
+    /this\.session\.sourceImage = resolvedFrames\.sourceImage;[\s\S]*this\.session\.sourceImageDataUrl = null;/,
+    "LiteSnap should keep the full source image in the main process without eagerly encoding it for overlay IPC"
   );
   assert.match(
     captureSource,
-    /imageDataUrl: this\.session\.sourceImageDataUrl \?\? this\.session\.previewImageDataUrl/,
-    "LiteSnap overlay state should prefer the full-resolution source image over the low-resolution preview"
+    /imageDataUrl: this\.session\.previewImageDataUrl/,
+    "LiteSnap overlay state should use the display-sized preview so capture starts immediately on high-DPI screens"
   );
   assert.match(
     captureSource,
@@ -527,7 +567,7 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /resolveCaptureFrames\([\s\S]*captureSourceImage\(display\)/,
+    /resolveCaptureFrames\([\s\S]*captureSourceImageWithFallback\(/,
     "LiteSnap should capture the full source image on demand when only preview cache is warm"
   );
   assert.match(
@@ -537,8 +577,18 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /shouldRefreshIdleFrameCache\([\s\S]*getAllWindows\(\)[\s\S]*isFocused\(\)/,
-    "LiteSnap frame cache refresh should pause while no LiteLauncher window is focused"
+    /shouldRefreshIdleFrameCache\([\s\S]*idleFrameCachePaused/,
+    "LiteSnap frame cache refresh should pause while the launcher window is focused"
+  );
+  assert.match(
+    captureSource,
+    /pauseIdleFrameCache\(\): void[\s\S]*stopFrameCacheRefresh\(\)[\s\S]*abortFrameCacheWarm\(\)/,
+    "LiteSnap should stop background frame-cache work when the launcher gains focus"
+  );
+  assert.match(
+    captureSource,
+    /startCaptureInternal\([\s\S]*stopFrameCacheRefresh\(\)[\s\S]*abortFrameCacheWarm\(\)/,
+    "LiteSnap should abort idle frame-cache work before starting a real capture"
   );
   assert.match(
     captureSource,
@@ -592,8 +642,8 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /session\.overlayWindow\.hide\(\)[\s\S]*this\.parkOverlayWindow\(session\.overlayWindow\)/,
-    "LiteSnap should park the reusable overlay after capture instead of leaving it interactive"
+    /await this\.emitOverlayStateChanged\(null\)[\s\S]*session\.overlayWindow\.hide\(\)/,
+    "LiteSnap should reset overlay renderer state before parking the overlay window"
   );
   assert.match(
     captureSource,
@@ -639,6 +689,11 @@ test("LiteSnap renderer panel actions call the preload bridge for capture and pi
     panelImplsSource,
     /function saveLiteSnapSettings\([\s\S]*launcher\.setLiteSnapSettings\(patch\)/,
     "LiteSnap settings page should persist editable settings through the preload bridge"
+  );
+  assert.match(
+    panelImplsSource,
+    /submitButton\.disabled = true[\s\S]*保存中/,
+    "LiteSnap settings save should show a saving state and block duplicate submits"
   );
   assert.match(
     panelImplsSource,
@@ -722,13 +777,33 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
   );
   assert.match(
     mainIndexSource,
-    /const started = await liteSnapCaptureSessionManager\.startCapture[\s\S]*if \(started\) \{[\s\S]*liteSnapCaptureSessionManager\.startFrameCacheRefresh\(\);/,
-    "LiteSnap should start follow-up frame-cache refresh only after the first real capture starts"
+    /const started = await liteSnapCaptureSessionManager\.startCapture[\s\S]*if \(started && !launcherWindow\.isDestroyed\(\) && !launcherWindow\.isFocused\(\)\) \{[\s\S]*liteSnapCaptureSessionManager\.startFrameCacheRefresh\(\);/,
+    "LiteSnap should start follow-up frame-cache refresh only after capture when the launcher is not focused"
+  );
+  assert.match(
+    mainIndexSource,
+    /liteSnapCaptureShortcutTriggeredAt/,
+    "LiteSnap capture shortcut should debounce duplicate global and local triggers"
+  );
+  assert.match(
+    mainIndexSource,
+    /launcherWindow\.on\("focus"[\s\S]*pauseIdleFrameCache\(\)/,
+    "LiteSnap should pause idle frame-cache warming while the launcher window is focused"
   );
   assert.doesNotMatch(
     mainIndexSource,
     /startCapture\(async[\s\S]{0,200}launcherWindow\.hide\(\)/,
     "LiteSnap capture should keep the launcher window visible"
+  );
+  assert.match(
+    mainIndexSource,
+    /registerLiteSnapLocalShortcut\(window, startCapture, pinClipboardImage\)/,
+    "LiteSnap should also handle screenshot shortcuts locally when the launcher window is focused"
+  );
+  assert.match(
+    mainIndexSource,
+    /function matchAcceleratorInput\(input: Input, accelerator: string\)/,
+    "LiteSnap local shortcut matching should mirror the configured accelerator"
   );
   assert.match(
     mainIndexSource,
@@ -742,18 +817,23 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
   );
   assert.match(
     mainIndexSource,
-    /shouldRegisterShortcuts[\s\S]*hasOwnProperty\.call\(patch, "screenshotShortcut"\)[\s\S]*hasOwnProperty\.call\(patch, "pinShortcut"\)/,
+    /shortcutsChanged[\s\S]*hasOwnProperty\.call\(patch, "screenshotShortcut"\)[\s\S]*hasOwnProperty\.call\(patch, "pinShortcut"\)/,
     "LiteSnap should only re-register global shortcuts when shortcut settings change"
   );
   assert.match(
     mainIndexSource,
-    /function updateLiteSnapSettingsWithShortcutRegistration[\s\S]*const previous = await store\.getSettings\(\)[\s\S]*const requested = await store\.updateSettings\(patch\)/,
+    /function updateLiteSnapSettingsWithShortcutRegistration[\s\S]*const previous = await store\.getSettings\(\)[\s\S]*const next = await store\.updateSettings\(patch\)/,
     "LiteSnap should keep previous shortcut settings available while testing new shortcuts"
   );
   assert.match(
     mainIndexSource,
     /requestedRegistration\.screenshot[\s\S]*previous\.screenshotShortcut[\s\S]*requestedRegistration\.pin[\s\S]*previous\.pinShortcut/,
     "LiteSnap should roll failed shortcut registrations back to previous working values"
+  );
+  assert.match(
+    mainIndexSource,
+    /if \(!shortcutsChanged\) \{\s*return next;\s*\}/,
+    "LiteSnap should skip shortcut registration when only non-shortcut settings change"
   );
   assert.match(
     mainIndexSource,
@@ -782,6 +862,16 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     /window\.launcher\.onLiteSnapOverlayStateChanged\(\(nextState\) => \{/,
     "LiteSnap overlay should subscribe to pushed overlay-state updates"
   );
+  assert.match(
+    overlayRendererSource,
+    /function isOverlayBackgroundReady\(\)[\s\S]*dataset\.ready === "true"/,
+    "LiteSnap overlay should not render selection dimming before the screenshot background is ready"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function resetSelectionUi\(\)[\s\S]*lastSelection = null/,
+    "LiteSnap overlay should clear remembered selections when a capture session resets"
+  );
   assert.doesNotMatch(
     overlayRendererSource,
     /setPointerCapture|releasePointerCapture|setInterval\(\(\) => \{\s*void syncOverlayState\(\);\s*\},\s*80\)|liteSnapGetOverlayState\(\)/,
@@ -795,8 +885,13 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   assert.match(overlayRendererSource, /dblclick/);
   assert.match(
     overlayRendererSource,
-    /function shouldShowToolbar\(\): boolean \{[\s\S]*dragMode === "idle"/,
-    "LiteSnap overlay should only show the toolbar after the selection is confirmed"
+    /function shouldShowToolbar\(\): boolean \{[\s\S]*selectionCommitted/,
+    "LiteSnap overlay should only show the toolbar after the user confirms a selection"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function isNearFullscreenWindowRect\(/,
+    "LiteSnap overlay should suppress full-screen window hints that cover the whole monitor"
   );
   assert.match(
     overlayRendererSource,
@@ -805,7 +900,7 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     overlayRendererSource,
-    /if \(wasSelecting && !isValidSelection\(selection\)\)[\s\S]*if \(priorSelection\)[\s\S]*selection = priorSelection[\s\S]*if \(hoverWindowRect\)/,
+    /if \(wasSelecting && !isValidSelection\(selection\)\)[\s\S]*if \(priorSelection\)[\s\S]*selection = priorSelection[\s\S]*if \(hoverWindowRect && !isNearFullscreenWindowRect\(hoverWindowRect\)\)/,
     "LiteSnap overlay should preserve an existing selection on stray clicks and only adopt hovered windows without a prior selection"
   );
   assert.match(
@@ -996,5 +1091,190 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     overlayRendererSource,
     /await image\.decode\(\)[\s\S]*root\.dataset\.ready = "true"/,
     "LiteSnap overlay should decode the screenshot before marking the frame ready so the first capture never flashes a grey screen"
+  );
+});
+
+test("LiteSnap wires Windows OCR text recognition end to end", () => {
+  const sharedSource = fs.readFileSync(sharedLiteSnapPath, "utf8");
+  const channelsSource = fs.readFileSync(channelsPath, "utf8");
+  const preloadSource = fs.readFileSync(preloadPath, "utf8");
+  const ipcSource = fs.readFileSync(ipcPath, "utf8");
+  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const providerSource = fs.readFileSync(captureProviderPath, "utf8");
+  const nativeAddonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
+  const buildNativeSource = fs.readFileSync(buildNativeScriptPath, "utf8");
+  const mainIndexSource = fs.readFileSync(mainIndexPath, "utf8");
+  const overlayHtmlSource = fs.readFileSync(overlayHtmlPath, "utf8");
+  const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
+  const panelImplsSource = fs.readFileSync(panelImplsPath, "utf8");
+
+  assert.match(
+    nativeAddonSource,
+    /winrt\/Windows\.Media\.Ocr\.h/,
+    "native addon should include the Windows OCR projection header"
+  );
+  assert.match(
+    nativeAddonSource,
+    /"recognizeText"/,
+    "native addon should export a recognizeText function"
+  );
+  assert.match(
+    nativeAddonSource,
+    /kChinesePrefixes[\s\S]*zh-Hans/,
+    "native addon should prefer Chinese OCR language packs"
+  );
+  assert.match(
+    nativeAddonSource,
+    /OcrEngine::TryCreateFromUserProfileLanguages\(\)/,
+    "native addon should fall back to user profile OCR languages"
+  );
+  assert.match(
+    buildNativeSource,
+    /cppwinrt/,
+    "native build should add the cppwinrt include directory"
+  );
+  assert.match(
+    nativeAddonSource,
+    /languagePreference/,
+    "native OCR should accept a language preference"
+  );
+  assert.match(
+    buildNativeSource,
+    /WindowsApp\.lib/,
+    "native build should link WindowsApp.lib for WinRT"
+  );
+
+  assert.match(sharedSource, /interface LiteSnapRecognizeTextResult/);
+  assert.match(channelsSource, /liteSnapRecognizeText:/);
+  assert.match(preloadSource, /liteSnapRecognizeText\(/);
+  assert.match(ipcSource, /IPC_CHANNELS\.liteSnapRecognizeText/);
+  assert.match(
+    providerSource,
+    /recognizeText\([\s\S]*NativeImage[\s\S]*LiteSnapRecognizeTextOptions/,
+    "capture provider should expose recognizeText"
+  );
+  assert.match(
+    captureSource,
+    /public async recognizeSelection\(/,
+    "capture session manager should support recognizeSelection"
+  );
+  assert.match(
+    captureSource,
+    /prepareOcrImage\([\s\S]*resize\(/,
+    "OCR should upscale very small crops before recognition"
+  );
+  assert.match(
+    captureSource,
+    /recognizeOcrWithFallback\([\s\S]*recognizeWithLanguage\(image, "chinese"\)/,
+    "OCR should run Chinese and English engines sequentially instead of in parallel"
+  );
+  assert.match(
+    nativeAddonSource,
+    /g_ocr_mutex/,
+    "native OCR should serialize concurrent recognition requests"
+  );
+  assert.match(
+    mainIndexSource,
+    /recognizeLiteSnapTextAndShowPanel[\s\S]*preferredView: "ocr"/,
+    "main process should open the OCR panel with recognized text"
+  );
+  assert.match(
+    overlayHtmlSource,
+    /data-action="ocr"/,
+    "overlay toolbar should have a text-recognition button"
+  );
+  assert.match(
+    overlayRendererSource,
+    /liteSnapRecognizeText\(\{ selection \}\)/,
+    "overlay should call recognizeText for the current selection"
+  );
+  assert.match(
+    overlayRendererSource,
+    /请先框选要识别的区域/,
+    "overlay OCR should explain when no valid selection exists"
+  );
+  assert.match(
+    panelImplsSource,
+    /setMode\("plugin"\);[\s\S]*renderList\(\);[\s\S]*refreshEntries/,
+    "plugin panel open should render immediately before async refresh"
+  );
+  assert.match(
+    panelImplsSource,
+    /liteSnapPanelView === "ocr"[\s\S]*litesnap-ocr-textarea/,
+    "panel should render an editable OCR result view"
+  );
+
+  assert.match(sharedSource, /interface LiteSnapTranslateSelectionResult/);
+  assert.match(channelsSource, /liteSnapTranslateSelection:/);
+  assert.match(channelsSource, /liteSnapTranslateText:/);
+  assert.match(preloadSource, /liteSnapTranslateSelection\(/);
+  assert.match(preloadSource, /liteSnapTranslateText\(/);
+  assert.match(ipcSource, /IPC_CHANNELS\.liteSnapTranslateSelection/);
+  assert.match(ipcSource, /IPC_CHANNELS\.liteSnapTranslateText/);
+  assert.match(
+    captureSource,
+    /recognizeTextFromSelection/,
+    "capture session manager should expose recognizeTextFromSelection"
+  );
+  assert.match(
+    captureSource,
+    /languagePreference:\s*"english"/,
+    "translate flow should prefer the English OCR engine"
+  );
+  assert.match(
+    mainIndexSource,
+    /正在在线翻译，请稍候/,
+    "translate flow should open the panel before Baidu translate returns"
+  );
+  assert.match(
+    mainIndexSource,
+    /translateLiteSnapSelectionAndShowPanel[\s\S]*preferredView: "translate"/,
+    "main process should open the translate panel"
+  );
+  assert.match(
+    overlayHtmlSource,
+    /data-action="translate"/,
+    "overlay toolbar should have a translate button"
+  );
+  assert.match(
+    overlayRendererSource,
+    /liteSnapTranslateSelection\(\{ selection \}\)/,
+    "overlay should call translateSelection for the current selection"
+  );
+  assert.match(
+    panelImplsSource,
+    /liteSnapPanelView === "translate"[\s\S]*litesnap-translate-text/,
+    "panel should render translate source and result fields"
+  );
+  assert.match(
+    fs.readFileSync(
+      path.join(process.cwd(), "src", "main", "litesnap", "baidu-translator.ts"),
+      "utf8"
+    ),
+    /BAIDU_TRANSLATE_ENDPOINT[\s\S]*BAIDU_LLM_TRANSLATE_ENDPOINT/,
+    "Baidu translator should support standard and LLM translate endpoints"
+  );
+  assert.match(
+    fs.readFileSync(
+      path.join(process.cwd(), "src", "shared", "baidu-translate.ts"),
+      "utf8"
+    ),
+    /fanyi-api\.baidu\.com\/api\/trans\/vip\/translate[\s\S]*fanyi-api\.baidu\.com\/ait\/api\/aiTextTranslate/,
+    "shared Baidu helper should define standard and LLM translate endpoints"
+  );
+  assert.match(
+    panelImplsSource,
+    /translateBaiduEngine[\s\S]*translateBaiduApiKey/,
+    "LiteSnap settings should let users choose Baidu translate engine and API Key"
+  );
+  assert.match(
+    panelImplsSource,
+    /liteSnapTranslateText[\s\S]*translateBaiduAppId/,
+    "LiteSnap settings should translate typed text with Baidu credentials"
+  );
+  assert.match(
+    panelImplsSource,
+    /litesnap-settings-translate-source[\s\S]*litesnap-settings-translate-result/,
+    "LiteSnap settings should provide source and result text areas for manual translate"
   );
 });

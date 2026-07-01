@@ -33,12 +33,5 @@ export function createLiteSnapOverlayWindow(display: Display): BrowserWindow {
   window.setIgnoreMouseEvents(true);
   window.loadFile(path.join(__dirname, "../../renderer/litesnap-overlay.html"));
 
-  window.once("ready-to-show", () => {
-    if (window.isDestroyed()) {
-      return;
-    }
-    window.hide();
-  });
-
   return window;
 }

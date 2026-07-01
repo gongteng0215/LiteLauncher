@@ -10,6 +10,14 @@ import {
   type Rectangle
 } from "electron";
 
+import {
+  type LiteSnapOcrLanguagePreference
+} from "../../shared/litesnap-ocr-quality";
+
+export interface LiteSnapRecognizeTextOptions {
+  languagePreference?: LiteSnapOcrLanguagePreference;
+}
+
 export interface LiteSnapCaptureProvider {
   capturePreviewImage(display: Display): Promise<NativeImage | null>;
   captureSourceImage(display: Display): Promise<NativeImage | null>;
@@ -21,6 +29,11 @@ export interface LiteSnapCaptureProvider {
     x: number,
     y: number
   ): Promise<Rectangle | null>;
+  recognizeText(
+    image: NativeImage,
+    options?: LiteSnapRecognizeTextOptions
+  ): Promise<string | null>;
+  supportsTextRecognition(): boolean;
 }
 
 type NativeLiteSnapCaptureRequest = {
@@ -63,6 +76,12 @@ type NativeLiteSnapCaptureAddon = {
     x: number,
     y: number
   ): Rectangle | null;
+  recognizeText?(request: {
+    data: Buffer;
+    width: number;
+    height: number;
+    languagePreference?: string;
+  }): Promise<string>;
 };
 
 type ScreenWithDipTransforms = typeof screen & {
@@ -92,7 +111,7 @@ function createNativeImageFromResult(
   return image.isEmpty() ? null : image;
 }
 
-class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
+export class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
   public async capturePreviewImage(display: Display): Promise<NativeImage | null> {
     const previewSize = resolvePreviewOutputSize(display);
     return this.captureDisplayImage(display, {
@@ -130,6 +149,18 @@ class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
 
   public async getWindowRectAtPoint(): Promise<Rectangle | null> {
     return null;
+  }
+
+  public async recognizeText(
+    _image: NativeImage,
+    _options?: LiteSnapRecognizeTextOptions
+  ): Promise<string | null> {
+    // OCR is only provided by the Windows native addon.
+    return null;
+  }
+
+  public supportsTextRecognition(): boolean {
+    return false;
   }
 
   private async captureDisplayImage(
@@ -176,6 +207,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     if (typeof this.addon.captureDisplayFrames === "function") {
       const physicalBounds = toPhysicalDisplayBounds(display);
       const previewSize = resolvePreviewOutputSize(display);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       const result = this.addon.captureDisplayFrames({
         x: physicalBounds.x,
         y: physicalBounds.y,
@@ -220,6 +252,40 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     }
 
     return toDisplayDipRect(display, rect);
+  }
+
+  public async recognizeText(
+    image: NativeImage,
+    options?: LiteSnapRecognizeTextOptions
+  ): Promise<string | null> {
+    if (typeof this.addon.recognizeText !== "function") {
+      return null;
+    }
+
+    const size = image.getSize();
+    if (size.width <= 0 || size.height <= 0) {
+      return null;
+    }
+
+    try {
+      const text = await this.addon.recognizeText({
+        data: image.toBitmap(),
+        width: size.width,
+        height: size.height,
+        languagePreference: options?.languagePreference
+      });
+      if (typeof text !== "string") {
+        return null;
+      }
+      return text.trim().length > 0 ? text : null;
+    } catch (error) {
+      console.warn("[litesnap] native OCR failed", error);
+      return null;
+    }
+  }
+
+  public supportsTextRecognition(): boolean {
+    return typeof this.addon.recognizeText === "function";
   }
 
   private async captureDisplayImage(
@@ -325,6 +391,58 @@ function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
     console.warn("[litesnap] failed to load Windows native capture addon", error);
     return null;
   }
+}
+
+const electronFallbackProvider = new ElectronLiteSnapCaptureProvider();
+
+function isValidCaptureFrames(
+  frames: { previewImage: NativeImage; sourceImage: NativeImage } | null
+): frames is { previewImage: NativeImage; sourceImage: NativeImage } {
+  return Boolean(
+    frames &&
+      !frames.previewImage.isEmpty() &&
+      !frames.sourceImage.isEmpty()
+  );
+}
+
+export async function captureDisplayFramesWithFallback(
+  provider: LiteSnapCaptureProvider,
+  display: Display
+): Promise<{ previewImage: NativeImage; sourceImage: NativeImage } | null> {
+  const primary = await provider.captureDisplayFrames(display);
+  if (isValidCaptureFrames(primary)) {
+    return primary;
+  }
+
+  if (provider instanceof ElectronLiteSnapCaptureProvider) {
+    return null;
+  }
+
+  console.warn(
+    "[litesnap] primary capture failed, falling back to desktopCapturer"
+  );
+  const fallback = await electronFallbackProvider.captureDisplayFrames(display);
+  return isValidCaptureFrames(fallback) ? fallback : null;
+}
+
+export async function captureSourceImageWithFallback(
+  provider: LiteSnapCaptureProvider,
+  display: Display
+): Promise<NativeImage | null> {
+  const primary = await provider.captureSourceImage(display);
+  if (primary && !primary.isEmpty()) {
+    return primary;
+  }
+
+  if (provider instanceof ElectronLiteSnapCaptureProvider) {
+    return null;
+  }
+
+  console.warn(
+    "[litesnap] primary source capture failed, falling back to desktopCapturer"
+  );
+  const fallback = await electronFallbackProvider.captureSourceImage(display);
+  return fallback && !fallback.isEmpty() ? fallback : null;
 }
 
 export function createLiteSnapCaptureProvider(): LiteSnapCaptureProvider {

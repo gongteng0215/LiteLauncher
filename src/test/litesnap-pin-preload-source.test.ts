@@ -28,4 +28,14 @@ test("LiteSnap pin preload exposes visual state bridge", () => {
     /copyToClipboard\(\): void[\s\S]*ipcRenderer\.send\(PIN_COPY_CHANNEL\)/,
     "LiteSnap pin preload should copy pinned images to the clipboard"
   );
+  assert.match(
+    source,
+    /saveToFile\(\): void[\s\S]*ipcRenderer\.send\(PIN_SAVE_CHANNEL\)/,
+    "LiteSnap pin preload should let the pin window save the image to disk"
+  );
+  assert.match(
+    source,
+    /moveBy\(deltaX: number, deltaY: number\)[\s\S]*ipcRenderer\.send\(PIN_MOVE_CHANNEL, deltaX, deltaY\)/,
+    "LiteSnap pin preload should move frameless pin windows without using a CSS drag region"
+  );
 });

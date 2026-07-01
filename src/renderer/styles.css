@@ -635,6 +635,33 @@ body {
   white-space: nowrap;
 }
 
+.litesnap-ocr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.litesnap-ocr-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--settings-border, rgba(148, 163, 184, 0.35));
+  background: var(--settings-input-bg, rgba(15, 23, 42, 0.35));
+  color: inherit;
+  font-family: "Consolas", "Cascadia Code", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.litesnap-ocr-textarea:focus {
+  outline: none;
+  border-color: var(--accent, #38bdf8);
+}
+
 .settings-number {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.2);

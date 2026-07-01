@@ -10,8 +10,14 @@ import {
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
+  LiteSnapRecognizeTextInput,
+  LiteSnapRecognizeTextResult,
   LiteSnapSettings,
-  LiteSnapSettingsUpdateResult
+  LiteSnapSettingsUpdateResult,
+  LiteSnapTranslateSelectionInput,
+  LiteSnapTranslateSelectionResult,
+  LiteSnapTranslateTextInput,
+  LiteSnapTranslateTextResult
 } from "../shared/litesnap";
 import {
   AppErrorLogEntry,
@@ -89,6 +95,15 @@ type LiteSnapProvider = {
   commitCapture: (
     input: LiteSnapCommitCaptureInput
   ) => Promise<LiteSnapCommitCaptureResult>;
+  recognizeText: (
+    input: LiteSnapRecognizeTextInput
+  ) => Promise<LiteSnapRecognizeTextResult>;
+  translateSelection: (
+    input: LiteSnapTranslateSelectionInput
+  ) => Promise<LiteSnapTranslateSelectionResult>;
+  translateText: (
+    input: LiteSnapTranslateTextInput
+  ) => Promise<LiteSnapTranslateTextResult>;
   cancelCapture: () => Promise<boolean>;
   ensureSourceImage: () => Promise<string | null>;
 };
@@ -150,6 +165,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapTogglePinnedWindows,
   IPC_CHANNELS.liteSnapGetOverlayState,
   IPC_CHANNELS.liteSnapCommitCapture,
+  IPC_CHANNELS.liteSnapRecognizeText,
   IPC_CHANNELS.liteSnapCancelCapture,
   IPC_CHANNELS.liteSnapEnsureSourceImage,
   IPC_CHANNELS.rebuildCatalog,
@@ -1352,6 +1368,43 @@ export function registerIpcHandlers(
               }
             };
       return options.liteSnapProvider.commitCapture(normalizedInput);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapRecognizeText,
+    async (_, input: LiteSnapRecognizeTextInput | null) => {
+      const normalizedInput: LiteSnapRecognizeTextInput =
+        input && typeof input === "object" && input.selection
+          ? input
+          : { selection: { x: 0, y: 0, width: 0, height: 0 } };
+      return options.liteSnapProvider.recognizeText(normalizedInput);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapTranslateSelection,
+    async (_, input: LiteSnapTranslateSelectionInput | null) => {
+      const normalizedInput: LiteSnapTranslateSelectionInput =
+        input && typeof input === "object" && input.selection
+          ? input
+          : { selection: { x: 0, y: 0, width: 0, height: 0 } };
+      return options.liteSnapProvider.translateSelection(normalizedInput);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapTranslateText,
+    async (_, input: LiteSnapTranslateTextInput | null) => {
+      const normalizedInput: LiteSnapTranslateTextInput =
+        input && typeof input === "object"
+          ? {
+              text: typeof input.text === "string" ? input.text : "",
+              appId: typeof input.appId === "string" ? input.appId : undefined,
+              secret: typeof input.secret === "string" ? input.secret : undefined
+            }
+          : { text: "" };
+      return options.liteSnapProvider.translateText(normalizedInput);
     }
   );
 

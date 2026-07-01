@@ -1,5 +1,5 @@
 (() => {
-  type OverlayAction = "copy" | "save" | "pin" | "cancel";
+  type OverlayAction = "copy" | "save" | "pin" | "cancel" | "ocr" | "translate";
   type ResizeHandle = "n" | "s" | "w" | "e" | "nw" | "ne" | "sw" | "se";
   type DragMode =
     | "idle"
@@ -183,6 +183,8 @@
   let fillShapes = false;
   let persistSettingsTimer: number | null = null;
   let lastSelection: SelectionRect | null = null;
+  let selectionCommitted = false;
+  let allowWindowHintAfterReady = false;
   let hoverWindowRect: SelectionRect | null = null;
   let windowQueryTimer: number | null = null;
   let windowQuerySeq = 0;
@@ -987,8 +989,18 @@
     }
   }
 
+  function isOverlayBackgroundReady(): boolean {
+    return (
+      Boolean(overlayRoot && overlayRoot.dataset.ready === "true") &&
+      Boolean(overlayState?.imageDataUrl)
+    );
+  }
+
   function resetSelectionUi(): void {
     selection = null;
+    lastSelection = null;
+    selectionCommitted = false;
+    allowWindowHintAfterReady = false;
     pointerStart = null;
     dragMode = "idle";
     committing = false;
@@ -1029,7 +1041,10 @@
     }
     if (toolbarNode) {
       toolbarNode.hidden = true;
+      toolbarNode.style.left = "";
+      toolbarNode.style.top = "";
     }
+    toolbarSize = { width: 0, height: 0 };
     if (hintNode) {
       hintNode.hidden = false;
     }
@@ -1096,7 +1111,32 @@
   }
 
   function shouldShowToolbar(): boolean {
-    return isValidSelection(selection) && dragMode === "idle";
+    return (
+      selectionCommitted &&
+      isValidSelection(selection) &&
+      dragMode === "idle" &&
+      isOverlayBackgroundReady()
+    );
+  }
+
+  function isNearFullscreenWindowRect(rect: SelectionRect): boolean {
+    const viewportWidth = getViewportWidth();
+    const viewportHeight = getViewportHeight();
+    const viewportArea = Math.max(1, viewportWidth * viewportHeight);
+    const rectArea = Math.max(0, rect.width) * Math.max(0, rect.height);
+    return rectArea >= viewportArea * 0.88;
+  }
+
+  function noteCapturePointerActivity(): void {
+    if (isOverlayBackgroundReady()) {
+      allowWindowHintAfterReady = true;
+    }
+  }
+
+  function markSelectionCommittedIfValid(): void {
+    if (isValidSelection(selection)) {
+      selectionCommitted = true;
+    }
   }
 
   function updateSelectionChrome(): void {
@@ -1145,7 +1185,9 @@
     // real selection. Once a valid selection exists or a drag/draw begins, the
     // hint must disappear so it never feels like the whole screen is selected.
     if (
+      !allowWindowHintAfterReady ||
       !hoverWindowRect ||
+      isNearFullscreenWindowRect(hoverWindowRect) ||
       dragMode !== "idle" ||
       activeTool !== "select" ||
       isValidSelection(selection)
@@ -1166,6 +1208,7 @@
       activeTool !== "select" ||
       editingText ||
       committing ||
+      !allowWindowHintAfterReady ||
       !isOverlayReady() ||
       isValidSelection(selection)
     ) {
@@ -1195,7 +1238,15 @@
             !isValidSelection(selection)
           ) {
             hoverWindowRect = normalizeWindowRect(rect);
-            renderWindowHint();
+            if (
+              hoverWindowRect &&
+              !isNearFullscreenWindowRect(hoverWindowRect)
+            ) {
+              renderWindowHint();
+            } else {
+              hoverWindowRect = null;
+              clearWindowHint();
+            }
           }
         })
         .catch(() => undefined);
@@ -1210,7 +1261,8 @@
       !dimBottomNode ||
       !dimLeftNode ||
       !selection ||
-      !isValidSelection(selection)
+      !isValidSelection(selection) ||
+      !isOverlayBackgroundReady()
     ) {
       if (dimNode) {
         dimNode.hidden = true;
@@ -1239,7 +1291,7 @@
       return;
     }
 
-    if (!isValidSelection(selection)) {
+    if (!isValidSelection(selection) || !isOverlayBackgroundReady()) {
       selectionNode.hidden = true;
       if (canvasNode) {
         canvasNode.hidden = true;
@@ -1923,6 +1975,16 @@
       return;
     }
 
+    if (action === "ocr") {
+      await recognizeSelectionText();
+      return;
+    }
+
+    if (action === "translate") {
+      await translateSelectionText();
+      return;
+    }
+
     if (!selection || !isValidSelection(selection) || committing) {
       return;
     }
@@ -1951,6 +2013,70 @@
     committing = false;
     setToolbarDisabled(false);
     showStatus(result.message, true);
+  }
+
+  async function recognizeSelectionText(): Promise<void> {
+    if (!selection || !isValidSelection(selection)) {
+      showStatus("请先框选要识别的区域。", true);
+      return;
+    }
+    if (committing) {
+      return;
+    }
+    if (!window.launcher?.liteSnapRecognizeText) {
+      showStatus("识别功能未加载，请重启 LiteLauncher。", true);
+      return;
+    }
+
+    finishTextInput(true);
+    committing = true;
+    setToolbarDisabled(true);
+    showStatus("正在识别文字…", true);
+
+    try {
+      const result = await window.launcher.liteSnapRecognizeText({ selection });
+      if (!result.ok) {
+        showStatus(result.message, true);
+      }
+    } catch (error) {
+      console.warn("[litesnap-overlay] OCR failed", error);
+      showStatus("文字识别失败，请稍后重试。", true);
+    } finally {
+      committing = false;
+      setToolbarDisabled(false);
+    }
+  }
+
+  async function translateSelectionText(): Promise<void> {
+    if (!selection || !isValidSelection(selection)) {
+      showStatus("请先框选要翻译的区域。", true);
+      return;
+    }
+    if (committing) {
+      return;
+    }
+    if (!window.launcher?.liteSnapTranslateSelection) {
+      showStatus("翻译功能未加载，请重启 LiteLauncher。", true);
+      return;
+    }
+
+    finishTextInput(true);
+    committing = true;
+    setToolbarDisabled(true);
+    showStatus("正在识别并翻译…", true);
+
+    try {
+      const result = await window.launcher.liteSnapTranslateSelection({ selection });
+      if (!result.ok) {
+        showStatus(result.message, true);
+      }
+    } catch (error) {
+      console.warn("[litesnap-overlay] translate failed", error);
+      showStatus("截图翻译失败，请检查网络后重试。", true);
+    } finally {
+      committing = false;
+      setToolbarDisabled(false);
+    }
   }
 
   function beginDraftAnnotation(point: Point): void {
@@ -2183,6 +2309,8 @@
       return;
     }
 
+    noteCapturePointerActivity();
+
     if (toolbarNode && !toolbarNode.hidden && toolbarNode.contains(event.target as Node)) {
       return;
     }
@@ -2281,6 +2409,9 @@
         selection && isValidSelection(selection) ? { ...selection } : null;
       dragMode = "selecting";
       selectedAnnotationIndex = null;
+      if (!priorSelection) {
+        selectionCommitted = false;
+      }
       selection = normalizeRect(pointX, pointY, pointX, pointY);
       pointerStart = {
         pointerId: event.pointerId,
@@ -2304,6 +2435,7 @@
   }
 
   function handlePointerMove(event: PointerEvent): void {
+    noteCapturePointerActivity();
     scheduleLoupeUpdate(event.clientX, event.clientY);
     updateBrushPreview(event.clientX, event.clientY, event.target);
     if (!pointerStart || event.pointerId !== pointerStart.pointerId) {
@@ -2369,20 +2501,23 @@
       if (priorSelection) {
         selection = priorSelection;
         clearWindowHint();
+        markSelectionCommittedIfValid();
         updateSelectionChrome();
         renderSelection();
         return;
       }
       // Otherwise (no prior selection yet) a plain click over a detected window
       // adopts that window, matching Snipaste's click-to-grab-window flow.
-      if (hoverWindowRect) {
+      if (hoverWindowRect && !isNearFullscreenWindowRect(hoverWindowRect)) {
         selection = { ...hoverWindowRect };
         clearWindowHint();
+        markSelectionCommittedIfValid();
         renderSelection();
         return;
       }
     }
 
+    markSelectionCommittedIfValid();
     renderSelection();
   }
 
@@ -2522,7 +2657,11 @@
     toolbarNode.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
       button.addEventListener("click", () => {
         const action = button.getAttribute("data-action") as OverlayAction | null;
-        if (action) {
+        if (action === "ocr") {
+          void recognizeSelectionText();
+        } else if (action === "translate") {
+          void translateSelectionText();
+        } else if (action) {
           void commitSelection(action);
         }
       });
@@ -2586,6 +2725,7 @@
         event.preventDefault();
         selection = { ...lastSelection };
         dragMode = "idle";
+        markSelectionCommittedIfValid();
         renderSelection();
         return;
       }
@@ -2679,6 +2819,7 @@
         root.style.backgroundImage = `url("${dataUrl}")`;
         root.style.backgroundSize = backgroundSize;
         root.dataset.ready = "true";
+        allowWindowHintAfterReady = false;
       } catch {
         if (overlayState !== pendingState) {
           return;
@@ -2686,6 +2827,7 @@
         root.style.backgroundImage = `url("${dataUrl}")`;
         root.style.backgroundSize = backgroundSize;
         root.dataset.ready = "true";
+        allowWindowHintAfterReady = false;
       }
     })();
     hideStatus();

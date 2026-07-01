@@ -90,12 +90,22 @@ function buildWithCl(vcVars64PathValue, windowsSdkVersion) {
   const addonObjPath = path.join(releaseDir, "addon.obj");
   const hookObjPath = path.join(releaseDir, "win_delay_load_hook.obj");
   const buildBatchPath = path.join(nativeRoot, ".build-native.cmd");
+  // C++/WinRT projection headers (winrt/Windows.Media.Ocr.h etc.) live in the
+  // Windows SDK cppwinrt include directory. It is not always on the default
+  // INCLUDE that vcvars64.bat exports, so add it explicitly.
+  const cppWinrtIncludeDir = path.join(
+    windowsKitsRoot,
+    "Include",
+    windowsSdkVersion.replace(/\\$/, ""),
+    "cppwinrt"
+  );
   const buildBatchContents = [
     `@call "${vcVars64PathValue}"`,
     `if not exist "${releaseDir}" mkdir "${releaseDir}"`,
     "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
     "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /DBUILDING_NODE_EXTENSION /DNODE_GYP_MODULE_NAME=litesnap_capture ^",
     `  /I"${vendorIncludeDir}" ^`,
+    `  /I"${cppWinrtIncludeDir}" ^`,
     `  /Fo"${addonObjPath}" ^`,
     `  "${addonSourcePath}"`,
     "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
@@ -107,7 +117,7 @@ function buildWithCl(vcVars64PathValue, windowsSdkVersion) {
     `  "${addonObjPath}" ^`,
     `  "${hookObjPath}" ^`,
     "  delayimp.lib /DELAYLOAD:node.exe /ignore:4199 ^",
-    `  user32.lib gdi32.lib dwmapi.lib "${vendorNodeLibPath}"`,
+    `  user32.lib gdi32.lib dwmapi.lib WindowsApp.lib "${vendorNodeLibPath}"`,
     ""
   ].join("\r\n");
 

@@ -7,6 +7,8 @@ import { type LiteSnapWindowRect } from "../../shared/litesnap";
 
 const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
+const PIN_SAVE_CHANNEL = "litesnap-pin:save";
+const PIN_MOVE_CHANNEL = "litesnap-pin:move-by";
 
 type PinWindowMeta = {
   baseWidth: number;
@@ -16,8 +18,13 @@ type PinWindowMeta = {
   imagePath: string;
 };
 
+type PinSaveImageProvider = (image: NativeImage) => Promise<string>;
+
 let pinVisualHandlersRegistered = false;
 let pinCopyHandlerRegistered = false;
+let pinSaveHandlerRegistered = false;
+let pinMoveHandlerRegistered = false;
+let pinSaveImageProvider: PinSaveImageProvider | null = null;
 const pinWindowMeta = new Map<number, PinWindowMeta>();
 
 function ensurePinCopyHandler(): void {
@@ -41,6 +48,53 @@ function ensurePinCopyHandler(): void {
     if (!image.isEmpty()) {
       clipboard.writeImage(image);
     }
+  });
+}
+
+function ensurePinSaveHandler(): void {
+  if (pinSaveHandlerRegistered) {
+    return;
+  }
+
+  pinSaveHandlerRegistered = true;
+  ipcMain.on(PIN_SAVE_CHANNEL, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta?.imagePath || !pinSaveImageProvider) {
+      return;
+    }
+
+    const image = nativeImage.createFromPath(meta.imagePath);
+    if (image.isEmpty()) {
+      return;
+    }
+
+    void pinSaveImageProvider(image).catch(() => undefined);
+  });
+}
+
+function ensurePinMoveHandler(): void {
+  if (pinMoveHandlerRegistered) {
+    return;
+  }
+
+  pinMoveHandlerRegistered = true;
+  ipcMain.on(PIN_MOVE_CHANNEL, (event, deltaX: number, deltaY: number) => {
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+      return;
+    }
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const [x, y] = window.getPosition();
+    window.setPosition(Math.round(x + deltaX), Math.round(y + deltaY), false);
   });
 }
 
@@ -173,10 +227,14 @@ function buildPinWindowHtml(
       .pin-shell {
         position: fixed;
         inset: 0;
-        -webkit-app-region: drag;
+        -webkit-app-region: no-drag;
         border-radius: ${shellRadius};
         overflow: hidden;
         background: #000000;
+        cursor: grab;
+      }
+      .pin-shell.is-dragging {
+        cursor: grabbing;
       }
       .pin-shell.is-border-enabled {
         outline: 1px solid rgba(255, 255, 255, 0.45);
@@ -243,6 +301,30 @@ function buildPinWindowHtml(
         margin: 5px 4px;
         background: rgba(255, 255, 255, 0.1);
       }
+      .pin-menu__opacity-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px 8px;
+      }
+      .pin-menu__opacity-label {
+        color: #cbd5e1;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .pin-menu__opacity-slider {
+        width: 100%;
+        margin: 0;
+        accent-color: #7dd3fc;
+        cursor: pointer;
+      }
+      .pin-menu__opacity-value {
+        min-width: 36px;
+        color: #94a3b8;
+        font-size: 11px;
+        text-align: right;
+      }
     </style>
   </head>
   <body>
@@ -260,10 +342,23 @@ function buildPinWindowHtml(
         <div class="pin-menu__label" id="pin-menu-label">缩放 100% / 透明度 100%</div>
         <button type="button" data-command="zoom-in">放大</button>
         <button type="button" data-command="zoom-out">缩小</button>
-        <button type="button" data-command="opacity-up">增加不透明度</button>
-        <button type="button" data-command="opacity-down">降低不透明度</button>
+        <div class="pin-menu__opacity-row">
+          <label class="pin-menu__opacity-label" for="pin-opacity-slider">透明度</label>
+          <input
+            type="range"
+            id="pin-opacity-slider"
+            class="pin-menu__opacity-slider"
+            min="20"
+            max="100"
+            step="1"
+            value="100"
+          />
+          <span class="pin-menu__opacity-value" id="pin-opacity-value">100%</span>
+        </div>
         <button type="button" data-command="reset">重置缩放和透明度</button>
         <div class="pin-menu__divider"></div>
+        <button type="button" data-command="copy">复制到剪贴板</button>
+        <button type="button" data-command="save">保存图片</button>
         <button type="button" data-command="toggle-border">切换边框</button>
         <div class="pin-menu__divider"></div>
         <button type="button" data-command="close">关闭贴图</button>
@@ -273,10 +368,25 @@ function buildPinWindowHtml(
       const shell = document.getElementById("pin-shell");
       const menu = document.getElementById("pin-menu");
       const menuLabel = document.getElementById("pin-menu-label");
+      const opacitySlider = document.getElementById("pin-opacity-slider");
+      const opacityValue = document.getElementById("pin-opacity-value");
       const pinApi = window.liteSnapPin;
       let scale = 1;
       let opacity = 1;
       let visualFrame = 0;
+      let dragging = false;
+      let dragScreenX = 0;
+      let dragScreenY = 0;
+
+      function syncOpacityControls() {
+        const percent = Math.round(opacity * 100);
+        if (opacitySlider instanceof HTMLInputElement) {
+          opacitySlider.value = String(percent);
+        }
+        if (opacityValue) {
+          opacityValue.textContent = percent + "%";
+        }
+      }
 
       function applyVisualState() {
         if (visualFrame) {
@@ -286,6 +396,7 @@ function buildPinWindowHtml(
         visualFrame = requestAnimationFrame(function () {
           visualFrame = 0;
           pinApi?.setVisualState(scale, opacity);
+          syncOpacityControls();
           if (menuLabel) {
             menuLabel.textContent =
               "缩放 " + Math.round(scale * 100) + "% / 透明度 " + Math.round(opacity * 100) + "%";
@@ -304,6 +415,7 @@ function buildPinWindowHtml(
           return;
         }
         menu.hidden = false;
+        syncOpacityControls();
         const rect = menu.getBoundingClientRect();
         menu.style.left = Math.min(x, window.innerWidth - rect.width - 8) + "px";
         menu.style.top = Math.min(y, window.innerHeight - rect.height - 8) + "px";
@@ -320,12 +432,14 @@ function buildPinWindowHtml(
           scale = Math.min(4, scale * 1.12);
         } else if (command === "zoom-out") {
           scale = Math.max(0.2, scale * 0.88);
-        } else if (command === "opacity-up") {
-          opacity = Math.min(1, opacity + 0.08);
-        } else if (command === "opacity-down") {
-          opacity = Math.max(0.2, opacity - 0.08);
         } else if (command === "reset") {
           resetTransform();
+          return;
+        } else if (command === "copy") {
+          pinApi?.copyToClipboard?.();
+          return;
+        } else if (command === "save") {
+          pinApi?.saveToFile?.();
           return;
         } else if (command === "toggle-border") {
           shell?.classList.toggle("is-border-enabled");
@@ -352,14 +466,84 @@ function buildPinWindowHtml(
         }
         applyVisualState();
       }, { passive: false });
+      opacitySlider?.addEventListener("input", function (event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) {
+          return;
+        }
+        const next = Number(target.value);
+        if (!Number.isFinite(next)) {
+          return;
+        }
+        opacity = Math.min(1, Math.max(0.2, next / 100));
+        applyVisualState();
+      });
       window.addEventListener("contextmenu", function (event) {
         event.preventDefault();
         showMenu(event.clientX, event.clientY);
       });
-      window.addEventListener("pointerdown", function (event) {
-        if (!menu || menu.hidden || menu.contains(event.target)) {
+      window.addEventListener(
+        "pointerdown",
+        function (event) {
+          if (event.button !== 0) {
+            return;
+          }
+
+          const target = event.target;
+          const menuOpen = Boolean(menu && !menu.hidden);
+          const insideMenu =
+            menuOpen && target instanceof Node && menu.contains(target);
+
+          if (menuOpen && !insideMenu) {
+            hideMenu();
+          }
+
+          if (insideMenu) {
+            return;
+          }
+
+          if (
+            target instanceof HTMLElement &&
+            (target.closest("button") || target.closest("input"))
+          ) {
+            return;
+          }
+
+          dragging = true;
+          dragScreenX = event.screenX;
+          dragScreenY = event.screenY;
+          shell?.classList.add("is-dragging");
+          shell?.setPointerCapture?.(event.pointerId);
+        },
+        true
+      );
+      window.addEventListener("pointermove", function (event) {
+        if (!dragging) {
           return;
         }
+        const deltaX = event.screenX - dragScreenX;
+        const deltaY = event.screenY - dragScreenY;
+        if (deltaX === 0 && deltaY === 0) {
+          return;
+        }
+        dragScreenX = event.screenX;
+        dragScreenY = event.screenY;
+        pinApi?.moveBy?.(deltaX, deltaY);
+      });
+      window.addEventListener("pointerup", function (event) {
+        if (!dragging) {
+          return;
+        }
+        dragging = false;
+        shell?.classList.remove("is-dragging");
+        shell?.releasePointerCapture?.(event.pointerId);
+      });
+      window.addEventListener("pointercancel", function (event) {
+        dragging = false;
+        shell?.classList.remove("is-dragging");
+        shell?.releasePointerCapture?.(event.pointerId);
+      });
+      window.addEventListener("blur", function () {
         hideMenu();
       });
       menu?.addEventListener("click", function (event) {
@@ -454,6 +638,14 @@ export class LiteSnapPinWindowManager {
   private readonly windows = new Set<BrowserWindow>();
   private hiddenByManager = false;
   private prewarmedWindow: BrowserWindow | null = null;
+  private pinningClipboard = false;
+
+  // Lets the host wire saving a pinned image to disk (settings-aware save +
+  // reveal in Explorer) without this module depending on the settings/image
+  // stores directly.
+  public setSaveImageProvider(provider: PinSaveImageProvider | null): void {
+    pinSaveImageProvider = provider;
+  }
 
   public prewarmPinWindow(): void {
     if (process.platform !== "win32" || this.prewarmedWindow) {
@@ -538,7 +730,18 @@ export class LiteSnapPinWindowManager {
       return false;
     }
 
-    return this.pinImage(image);
+    // Guard against rapid re-triggering of the global pin shortcut, which would
+    // otherwise spawn a burst of pin windows (and prewarm churn) from a single
+    // held keypress.
+    if (this.pinningClipboard) {
+      return true;
+    }
+    this.pinningClipboard = true;
+    try {
+      return await this.pinImage(image);
+    } finally {
+      this.pinningClipboard = false;
+    }
   }
 
   public async pinImage(
@@ -593,6 +796,8 @@ export class LiteSnapPinWindowManager {
 
     ensurePinVisualHandlers();
     ensurePinCopyHandler();
+    ensurePinSaveHandler();
+    ensurePinMoveHandler();
 
     const window = this.takePrewarmedWindow({ x, y, width, height });
     void this.prewarmPinWindow();

@@ -120,4 +120,14 @@ test("dev-electron only restarts for main-process bundle changes", () => {
     /normalized\.endsWith\("\.map"\)|normalized\.endsWith\('\.map'\)/,
     "source map updates should be ignored so watch mode does not thrash Electron restarts"
   );
+  assert.doesNotMatch(
+    source,
+    /spawn\(electronBinary,\s*\["\.",\s*"--replace-instance"\]/,
+    "dev-electron should not use --replace-instance; dev runner owns restarts"
+  );
+  assert.match(
+    source,
+    /spawn\(electronBinary,\s*\["\."\]/,
+    "dev-electron should start Electron without replace-instance args"
+  );
 });

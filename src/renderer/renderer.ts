@@ -369,6 +369,18 @@ interface LauncherApi {
   onClearInput(handler: () => void): () => void;
   onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
   onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
+  liteSnapTranslateText?(input: {
+    text: string;
+    appId?: string;
+    secret?: string;
+    apiKey?: string;
+    engine?: "standard" | "llm";
+  }): Promise<{
+    ok: boolean;
+    sourceText: string;
+    translatedText: string;
+    message: string;
+  }>;
 }
 
 type ResultEntry =

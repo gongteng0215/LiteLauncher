@@ -243,6 +243,10 @@
   box-shadow: 0 14px 36px rgba(2, 6, 23, 0.45);
 }
 
+.litesnap-overlay__toolbar[hidden] {
+  display: none !important;
+}
+
 .litesnap-overlay__toolbar-row {
   display: flex;
   flex-wrap: wrap;

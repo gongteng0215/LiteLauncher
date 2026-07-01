@@ -7,8 +7,14 @@ import {
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
+  LiteSnapRecognizeTextInput,
+  LiteSnapRecognizeTextResult,
   LiteSnapSettings,
-  LiteSnapSettingsUpdateResult
+  LiteSnapSettingsUpdateResult,
+  LiteSnapTranslateSelectionInput,
+  LiteSnapTranslateSelectionResult,
+  LiteSnapTranslateTextInput,
+  LiteSnapTranslateTextResult
 } from "../shared/litesnap";
 import {
   AppErrorLogEntry,
@@ -124,6 +130,21 @@ const api = {
     input: LiteSnapCommitCaptureInput
   ): Promise<LiteSnapCommitCaptureResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCommitCapture, input);
+  },
+  liteSnapRecognizeText(
+    input: LiteSnapRecognizeTextInput
+  ): Promise<LiteSnapRecognizeTextResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapRecognizeText, input);
+  },
+  liteSnapTranslateSelection(
+    input: LiteSnapTranslateSelectionInput
+  ): Promise<LiteSnapTranslateSelectionResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateSelection, input);
+  },
+  liteSnapTranslateText(
+    input: LiteSnapTranslateTextInput
+  ): Promise<LiteSnapTranslateTextResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateText, input);
   },
   liteSnapCancelCapture(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCancelCapture);

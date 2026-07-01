@@ -2,10 +2,34 @@
 #include <windows.h>
 #include <dwmapi.h>
 
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Globalization.h>
+#include <winrt/Windows.Graphics.Imaging.h>
+#include <winrt/Windows.Media.Ocr.h>
+
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <string>
 #include <vector>
 
+// Raw COM interface for direct access to a SoftwareBitmap's backing buffer.
+// This UUID/vtable is the documented contract for IMemoryBufferByteAccess and
+// lets us memcpy the captured BGRA pixels into the bitmap without an extra copy
+// through WinRT collection types.
+struct __declspec(uuid("5b0d3235-4dba-4d44-865e-8f1d0e4fd04d"))
+    __declspec(novtable) IMemoryBufferByteAccess : ::IUnknown {
+  virtual HRESULT __stdcall GetBuffer(uint8_t** value, uint32_t* capacity) = 0;
+};
+
 namespace {
+
+std::mutex g_ocr_mutex;
 
 struct CaptureRequest {
   int32_t x;
@@ -540,6 +564,479 @@ napi_value GetWindowRectAtPoint(napi_env env, napi_callback_info info) {
   return result;
 }
 
+struct OcrWork {
+  napi_async_work work = nullptr;
+  napi_deferred deferred = nullptr;
+  std::vector<uint8_t> pixels;
+  int32_t width = 0;
+  int32_t height = 0;
+  bool prefer_english = false;
+  bool ok = false;
+  std::string text;
+  std::string error;
+};
+
+enum class OcrLanguagePreference {
+  kChineseFirst,
+  kEnglishFirst,
+};
+
+winrt::Windows::Media::Ocr::OcrEngine ResolveOcrEngine(
+    OcrLanguagePreference preference) {
+  using namespace winrt::Windows::Globalization;
+  using namespace winrt::Windows::Media::Ocr;
+
+  const auto available = OcrEngine::AvailableRecognizerLanguages();
+
+  const auto find_available = [&](std::wstring_view prefix)
+      -> std::optional<Language> {
+    for (uint32_t index = 0; index < available.Size(); ++index) {
+      const Language candidate = available.GetAt(index);
+      const std::wstring tag = candidate.LanguageTag().c_str();
+      if (tag.size() >= prefix.size() &&
+          tag.compare(0, prefix.size(), prefix) == 0) {
+        return candidate;
+      }
+    }
+    return std::nullopt;
+  };
+
+  const auto try_language = [&](const Language& language) -> OcrEngine {
+    return OcrEngine::TryCreateFromLanguage(language);
+  };
+
+  const auto try_prefixes = [&](const wchar_t* const* prefixes, size_t count)
+      -> OcrEngine {
+    for (size_t index = 0; index < count; ++index) {
+      const std::optional<Language> language = find_available(prefixes[index]);
+      if (!language.has_value()) {
+        continue;
+      }
+      OcrEngine engine = try_language(language.value());
+      if (engine) {
+        return engine;
+      }
+    }
+    return nullptr;
+  };
+
+  static const wchar_t* kChinesePrefixes[] = {
+      L"zh-Hans", L"zh-CN", L"zh-Hant", L"zh-TW", L"zh-HK", L"zh"};
+  static const wchar_t* kEnglishPrefixes[] = {L"en-US", L"en-GB", L"en"};
+
+  if (preference == OcrLanguagePreference::kEnglishFirst) {
+    if (OcrEngine engine = try_prefixes(
+            kEnglishPrefixes,
+            sizeof(kEnglishPrefixes) / sizeof(kEnglishPrefixes[0]))) {
+      return engine;
+    }
+  } else {
+    if (OcrEngine engine = try_prefixes(
+            kChinesePrefixes,
+            sizeof(kChinesePrefixes) / sizeof(kChinesePrefixes[0]))) {
+      return engine;
+    }
+  }
+
+  if (OcrEngine engine = OcrEngine::TryCreateFromUserProfileLanguages()) {
+    return engine;
+  }
+
+  if (available.Size() > 0) {
+    OcrEngine engine = try_language(available.GetAt(0));
+    if (engine) {
+      return engine;
+    }
+  }
+
+  throw std::runtime_error(
+      "No OCR language is installed. Add OCR language packs in Windows "
+      "language settings.");
+}
+
+winrt::Windows::Foundation::Rect GetLineBoundingRect(
+    const winrt::Windows::Media::Ocr::OcrLine& line) {
+  using namespace winrt::Windows::Foundation;
+  using namespace winrt::Windows::Media::Ocr;
+
+  Rect bounds{};
+  bool has_bounds = false;
+  for (const OcrWord& word : line.Words()) {
+    const Rect word_rect = word.BoundingRect();
+    if (!has_bounds) {
+      bounds = word_rect;
+      has_bounds = true;
+      continue;
+    }
+
+    const float left = (std::min)(bounds.X, word_rect.X);
+    const float top = (std::min)(bounds.Y, word_rect.Y);
+    const float right = (std::max)(bounds.X + bounds.Width, word_rect.X + word_rect.Width);
+    const float bottom = (std::max)(bounds.Y + bounds.Height, word_rect.Y + word_rect.Height);
+    bounds.X = left;
+    bounds.Y = top;
+    bounds.Width = right - left;
+    bounds.Height = bottom - top;
+  }
+
+  return bounds;
+}
+
+bool IsBlankOcrLine(const std::string& text) {
+  for (unsigned char character : text) {
+    if (!std::isspace(character)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool NeedsSpaceBetweenOcrLines(
+    const std::string& previous,
+    const std::string& next) {
+  if (previous.empty() || next.empty()) {
+    return false;
+  }
+
+  const unsigned char previous_char =
+      static_cast<unsigned char>(previous.back());
+  const unsigned char next_char = static_cast<unsigned char>(next.front());
+  const auto is_latin_alnum = [](unsigned char value) {
+    return std::isalnum(value) != 0;
+  };
+
+  return is_latin_alnum(previous_char) && is_latin_alnum(next_char);
+}
+
+std::string FormatOcrResult(const winrt::Windows::Media::Ocr::OcrResult& result) {
+  using namespace winrt::Windows::Media::Ocr;
+
+  const std::string fallback_text = winrt::to_string(result.Text());
+  const auto lines = result.Lines();
+  if (lines.Size() == 0) {
+    return IsBlankOcrLine(fallback_text) ? "" : fallback_text;
+  }
+
+  struct OcrLineEntry {
+    uint32_t line_index;
+    std::string text;
+  };
+
+  std::vector<OcrLineEntry> entries;
+  entries.reserve(lines.Size());
+  for (uint32_t index = 0; index < lines.Size(); ++index) {
+    const std::string text = winrt::to_string(lines.GetAt(index).Text());
+    if (IsBlankOcrLine(text)) {
+      continue;
+    }
+    entries.push_back({ index, text });
+  }
+
+  if (entries.empty()) {
+    return IsBlankOcrLine(fallback_text) ? "" : fallback_text;
+  }
+  if (entries.size() == 1) {
+    return entries[0].text;
+  }
+
+  struct GapMetrics {
+    float ratio;
+  };
+
+  std::vector<GapMetrics> gaps;
+  gaps.reserve(entries.size() - 1);
+  for (size_t index = 1; index < entries.size(); ++index) {
+    const OcrLine& previous = lines.GetAt(entries[index - 1].line_index);
+    const OcrLine& current = lines.GetAt(entries[index].line_index);
+    const auto previous_rect = GetLineBoundingRect(previous);
+    const auto current_rect = GetLineBoundingRect(current);
+    const float previous_bottom = previous_rect.Y + previous_rect.Height;
+    const float gap = current_rect.Y - previous_bottom;
+    const float reference_height =
+        (std::max)(previous_rect.Height, current_rect.Height);
+    const float ratio =
+        gap / (reference_height > 0.0f ? reference_height : 16.0f);
+    gaps.push_back({ ratio });
+  }
+
+  // Chat-style layouts usually have one large divider gap near the top. Keep at
+  // most one blank line, and only before the first clearly separated block.
+  constexpr float kBlankLineRatio = 1.75f;
+  constexpr float kWrapMergeRatio = 0.4f;
+  size_t blank_gap_index = gaps.size();
+  for (size_t index = 0; index < gaps.size(); ++index) {
+    if (gaps[index].ratio >= kBlankLineRatio) {
+      blank_gap_index = index;
+      break;
+    }
+  }
+  const bool use_blank_line = blank_gap_index < gaps.size();
+
+  std::ostringstream formatted;
+  formatted << entries[0].text;
+  for (size_t index = 1; index < entries.size(); ++index) {
+    const GapMetrics& gap = gaps[index - 1];
+    const std::string& previous_text = entries[index - 1].text;
+    const std::string& current_text = entries[index].text;
+
+    if (use_blank_line && index - 1 == blank_gap_index) {
+      formatted << "\n\n" << current_text;
+      continue;
+    }
+
+    if (gap.ratio <= kWrapMergeRatio) {
+      if (NeedsSpaceBetweenOcrLines(previous_text, current_text)) {
+        formatted << ' ';
+      }
+      formatted << current_text;
+      continue;
+    }
+
+    formatted << '\n' << current_text;
+  }
+
+  const std::string output = formatted.str();
+  if (IsBlankOcrLine(output) && !IsBlankOcrLine(fallback_text)) {
+    return fallback_text;
+  }
+
+  return output;
+}
+
+std::string RunOcrOnBgraPixels(
+    const std::vector<uint8_t>& pixels,
+    int32_t width,
+    int32_t height,
+    OcrLanguagePreference preference) {
+  using namespace winrt::Windows::Graphics::Imaging;
+  using namespace winrt::Windows::Media::Ocr;
+
+  SoftwareBitmap bitmap(
+      BitmapPixelFormat::Bgra8,
+      width,
+      height,
+      BitmapAlphaMode::Premultiplied);
+
+  {
+    BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
+    winrt::Windows::Foundation::IMemoryBufferReference reference =
+        buffer.CreateReference();
+    auto byte_access = reference.as<IMemoryBufferByteAccess>();
+
+    uint8_t* destination = nullptr;
+    uint32_t capacity = 0;
+    winrt::check_hresult(byte_access->GetBuffer(&destination, &capacity));
+
+    BitmapPlaneDescription description = buffer.GetPlaneDescription(0);
+    const size_t source_stride = static_cast<size_t>(width) * 4U;
+    for (int32_t row = 0; row < height; ++row) {
+      uint8_t* destination_row =
+          destination + description.StartIndex +
+          static_cast<size_t>(row) * static_cast<size_t>(description.Stride);
+      const uint8_t* source_row =
+          pixels.data() + static_cast<size_t>(row) * source_stride;
+      std::memcpy(destination_row, source_row, source_stride);
+    }
+  }
+
+  OcrEngine engine = ResolveOcrEngine(preference);
+  if (!engine) {
+    throw std::runtime_error(
+        "No OCR language is installed. Add Chinese OCR in Windows language "
+        "settings.");
+  }
+
+  OcrResult result = engine.RecognizeAsync(bitmap).get();
+  return FormatOcrResult(result);
+}
+
+void ExecuteOcrWork(napi_env /*env*/, void* data) {
+  auto* work = static_cast<OcrWork*>(data);
+  try {
+    try {
+      winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    } catch (winrt::hresult_error const&) {
+      // The libuv worker thread may already have a COM apartment initialized
+      // (or in a different mode); reuse it rather than failing the request.
+    }
+
+    std::lock_guard<std::mutex> lock(g_ocr_mutex);
+    work->text = RunOcrOnBgraPixels(
+        work->pixels,
+        work->width,
+        work->height,
+        work->prefer_english ? OcrLanguagePreference::kEnglishFirst
+                             : OcrLanguagePreference::kChineseFirst);
+    work->ok = true;
+  } catch (winrt::hresult_error const& error) {
+    work->ok = false;
+    work->error = winrt::to_string(error.message());
+  } catch (std::exception const& error) {
+    work->ok = false;
+    work->error = error.what();
+  } catch (...) {
+    work->ok = false;
+    work->error = "Unknown OCR failure.";
+  }
+
+  // Release the copied pixels as soon as recognition finishes.
+  work->pixels.clear();
+  work->pixels.shrink_to_fit();
+}
+
+void CompleteOcrWork(napi_env env, napi_status status, void* data) {
+  auto* work = static_cast<OcrWork*>(data);
+
+  if (status == napi_ok && work->ok) {
+    napi_value text_value;
+    if (napi_create_string_utf8(
+            env, work->text.c_str(), work->text.size(), &text_value) == napi_ok) {
+      napi_resolve_deferred(env, work->deferred, text_value);
+    } else {
+      napi_value fallback;
+      napi_get_undefined(env, &fallback);
+      napi_resolve_deferred(env, work->deferred, fallback);
+    }
+  } else {
+    const std::string& message =
+        work->error.empty() ? std::string("OCR failed.") : work->error;
+    napi_value error_value;
+    napi_value error_message;
+    napi_create_string_utf8(
+        env, message.c_str(), message.size(), &error_message);
+    napi_create_error(env, nullptr, error_message, &error_value);
+    napi_reject_deferred(env, work->deferred, error_value);
+  }
+
+  napi_delete_async_work(env, work->work);
+  delete work;
+}
+
+napi_value RejectedPromise(napi_env env, const char* message) {
+  napi_deferred deferred;
+  napi_value promise;
+  if (napi_create_promise(env, &deferred, &promise) != napi_ok) {
+    return CreateNull(env);
+  }
+
+  napi_value error_message;
+  napi_value error_value;
+  napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &error_message);
+  napi_create_error(env, nullptr, error_message, &error_value);
+  napi_reject_deferred(env, deferred, error_value);
+  return promise;
+}
+
+bool ReadStringProperty(
+    napi_env env,
+    napi_value object,
+    const char* key,
+    std::string* out) {
+  napi_value property;
+  if (napi_get_named_property(env, object, key, &property) != napi_ok) {
+    return false;
+  }
+
+  napi_valuetype type;
+  if (napi_typeof(env, property, &type) != napi_ok || type != napi_string) {
+    return false;
+  }
+
+  size_t length = 0;
+  if (napi_get_value_string_utf8(env, property, nullptr, 0, &length) != napi_ok) {
+    return false;
+  }
+
+  std::string value(length, '\0');
+  size_t written = 0;
+  if (napi_get_value_string_utf8(
+          env,
+          property,
+          value.data(),
+          value.size() + 1,
+          &written) != napi_ok) {
+    return false;
+  }
+
+  value.resize(written);
+  *out = value;
+  return true;
+}
+
+napi_value RecognizeText(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok ||
+      argc < 1) {
+    return RejectedPromise(env, "recognizeText requires a request object.");
+  }
+
+  int32_t width = 0;
+  int32_t height = 0;
+  if (!ReadInt32Property(env, args[0], "width", &width) ||
+      !ReadInt32Property(env, args[0], "height", &height) ||
+      width <= 0 || height <= 0) {
+    return RejectedPromise(env, "recognizeText received invalid dimensions.");
+  }
+
+  napi_value data_property;
+  if (napi_get_named_property(env, args[0], "data", &data_property) != napi_ok) {
+    return RejectedPromise(env, "recognizeText requires a data buffer.");
+  }
+
+  void* buffer_data = nullptr;
+  size_t buffer_length = 0;
+  if (napi_get_buffer_info(env, data_property, &buffer_data, &buffer_length) !=
+          napi_ok ||
+      buffer_data == nullptr) {
+    return RejectedPromise(env, "recognizeText requires a valid data buffer.");
+  }
+
+  const size_t expected_length =
+      static_cast<size_t>(width) * static_cast<size_t>(height) * 4U;
+  if (buffer_length < expected_length) {
+    return RejectedPromise(env, "recognizeText buffer is smaller than expected.");
+  }
+
+  auto* work = new OcrWork();
+  work->width = width;
+  work->height = height;
+  std::string language_preference;
+  if (ReadStringProperty(env, args[0], "languagePreference", &language_preference)) {
+    work->prefer_english = language_preference == "english";
+  }
+  work->pixels.assign(
+      static_cast<const uint8_t*>(buffer_data),
+      static_cast<const uint8_t*>(buffer_data) + expected_length);
+
+  napi_value promise;
+  if (napi_create_promise(env, &work->deferred, &promise) != napi_ok) {
+    delete work;
+    return RejectedPromise(env, "recognizeText could not create a promise.");
+  }
+
+  napi_value resource_name;
+  napi_create_string_utf8(
+      env, "LiteSnapOcr", NAPI_AUTO_LENGTH, &resource_name);
+  if (napi_create_async_work(
+          env,
+          nullptr,
+          resource_name,
+          ExecuteOcrWork,
+          CompleteOcrWork,
+          work,
+          &work->work) != napi_ok) {
+    napi_value undefined;
+    napi_get_undefined(env, &undefined);
+    napi_reject_deferred(env, work->deferred, undefined);
+    delete work;
+    return promise;
+  }
+
+  napi_queue_async_work(env, work->work);
+  return promise;
+}
+
 }  // namespace
 
 napi_value Init(napi_env env, napi_value exports) {
@@ -572,6 +1069,16 @@ napi_value Init(napi_env env, napi_value exports) {
       nullptr,
       &window_rect_fn);
   napi_set_named_property(env, exports, "getWindowRectAtPoint", window_rect_fn);
+
+  napi_value recognize_text_fn;
+  napi_create_function(
+      env,
+      "recognizeText",
+      NAPI_AUTO_LENGTH,
+      RecognizeText,
+      nullptr,
+      &recognize_text_fn);
+  napi_set_named_property(env, exports, "recognizeText", recognize_text_fn);
   return exports;
 }
 

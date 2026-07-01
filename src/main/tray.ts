@@ -18,6 +18,8 @@ const FALLBACK_ICON_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComp
 )}`;
 
 let appTray: Tray | null = null;
+let cachedTrayIcon: NativeImage | null = null;
+let trayIconSourceLogged = false;
 
 export interface SetupAppTrayOptions {
   showLauncherWindow?: () => void;
@@ -30,26 +32,42 @@ function buildFallbackTrayIcon(): NativeImage {
 }
 
 function resolveTrayIcon(): NativeImage {
+  if (cachedTrayIcon && !cachedTrayIcon.isEmpty()) {
+    return cachedTrayIcon;
+  }
+
   const bundledIconPath = resolveBundledAppIconPath();
   const bundledTrayIcon = loadBundledTrayIcon();
   if (bundledTrayIcon && !bundledTrayIcon.isEmpty()) {
-    if (bundledIconPath) {
-      console.info(`[tray] using bundled icon: ${bundledIconPath}`);
-    } else {
-      console.info("[tray] using bundled icon");
+    if (!trayIconSourceLogged) {
+      if (bundledIconPath) {
+        console.info(`[tray] using bundled icon: ${bundledIconPath}`);
+      } else {
+        console.info("[tray] using bundled icon");
+      }
+      trayIconSourceLogged = true;
     }
-    return bundledTrayIcon;
+    cachedTrayIcon = bundledTrayIcon;
+    return cachedTrayIcon;
   }
 
   if (bundledIconPath) {
-    console.warn(
-      `[tray] failed to decode bundled icon, using generated fallback icon: ${bundledIconPath}`
-    );
-    return buildFallbackTrayIcon();
+    if (!trayIconSourceLogged) {
+      console.warn(
+        `[tray] failed to decode bundled icon, using generated fallback icon: ${bundledIconPath}`
+      );
+      trayIconSourceLogged = true;
+    }
+    cachedTrayIcon = buildFallbackTrayIcon();
+    return cachedTrayIcon;
   }
 
-  console.warn("[tray] bundled icon not found, using generated fallback icon");
-  return buildFallbackTrayIcon();
+  if (!trayIconSourceLogged) {
+    console.warn("[tray] bundled icon not found, using generated fallback icon");
+    trayIconSourceLogged = true;
+  }
+  cachedTrayIcon = buildFallbackTrayIcon();
+  return cachedTrayIcon;
 }
 
 function buildTrayMenu(
@@ -130,4 +148,5 @@ export function destroyAppTray(): void {
 
   appTray.destroy();
   appTray = null;
+  cachedTrayIcon = null;
 }
