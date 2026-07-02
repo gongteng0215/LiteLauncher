@@ -386,6 +386,11 @@ function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
     }
 
     console.info("[litesnap] using Windows native capture provider");
+    if (typeof addon.recognizeText !== "function") {
+      console.warn(
+        "[litesnap] native capture addon loaded without OCR support; run pnpm run build to rebuild litesnap-capture.node"
+      );
+    }
     return new NativeLiteSnapCaptureProvider(addon);
   } catch (error) {
     console.warn("[litesnap] failed to load Windows native capture addon", error);

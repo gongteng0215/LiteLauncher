@@ -104,6 +104,21 @@ type LiteSnapProvider = {
   translateText: (
     input: LiteSnapTranslateTextInput
   ) => Promise<LiteSnapTranslateTextResult>;
+  probeOcr: () => Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
+  getOcrCapabilities: () => Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
+  >;
+  installOcrCapabilities: (
+    languages?: import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityLanguage[]
+  ) => Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityInstallResult
+  >;
+  getOcrProbeCache: () => Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache | null
+  >;
+  setOcrProbeCache: (
+    cache: import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache
+  ) => Promise<boolean>;
   cancelCapture: () => Promise<boolean>;
   ensureSourceImage: () => Promise<string | null>;
 };
@@ -166,6 +181,11 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapGetOverlayState,
   IPC_CHANNELS.liteSnapCommitCapture,
   IPC_CHANNELS.liteSnapRecognizeText,
+  IPC_CHANNELS.liteSnapProbeOcr,
+  IPC_CHANNELS.liteSnapGetOcrCapabilities,
+  IPC_CHANNELS.liteSnapInstallOcrCapabilities,
+  IPC_CHANNELS.liteSnapGetOcrProbeCache,
+  IPC_CHANNELS.liteSnapSetOcrProbeCache,
   IPC_CHANNELS.liteSnapCancelCapture,
   IPC_CHANNELS.liteSnapEnsureSourceImage,
   IPC_CHANNELS.rebuildCatalog,
@@ -187,6 +207,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.pickFilePath,
   IPC_CHANNELS.pickDirectoryPath,
   IPC_CHANNELS.hide,
+  IPC_CHANNELS.relaunchApp,
   IPC_CHANNELS.getClipItems,
   IPC_CHANNELS.copyClipItem,
   IPC_CHANNELS.deleteClipItem,
@@ -795,6 +816,8 @@ function escapeForPowerShellSingleQuote(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+const WINDOWS_ASSOCIATED_ICON_TIMEOUT_MS = 5000;
+
 async function tryReadWindowsAssociatedIconAsDataUrl(
   iconSource: string
 ): Promise<string | null> {
@@ -857,20 +880,34 @@ async function tryReadWindowsAssociatedIconAsDataUrl(
       stdout += chunk;
     });
 
+    const timeoutHandle = setTimeout(() => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      // Do not cache a permanent failure here: a timeout may just mean the
+      // system was briefly under load, so allow a later attempt to retry.
+      child.kill();
+      resolve(null);
+    }, WINDOWS_ASSOCIATED_ICON_TIMEOUT_MS);
+
     const finish = (value: string | null) => {
       if (resolved) {
         return;
       }
       resolved = true;
+      clearTimeout(timeoutHandle);
       windowsAssociatedIconCache.set(cacheKey, value);
       resolve(value);
     };
 
     child.once("error", () => {
+      clearTimeout(timeoutHandle);
       finish(null);
     });
 
     child.once("close", (code) => {
+      clearTimeout(timeoutHandle);
       if (code !== 0) {
         finish(null);
         return;
@@ -1408,6 +1445,40 @@ export function registerIpcHandlers(
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.liteSnapProbeOcr, async () => {
+    return options.liteSnapProvider.probeOcr();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapGetOcrCapabilities, async () => {
+    return options.liteSnapProvider.getOcrCapabilities();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapInstallOcrCapabilities,
+    async (_, languagesInput: unknown) => {
+      const languages = Array.isArray(languagesInput)
+        ? languagesInput.filter(
+            (entry): entry is "zh-CN" | "en-US" =>
+              entry === "zh-CN" || entry === "en-US"
+          )
+        : undefined;
+      return options.liteSnapProvider.installOcrCapabilities(languages);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapGetOcrProbeCache, async () => {
+    return options.liteSnapProvider.getOcrProbeCache();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapSetOcrProbeCache, async (_, cacheInput) => {
+    if (!cacheInput || typeof cacheInput !== "object") {
+      return false;
+    }
+    return options.liteSnapProvider.setOcrProbeCache(
+      cacheInput as import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache
+    );
+  });
+
   ipcMain.handle(IPC_CHANNELS.liteSnapCancelCapture, async () => {
     return options.liteSnapProvider.cancelCapture();
   });
@@ -1551,7 +1622,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.resolveCommandQuery, async (_, query: string) => {
     try {
-      const items = getDynamicSearchItems(query ?? "", "all");
+      const items = await getDynamicSearchItems(query ?? "", "all");
       return attachIcons(items);
     } catch (error) {
       const detail =
@@ -1701,6 +1772,15 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.hide, () => {
     applyLauncherWindowSizePreset(window, "compact");
     window.hide();
+    return true;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.relaunchApp, () => {
+    const relaunchArgs = process.argv
+      .slice(1)
+      .filter((arg) => arg !== "--replace-instance");
+    app.relaunch({ args: relaunchArgs });
+    app.quit();
     return true;
   });
 

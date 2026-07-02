@@ -24,6 +24,7 @@ import {
   scoreLiteSnapOcrText,
   type LiteSnapOcrLanguagePreference
 } from "../../shared/litesnap-ocr-quality";
+import { type LiteSnapOcrIssue } from "../../shared/litesnap-ocr-help";
 import { IPC_CHANNELS } from "../../shared/channels";
 import {
   captureDisplayFramesWithFallback,
@@ -35,6 +36,20 @@ import { createLiteSnapOverlayWindow } from "./overlay-window";
 import { LiteSnapImageStore } from "./image-store";
 import { LiteSnapPinWindowManager } from "./pin-window-manager";
 import { LiteSnapSettingsStore } from "./settings";
+import { probeLiteSnapOcr } from "./ocr-probe";
+import {
+  installLiteSnapOcrCapabilities,
+  listLiteSnapOcrCapabilities
+} from "./ocr-capability-installer";
+import type {
+  LiteSnapOcrCapabilityLanguage,
+  LiteSnapOcrProbeResult
+} from "../../shared/litesnap-ocr-help";
+import {
+  formatLiteSnapOcrProbeSummary,
+  inferOcrCapabilitiesFromEngineProbe,
+  reconcileOcrCapabilitiesWithProbe
+} from "../../shared/litesnap-ocr-help";
 
 type CaptureSession = {
   captureId: string;
@@ -497,19 +512,16 @@ export class LiteSnapCaptureSessionManager {
   }
 
   private buildOcrFailureMessage(): string {
-    return [
-      "未识别到文字。",
-      "识别英文请在 Windows 设置 → 时间和语言 → 语言和区域 中，",
-      "为「英语」安装 OCR（语言 → 选项 → 光学字符识别）。",
-      "识别中文请安装「中文（简体）」OCR。",
-      "配置后重启 LiteLauncher 再试。"
-    ].join("");
+    return "未识别到文字。请检查是否已安装 Windows OCR 语言包（英文或中文简体）。";
   }
 
   private async recognizeSelectionText(
     input: LiteSnapRecognizeTextInput,
     options?: { languagePreference?: LiteSnapOcrLanguagePreference }
-  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+  ): Promise<
+    | { ok: true; text: string }
+    | { ok: false; message: string; ocrIssue?: LiteSnapOcrIssue }
+  > {
     const session = this.session;
     if (!session) {
       return { ok: false, message: "截图会话已结束。" };
@@ -530,8 +542,9 @@ export class LiteSnapCaptureSessionManager {
     if (!this.captureProvider.supportsTextRecognition()) {
       return {
         ok: false,
+        ocrIssue: "module_missing",
         message:
-          "当前未加载 Windows OCR 模块。请完全退出 LiteLauncher 后重新启动；若仍失败，请重新编译 native 模块。"
+          "当前未加载 Windows OCR 模块。请完全退出 LiteLauncher 后重新启动；若仍失败，请安装最新版本或重新编译 native 模块。"
       };
     }
 
@@ -539,7 +552,11 @@ export class LiteSnapCaptureSessionManager {
     const text = await this.recognizeOcrWithFallback(ocrImage, options);
 
     if (text === null) {
-      return { ok: false, message: this.buildOcrFailureMessage() };
+      return {
+        ok: false,
+        ocrIssue: "language_pack",
+        message: this.buildOcrFailureMessage()
+      };
     }
 
     const normalized = normalizeLiteSnapOcrText(text);
@@ -557,7 +574,12 @@ export class LiteSnapCaptureSessionManager {
     await this.cancelCapture();
 
     if (!result.ok) {
-      return { ok: false, text: "", message: result.message };
+      return {
+        ok: false,
+        text: "",
+        message: result.message,
+        ocrIssue: result.ocrIssue
+      };
     }
 
     return { ok: true, text: result.text, message: "已识别文字。" };
@@ -566,14 +588,55 @@ export class LiteSnapCaptureSessionManager {
   public async recognizeTextFromSelection(
     input: LiteSnapRecognizeTextInput,
     options?: { languagePreference?: LiteSnapOcrLanguagePreference }
-  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+  ): Promise<
+    | { ok: true; text: string }
+    | { ok: false; message: string; ocrIssue?: LiteSnapOcrIssue }
+  > {
     return this.recognizeSelectionText(input, options);
   }
 
   public async recognizeSelectionForTranslate(
     input: LiteSnapRecognizeTextInput
-  ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+  ): Promise<
+    | { ok: true; text: string }
+    | { ok: false; message: string; ocrIssue?: LiteSnapOcrIssue }
+  > {
     return this.recognizeSelectionText(input, { languagePreference: "english" });
+  }
+
+  public async probeOcrStatusAsync(): Promise<LiteSnapOcrProbeResult> {
+    const result = probeLiteSnapOcr(this.captureProvider);
+
+    if (
+      result.moduleLoaded &&
+      result.chineseReady &&
+      result.englishReady
+    ) {
+      result.capabilities = inferOcrCapabilitiesFromEngineProbe(result);
+    } else {
+      try {
+        const listed = await listLiteSnapOcrCapabilities();
+        if (listed.ok) {
+          result.capabilities = reconcileOcrCapabilitiesWithProbe(
+            listed.capabilities,
+            result
+          );
+        }
+      } catch {
+        // ignore capability listing errors
+      }
+    }
+
+    result.message = formatLiteSnapOcrProbeSummary(result);
+    return result;
+  }
+
+  public listOcrCapabilities() {
+    return listLiteSnapOcrCapabilities();
+  }
+
+  public installOcrCapabilities(languages?: LiteSnapOcrCapabilityLanguage[]) {
+    return installLiteSnapOcrCapabilities(languages);
   }
 
   public async cancelCapture(): Promise<boolean> {

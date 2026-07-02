@@ -61,6 +61,9 @@ export type CashflowStatsSummary = {
 
 export class LiteDatabase {
   private readonly db: DatabaseSync;
+  // Reused across calls so hot paths (e.g. saveItems looping over many rows)
+  // don't re-parse/re-plan the same SQL text on every iteration.
+  private readonly statementCache = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
 
   public constructor(dbPath: string) {
     ensureParentDirectory(dbPath);
@@ -68,7 +71,17 @@ export class LiteDatabase {
   }
 
   public async close(): Promise<void> {
+    this.statementCache.clear();
     this.db.close();
+  }
+
+  private prepareCached(sql: string): ReturnType<DatabaseSync["prepare"]> {
+    let statement = this.statementCache.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.statementCache.set(sql, statement);
+    }
+    return statement;
   }
 
   private run(sql: string, params: SqlParam[] = []): Promise<void> {
@@ -86,7 +99,7 @@ export class LiteDatabase {
     sql: string,
     params: SqlParam[] = []
   ): Promise<{ changes: number; lastInsertId: number }> {
-    const result = this.db.prepare(sql).run(...params);
+    const result = this.prepareCached(sql).run(...params);
     return Promise.resolve({
       changes: coerceSqliteNumber(result.changes),
       lastInsertId: coerceSqliteNumber(result.lastInsertRowid)
@@ -94,11 +107,11 @@ export class LiteDatabase {
   }
 
   private get<T>(sql: string, params: SqlParam[] = []): Promise<T | undefined> {
-    return Promise.resolve(this.db.prepare(sql).get(...params) as T | undefined);
+    return Promise.resolve(this.prepareCached(sql).get(...params) as T | undefined);
   }
 
   private all<T>(sql: string, params: SqlParam[] = []): Promise<T[]> {
-    return Promise.resolve(this.db.prepare(sql).all(...params) as T[]);
+    return Promise.resolve(this.prepareCached(sql).all(...params) as T[]);
   }
 
   public async init(): Promise<void> {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import * as childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -16,7 +17,52 @@ const CODEX_ICON = `${CODEX_PACKAGE_ROOT}\\assets\\Square44x44Logo.png`;
 const ELECTRON_MODULE_PATH = require.resolve("electron");
 const nativeChildProcess = require("node:child_process") as typeof childProcess & {
   spawnSync: typeof childProcess.spawnSync;
+  spawn: typeof childProcess.spawn;
 };
+
+/**
+ * `src/main/search.ts` resolves command-path/StartApps lookups via async
+ * `spawn` (not `spawnSync`) so it never blocks the Electron main thread.
+ * This fake child process lets tests simulate that async process without
+ * shelling out for real.
+ */
+class FakeChildProcess extends EventEmitter {
+  public readonly stdout = new EventEmitter() as EventEmitter & {
+    setEncoding: (encoding: string) => void;
+  };
+
+  constructor() {
+    super();
+    this.stdout.setEncoding = () => undefined;
+  }
+
+  kill(): boolean {
+    return true;
+  }
+}
+
+function makeAsyncSpawnMock(
+  handler: (
+    command: string,
+    args: string[]
+  ) => { status: number; stdout?: string; stderr?: string }
+): typeof childProcess.spawn {
+  return ((command: unknown, args?: unknown) => {
+    const executable = String(command);
+    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
+    const child = new FakeChildProcess();
+
+    queueMicrotask(() => {
+      const result = handler(executable, argList);
+      if (result.stdout) {
+        child.stdout.emit("data", result.stdout);
+      }
+      child.emit("close", result.status);
+    });
+
+    return child as unknown as childProcess.ChildProcess;
+  }) as typeof childProcess.spawn;
+}
 
 const APPX_MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
@@ -212,27 +258,25 @@ test("buildCatalogWithOptions includes a single Codex WindowsApps application it
   );
 });
 
-test("getDynamicSearchItems returns a WindowsApps Codex application result with catalog-stable id", (t) => {
+test("getDynamicSearchItems returns a WindowsApps Codex application result with catalog-stable id", async (t) => {
   skipOnNonWindows(t);
 
-  const originalSpawnSync = childProcess.spawnSync;
+  const originalSpawn = childProcess.spawn;
   const originalExistsSync = fs.existsSync;
   const originalReadFileSync = fs.readFileSync;
 
   t.after(() => {
-    nativeChildProcess.spawnSync = originalSpawnSync;
+    nativeChildProcess.spawn = originalSpawn;
     fs.existsSync = originalExistsSync;
     fs.readFileSync = originalReadFileSync;
   });
 
-  nativeChildProcess.spawnSync = ((command, args) => {
-    const executable = String(command);
-    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
-    if (executable.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
-      return makeSpawnResult(0, `${CODEX_EXE}\r\n`);
+  nativeChildProcess.spawn = makeAsyncSpawnMock((command, argList) => {
+    if (command.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
+      return { status: 0, stdout: `${CODEX_EXE}\r\n` };
     }
-    return makeSpawnResult(1, "", "unexpected spawnSync");
-  }) as typeof childProcess.spawnSync;
+    return { status: 1, stderr: "unexpected spawn" };
+  });
 
   const { getDynamicSearchItems } = loadFreshModule<typeof import("../main/search")>(
     "../main/search"
@@ -251,7 +295,7 @@ test("getDynamicSearchItems returns a WindowsApps Codex application result with 
     return originalReadFileSync(candidate, options as never);
   }) as typeof fs.readFileSync;
 
-  const results = getDynamicSearchItems("codex", "all");
+  const results = await getDynamicSearchItems("codex", "all");
 
   assert.equal(results.length, 1);
   assert.equal(results[0]?.id, "app:startapp:codex");
@@ -262,52 +306,51 @@ test("getDynamicSearchItems returns a WindowsApps Codex application result with 
   assert.equal(results[0]?.iconPath, CODEX_ICON);
 });
 
-test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailable", (t) => {
+test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailable", async (t) => {
   skipOnNonWindows(t);
 
-  const originalSpawnSync = childProcess.spawnSync;
+  const originalSpawn = childProcess.spawn;
   const originalExistsSync = fs.existsSync;
   const originalReadFileSync = fs.readFileSync;
 
   t.after(() => {
-    nativeChildProcess.spawnSync = originalSpawnSync;
+    nativeChildProcess.spawn = originalSpawn;
     fs.existsSync = originalExistsSync;
     fs.readFileSync = originalReadFileSync;
   });
 
-  nativeChildProcess.spawnSync = ((command, args) => {
-    const executable = String(command);
-    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
+  nativeChildProcess.spawn = makeAsyncSpawnMock((command, argList) => {
     const script = argList.join(" ");
+    const lower = command.toLowerCase();
 
-    if (executable.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
-      return makeSpawnResult(1, "", "INFO: Could not find files for the given pattern(s).");
+    if (lower.endsWith("\\where.exe") && argList[0] === "codex") {
+      return {
+        status: 1,
+        stderr: "INFO: Could not find files for the given pattern(s)."
+      };
     }
 
     if (
-      executable.toLowerCase().endsWith("\\powershell.exe") &&
+      lower.endsWith("\\powershell.exe") &&
       script.includes("Get-StartApps") &&
       script.includes("Get-AppxPackage")
     ) {
-      return makeSpawnResult(
-        0,
-        JSON.stringify({
+      return {
+        status: 0,
+        stdout: JSON.stringify({
           name: "Codex",
           appId: CODEX_APP_ID,
           installLocation: CODEX_PACKAGE_ROOT
         })
-      );
+      };
     }
 
-    if (
-      executable.toLowerCase().endsWith("\\powershell.exe") &&
-      script.includes("Get-Command")
-    ) {
-      return makeSpawnResult(0, "");
+    if (lower.endsWith("\\powershell.exe") && script.includes("Get-Command")) {
+      return { status: 0, stdout: "" };
     }
 
-    return makeSpawnResult(1, "", "unexpected spawnSync");
-  }) as typeof childProcess.spawnSync;
+    return { status: 1, stderr: "unexpected spawn" };
+  });
 
   const { getDynamicSearchItems } = loadFreshModule<typeof import("../main/search")>(
     "../main/search"
@@ -326,7 +369,7 @@ test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailab
     return originalReadFileSync(candidate, options as never);
   }) as typeof fs.readFileSync;
 
-  const results = getDynamicSearchItems("codex", "all");
+  const results = await getDynamicSearchItems("codex", "all");
 
   assert.equal(results.length, 1);
   assert.equal(results[0]?.id, "app:startapp:codex");
@@ -337,45 +380,40 @@ test("getDynamicSearchItems falls back to StartApps when PATH alias is unavailab
   assert.equal(results[0]?.iconPath, CODEX_ICON);
 });
 
-test("getDynamicSearchItems retries after an earlier Windows alias miss in the same process", (t) => {
+test("getDynamicSearchItems retries after an earlier Windows alias miss in the same process", async (t) => {
   skipOnNonWindows(t);
 
-  const originalSpawnSync = childProcess.spawnSync;
+  const originalSpawn = childProcess.spawn;
   const originalExistsSync = fs.existsSync;
   const originalReadFileSync = fs.readFileSync;
 
   t.after(() => {
-    nativeChildProcess.spawnSync = originalSpawnSync;
+    nativeChildProcess.spawn = originalSpawn;
     fs.existsSync = originalExistsSync;
     fs.readFileSync = originalReadFileSync;
   });
 
   let whereCallCount = 0;
-  nativeChildProcess.spawnSync = ((command, args) => {
-    const executable = String(command);
-    const argList = Array.isArray(args) ? args.map((entry) => String(entry)) : [];
+  nativeChildProcess.spawn = makeAsyncSpawnMock((command, argList) => {
+    const lower = command.toLowerCase();
 
-    if (executable.toLowerCase().endsWith("\\where.exe") && argList[0] === "codex") {
+    if (lower.endsWith("\\where.exe") && argList[0] === "codex") {
       whereCallCount += 1;
       if (whereCallCount === 1) {
-        return makeSpawnResult(
-          1,
-          "",
-          "INFO: Could not find files for the given pattern(s)."
-        );
+        return {
+          status: 1,
+          stderr: "INFO: Could not find files for the given pattern(s)."
+        };
       }
-      return makeSpawnResult(0, `${CODEX_EXE}\r\n`);
+      return { status: 0, stdout: `${CODEX_EXE}\r\n` };
     }
 
-    if (
-      executable.toLowerCase().endsWith("\\powershell.exe") &&
-      argList.includes("-Command")
-    ) {
-      return makeSpawnResult(0, "");
+    if (lower.endsWith("\\powershell.exe") && argList.includes("-Command")) {
+      return { status: 0, stdout: "" };
     }
 
-    return makeSpawnResult(1, "", "unexpected spawnSync");
-  }) as typeof childProcess.spawnSync;
+    return { status: 1, stderr: "unexpected spawn" };
+  });
 
   const { getDynamicSearchItems } = loadFreshModule<typeof import("../main/search")>(
     "../main/search"
@@ -394,10 +432,10 @@ test("getDynamicSearchItems retries after an earlier Windows alias miss in the s
     return originalReadFileSync(candidate, options as never);
   }) as typeof fs.readFileSync;
 
-  const firstResults = getDynamicSearchItems("codex", "all");
+  const firstResults = await getDynamicSearchItems("codex", "all");
   assert.equal(firstResults.length, 0, "first lookup should miss");
 
-  const secondResults = getDynamicSearchItems("codex", "all");
+  const secondResults = await getDynamicSearchItems("codex", "all");
   assert.equal(secondResults.length, 1, "second lookup should retry and recover");
   assert.equal(secondResults[0]?.id, "app:startapp:codex");
   assert.equal(

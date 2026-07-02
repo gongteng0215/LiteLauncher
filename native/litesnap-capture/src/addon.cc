@@ -1037,6 +1037,84 @@ napi_value RecognizeText(napi_env env, napi_callback_info info) {
   return promise;
 }
 
+bool TryResolveOcrEngine(OcrLanguagePreference preference) {
+  try {
+    winrt::Windows::Media::Ocr::OcrEngine engine = ResolveOcrEngine(preference);
+    return static_cast<bool>(engine);
+  } catch (...) {
+    return false;
+  }
+}
+
+napi_value ProbeOcr(napi_env env, napi_callback_info /*info*/) {
+  napi_value result;
+  napi_create_object(env, &result);
+
+  try {
+    try {
+      winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    } catch (winrt::hresult_error const&) {
+    }
+
+    using namespace winrt::Windows::Globalization;
+    using namespace winrt::Windows::Media::Ocr;
+
+    napi_value languages_array;
+    napi_create_array(env, &languages_array);
+    uint32_t language_count = 0;
+
+    const auto available = OcrEngine::AvailableRecognizerLanguages();
+    for (uint32_t index = 0; index < available.Size(); ++index) {
+      const std::string tag =
+          winrt::to_string(available.GetAt(index).LanguageTag());
+      napi_value language_value;
+      napi_create_string_utf8(
+          env, tag.c_str(), NAPI_AUTO_LENGTH, &language_value);
+      napi_set_element(env, languages_array, language_count++, language_value);
+    }
+    napi_set_named_property(env, result, "availableLanguages", languages_array);
+
+    napi_value chinese_ready;
+    napi_value english_ready;
+    napi_get_boolean(
+        env,
+        TryResolveOcrEngine(OcrLanguagePreference::kChineseFirst),
+        &chinese_ready);
+    napi_get_boolean(
+        env,
+        TryResolveOcrEngine(OcrLanguagePreference::kEnglishFirst),
+        &english_ready);
+    napi_set_named_property(env, result, "chineseReady", chinese_ready);
+    napi_set_named_property(env, result, "englishReady", english_ready);
+  } catch (winrt::hresult_error const& error) {
+    napi_value empty_array;
+    napi_create_array(env, &empty_array);
+    napi_set_named_property(env, result, "availableLanguages", empty_array);
+
+    napi_value false_value;
+    napi_get_boolean(env, false, &false_value);
+    napi_set_named_property(env, result, "chineseReady", false_value);
+    napi_set_named_property(env, result, "englishReady", false_value);
+
+    napi_value error_message;
+    const std::string message = winrt::to_string(error.message());
+    napi_create_string_utf8(
+        env, message.c_str(), NAPI_AUTO_LENGTH, &error_message);
+    napi_set_named_property(env, result, "error", error_message);
+  } catch (...) {
+    napi_value empty_array;
+    napi_create_array(env, &empty_array);
+    napi_set_named_property(env, result, "availableLanguages", empty_array);
+
+    napi_value false_value;
+    napi_get_boolean(env, false, &false_value);
+    napi_set_named_property(env, result, "chineseReady", false_value);
+    napi_set_named_property(env, result, "englishReady", false_value);
+  }
+
+  return result;
+}
+
 }  // namespace
 
 napi_value Init(napi_env env, napi_value exports) {
@@ -1079,6 +1157,16 @@ napi_value Init(napi_env env, napi_value exports) {
       nullptr,
       &recognize_text_fn);
   napi_set_named_property(env, exports, "recognizeText", recognize_text_fn);
+
+  napi_value probe_ocr_fn;
+  napi_create_function(
+      env,
+      "probeOcr",
+      NAPI_AUTO_LENGTH,
+      ProbeOcr,
+      nullptr,
+      &probe_ocr_fn);
+  napi_set_named_property(env, exports, "probeOcr", probe_ocr_fn);
   return exports;
 }
 

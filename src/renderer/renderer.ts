@@ -358,6 +358,7 @@ interface LauncherApi {
   pickFilePath(): Promise<string | null>;
   pickDirectoryPath(): Promise<string | null>;
   hide(): Promise<boolean>;
+  relaunchApp(): Promise<boolean>;
   getClipItems(query: string): Promise<ClipItem[]>;
   copyClipItem(itemId: string): Promise<boolean>;
   deleteClipItem(itemId: string): Promise<boolean>;
@@ -381,6 +382,79 @@ interface LauncherApi {
     translatedText: string;
     message: string;
   }>;
+  liteSnapProbeOcr?(): Promise<{
+    ok: boolean;
+    message: string;
+    ocrIssue?: "module_missing" | "language_pack";
+    moduleLoaded: boolean;
+    nativeAddonExists: boolean;
+    availableLanguages: string[];
+    chineseReady: boolean;
+    englishReady: boolean;
+    capabilities?: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+  }>;
+  liteSnapGetOcrCapabilities?(): Promise<{
+    ok: boolean;
+    message: string;
+    capabilities: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+  }>;
+  liteSnapInstallOcrCapabilities?(
+    languages?: Array<"zh-CN" | "en-US">
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    cancelled?: boolean;
+    capabilities: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+  }>;
+  liteSnapGetOcrProbeCache?(): Promise<{
+    ready: boolean;
+    summary: string;
+    probeState: {
+      ok: boolean;
+      moduleLoaded: boolean;
+      chineseReady: boolean;
+      englishReady: boolean;
+    };
+    capabilities?: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+    checkedAt: number;
+  } | null>;
+  liteSnapSetOcrProbeCache?(cache: {
+    ready: boolean;
+    summary: string;
+    probeState: {
+      ok: boolean;
+      moduleLoaded: boolean;
+      chineseReady: boolean;
+      englishReady: boolean;
+    };
+    capabilities?: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+    checkedAt: number;
+  }): Promise<boolean>;
 }
 
 type ResultEntry =
@@ -2481,6 +2555,9 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
       ? launchAtLoginNode.checked
       : launchAtLoginStatus.enabled;
 
+  const previousVisiblePluginIds = visiblePluginIds;
+  let visiblePluginsChanged = false;
+
   try {
     const normalized = normalizeSettingsInput(inputConfig);
     const normalizedCatalog = normalizeCatalogScanConfigInput(catalogInputConfig);
@@ -2499,6 +2576,9 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
     catalogScanConfig = nextCatalogScanConfig;
     visiblePluginIds = nextAppliedVisiblePluginIds;
     launchAtLoginStatus = nextLaunchAtLoginStatus;
+    visiblePluginsChanged =
+      previousVisiblePluginIds.length !== visiblePluginIds.length ||
+      previousVisiblePluginIds.some((id, index) => id !== visiblePluginIds[index]);
     setStatus(
       `\u8bbe\u7f6e\u5df2\u4fdd\u5b58（可见插件 ${visiblePluginIds.length} 个；索引源改动需重建索引后生效）`
     );
@@ -2506,7 +2586,13 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
     setStatus("\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25");
   }
 
-  renderList();
+  // Only the visible-plugin list affects other panels (home sections,
+  // plugin catalog). Other fields are just clamped/deduped versions of what
+  // the user already sees in the form, so skip the full settings-panel
+  // rebuild when nothing structural changed.
+  if (visiblePluginsChanged) {
+    renderList();
+  }
 }
 
 async function rebuildCatalogFromSettings(): Promise<void> {

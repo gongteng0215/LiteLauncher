@@ -605,6 +605,14 @@ body {
   grid-column: 2;
 }
 
+.settings-row.settings-row-info .settings-row-info-value {
+  width: 100%;
+  min-width: 0;
+  line-height: 1.5;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .settings-row-label {
   font-size: 12px;
   color: rgba(233, 242, 255, 0.92);
@@ -660,6 +668,32 @@ body {
 .litesnap-ocr-textarea:focus {
   outline: none;
   border-color: var(--accent, #38bdf8);
+}
+
+.litesnap-ocr-help {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-bg, #1e1e1e) 88%, var(--accent, #38bdf8) 12%);
+}
+
+.litesnap-ocr-help-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.litesnap-ocr-help-steps {
+  margin: 0 0 10px 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.litesnap-ocr-help-actions {
+  margin-top: 4px;
 }
 
 .settings-number {

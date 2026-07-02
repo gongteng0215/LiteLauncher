@@ -26,6 +26,13 @@ const captureManagerPath = path.join(
   "litesnap",
   "capture-session-manager.ts"
 );
+const ocrCapabilityInstallerPath = path.join(
+  process.cwd(),
+  "src",
+  "main",
+  "litesnap",
+  "ocr-capability-installer.ts"
+);
 const captureProviderPath = path.join(
   process.cwd(),
   "src",
@@ -168,6 +175,7 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
 test("LiteSnap main-process runtime scaffolding exists", () => {
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const overlaySource = fs.readFileSync(overlayWindowPath, "utf8");
   const pinSource = fs.readFileSync(pinManagerPath, "utf8");
@@ -369,6 +377,7 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
 
 test("LiteSnap capture manager launches a first-party overlay instead of handing off to ms-screenclip", () => {
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const buildNativeSource = fs.readFileSync(buildNativeScriptPath, "utf8");
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
@@ -770,10 +779,22 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     /liteSnapPinWindowManager\.prewarmPinWindow\(\);[\s\S]*const launcherWindow = createLauncherWindow\(\)/,
     "LiteSnap should not prewarm pin windows during main-process startup"
   );
+  const launcherWindowCreationIndex = mainIndexSource.indexOf(
+    "const launcherWindow = createLauncherWindow();"
+  );
+  assert.ok(
+    launcherWindowCreationIndex >= 0,
+    "LiteSnap regression expects the launcher window creation call to exist"
+  );
   assert.doesNotMatch(
-    mainIndexSource,
-    /void liteSnapCaptureSessionManager\.prewarmOverlay\(\);/,
-    "LiteSnap should not create the reusable overlay during main-process startup"
+    mainIndexSource.slice(0, launcherWindowCreationIndex),
+    /liteSnapCaptureSessionManager\.prewarmOverlay\(\)/,
+    "LiteSnap should not create the reusable overlay before the launcher window exists"
+  );
+  assert.match(
+    mainIndexSource.slice(launcherWindowCreationIndex),
+    /setTimeout\(\(\) => \{[\s\S]*liteSnapCaptureSessionManager\.prewarmOverlay\(\)[\s\S]*\}, LITESNAP_OVERLAY_PREWARM_DELAY_MS\)/,
+    "LiteSnap should lazily prewarm the overlay on a delay after the launcher window is ready, without blocking bootstrap"
   );
   assert.match(
     mainIndexSource,
@@ -854,6 +875,7 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   const copyAssetsSource = fs.readFileSync(copyAssetsPath, "utf8");
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
 
   assert.match(overlayRendererSource, /copy|save|pin|cancel/);
   assert.match(overlayRendererSource, /pointerdown/);
@@ -1100,6 +1122,7 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   const preloadSource = fs.readFileSync(preloadPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const nativeAddonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
   const buildNativeSource = fs.readFileSync(buildNativeScriptPath, "utf8");
@@ -1202,6 +1225,52 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
     panelImplsSource,
     /liteSnapPanelView === "ocr"[\s\S]*litesnap-ocr-textarea/,
     "panel should render an editable OCR result view"
+  );
+  assert.match(panelImplsSource, /ensureLiteSnapOcrCacheLoaded/);
+  assert.match(panelImplsSource, /liteSnapGetOcrProbeCache/);
+  assert.match(panelImplsSource, /persistLiteSnapOcrProbeCacheIfReady/);
+  assert.match(channelsSource, /liteSnapGetOcrProbeCache:/);
+  assert.match(channelsSource, /liteSnapSetOcrProbeCache:/);
+  assert.match(
+    panelImplsSource,
+    /formatLiteSnapOcrInstallActionLabel[\s\S]*missingLanguages/,
+    "OCR install button label should reflect missing languages"
+  );
+  assert.match(channelsSource, /relaunchApp:/);
+  assert.match(preloadSource, /relaunchApp\(/);
+  assert.match(captureSource, /ocrIssue:\s*"module_missing"/);
+  assert.match(channelsSource, /liteSnapProbeOcr:/);
+  assert.match(preloadSource, /liteSnapProbeOcr\(/);
+  assert.match(ipcSource, /IPC_CHANNELS\.liteSnapProbeOcr/);
+  assert.match(
+    panelImplsSource,
+    /runLiteSnapSettingsOcrProbe[\s\S]*liteSnapProbeOcr/,
+    "settings panel should expose an OCR probe action"
+  );
+  assert.match(nativeAddonSource, /"probeOcr"/);
+  assert.match(
+    panelImplsSource,
+    /runLiteSnapInstallOcrCapabilities[\s\S]*liteSnapInstallOcrCapabilities/,
+    "panel should support one-click OCR capability install"
+  );
+  assert.match(
+    channelsSource,
+    /liteSnapInstallOcrCapabilities:/
+  );
+  assert.match(
+    captureSource,
+    /inferOcrCapabilitiesFromEngineProbe/,
+    "OCR probe should skip PowerShell when engines are already ready"
+  );
+  assert.match(
+    ocrInstallerSource,
+    /Get-WindowsCapability -Online -Name \$name/,
+    "OCR capability listing should query only known OCR packages"
+  );
+  assert.doesNotMatch(
+    ocrInstallerSource,
+    /Get-WindowsCapability -Online \| Where-Object/,
+    "OCR capability listing should not scan all online capabilities"
   );
 
   assert.match(sharedSource, /interface LiteSnapTranslateSelectionResult/);

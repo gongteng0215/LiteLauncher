@@ -151,6 +151,10 @@ let webtoolsCryptoPrivateKey = "";
 let webtoolsCryptoRsaBits = 2048;
 let webtoolsCryptoAutoTimer: number | null = null;
 let webtoolsCryptoRequestToken = 0;
+// Tracks the algorithm picker's outside-click listener so it can be torn
+// down from cleanupPluginPanelTransientState even if the panel is replaced
+// (e.g. via renderList()) while the menu is still open.
+let removeActiveCryptoAlgorithmMenuListener: (() => void) | null = null;
 let webtoolsJwtToken = "";
 let webtoolsJwtHeader = "";
 let webtoolsJwtPayload = "";
@@ -12679,6 +12683,7 @@ interface LiteSnapPanelData {
     translateBaiduApiKey: string;
   };
   statusMessage: string;
+  ocrIssue?: "module_missing" | "language_pack";
 }
 
 const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
@@ -12705,12 +12710,203 @@ let liteSnapPanelData: LiteSnapPanelData = {
   settings: { ...DEFAULT_LITESNAP_PANEL_DATA.settings },
   statusMessage: DEFAULT_LITESNAP_PANEL_DATA.statusMessage
 };
+let liteSnapOcrIssue: "module_missing" | "language_pack" | null = null;
 let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" = "main";
 let liteSnapOcrText = "";
 let liteSnapTranslateSourceText = "";
 let liteSnapTranslateText = "";
 let liteSnapSettingsTranslateSource = "";
 let liteSnapSettingsTranslateResult = "";
+let liteSnapOcrProbeSummary = "";
+let liteSnapOcrProbeIssue: "module_missing" | "language_pack" | null = null;
+let liteSnapOcrProbeState: {
+  ok: boolean;
+  moduleLoaded: boolean;
+  chineseReady: boolean;
+  englishReady: boolean;
+} | null = null;
+let liteSnapOcrCapabilities: Array<{
+  languageTag: "zh-CN" | "en-US";
+  capabilityName: string;
+  state: string;
+  installed: boolean;
+}> | null = null;
+let liteSnapOcrCacheLoadPromise: Promise<void> | null = null;
+let liteSnapOcrCacheHydrated = false;
+
+function applyLiteSnapOcrProbeResult(
+  result: {
+    ok: boolean;
+    message: string;
+    ocrIssue?: "module_missing" | "language_pack";
+    moduleLoaded: boolean;
+    chineseReady: boolean;
+    englishReady: boolean;
+    capabilities?: Array<{
+      languageTag: "zh-CN" | "en-US";
+      capabilityName: string;
+      state: string;
+      installed: boolean;
+    }>;
+  },
+  options: { persist?: boolean } = {}
+): void {
+  liteSnapOcrProbeState = {
+    ok: result.ok,
+    moduleLoaded: result.moduleLoaded,
+    chineseReady: result.chineseReady,
+    englishReady: result.englishReady
+  };
+  liteSnapOcrProbeSummary = result.message;
+  liteSnapOcrProbeIssue = result.ok
+    ? null
+    : result.ocrIssue ?? inferLiteSnapOcrIssueFromMessage(result.message);
+  if (result.capabilities && result.capabilities.length > 0) {
+    liteSnapOcrCapabilities = result.capabilities;
+  }
+
+  if (options.persist !== false && isLiteSnapOcrRuntimeReady()) {
+    void persistLiteSnapOcrProbeCacheIfReady();
+  }
+}
+
+async function persistLiteSnapOcrProbeCacheIfReady(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapSetOcrProbeCache || !liteSnapOcrProbeState) {
+    return;
+  }
+
+  if (!isLiteSnapOcrRuntimeReady()) {
+    return;
+  }
+
+  try {
+    await launcher.liteSnapSetOcrProbeCache({
+      ready: true,
+      summary: liteSnapOcrProbeSummary,
+      probeState: { ...liteSnapOcrProbeState },
+      capabilities: liteSnapOcrCapabilities ?? undefined,
+      checkedAt: Date.now()
+    });
+  } catch (error) {
+    console.warn("[litesnap] OCR probe cache persist failed", error);
+  }
+}
+
+async function loadLiteSnapOcrProbeCache(): Promise<void> {
+  if (liteSnapOcrCacheHydrated) {
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapGetOcrProbeCache) {
+    liteSnapOcrCacheHydrated = true;
+    return;
+  }
+
+  const previousSummary = liteSnapOcrProbeSummary;
+  const previousReady = isLiteSnapOcrRuntimeReady();
+
+  try {
+    const cache = await launcher.liteSnapGetOcrProbeCache();
+    if (cache?.ready) {
+      applyLiteSnapOcrProbeResult(
+        {
+          ok: cache.probeState.ok,
+          message: cache.summary,
+          moduleLoaded: cache.probeState.moduleLoaded,
+          chineseReady: cache.probeState.chineseReady,
+          englishReady: cache.probeState.englishReady,
+          capabilities: cache.capabilities
+        },
+        { persist: false }
+      );
+    }
+  } catch (error) {
+    console.warn("[litesnap] OCR probe cache load failed", error);
+  } finally {
+    liteSnapOcrCacheHydrated = true;
+    const stateChanged =
+      liteSnapOcrProbeSummary !== previousSummary ||
+      isLiteSnapOcrRuntimeReady() !== previousReady;
+    if (stateChanged) {
+      renderList();
+    }
+  }
+}
+
+function ensureLiteSnapOcrCacheLoaded(): void {
+  if (liteSnapOcrCacheLoadPromise) {
+    return;
+  }
+
+  liteSnapOcrCacheLoadPromise = loadLiteSnapOcrProbeCache();
+}
+
+function isLiteSnapOcrRuntimeReady(): boolean {
+  if (
+    liteSnapOcrProbeState?.moduleLoaded &&
+    liteSnapOcrProbeState.chineseReady &&
+    liteSnapOcrProbeState.englishReady
+  ) {
+    return true;
+  }
+
+  if (liteSnapOcrProbeState?.ok) {
+    return true;
+  }
+
+  const summary = liteSnapOcrProbeSummary.trim();
+  if (!summary) {
+    return false;
+  }
+
+  return (
+    summary.includes("OCR 检测通过") &&
+    summary.includes("中文引擎：可用") &&
+    summary.includes("英文引擎：可用")
+  );
+}
+
+function resolveLiteSnapMissingOcrLanguages(): Array<"zh-CN" | "en-US"> {
+  if (isLiteSnapOcrRuntimeReady()) {
+    return [];
+  }
+
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  return (
+    utils?.resolveMissingOcrCapabilityLanguages?.(
+      liteSnapOcrCapabilities,
+      liteSnapOcrProbeState
+    ) ?? ["zh-CN", "en-US"]
+  );
+}
+
+function shouldShowLiteSnapOcrInstallAction(): boolean {
+  if (isLiteSnapOcrRuntimeReady()) {
+    return false;
+  }
+
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  if (utils?.shouldShowLiteSnapOcrInstallButton) {
+    return utils.shouldShowLiteSnapOcrInstallButton(
+      liteSnapOcrCapabilities,
+      liteSnapOcrProbeState
+    );
+  }
+
+  return resolveLiteSnapMissingOcrLanguages().length > 0;
+}
+
+function formatLiteSnapOcrInstallActionLabel(
+  languages: Array<"zh-CN" | "en-US">
+): string {
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  return (
+    utils?.formatLiteSnapOcrInstallButtonLabel?.(languages) ??
+    "一键安装 OCR（中+英）"
+  );
+}
 
 function normalizeLiteSnapOcrPanelText(text: string): string {
   const utils = window.__LL_LITESNAP_TEXT_UTILS__;
@@ -12718,6 +12914,199 @@ function normalizeLiteSnapOcrPanelText(text: string): string {
     return utils.normalizeLiteSnapOcrText(text);
   }
   return text;
+}
+
+function resolveLiteSnapOcrIssue(
+  dataRecord: Record<string, unknown> | null,
+  statusMessage: string
+): "module_missing" | "language_pack" | null {
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  const rawIssue = dataRecord?.ocrIssue;
+  if (utils?.isLiteSnapOcrIssue?.(rawIssue)) {
+    return rawIssue;
+  }
+  return utils?.inferLiteSnapOcrIssue?.(statusMessage) ?? null;
+}
+
+function relaunchLiteLauncherApp(): void {
+  const launcher = getLauncherApi();
+  if (!launcher?.relaunchApp) {
+    setStatus("请从托盘图标右键完全退出 LiteLauncher，再重新打开。");
+    return;
+  }
+  void launcher.relaunchApp();
+}
+
+function createLiteSnapOcrSetupGuideSection(): HTMLDivElement {
+  const section = document.createElement("div");
+  section.className = "litesnap-ocr-help";
+
+  const title = document.createElement("div");
+  title.className = "litesnap-ocr-help-title";
+  title.textContent = "Windows OCR 配置指引";
+  section.appendChild(title);
+
+  const list = document.createElement("ol");
+  list.className = "litesnap-ocr-help-steps";
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  const steps =
+    utils?.WINDOWS_10_OCR_SETUP_STEPS ??
+    ([
+      "点「一键安装 OCR（中+英）」，在 UAC 提示里选「是」。",
+      "等待安装完成，不要关闭弹出的 PowerShell 窗口。",
+      "点「重启 LiteLauncher」，再点「检测 OCR」。"
+    ] as const);
+  for (const step of steps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+
+  return section;
+}
+
+function buildLiteSnapOcrConfigurationSection(options: {
+  resultTextareaId: string;
+  includeFailureHelp?: boolean;
+}): HTMLElement[] {
+  const missingLanguages = resolveLiteSnapMissingOcrLanguages();
+  const showInstallButton = shouldShowLiteSnapOcrInstallAction();
+  const installButtonLabel = formatLiteSnapOcrInstallActionLabel(missingLanguages);
+  const ocrReady = isLiteSnapOcrRuntimeReady();
+
+  const ocrProbeInfo = createLiteSnapInfoRow(
+    "文字识别 (OCR)",
+    ocrReady
+      ? "系统 OCR 组件已就绪"
+      : "Win10 可用一键安装系统 OCR 组件（需管理员 UAC）",
+    ocrReady
+      ? "可直接使用截图文字识别；如有异常请点「检测 OCR」"
+      : showInstallButton
+        ? `推荐先点「${installButtonLabel}」，装完重启再检测`
+        : "点「检测 OCR」查看模块与语言包状态"
+  );
+
+  const ocrSetupGuide = createLiteSnapOcrSetupGuideSection();
+
+  const ocrProbeResultField = document.createElement("div");
+  ocrProbeResultField.className = "settings-field litesnap-ocr-field";
+
+  const ocrProbeResultLabel = document.createElement("label");
+  ocrProbeResultLabel.className = "settings-field-label";
+  ocrProbeResultLabel.textContent = "检测结果";
+  ocrProbeResultLabel.htmlFor = options.resultTextareaId;
+
+  const ocrProbeResultTextarea = document.createElement("textarea");
+  ocrProbeResultTextarea.id = options.resultTextareaId;
+  ocrProbeResultTextarea.className = "litesnap-ocr-textarea";
+  ocrProbeResultTextarea.rows = 5;
+  ocrProbeResultTextarea.spellcheck = false;
+  ocrProbeResultTextarea.readOnly = true;
+  ocrProbeResultTextarea.value = liteSnapOcrProbeSummary;
+  ocrProbeResultTextarea.placeholder =
+    liteSnapOcrProbeSummary ||
+    (isLiteSnapOcrRuntimeReady()
+      ? "上次检测已通过，可直接使用 OCR；如需复查请点「检测 OCR」"
+      : "点「检测 OCR」查看模块与语言包状态");
+  ocrProbeResultField.append(ocrProbeResultLabel, ocrProbeResultTextarea);
+
+  const ocrProbeActions = document.createElement("div");
+  ocrProbeActions.className = "settings-actions litesnap-ocr-help-actions";
+
+  if (showInstallButton) {
+    const installOcrButton = document.createElement("button");
+    installOcrButton.type = "button";
+    installOcrButton.className = "settings-btn settings-btn-primary";
+    installOcrButton.textContent = installButtonLabel;
+    installOcrButton.addEventListener("click", () => {
+      void runLiteSnapInstallOcrCapabilities(
+        installOcrButton,
+        ocrProbeResultTextarea,
+        missingLanguages
+      );
+    });
+    ocrProbeActions.appendChild(installOcrButton);
+  }
+
+  const ocrProbeButton = document.createElement("button");
+  ocrProbeButton.type = "button";
+  ocrProbeButton.className = "settings-btn settings-btn-secondary";
+  ocrProbeButton.textContent = "检测 OCR";
+  ocrProbeButton.addEventListener("click", () => {
+    void runLiteSnapSettingsOcrProbe(ocrProbeButton, ocrProbeResultTextarea);
+  });
+
+  const relaunchButton = document.createElement("button");
+  relaunchButton.type = "button";
+  relaunchButton.className = "settings-btn settings-btn-secondary";
+  relaunchButton.textContent = "重启 LiteLauncher";
+  relaunchButton.addEventListener("click", () => {
+    relaunchLiteLauncherApp();
+  });
+
+  ocrProbeActions.append(ocrProbeButton, relaunchButton);
+
+  const nodes: HTMLElement[] = [
+    ocrProbeInfo,
+    ...(ocrReady ? [] : [ocrSetupGuide]),
+    ocrProbeResultField,
+    ocrProbeActions
+  ];
+
+  if (options.includeFailureHelp && liteSnapOcrProbeIssue) {
+    nodes.push(createLiteSnapOcrHelpSection(liteSnapOcrProbeIssue));
+  }
+
+  return nodes;
+}
+
+function createLiteSnapOcrHelpSection(
+  issue: "module_missing" | "language_pack"
+): HTMLDivElement {
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  const help = utils?.getLiteSnapOcrHelp?.(issue) ?? {
+    title: issue === "module_missing" ? "OCR 组件未加载" : "需要安装 Windows OCR 语言包",
+    steps: [
+      "点「一键安装 OCR（中+英）」，在 UAC 提示里选「是」。",
+      "安装完成后点「重启 LiteLauncher」，再点「检测 OCR」。"
+    ],
+    showRelaunchButton: true
+  };
+
+  const section = document.createElement("div");
+  section.className = "litesnap-ocr-help";
+
+  const title = document.createElement("div");
+  title.className = "litesnap-ocr-help-title";
+  title.textContent = help.title;
+  section.appendChild(title);
+
+  const list = document.createElement("ol");
+  list.className = "litesnap-ocr-help-steps";
+  for (const step of help.steps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+
+  if (help.showRelaunchButton) {
+    const actions = document.createElement("div");
+    actions.className = "settings-actions litesnap-ocr-help-actions";
+
+    const relaunchButton = document.createElement("button");
+    relaunchButton.type = "button";
+    relaunchButton.className = "settings-btn settings-btn-primary";
+    relaunchButton.textContent = "重启 LiteLauncher";
+    relaunchButton.addEventListener("click", () => {
+      relaunchLiteLauncherApp();
+    });
+    actions.appendChild(relaunchButton);
+    section.appendChild(actions);
+  }
+
+  return section;
 }
 
 function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
@@ -12820,14 +13209,14 @@ function createLiteSnapInfoRow(
   hintText?: string
 ): HTMLDivElement {
   const row = document.createElement("div");
-  row.className = "settings-row";
+  row.className = "settings-row settings-row-textarea settings-row-info";
 
   const label = document.createElement("div");
   label.className = "settings-row-label";
   label.textContent = labelText;
 
   const value = document.createElement("div");
-  value.className = "settings-value settings-wrap";
+  value.className = "settings-value settings-row-info-value";
   value.textContent = valueText;
 
   row.append(label, value);
@@ -13079,6 +13468,148 @@ function createLiteSnapCheckbox(
   return input;
 }
 
+async function runLiteSnapInstallOcrCapabilities(
+  installButton: HTMLButtonElement,
+  resultTextarea: HTMLTextAreaElement,
+  languages: Array<"zh-CN" | "en-US">
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapInstallOcrCapabilities) {
+    setStatus("当前版本不支持一键安装，请升级 LiteLauncher 或手动运行 PowerShell。");
+    return;
+  }
+
+  const installLanguages =
+    languages.length > 0 ? languages : resolveLiteSnapMissingOcrLanguages();
+  if (installLanguages.length === 0) {
+    setStatus("系统 OCR 组件已全部安装，无需重复安装。");
+    renderList();
+    return;
+  }
+
+  const defaultLabel = formatLiteSnapOcrInstallActionLabel(installLanguages);
+  const previousLabel = installButton.textContent ?? defaultLabel;
+  installButton.disabled = true;
+  installButton.textContent = "安装中…";
+  resultTextarea.placeholder =
+    "正在请求管理员权限并安装 OCR 组件，可能需要几分钟，请勿关闭弹出的 PowerShell 窗口…";
+  beginPluginNativeInteraction(1_800_000);
+
+  try {
+    const result = await launcher.liteSnapInstallOcrCapabilities(installLanguages);
+    const capLines = result.capabilities
+      .map(
+        (cap) =>
+          `${cap.languageTag}: ${cap.installed ? "已安装" : cap.state || "未安装"}`
+      )
+      .join("\n");
+    const zhCap = result.capabilities.find((cap) => cap.languageTag === "zh-CN");
+    const enCap = result.capabilities.find((cap) => cap.languageTag === "en-US");
+    applyLiteSnapOcrProbeResult({
+      ok: result.ok,
+      message: [result.message, capLines].filter(Boolean).join("\n"),
+      moduleLoaded: liteSnapOcrProbeState?.moduleLoaded ?? true,
+      chineseReady: zhCap?.installed ?? liteSnapOcrProbeState?.chineseReady ?? false,
+      englishReady: enCap?.installed ?? liteSnapOcrProbeState?.englishReady ?? false,
+      capabilities: result.capabilities,
+      ocrIssue: result.ok ? undefined : "language_pack"
+    });
+    resultTextarea.value = liteSnapOcrProbeSummary;
+    resultTextarea.placeholder = "";
+    setStatus(
+      result.cancelled
+        ? "已取消管理员授权。"
+        : result.ok
+          ? "OCR 组件安装完成，请重启 LiteLauncher。"
+          : result.message
+    );
+    renderList();
+  } catch (error) {
+    console.warn("[litesnap] OCR capability install failed", error);
+    liteSnapOcrProbeSummary = "安装失败，请确认已点击 UAC「是」授予管理员权限。";
+    liteSnapOcrProbeIssue = "language_pack";
+    resultTextarea.value = liteSnapOcrProbeSummary;
+    setStatus("OCR 安装失败。");
+    renderList();
+  } finally {
+    installButton.disabled = false;
+    installButton.textContent = previousLabel;
+    schedulePluginNativeInteractionRelease(260);
+  }
+}
+
+async function runLiteSnapSettingsOcrProbe(
+  probeButton: HTMLButtonElement,
+  resultTextarea: HTMLTextAreaElement
+): Promise<void> {
+  const launcher = getLauncherApi();
+  const previousLabel = probeButton.textContent ?? "检测 OCR";
+  probeButton.disabled = true;
+  probeButton.textContent = "检测中…";
+  resultTextarea.value = "";
+  resultTextarea.placeholder = "正在检测 Windows OCR 模块与语言包…";
+  liteSnapOcrProbeIssue = null;
+  beginPluginNativeInteraction(25_000);
+
+  if (!launcher?.liteSnapProbeOcr) {
+    liteSnapOcrProbeSummary = [
+      "当前版本未加载 OCR 检测接口，请先重启 LiteLauncher。",
+      "若仍不可用，请确认已安装最新版，并点「一键安装 OCR（中+英）」。"
+    ].join("\n");
+    liteSnapOcrProbeIssue = "module_missing";
+    resultTextarea.value = liteSnapOcrProbeSummary;
+    resultTextarea.placeholder = "";
+    setStatus("请先重启应用，再试一键安装 OCR。");
+    probeButton.disabled = false;
+    probeButton.textContent = previousLabel;
+    schedulePluginNativeInteractionRelease(260);
+    return;
+  }
+
+  let shouldRefreshPanel = false;
+  try {
+    const result = await launcher.liteSnapProbeOcr();
+    applyLiteSnapOcrProbeResult(result);
+    resultTextarea.value = liteSnapOcrProbeSummary;
+    resultTextarea.placeholder = "";
+    setStatus(
+      result.ok
+        ? "OCR 检测通过。"
+        : shouldShowLiteSnapOcrInstallAction()
+          ? `OCR 检测未通过，请点「${formatLiteSnapOcrInstallActionLabel(
+              resolveLiteSnapMissingOcrLanguages()
+            )}」或「重启 LiteLauncher」。`
+          : "OCR 检测未通过，请点「重启 LiteLauncher」。"
+    );
+    shouldRefreshPanel = true;
+  } catch (error) {
+    console.warn("[litesnap] settings OCR probe failed", error);
+    liteSnapOcrProbeSummary = [
+      "检测失败，请完全退出 LiteLauncher 后重试。",
+      "可先点「一键安装 OCR（中+英）」安装系统语言包。"
+    ].join("\n");
+    liteSnapOcrProbeIssue = "module_missing";
+    resultTextarea.value = liteSnapOcrProbeSummary;
+    resultTextarea.placeholder = "";
+    setStatus("OCR 检测失败，请重试一键安装。");
+    shouldRefreshPanel = true;
+  } finally {
+    probeButton.disabled = false;
+    probeButton.textContent = previousLabel;
+    schedulePluginNativeInteractionRelease(260);
+    if (shouldRefreshPanel) {
+      renderList();
+    }
+  }
+}
+
+function inferLiteSnapOcrIssueFromMessage(
+  message: string
+): "module_missing" | "language_pack" | null {
+  const utils = window.__LL_LITESNAP_TEXT_UTILS__;
+  return utils?.inferLiteSnapOcrIssue?.(message) ?? null;
+}
+
 async function runLiteSnapSettingsTranslate(
   form: HTMLFormElement,
   sourceTextarea: HTMLTextAreaElement,
@@ -13200,7 +13731,13 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
     });
     liteSnapPanelView = "settings";
     setStatus(statusMessage);
-    renderList();
+    // The form already reflects the values the user just submitted, so a
+    // full renderList() rebuild here is unnecessary and would only reset
+    // scroll position/focus. Just restore the submit button in place.
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = previousLabel;
+    }
   } catch (error) {
     console.warn("[litesnap] save settings failed", error);
     setStatus("保存设置失败，请重试。");
@@ -13690,9 +14227,15 @@ window.__LL_PANEL_IMPLS__ = {
       window.clearTimeout(webtoolsCronAutoTimer);
       webtoolsCronAutoTimer = null;
     }
-    if (activePluginId !== WEBTOOLS_CRYPTO_PLUGIN_ID && webtoolsCryptoAutoTimer !== null) {
-      window.clearTimeout(webtoolsCryptoAutoTimer);
-      webtoolsCryptoAutoTimer = null;
+    if (activePluginId !== WEBTOOLS_CRYPTO_PLUGIN_ID) {
+      if (webtoolsCryptoAutoTimer !== null) {
+        window.clearTimeout(webtoolsCryptoAutoTimer);
+        webtoolsCryptoAutoTimer = null;
+      }
+      if (removeActiveCryptoAlgorithmMenuListener) {
+        removeActiveCryptoAlgorithmMenuListener();
+        removeActiveCryptoAlgorithmMenuListener = null;
+      }
     }
     if (activePluginId !== WEBTOOLS_JWT_PLUGIN_ID) {
       if (webtoolsJwtAutoTimer !== null) {
@@ -13740,6 +14283,12 @@ window.__LL_PANEL_IMPLS__ = {
     if (activePluginId !== WEBTOOLS_UA_PLUGIN_ID && webtoolsUaAutoTimer !== null) {
       window.clearTimeout(webtoolsUaAutoTimer);
       webtoolsUaAutoTimer = null;
+    }
+    if (
+      activePluginId !== HARDWARE_INSPECTOR_PLUGIN_ID &&
+      hardwareInspectorExpandedDiskKeys.size > 0
+    ) {
+      hardwareInspectorExpandedDiskKeys.clear();
     }
   },
 
@@ -14848,6 +15397,11 @@ window.__LL_PANEL_IMPLS__ = {
     const panelRecord = toRecord(panel);
     const dataRecord = toRecord(panelRecord?.data ?? panel);
     liteSnapPanelData = normalizeLiteSnapPanelData(dataRecord);
+    const statusMessage =
+      typeof dataRecord?.statusMessage === "string"
+        ? dataRecord.statusMessage
+        : liteSnapPanelData.statusMessage;
+    liteSnapOcrIssue = resolveLiteSnapOcrIssue(dataRecord, statusMessage);
     if (dataRecord?.preferredView === "ocr") {
       liteSnapPanelView = "ocr";
       const rawOcrText =
@@ -14871,6 +15425,8 @@ window.__LL_PANEL_IMPLS__ = {
   },
 
   renderLiteSnapPanel(): void {
+    ensureLiteSnapOcrCacheLoaded();
+
     const panelItem = document.createElement("li");
     panelItem.className = "settings-panel-item";
 
@@ -14937,6 +15493,17 @@ window.__LL_PANEL_IMPLS__ = {
       const ocrActions = document.createElement("div");
       ocrActions.className = "settings-actions";
 
+      const ocrFailureIssue =
+        liteSnapOcrIssue ??
+        (!liteSnapOcrText.trim()
+          ? inferLiteSnapOcrIssueFromMessage(liteSnapPanelData.statusMessage)
+          : null);
+      const ocrHelpSection = ocrFailureIssue
+        ? createLiteSnapOcrHelpSection(ocrFailureIssue)
+        : !liteSnapOcrText.trim()
+          ? createLiteSnapOcrSetupGuideSection()
+          : null;
+
       const copyButton = document.createElement("button");
       copyButton.type = "button";
       copyButton.className = "settings-btn settings-btn-primary";
@@ -14979,7 +15546,11 @@ window.__LL_PANEL_IMPLS__ = {
         backToMainButton,
         backToSearchButton
       );
-      form.append(ocrStatusRow, ocrField, ocrActions);
+      if (ocrHelpSection) {
+        form.append(ocrStatusRow, ocrHelpSection, ocrField, ocrActions);
+      } else {
+        form.append(ocrStatusRow, ocrField, ocrActions);
+      }
     } else if (liteSnapPanelView === "translate") {
       const translateStatusRow = createLiteSnapInfoRow(
         "截图翻译",
@@ -15030,6 +15601,18 @@ window.__LL_PANEL_IMPLS__ = {
       const translateActions = document.createElement("div");
       translateActions.className = "settings-actions";
 
+      const translateHelpSection =
+        liteSnapOcrIssue ??
+        (!liteSnapTranslateSourceText.trim()
+          ? inferLiteSnapOcrIssueFromMessage(liteSnapPanelData.statusMessage)
+          : null);
+      const translateOcrHelpSection = translateHelpSection
+        ? createLiteSnapOcrHelpSection(translateHelpSection)
+        : !liteSnapTranslateSourceText.trim() &&
+            inferLiteSnapOcrIssueFromMessage(liteSnapPanelData.statusMessage)
+          ? createLiteSnapOcrSetupGuideSection()
+          : null;
+
       const copyTranslationButton = document.createElement("button");
       copyTranslationButton.type = "button";
       copyTranslationButton.className = "settings-btn settings-btn-primary";
@@ -15072,12 +15655,22 @@ window.__LL_PANEL_IMPLS__ = {
         backToMainButton,
         backToSearchButton
       );
-      form.append(
-        translateStatusRow,
-        sourceField,
-        translateField,
-        translateActions
-      );
+      if (translateOcrHelpSection) {
+        form.append(
+          translateStatusRow,
+          translateOcrHelpSection,
+          sourceField,
+          translateField,
+          translateActions
+        );
+      } else {
+        form.append(
+          translateStatusRow,
+          sourceField,
+          translateField,
+          translateActions
+        );
+      }
     } else if (liteSnapPanelView === "settings") {
       const settingsStatusRow = createLiteSnapInfoRow(
         "设置说明",
@@ -15235,6 +15828,11 @@ window.__LL_PANEL_IMPLS__ = {
         )
       ];
 
+      const ocrConfigurationNodes = buildLiteSnapOcrConfigurationSection({
+        resultTextareaId: "litesnap-settings-ocr-probe-result",
+        includeFailureHelp: true
+      });
+
       const translateTestInfo = createLiteSnapInfoRow(
         "文本翻译",
         "直接输入文字翻译为中文，使用上方所选百度翻译引擎",
@@ -15362,6 +15960,7 @@ window.__LL_PANEL_IMPLS__ = {
       form.append(
         settingsStatusRow,
         shortcutStatusRow,
+        ...ocrConfigurationNodes,
         ...settingsRows,
         translateTestInfo,
         translateSourceField,
@@ -15408,6 +16007,11 @@ window.__LL_PANEL_IMPLS__ = {
       const actions = document.createElement("div");
       actions.className = "settings-actions";
 
+      const mainOcrNodes = buildLiteSnapOcrConfigurationSection({
+        resultTextareaId: "litesnap-main-ocr-probe-result",
+        includeFailureHelp: true
+      });
+
       const captureButton = document.createElement("button");
       captureButton.type = "submit";
       captureButton.className = "settings-btn settings-btn-primary";
@@ -15447,7 +16051,7 @@ window.__LL_PANEL_IMPLS__ = {
       });
 
       actions.append(captureButton, pinButton, togglePinsButton, settingsButton, backButton);
-      form.append(statusRow, ...settingsRows, actions);
+      form.append(statusRow, ...mainOcrNodes, ...settingsRows, actions);
     }
 
     panel.append(title, description, form);
@@ -17595,6 +18199,8 @@ window.__LL_PANEL_IMPLS__ = {
       cleanButtonGrid.appendChild(button);
     });
 
+    let jsonStatsDebounceHandle: number | null = null;
+
     const updateJsonStats = (): void => {
       routeStat.textContent = `${formatLabel(sourceSelect.value)} -> ${formatLabel(targetSelect.value)}`;
       inputStat.textContent = `输入 ${summarizeText(inputArea.value)}`;
@@ -17603,6 +18209,19 @@ window.__LL_PANEL_IMPLS__ = {
       payloadStat.dataset.state = webtoolsJsonState.valid === false ? "error" : "idle";
       renderStructurePreview();
       renderFieldSelector();
+    };
+
+    // `describePayload` runs JSON.parse and the structure/field preview
+    // rebuilds DOM nodes; debounce the per-keystroke call so large payloads
+    // don't re-parse on every single character.
+    const scheduleUpdateJsonStats = (): void => {
+      if (jsonStatsDebounceHandle !== null) {
+        window.clearTimeout(jsonStatsDebounceHandle);
+      }
+      jsonStatsDebounceHandle = window.setTimeout(() => {
+        jsonStatsDebounceHandle = null;
+        updateJsonStats();
+      }, 220);
     };
 
     const updateJsonFormHead = (): void => {
@@ -17654,7 +18273,7 @@ window.__LL_PANEL_IMPLS__ = {
     });
     inputArea.addEventListener("input", () => {
       webtoolsJsonState.selectedFields = [];
-      updateJsonStats();
+      scheduleUpdateJsonStats();
       scheduleWebtoolsJsonAutoConvert(form);
     });
 
@@ -18434,20 +19053,24 @@ window.__LL_PANEL_IMPLS__ = {
   algorithmMenu.className = "webtools-crypto-picker-menu";
   algorithmMenu.setAttribute("role", "listbox");
 
-  let removeAlgorithmOutsideListener: (() => void) | null = null;
-
   const closeAlgorithmMenu = (): void => {
     algorithmPicker.dataset.open = "false";
     algorithmTrigger.setAttribute("aria-expanded", "false");
-    if (removeAlgorithmOutsideListener) {
-      removeAlgorithmOutsideListener();
-      removeAlgorithmOutsideListener = null;
+    if (removeActiveCryptoAlgorithmMenuListener) {
+      removeActiveCryptoAlgorithmMenuListener();
+      removeActiveCryptoAlgorithmMenuListener = null;
     }
   };
 
   const openAlgorithmMenu = (): void => {
     if (algorithmPicker.dataset.open === "true") {
       return;
+    }
+    // Closing any listener left over from a stale render before attaching
+    // a new one keeps at most one document-level listener alive at a time.
+    if (removeActiveCryptoAlgorithmMenuListener) {
+      removeActiveCryptoAlgorithmMenuListener();
+      removeActiveCryptoAlgorithmMenuListener = null;
     }
     algorithmPicker.dataset.open = "true";
     algorithmTrigger.setAttribute("aria-expanded", "true");
@@ -18459,7 +19082,7 @@ window.__LL_PANEL_IMPLS__ = {
       closeAlgorithmMenu();
     };
     document.addEventListener("pointerdown", handleOutsidePointer, true);
-    removeAlgorithmOutsideListener = () => {
+    removeActiveCryptoAlgorithmMenuListener = () => {
       document.removeEventListener("pointerdown", handleOutsidePointer, true);
     };
   };

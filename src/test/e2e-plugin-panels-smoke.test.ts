@@ -728,7 +728,13 @@ test(
         const rootSource = document.querySelector(".codeagent-switch-root-source");
         return Boolean(form && modelField && reviewField && rootPreview && rootSource);
       }, undefined, { timeout: 10000 });
-      await page.locator('.codeagent-switch-provider-chip').first().click();
+      await page
+        .locator(
+          ".codeagent-switch-current-actions button, .codeagent-switch-detail-hero-actions button"
+        )
+        .filter({ hasText: /Provider|Key/i })
+        .first()
+        .click();
       await page.waitForFunction(() => {
         const saveButton = Array.from(
           document.querySelectorAll<HTMLButtonElement>(".codeagent-switch-detail-hero-actions button")

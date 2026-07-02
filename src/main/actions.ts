@@ -230,6 +230,8 @@ function escapeForPowerShellSingleQuote(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+const RUN_AS_ADMIN_TIMEOUT_MS = 60_000;
+
 async function runAsAdmin(target: string): Promise<ExecuteResult> {
   const normalized = target.trim();
   if (!normalized) {
@@ -270,8 +272,26 @@ async function runAsAdmin(target: string): Promise<ExecuteResult> {
         return;
       }
       settled = true;
+      clearTimeout(timeoutHandle);
       resolve(result);
     };
+
+    let killChild = (): void => undefined;
+
+    // If the user leaves the UAC prompt unattended, `Start-Process -Verb
+    // RunAs` keeps the PowerShell helper (and this IPC call) waiting
+    // indefinitely. Give up after a while instead of hanging forever.
+    const timeoutHandle = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      killChild();
+      finish({
+        ok: false,
+        keepOpen: true,
+        message: `等待管理员授权超时，请重试：${title}`
+      });
+    }, RUN_AS_ADMIN_TIMEOUT_MS);
 
     try {
       const child = spawn(
@@ -289,6 +309,7 @@ async function runAsAdmin(target: string): Promise<ExecuteResult> {
           stdio: ["ignore", "pipe", "pipe"]
         }
       );
+      killChild = () => child.kill();
 
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString("utf8");

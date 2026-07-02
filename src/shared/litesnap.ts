@@ -1,6 +1,11 @@
+import type { LiteSnapOcrIssue } from "../shared/litesnap-ocr-help";
+
 export const LITESNAP_PLUGIN_ID = "litesnap";
 export const LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT = "F1";
 export const LITESNAP_DEFAULT_PIN_SHORTCUT = "F3";
+
+export type { LiteSnapOcrIssue };
+export type { LiteSnapOcrProbeResult } from "./litesnap-ocr-help";
 
 export type LiteSnapPanelAction =
   | "open"
@@ -51,6 +56,7 @@ export interface LiteSnapPanelPayload {
   statusMessage?: string;
   preferredView?: "main" | "settings" | "ocr" | "translate";
   ocrText?: string;
+  ocrIssue?: LiteSnapOcrIssue;
   translateSourceText?: string;
   translateText?: string;
 }
@@ -99,6 +105,7 @@ export interface LiteSnapRecognizeTextResult {
   ok: boolean;
   text: string;
   message: string;
+  ocrIssue?: LiteSnapOcrIssue;
 }
 
 export interface LiteSnapTranslateSelectionInput {

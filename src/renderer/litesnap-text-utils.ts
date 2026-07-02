@@ -1,3 +1,16 @@
+import {
+  getLiteSnapOcrHelp,
+  inferLiteSnapOcrIssue,
+  isLiteSnapOcrIssue,
+  WINDOWS_10_OCR_SETUP_STEPS,
+  formatLiteSnapOcrInstallButtonLabel,
+  reconcileOcrCapabilitiesWithProbe,
+  resolveMissingOcrCapabilityLanguages,
+  shouldShowLiteSnapOcrInstallButton,
+  type LiteSnapOcrHelpContent,
+  type LiteSnapOcrIssue
+} from "../shared/litesnap-ocr-help";
+
 // Keep in sync with normalizeLiteSnapOcrText in src/shared/litesnap.ts
 function collapseLiteSnapOcrBlankLines(text: string): string {
   const blocks = text.split(/\n\n+/);
@@ -41,5 +54,18 @@ function normalizeLiteSnapOcrText(text: string): string {
 }
 
 window.__LL_LITESNAP_TEXT_UTILS__ = {
-  normalizeLiteSnapOcrText
+  normalizeLiteSnapOcrText,
+  getLiteSnapOcrHelp,
+  inferLiteSnapOcrIssue,
+  isLiteSnapOcrIssue,
+  WINDOWS_10_OCR_SETUP_STEPS,
+  resolveMissingOcrCapabilityLanguages,
+  shouldShowLiteSnapOcrInstallButton,
+  formatLiteSnapOcrInstallButtonLabel,
+  reconcileOcrCapabilitiesWithProbe
+};
+
+export type {
+  LiteSnapOcrHelpContent,
+  LiteSnapOcrIssue
 };

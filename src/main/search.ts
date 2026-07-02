@@ -1,6 +1,6 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 import { computeInitialItems, computeSearchItems } from "../shared/search-engine";
 import { LaunchItem, SearchRequestOptions, SearchScope } from "../shared/types";
@@ -11,6 +11,66 @@ const DYNAMIC_COMMAND_CACHE = new Map<string, LaunchItem>();
 
 function isSimpleCommandQuery(query: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{1,63}$/i.test(query);
+}
+
+type CommandRunResult = {
+  stdout: string;
+  status: number | null;
+};
+
+/**
+ * Async replacement for spawnSync: runs a short-lived helper process without
+ * blocking the Electron main thread while the caller awaits the result.
+ */
+function runCommandAsync(
+  command: string,
+  args: string[],
+  timeoutMs: number
+): Promise<CommandRunResult> {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(command, args, { windowsHide: true });
+    } catch {
+      resolve({ stdout: "", status: null });
+      return;
+    }
+
+    let stdout = "";
+    let settled = false;
+
+    const timeoutHandle = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill();
+      resolve({ stdout, status: null });
+    }, timeoutMs);
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    child.once("error", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutHandle);
+      resolve({ stdout, status: null });
+    });
+
+    child.once("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutHandle);
+      resolve({ stdout, status: code });
+    });
+  });
 }
 
 function getWindowsWhereExecutable(): string {
@@ -29,26 +89,24 @@ function getWindowsPowerShellExecutable(): string {
   );
 }
 
-function resolveWindowsCommandPathViaPowerShell(commandName: string): string | null {
+async function resolveWindowsCommandPathViaPowerShell(
+  commandName: string
+): Promise<string | null> {
   try {
-    const result = spawnSync(
+    const result = await runCommandAsync(
       getWindowsPowerShellExecutable(),
       [
         "-NoProfile",
         "-Command",
         `(Get-Command '${commandName.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)`
       ],
-      {
-        encoding: "utf8",
-        windowsHide: true,
-        timeout: 3000
-      }
+      3000
     );
-    if (result.error || result.status !== 0) {
+    if (result.status !== 0) {
       return null;
     }
 
-    const resolved = String(result.stdout ?? "")
+    const resolved = result.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .find(Boolean);
@@ -58,7 +116,7 @@ function resolveWindowsCommandPathViaPowerShell(commandName: string): string | n
   }
 }
 
-function resolveCommandPath(query: string): string | null {
+async function resolveCommandPath(query: string): Promise<string | null> {
   const normalized = query.trim();
   if (!normalized) {
     return null;
@@ -66,13 +124,13 @@ function resolveCommandPath(query: string): string | null {
 
   if (process.platform === "win32") {
     try {
-      const result = spawnSync(getWindowsWhereExecutable(), [normalized], {
-        encoding: "utf8",
-        windowsHide: true,
-        timeout: 2000
-      });
-      if (!result.error && result.status === 0) {
-        const candidates = String(result.stdout ?? "")
+      const result = await runCommandAsync(
+        getWindowsWhereExecutable(),
+        [normalized],
+        2000
+      );
+      if (result.status === 0) {
+        const candidates = result.stdout
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter(Boolean);
@@ -91,15 +149,12 @@ function resolveCommandPath(query: string): string | null {
   }
 
   try {
-    const result = spawnSync("which", [normalized], {
-      encoding: "utf8",
-      timeout: 1200
-    });
-    if (result.error || result.status !== 0) {
+    const result = await runCommandAsync("which", [normalized], 1200);
+    if (result.status !== 0) {
       return null;
     }
 
-    const resolved = String(result.stdout ?? "")
+    const resolved = result.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .find(Boolean);
@@ -179,7 +234,9 @@ function resolveWindowsAppsMetadata(resolvedPath: string): WindowsAppsMetadata |
   return null;
 }
 
-function resolveWindowsStartApp(commandName: string): WindowsStartAppEntry | null {
+async function resolveWindowsStartApp(
+  commandName: string
+): Promise<WindowsStartAppEntry | null> {
   if (process.platform !== "win32") {
     return null;
   }
@@ -198,16 +255,16 @@ function resolveWindowsStartApp(commandName: string): WindowsStartAppEntry | nul
     `[pscustomobject]@{ name = $start.Name; appId = $start.AppID; installLocation = $pkg.InstallLocation } | ConvertTo-Json -Compress`;
 
   try {
-    const result = spawnSync(getWindowsPowerShellExecutable(), ["-NoProfile", "-Command", script], {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 5000
-    });
-    if (result.error || result.status !== 0) {
+    const result = await runCommandAsync(
+      getWindowsPowerShellExecutable(),
+      ["-NoProfile", "-Command", script],
+      5000
+    );
+    if (result.status !== 0) {
       return null;
     }
 
-    const raw = String(result.stdout ?? "").trim();
+    const raw = result.stdout.trim();
     if (!raw) {
       return null;
     }
@@ -235,10 +292,83 @@ function resolveWindowsStartApp(commandName: string): WindowsStartAppEntry | nul
   }
 }
 
-export function getDynamicSearchItems(
+const DYNAMIC_COMMAND_RESOLUTION_INFLIGHT = new Map<string, Promise<void>>();
+
+async function resolveDynamicCommandItem(
+  cacheKey: string,
+  normalized: string
+): Promise<void> {
+  const resolvedPath = await resolveCommandPath(normalized);
+  if (resolvedPath) {
+    const windowsApps = resolveWindowsAppsMetadata(resolvedPath);
+    if (windowsApps) {
+      DYNAMIC_COMMAND_CACHE.set(cacheKey, {
+        id: buildWindowsStartAppItemId(cacheKey),
+        type: "application",
+        title: windowsApps.title,
+        subtitle: resolvedPath,
+        target: `command:apps-folder:${encodeURIComponent(windowsApps.appId)}`,
+        iconPath: windowsApps.iconPath,
+        keywords: [
+          cacheKey,
+          windowsApps.title.toLowerCase(),
+          path.basename(resolvedPath).toLowerCase(),
+          "command",
+          "path",
+          "alias",
+          "windowsapps"
+        ]
+      });
+    } else {
+      const title = formatResolvedCommandTitle(normalized, resolvedPath);
+      DYNAMIC_COMMAND_CACHE.set(cacheKey, {
+        id: `app:path-alias:${cacheKey}`,
+        type: "application",
+        title,
+        subtitle: resolvedPath,
+        target: resolvedPath,
+        keywords: [
+          cacheKey,
+          title.toLowerCase(),
+          path.basename(resolvedPath).toLowerCase(),
+          "command",
+          "path",
+          "alias"
+        ]
+      });
+    }
+    return;
+  }
+
+  const startApp = await resolveWindowsStartApp(normalized);
+  if (startApp) {
+    const metadata = startApp.installLocation
+      ? resolveWindowsAppsMetadata(path.join(startApp.installLocation, "AppxManifest.xml"))
+      : null;
+    DYNAMIC_COMMAND_CACHE.set(cacheKey, {
+      id: buildWindowsStartAppItemId(cacheKey),
+      type: "application",
+      title: metadata?.title || startApp.name,
+      subtitle: startApp.installLocation || startApp.appId,
+      target: `command:apps-folder:${encodeURIComponent(startApp.appId)}`,
+      iconPath: metadata?.iconPath,
+      keywords: [
+        cacheKey,
+        startApp.name.toLowerCase(),
+        startApp.appId.toLowerCase(),
+        startApp.installLocation?.toLowerCase() ?? "",
+        "command",
+        "startapps",
+        "windowsapps"
+      ].filter(Boolean)
+    });
+  }
+}
+
+export async function getDynamicSearchItems(
   query: string,
   scope: SearchScope = "all"
-): LaunchItem[] {
+): Promise<LaunchItem[]> {
   if (scope !== "all" && scope !== "command") {
     return [];
   }
@@ -250,70 +380,15 @@ export function getDynamicSearchItems(
 
   const cacheKey = normalized.toLowerCase();
   if (!DYNAMIC_COMMAND_CACHE.has(cacheKey)) {
-    const resolvedPath = resolveCommandPath(normalized);
-    if (resolvedPath) {
-      const windowsApps = resolveWindowsAppsMetadata(resolvedPath);
-      if (windowsApps) {
-        DYNAMIC_COMMAND_CACHE.set(cacheKey, {
-          id: buildWindowsStartAppItemId(cacheKey),
-          type: "application",
-          title: windowsApps.title,
-          subtitle: resolvedPath,
-          target: `command:apps-folder:${encodeURIComponent(windowsApps.appId)}`,
-          iconPath: windowsApps.iconPath,
-          keywords: [
-            cacheKey,
-            windowsApps.title.toLowerCase(),
-            path.basename(resolvedPath).toLowerCase(),
-            "command",
-            "path",
-            "alias",
-            "windowsapps"
-          ]
-        });
-      } else {
-        const title = formatResolvedCommandTitle(normalized, resolvedPath);
-        DYNAMIC_COMMAND_CACHE.set(cacheKey, {
-          id: `app:path-alias:${cacheKey}`,
-          type: "application",
-          title,
-          subtitle: resolvedPath,
-          target: resolvedPath,
-          keywords: [
-            cacheKey,
-            title.toLowerCase(),
-            path.basename(resolvedPath).toLowerCase(),
-            "command",
-            "path",
-            "alias"
-          ]
-        });
-      }
+    const inflight = DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.get(cacheKey);
+    if (inflight) {
+      await inflight;
     } else {
-      const startApp = resolveWindowsStartApp(normalized);
-      if (startApp) {
-        const metadata =
-          startApp.installLocation
-            ? resolveWindowsAppsMetadata(path.join(startApp.installLocation, "AppxManifest.xml"))
-            : null;
-        DYNAMIC_COMMAND_CACHE.set(cacheKey, {
-          id: buildWindowsStartAppItemId(cacheKey),
-          type: "application",
-          title: metadata?.title || startApp.name,
-          subtitle: startApp.installLocation || startApp.appId,
-          target: `command:apps-folder:${encodeURIComponent(startApp.appId)}`,
-          iconPath: metadata?.iconPath,
-          keywords: [
-            cacheKey,
-            startApp.name.toLowerCase(),
-            startApp.appId.toLowerCase(),
-            startApp.installLocation?.toLowerCase() ?? "",
-            "command",
-            "startapps",
-            "windowsapps"
-          ].filter(Boolean)
-        });
-      }
+      const resolution = resolveDynamicCommandItem(cacheKey, normalized).finally(() => {
+        DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.delete(cacheKey);
+      });
+      DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.set(cacheKey, resolution);
+      await resolution;
     }
   }
 

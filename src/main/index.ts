@@ -6,6 +6,7 @@ import { IPC_CHANNELS } from "../shared/channels";
 import {
   createDefaultLiteSnapSettings,
   LITESNAP_PLUGIN_ID,
+  type LiteSnapOcrIssue,
   type LiteSnapRecognizeTextInput,
   type LiteSnapSettings,
   type LiteSnapShortcutRegistrationResult,
@@ -40,6 +41,10 @@ import { LiteSnapImageStore } from "./litesnap/image-store";
 import { translateWithBaidu } from "./litesnap/baidu-translator";
 import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
 import { LiteSnapSettingsStore } from "./litesnap/settings";
+import {
+  getLiteSnapOcrProbeCache,
+  setLiteSnapOcrProbeCache
+} from "./litesnap/ocr-probe-cache";
 import { initWebtoolsCronStore } from "./plugins/webtools-cron/store";
 import { filterItemsByPathRules } from "./path-rule-filter";
 import { normalizePinnedItemIds, validatePinnedItemRequest } from "./pinning";
@@ -80,6 +85,7 @@ const E2E_MODE = process.env.LITELAUNCHER_E2E === "1";
 const E2E_REAL_BLUR_MODE = process.env.LITELAUNCHER_E2E_REAL_BLUR === "1";
 const E2E_USER_DATA_DIR = (process.env.LITELAUNCHER_E2E_USER_DATA_DIR ?? "").trim();
 const REPLACE_INSTANCE_FLAG = "--replace-instance";
+const LITESNAP_OVERLAY_PREWARM_DELAY_MS = 4000;
 const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
@@ -1272,15 +1278,23 @@ async function loadPinnedItemIds(
     return [];
   }
 
+  let parsed: unknown;
   try {
-    return normalizePinnedItemIds(
-      JSON.parse(raw),
-      (itemId) => isPinnedItemIdResolvable(itemId, catalogIds),
-      PINNED_ITEMS_MAX
-    );
+    parsed = JSON.parse(raw);
   } catch {
     return [];
   }
+
+  const candidateIds = Array.isArray(parsed)
+    ? parsed.filter((value): value is string => typeof value === "string")
+    : [];
+  const resolvableDynamicIds = await computeResolvableDynamicPinIds(candidateIds, catalogIds);
+
+  return normalizePinnedItemIds(
+    parsed,
+    (itemId) => catalogIds.has(itemId) || resolvableDynamicIds.has(itemId),
+    PINNED_ITEMS_MAX
+  );
 }
 
 async function persistPinnedItemIds(db: LiteDatabase): Promise<void> {
@@ -1296,9 +1310,13 @@ async function persistCatalogSnapshot(
   catalogInitialized = true;
 
   const catalogIdSet = new Set(catalog.map((item) => item.id));
+  const resolvableDynamicIds = await computeResolvableDynamicPinIds(
+    pinnedItemIds,
+    catalogIdSet
+  );
   const normalizedPinned = normalizePinnedItemIds(
     pinnedItemIds,
-    (itemId) => isPinnedItemIdResolvable(itemId, catalogIdSet),
+    (itemId) => catalogIdSet.has(itemId) || resolvableDynamicIds.has(itemId),
     PINNED_ITEMS_MAX
   );
   const pinnedChanged = !areStringArraysEqual(normalizedPinned, pinnedItemIds);
@@ -1484,12 +1502,12 @@ function withPinnedState(items: LaunchItem[]): LaunchItem[] {
   return items.map((item) => ({ ...item, pinned: pinnedSet.has(item.id) }));
 }
 
-function getPinnedItemsFromCatalog(limit: number): LaunchItem[] {
+async function getPinnedItemsFromCatalog(limit: number): Promise<LaunchItem[]> {
   const byId = new Map(catalog.map((item) => [item.id, item]));
   const picked: LaunchItem[] = [];
 
   for (const itemId of pinnedItemIds) {
-    const item = byId.get(itemId) ?? findDynamicPinCandidate(itemId);
+    const item = byId.get(itemId) ?? (await findDynamicPinCandidate(itemId));
     if (!item) {
       continue;
     }
@@ -1508,20 +1526,27 @@ function getPinnedItemsFromCatalog(limit: number): LaunchItem[] {
   return picked;
 }
 
-function isPinnedItemIdResolvable(
-  itemId: string,
-  catalogIdSet = new Set(catalog.map((item) => item.id))
-): boolean {
-  const normalizedId = String(itemId ?? "").trim();
-  if (!normalizedId) {
-    return false;
+/**
+ * Pre-resolves which of the given pinned item ids can be matched to a
+ * dynamically-resolved command item (e.g. a path alias), without blocking on
+ * `spawnSync`. Used to build a synchronous "is resolvable" predicate for
+ * `normalizePinnedItemIds`.
+ */
+async function computeResolvableDynamicPinIds(
+  itemIds: Iterable<string>,
+  catalogIdSet: Set<string>
+): Promise<Set<string>> {
+  const resolvable = new Set<string>();
+  for (const rawId of itemIds) {
+    const normalizedId = String(rawId ?? "").trim();
+    if (!normalizedId || catalogIdSet.has(normalizedId) || resolvable.has(normalizedId)) {
+      continue;
+    }
+    if (await findDynamicPinCandidate(normalizedId)) {
+      resolvable.add(normalizedId);
+    }
   }
-
-  if (catalogIdSet.has(normalizedId)) {
-    return true;
-  }
-
-  return Boolean(findDynamicPinCandidate(normalizedId));
+  return resolvable;
 }
 
 function mergeSearchItems(
@@ -1588,7 +1613,7 @@ function findCatalogPinCandidate(item: LaunchItem): LaunchItem | undefined {
   return undefined;
 }
 
-function findDynamicPinCandidate(itemId: string): LaunchItem | undefined {
+async function findDynamicPinCandidate(itemId: string): Promise<LaunchItem | undefined> {
   const normalizedRequestedId = String(itemId ?? "").trim();
   if (!normalizedRequestedId) {
     return undefined;
@@ -1601,7 +1626,7 @@ function findDynamicPinCandidate(itemId: string): LaunchItem | undefined {
     return undefined;
   }
 
-  const liveResults = getDynamicSearchItems(normalizedQuery, "all");
+  const liveResults = await getDynamicSearchItems(normalizedQuery, "all");
   return liveResults.find((entry) => entry.id === normalizedRequestedId);
 }
 
@@ -1656,7 +1681,7 @@ async function setItemPinned(
     hydratedRequestedItem ??
     stableRequestedItem ??
     (normalizedRequestedId && !catalogIdSet.has(normalizedRequestedId)
-      ? findDynamicPinCandidate(normalizedRequestedId)
+      ? await findDynamicPinCandidate(normalizedRequestedId)
       : undefined);
   const validation = validatePinnedItemRequest(
     itemId,
@@ -1695,9 +1720,13 @@ async function setItemPinned(
       pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
     }
 
+    const resolvableDynamicIds = await computeResolvableDynamicPinIds(
+      pinnedItemIds,
+      catalogIdSet
+    );
     pinnedItemIds = normalizePinnedItemIds(
       pinnedItemIds,
-      (itemId) => isPinnedItemIdResolvable(itemId, catalogIdSet),
+      (itemId) => catalogIdSet.has(itemId) || resolvableDynamicIds.has(itemId),
       PINNED_ITEMS_MAX
     );
     const persisted = pinnedItemIds.includes(normalizedId);
@@ -1869,6 +1898,7 @@ async function bootstrap(): Promise<void> {
     statusMessage: string;
     preferredView: "ocr" | "translate";
     ocrText?: string;
+    ocrIssue?: LiteSnapOcrIssue;
     translateSourceText?: string;
     translateText?: string;
   }) => {
@@ -1898,6 +1928,7 @@ async function bootstrap(): Promise<void> {
         statusMessage: payload.statusMessage,
         preferredView: payload.preferredView,
         ocrText: payload.ocrText ?? "",
+        ocrIssue: payload.ocrIssue,
         translateSourceText: payload.translateSourceText ?? "",
         translateText: payload.translateText ?? ""
       }
@@ -1917,7 +1948,8 @@ async function bootstrap(): Promise<void> {
         ? "已识别文字，可编辑后复制。"
         : result.message,
       preferredView: "ocr",
-      ocrText: result.ok ? result.text : ""
+      ocrText: result.ok ? result.text : "",
+      ocrIssue: result.ok ? undefined : result.ocrIssue
     });
 
     return result;
@@ -1969,12 +2001,14 @@ async function bootstrap(): Promise<void> {
       statusMessage: string;
       translateSourceText: string;
       translateText: string;
+      ocrIssue?: LiteSnapOcrIssue;
     }) => {
       await sendLiteSnapPluginPanel({
         trigger: "litesnap-translate",
         subtitle: "截图翻译结果",
         statusMessage: payload.statusMessage,
         preferredView: "translate",
+        ocrIssue: payload.ocrIssue,
         translateSourceText: payload.translateSourceText,
         translateText: payload.translateText
       });
@@ -1989,7 +2023,8 @@ async function bootstrap(): Promise<void> {
         await sendTranslatePanel({
           statusMessage: recognized.message,
           translateSourceText: "",
-          translateText: ""
+          translateText: "",
+          ocrIssue: recognized.ocrIssue
         });
         return {
           ok: false,
@@ -2115,7 +2150,7 @@ async function bootstrap(): Promise<void> {
           );
         }
 
-        const dynamicItems = getDynamicSearchItems(query, scope).filter((item) => {
+        const dynamicItems = (await getDynamicSearchItems(query, scope)).filter((item) => {
           return !baseItems?.some(
             (existing) =>
               existing.id === item.id ||
@@ -2178,6 +2213,16 @@ async function bootstrap(): Promise<void> {
             translateLiteSnapSelectionAndShowPanel(input),
           translateText: (input: LiteSnapTranslateTextInput) =>
             translateLiteSnapText(input),
+          probeOcr: () => liteSnapCaptureSessionManager.probeOcrStatusAsync(),
+          getOcrCapabilities: () =>
+            liteSnapCaptureSessionManager.listOcrCapabilities(),
+          installOcrCapabilities: (languages) =>
+            liteSnapCaptureSessionManager.installOcrCapabilities(languages),
+          getOcrProbeCache: () => getLiteSnapOcrProbeCache(activeDatabase),
+          setOcrProbeCache: async (cache) => {
+            await setLiteSnapOcrProbeCache(activeDatabase, cache);
+            return true;
+          },
           cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture(),
           ensureSourceImage: async () =>
             liteSnapCaptureSessionManager.ensureSourceImageDataUrl()
@@ -2234,6 +2279,22 @@ async function bootstrap(): Promise<void> {
     } else {
       showLauncherWindowWithTrigger(launcherWindow, "startup-e2e");
     }
+  }
+
+  if (!E2E_MODE) {
+    // Give the launcher window time to finish showing before spending any
+    // CPU/GPU on the LiteSnap overlay, so this never competes with startup.
+    // Warming it here (instead of at first F1 press) avoids the overlay's
+    // first-load HTML/JS parse cost landing on the user's first screenshot.
+    const overlayPrewarmTimer = setTimeout(() => {
+      if (launcherWindow.isDestroyed()) {
+        return;
+      }
+      liteSnapCaptureSessionManager.prewarmOverlay().catch((error) => {
+        console.warn("[litesnap] delayed overlay prewarm failed", error);
+      });
+    }, LITESNAP_OVERLAY_PREWARM_DELAY_MS);
+    overlayPrewarmTimer.unref();
   }
 }
 

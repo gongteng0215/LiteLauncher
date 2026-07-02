@@ -146,6 +146,31 @@ const api = {
   ): Promise<LiteSnapTranslateTextResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateText, input);
   },
+  liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapProbeOcr);
+  },
+  liteSnapGetOcrCapabilities(): Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetOcrCapabilities);
+  },
+  liteSnapInstallOcrCapabilities(
+    languages?: import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityLanguage[]
+  ): Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityInstallResult
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapInstallOcrCapabilities, languages);
+  },
+  liteSnapGetOcrProbeCache(): Promise<
+    import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache | null
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetOcrProbeCache);
+  },
+  liteSnapSetOcrProbeCache(
+    cache: import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache
+  ): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapSetOcrProbeCache, cache);
+  },
   liteSnapCancelCapture(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCancelCapture);
   },
@@ -197,6 +222,9 @@ const api = {
   },
   hide(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.hide);
+  },
+  relaunchApp(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.relaunchApp);
   },
   getClipItems(query: string): Promise<ClipItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.getClipItems, query);

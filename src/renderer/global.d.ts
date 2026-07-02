@@ -257,6 +257,44 @@ declare global {
     __LL_PLUGIN_HANDLER_CONFIGS__?: RendererPluginHandlerConfigItem[];
     __LL_LITESNAP_TEXT_UTILS__?: {
       normalizeLiteSnapOcrText(text: string): string;
+      getLiteSnapOcrHelp(issue: "module_missing" | "language_pack"): {
+        title: string;
+        steps: string[];
+        showRelaunchButton: boolean;
+      };
+      inferLiteSnapOcrIssue(message: string): "module_missing" | "language_pack" | null;
+      isLiteSnapOcrIssue(value: unknown): value is "module_missing" | "language_pack";
+      WINDOWS_10_OCR_SETUP_STEPS: readonly string[];
+      resolveMissingOcrCapabilityLanguages(
+        capabilities: Array<{ languageTag: "zh-CN" | "en-US"; installed: boolean }> | null | undefined,
+        probe?: { chineseReady?: boolean; englishReady?: boolean } | null
+      ): Array<"zh-CN" | "en-US">;
+      shouldShowLiteSnapOcrInstallButton(
+        capabilities: Array<{ languageTag: "zh-CN" | "en-US"; installed: boolean }> | null | undefined,
+        probe?: {
+          ok?: boolean;
+          moduleLoaded?: boolean;
+          chineseReady?: boolean;
+          englishReady?: boolean;
+        } | null
+      ): boolean;
+      formatLiteSnapOcrInstallButtonLabel(
+        languages: Array<"zh-CN" | "en-US">
+      ): string;
+      reconcileOcrCapabilitiesWithProbe(
+        capabilities: Array<{
+          languageTag: "zh-CN" | "en-US";
+          capabilityName: string;
+          state: string;
+          installed: boolean;
+        }>,
+        probe: { chineseReady?: boolean; englishReady?: boolean }
+      ): Array<{
+        languageTag: "zh-CN" | "en-US";
+        capabilityName: string;
+        state: string;
+        installed: boolean;
+      }>;
     };
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
     launcher: {
@@ -305,6 +343,15 @@ declare global {
       liteSnapTranslateText(
         input: LiteSnapTranslateTextInput
       ): Promise<LiteSnapTranslateTextResult>;
+      liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
+      liteSnapGetOcrCapabilities(): Promise<
+        import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
+      >;
+      liteSnapInstallOcrCapabilities(
+        languages?: import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityLanguage[]
+      ): Promise<
+        import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityInstallResult
+      >;
       liteSnapCancelCapture(): Promise<boolean>;
       liteSnapEnsureSourceImage(): Promise<string | null>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;
@@ -324,7 +371,8 @@ declare global {
       setAutoHideSuspended(suspended: boolean): Promise<boolean>;
       pickFilePath(): Promise<string | null>;
       pickDirectoryPath(): Promise<string | null>;
-      hide(): Promise<boolean>;
+  hide(): Promise<boolean>;
+  relaunchApp(): Promise<boolean>;
       getClipItems(query: string): Promise<ClipItem[]>;
       copyClipItem(itemId: string): Promise<boolean>;
       deleteClipItem(itemId: string): Promise<boolean>;

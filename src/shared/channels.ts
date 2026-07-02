@@ -25,6 +25,11 @@ export const IPC_CHANNELS = {
   liteSnapRecognizeText: "launcher:litesnap-recognize-text",
   liteSnapTranslateSelection: "launcher:litesnap-translate-selection",
   liteSnapTranslateText: "launcher:litesnap-translate-text",
+  liteSnapProbeOcr: "launcher:litesnap-probe-ocr",
+  liteSnapGetOcrCapabilities: "launcher:litesnap-get-ocr-capabilities",
+  liteSnapInstallOcrCapabilities: "launcher:litesnap-install-ocr-capabilities",
+  liteSnapGetOcrProbeCache: "launcher:litesnap-get-ocr-probe-cache",
+  liteSnapSetOcrProbeCache: "launcher:litesnap-set-ocr-probe-cache",
   liteSnapCancelCapture: "launcher:litesnap-cancel-capture",
   liteSnapEnsureSourceImage: "launcher:litesnap-ensure-source-image",
   rebuildCatalog: "launcher:rebuild-catalog",
@@ -51,5 +56,6 @@ export const IPC_CHANNELS = {
   focusInput: "launcher:focus-input",
   clearInput: "launcher:clear-input",
   openPanel: "launcher:open-panel",
+  relaunchApp: "launcher:relaunch-app",
   debugKey: "launcher:debug-key"
 } as const;
