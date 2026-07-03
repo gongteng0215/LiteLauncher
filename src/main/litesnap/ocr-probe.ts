@@ -1,11 +1,11 @@
 import fs from "node:fs";
-import path from "node:path";
 
 import {
   formatLiteSnapOcrProbeSummary,
   type LiteSnapOcrProbeResult
 } from "../../shared/litesnap-ocr-help";
 import type { LiteSnapCaptureProvider } from "./capture-provider";
+import { resolveLiteSnapNativeAddonPath } from "./native-addon-path";
 
 export type LiteSnapNativeOcrProbe = {
   availableLanguages?: string[];
@@ -14,9 +14,7 @@ export type LiteSnapNativeOcrProbe = {
   error?: string;
 };
 
-export function resolveLiteSnapNativeAddonPath(): string {
-  return path.join(__dirname, "../../native/litesnap-capture.node");
-}
+export { resolveLiteSnapNativeAddonPath };
 
 function readNativeOcrProbe(): LiteSnapNativeOcrProbe | null {
   if (process.platform !== "win32") {

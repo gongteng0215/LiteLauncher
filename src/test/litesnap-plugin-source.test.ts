@@ -1264,13 +1264,18 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   );
   assert.match(
     ocrInstallerSource,
-    /Get-WindowsCapability -Online -Name \$name/,
-    "OCR capability listing should query only known OCR packages"
+    /Get-WindowsCapability -Online \| Where-Object \{ \$_.Name -like 'Language\.OCR\*' \}/,
+    "OCR capability listing should enumerate Language.OCR packages (Win11 installed state)"
   );
-  assert.doesNotMatch(
+  assert.match(
     ocrInstallerSource,
-    /Get-WindowsCapability -Online \| Where-Object/,
-    "OCR capability listing should not scan all online capabilities"
+    /Get-WindowsCapability \| Where-Object \{ \$_.Name -like 'Language\.OCR\*' \}/,
+    "OCR capability listing should fall back to local capability state"
+  );
+  assert.match(
+    providerSource,
+    /resolveLiteSnapNativeAddonPath/,
+    "capture provider should resolve native addon via packaged fallbacks"
   );
 
   assert.match(sharedSource, /interface LiteSnapTranslateSelectionResult/);

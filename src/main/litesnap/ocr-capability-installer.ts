@@ -202,20 +202,11 @@ async function listLiteSnapOcrCapabilitiesInternal(): Promise<LiteSnapOcrCapabil
     };
   }
 
-  const capabilityNames = SUPPORTED_LANGUAGES.map(
-    (tag) => LITESNAP_OCR_CAPABILITY_DEFAULTS[tag]
-  );
-  const quotedNames = capabilityNames
-    .map((name) => `'${escapeForPowerShellSingleQuote(name)}'`)
-    .join(", ");
-
   const listScriptPath = writeTempPowerShellScript("ocr-list", [
     "$ErrorActionPreference = 'SilentlyContinue'",
-    `$names = @(${quotedNames})`,
-    "$items = @()",
-    "foreach ($name in $names) {",
-    "  $item = Get-WindowsCapability -Online -Name $name",
-    "  if ($item) { $items += $item }",
+    "$items = @(Get-WindowsCapability -Online | Where-Object { $_.Name -like 'Language.OCR*' })",
+    "if ($items.Count -eq 0) {",
+    "  $items = @(Get-WindowsCapability | Where-Object { $_.Name -like 'Language.OCR*' })",
     "}",
     "if ($items.Count -eq 0) { Write-Output '[]'; exit 0 }",
     "$items | Select-Object Name, State | ConvertTo-Json -Compress"
@@ -230,7 +221,7 @@ async function listLiteSnapOcrCapabilitiesInternal(): Promise<LiteSnapOcrCapabil
         ok: false,
         message:
           result.stderr.trim() ||
-          "无法读取 Windows OCR 组件状态（需要 Windows 10 且支持 Get-WindowsCapability）。",
+          "无法读取 Windows OCR 组件状态（需要 Windows 10/11 且支持 Get-WindowsCapability）。",
         capabilities: mergeCapabilityInfos([])
       };
     }

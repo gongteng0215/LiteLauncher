@@ -6743,6 +6743,99 @@ body {
   gap: 10px;
 }
 
+.hardware-inspector-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 12px;
+  align-items: start;
+}
+
+.hardware-inspector-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.hardware-inspector-preview {
+  position: sticky;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.58);
+}
+
+.hardware-inspector-preview-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hardware-inspector-preview-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hardware-inspector-preview-hint {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hardware-inspector-preview-frame {
+  min-height: 220px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.72);
+  overflow: auto;
+}
+
+.hardware-inspector-preview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.hardware-inspector-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 16px;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.hardware-inspector-preview-placeholder-error {
+  color: #fecaca;
+}
+
+.hardware-inspector-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 1080px) {
+  .hardware-inspector-body {
+    grid-template-columns: 1fr;
+  }
+
+  .hardware-inspector-preview {
+    position: static;
+  }
+}
+
 .hardware-inspector-header {
   display: flex;
   justify-content: space-between;

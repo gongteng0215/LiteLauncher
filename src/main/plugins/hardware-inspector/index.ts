@@ -19,7 +19,8 @@ type HardwareInspectorAction =
   | "export-report"
   | "export-html"
   | "export-image"
-  | "export-image-compact";
+  | "export-image-compact"
+  | "preview-image";
 type BadgeTone = "neutral" | "warning" | "danger" | "success";
 
 interface CardBadge {
@@ -998,8 +999,10 @@ function parseCommand(optionsText: string | undefined): HardwareInspectorCommand
             ? "export-html"
             : action === "export-image"
               ? "export-image"
-              : action === "export-image-compact"
-                ? "export-image-compact"
+            : action === "export-image-compact"
+              ? "export-image-compact"
+              : action === "preview-image"
+                ? "preview-image"
                 : "open"
   };
 }
@@ -1043,6 +1046,35 @@ async function executeRefresh(force = true): Promise<ExecuteResult> {
   } catch (error) {
     const message =
         error instanceof Error && error.message ? error.message : "硬件信息采集失败";
+    return {
+      ok: false,
+      keepOpen: true,
+      message,
+      data: {
+        error: message
+      }
+    };
+  }
+}
+
+async function previewImage(): Promise<ExecuteResult> {
+  try {
+    const snapshot = await collectHardwareInspectorSnapshot({ force: false });
+    const png = await renderHardwareReportImage(snapshot, "compact");
+    return {
+      ok: true,
+      keepOpen: true,
+      message: "",
+      data: {
+        snapshot,
+        info: buildSummaryInfo(snapshot),
+        previewImageDataUrl: `data:image/png;base64,${png.toString("base64")}`,
+        error: ""
+      }
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message ? error.message : "生成硬件配置预览图失败";
     return {
       ok: false,
       keepOpen: true,
@@ -1230,6 +1262,10 @@ export const hardwareInspectorPlugin: LauncherPlugin = {
 
     if (command.action === "export-image-compact") {
       return exportImage(context, "compact");
+    }
+
+    if (command.action === "preview-image") {
+      return previewImage();
     }
 
     return exportReport(context, command.action === "export-html" ? "html" : "markdown");

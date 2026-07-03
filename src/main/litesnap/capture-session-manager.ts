@@ -627,6 +627,16 @@ export class LiteSnapCaptureSessionManager {
       }
     }
 
+    if (
+      !result.moduleLoaded &&
+      result.capabilities?.some((cap) => cap.installed)
+    ) {
+      result.message = result.nativeAddonExists
+        ? "系统 OCR 组件已安装，但 LiteLauncher 的 OCR 原生模块未加载。请完全退出后重新打开，或重新安装最新版 LiteLauncher。"
+        : "系统 OCR 组件已安装，但未找到 LiteLauncher 的 OCR 原生模块（litesnap-capture.node）。请重新安装最新版 LiteLauncher；开发者请执行 pnpm run build。";
+      result.ocrIssue = "module_missing";
+    }
+
     result.message = formatLiteSnapOcrProbeSummary(result);
     return result;
   }

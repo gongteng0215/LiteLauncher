@@ -135,6 +135,21 @@ test("hardware inspector plugin reuses cached snapshots on open and export", () 
     "hardware inspector panel should expose a compact export image action"
   );
   assert.match(
+    pluginSource,
+    /preview-image[\s\S]*previewImageDataUrl/,
+    "hardware inspector should generate inline preview images for the panel"
+  );
+  assert.match(
+    panelSource,
+    /hardware-inspector-preview/,
+    "hardware inspector panel should render a right-side preview column"
+  );
+  assert.match(
+    panelSource,
+    /loadHardwareInspectorPreview/,
+    "hardware inspector panel should load preview images after snapshot collection"
+  );
+  assert.match(
     panelSource,
     /if \(!hardwareInspectorSnapshot && !hardwareInspectorLoading && !hardwareInspectorError\)/,
     "hardware inspector should only auto-scan when no snapshot is already available"

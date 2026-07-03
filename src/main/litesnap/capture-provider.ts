@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 
 import {
   desktopCapturer,
@@ -13,6 +12,7 @@ import {
 import {
   type LiteSnapOcrLanguagePreference
 } from "../../shared/litesnap-ocr-quality";
+import { resolveLiteSnapNativeAddonPath } from "./native-addon-path";
 
 export interface LiteSnapRecognizeTextOptions {
   languagePreference?: LiteSnapOcrLanguagePreference;
@@ -365,16 +365,12 @@ function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
   };
 }
 
-function resolveNativeAddonPath(): string {
-  return path.join(__dirname, "../../native/litesnap-capture.node");
-}
-
 function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
   if (process.platform !== "win32") {
     return null;
   }
 
-  const nativeAddonPath = resolveNativeAddonPath();
+  const nativeAddonPath = resolveLiteSnapNativeAddonPath();
   if (!fs.existsSync(nativeAddonPath)) {
     return null;
   }
