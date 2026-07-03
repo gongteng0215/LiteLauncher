@@ -146,7 +146,7 @@ test("build-native script discovers Visual Studio 2026 toolchains", () => {
     "utf8"
   );
 
-  assert.match(buildNativeSource, /vswhere\.exe/);
-  assert.match(buildNativeSource, /"2026"/);
+  assert.match(buildNativeSource, /resolveVcVars64PathViaVswhere\(true\)/);
+  assert.match(buildNativeSource, /resolveVcVars64PathViaVswhere\(false\)/);
   assert.match(buildNativeSource, /"18"/);
 });

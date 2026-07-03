@@ -22,7 +22,7 @@ const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (
 const programFiles = process.env.ProgramFiles || "C:\\Program Files";
 const windowsKitsRoot = path.join(programFilesX86, "Windows Kits", "10");
 
-function resolveVcVars64PathViaVswhere() {
+function resolveVcVars64PathViaVswhere(requireVcTools) {
   const vswherePath = path.join(
     programFilesX86,
     "Microsoft Visual Studio",
@@ -33,19 +33,20 @@ function resolveVcVars64PathViaVswhere() {
     return null;
   }
 
-  const result = spawnSync(
-    vswherePath,
-    [
-      "-latest",
-      "-products",
-      "*",
+  const args = ["-latest", "-products", "*", "-property", "installationPath"];
+  if (requireVcTools) {
+    args.splice(
+      3,
+      0,
       "-requires",
-      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-      "-property",
-      "installationPath"
-    ],
-    { encoding: "utf8", windowsHide: true }
-  );
+      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+    );
+  }
+
+  const result = spawnSync(vswherePath, args, {
+    encoding: "utf8",
+    windowsHide: true
+  });
   if (result.status !== 0) {
     return null;
   }
@@ -69,7 +70,9 @@ function resolveVcVars64PathViaVswhere() {
 }
 
 function resolveVcVars64Path() {
-  const viaVswhere = resolveVcVars64PathViaVswhere();
+  const viaVswhere =
+    resolveVcVars64PathViaVswhere(true) ??
+    resolveVcVars64PathViaVswhere(false);
   if (viaVswhere) {
     return viaVswhere;
   }
@@ -123,6 +126,15 @@ function copyBuiltAddon() {
     if (error && error.code === "EBUSY") {
       const message =
         "dist/native/litesnap-capture.node is locked by a running LiteLauncher/Electron instance. Stop pnpm dev or close Electron before rebuilding the native addon.";
+      if (
+        fs.existsSync(distAddonPath) &&
+        fs.statSync(distAddonPath).size > 0
+      ) {
+        log(
+          `${message} Keeping the existing ${path.relative(projectRoot, distAddonPath)}.`
+        );
+        return;
+      }
       if (requireNativeBuild) {
         fail(message);
       }
@@ -241,12 +253,14 @@ const windowsSdkVersion = getLatestWindowsSdkVersion();
 if (!vcVars64Path || !windowsSdkVersion) {
   if (requireNativeBuild) {
     fail(
-      "Visual Studio Build Tools 2022 or Windows SDK environment is incomplete. Ensure vcvars64.bat and a Windows 10/11 SDK are installed."
+      `Visual Studio or Windows SDK environment is incomplete. vcvars64=${vcVars64Path ?? "missing"} sdk=${windowsSdkVersion ?? "missing"}`
     );
   }
   finishOptionalSkip("VS/Windows SDK environment is incomplete; skipping optional native build");
 }
 
+log(`using vcvars64 at ${vcVars64Path}`);
+log(`using Windows SDK ${windowsSdkVersion}`);
 log("building LiteSnap native capture addon with cl.exe");
 const result = buildWithCl(vcVars64Path, windowsSdkVersion);
 
