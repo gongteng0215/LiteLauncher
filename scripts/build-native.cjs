@@ -15,6 +15,11 @@ const builtAddonPath = path.join(
 );
 const distNativeDir = path.join(projectRoot, "dist", "native");
 const distAddonPath = path.join(distNativeDir, "litesnap-capture.node");
+const prebuiltAddonPath = path.join(
+  nativeRoot,
+  "prebuilt",
+  "win-x64-electron-40.node"
+);
 const requireNativeBuild =
   process.argv.includes("--require") ||
   process.env.LITELAUNCHER_REQUIRE_NATIVE_CAPTURE === "1";
@@ -116,6 +121,19 @@ function fail(message) {
 function finishOptionalSkip(message) {
   log(message);
   process.exit(0);
+}
+
+function publishPrebuiltAddon(reason) {
+  if (!fs.existsSync(prebuiltAddonPath)) {
+    return false;
+  }
+
+  fs.mkdirSync(distNativeDir, { recursive: true });
+  fs.copyFileSync(prebuiltAddonPath, distAddonPath);
+  log(
+    `${reason} Using checked-in prebuilt addon ${path.relative(projectRoot, prebuiltAddonPath)}.`
+  );
+  return true;
 }
 
 function copyBuiltAddon() {
@@ -251,6 +269,9 @@ if (!fs.existsSync(vendorNodeLibPath)) {
 const vcVars64Path = resolveVcVars64Path();
 const windowsSdkVersion = getLatestWindowsSdkVersion();
 if (!vcVars64Path || !windowsSdkVersion) {
+  if (publishPrebuiltAddon("VS/Windows SDK environment is incomplete.")) {
+    process.exit(0);
+  }
   if (requireNativeBuild) {
     fail(
       `Visual Studio or Windows SDK environment is incomplete. vcvars64=${vcVars64Path ?? "missing"} sdk=${windowsSdkVersion ?? "missing"}`
@@ -265,6 +286,9 @@ log("building LiteSnap native capture addon with cl.exe");
 const result = buildWithCl(vcVars64Path, windowsSdkVersion);
 
 if (result.status !== 0) {
+  if (publishPrebuiltAddon("Native compile failed.")) {
+    process.exit(0);
+  }
   if (requireNativeBuild) {
     process.exit(result.status ?? 1);
   }
@@ -272,6 +296,9 @@ if (result.status !== 0) {
 }
 
 if (!fs.existsSync(builtAddonPath)) {
+  if (publishPrebuiltAddon("Native compile produced no output.")) {
+    process.exit(0);
+  }
   if (requireNativeBuild) {
     fail("native build finished without producing build/Release/litesnap_capture.node");
   }

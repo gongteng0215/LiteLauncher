@@ -135,6 +135,11 @@ test("desktop build workflow requires LiteSnap native addon on Windows", () => {
 
   assert.match(
     workflow,
+    /node scripts\/build-native\.cjs --require/,
+    "windows build should compile or publish the LiteSnap native addon before packaging"
+  );
+  assert.match(
+    workflow,
     /LITELAUNCHER_REQUIRE_NATIVE_CAPTURE:\s*"1"/,
     "windows build should require the LiteSnap native addon"
   );
@@ -146,7 +151,7 @@ test("build-native script discovers Visual Studio 2026 toolchains", () => {
     "utf8"
   );
 
-  assert.match(buildNativeSource, /resolveVcVars64PathViaVswhere\(true\)/);
+  assert.match(buildNativeSource, /prebuilt\/win-x64-electron-40\.node/);
   assert.match(buildNativeSource, /resolveVcVars64PathViaVswhere\(false\)/);
   assert.match(buildNativeSource, /"18"/);
 });

@@ -37,15 +37,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build LiteSnap native addon
+        shell: pwsh
+        run: node scripts/build-native.cjs --require
+
       - name: Build Windows packages (NSIS + Portable)
         shell: pwsh
         run: |
           node scripts/clean-release.cjs
-          pnpm run build
+          pnpm exec tsc
+          node scripts/copy-assets.cjs
           if (-not (Test-Path "dist/native/litesnap-capture.node")) {
             throw "dist/native/litesnap-capture.node is missing after build"
           }
-          pnpm exec electron-builder --win --x64 --publish never --config.win.signAndEditExecutable=false
+          pnpm exec electron-builder --win --x64 --publish never
           node scripts/verify-release-output.cjs win
 
       - name: Upload Windows artifacts
