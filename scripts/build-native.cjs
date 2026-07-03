@@ -22,9 +22,60 @@ const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (
 const programFiles = process.env.ProgramFiles || "C:\\Program Files";
 const windowsKitsRoot = path.join(programFilesX86, "Windows Kits", "10");
 
+function resolveVcVars64PathViaVswhere() {
+  const vswherePath = path.join(
+    programFilesX86,
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe"
+  );
+  if (!fs.existsSync(vswherePath)) {
+    return null;
+  }
+
+  const result = spawnSync(
+    vswherePath,
+    [
+      "-latest",
+      "-products",
+      "*",
+      "-requires",
+      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "-property",
+      "installationPath"
+    ],
+    { encoding: "utf8", windowsHide: true }
+  );
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const installPath = String(result.stdout ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!installPath) {
+    return null;
+  }
+
+  const vcvarsPath = path.join(
+    installPath,
+    "VC",
+    "Auxiliary",
+    "Build",
+    "vcvars64.bat"
+  );
+  return fs.existsSync(vcvarsPath) ? vcvarsPath : null;
+}
+
 function resolveVcVars64Path() {
+  const viaVswhere = resolveVcVars64PathViaVswhere();
+  if (viaVswhere) {
+    return viaVswhere;
+  }
+
   const editions = ["BuildTools", "Community", "Professional", "Enterprise"];
-  const years = ["2026", "2022", "2019", "18"];
+  const years = ["2026", "2025", "2022", "2019", "18"];
   const roots = [programFilesX86, programFiles];
   const candidates = [];
 
