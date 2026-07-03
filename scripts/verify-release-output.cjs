@@ -101,6 +101,23 @@ for (const entry of files) {
   }
 }
 
+if (platform === "win") {
+  const nativeAddonPath = path.join(
+    releaseDir,
+    "win-unpacked",
+    "resources",
+    "app.asar.unpacked",
+    "dist",
+    "native",
+    "litesnap-capture.node"
+  );
+  if (!fs.existsSync(nativeAddonPath)) {
+    fail(
+      `missing packaged native addon at ${path.relative(projectRoot, nativeAddonPath)}`
+    );
+  }
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

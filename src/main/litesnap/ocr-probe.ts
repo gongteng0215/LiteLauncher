@@ -1,11 +1,14 @@
-import fs from "node:fs";
-
 import {
   formatLiteSnapOcrProbeSummary,
   type LiteSnapOcrProbeResult
 } from "../../shared/litesnap-ocr-help";
 import type { LiteSnapCaptureProvider } from "./capture-provider";
-import { resolveLiteSnapNativeAddonPath } from "./native-addon-path";
+import {
+  formatLiteSnapNativeAddonProbePaths,
+  isLiteSnapNativeAddonPresent,
+  resolveLiteSnapNativeAddonCandidates,
+  resolveLiteSnapNativeAddonPath
+} from "./native-addon-path";
 
 export type LiteSnapNativeOcrProbe = {
   availableLanguages?: string[];
@@ -21,23 +24,25 @@ function readNativeOcrProbe(): LiteSnapNativeOcrProbe | null {
     return null;
   }
 
-  const nativeAddonPath = resolveLiteSnapNativeAddonPath();
-  if (!fs.existsSync(nativeAddonPath)) {
+  if (!isLiteSnapNativeAddonPresent()) {
     return null;
   }
 
-  try {
-    const addon = require(nativeAddonPath) as {
-      probeOcr?: () => LiteSnapNativeOcrProbe;
-    };
-    if (!addon || typeof addon.probeOcr !== "function") {
-      return null;
+  for (const nativeAddonPath of resolveLiteSnapNativeAddonCandidates()) {
+    try {
+      const addon = require(nativeAddonPath) as {
+        probeOcr?: () => LiteSnapNativeOcrProbe;
+      };
+      if (!addon || typeof addon.probeOcr !== "function") {
+        continue;
+      }
+      return addon.probeOcr();
+    } catch (error) {
+      console.warn(`[litesnap] native OCR probe failed for ${nativeAddonPath}`, error);
     }
-    return addon.probeOcr();
-  } catch (error) {
-    console.warn("[litesnap] native OCR probe failed", error);
-    return null;
   }
+
+  return null;
 }
 
 function normalizeLanguageList(value: unknown): string[] {
@@ -66,7 +71,7 @@ export function probeLiteSnapOcr(
     };
   }
 
-  const nativeAddonExists = fs.existsSync(resolveLiteSnapNativeAddonPath());
+  const nativeAddonExists = isLiteSnapNativeAddonPresent();
   const moduleLoaded = provider.supportsTextRecognition();
 
   if (!moduleLoaded) {
@@ -75,7 +80,7 @@ export function probeLiteSnapOcr(
       ocrIssue: "module_missing",
       message: nativeAddonExists
         ? "OCR 模块未加载：native 文件存在，但 recognizeText 不可用。请完全退出后重启，或重新安装/编译 LiteLauncher。"
-        : "OCR 模块未加载：未找到 native 文件。请重新安装 LiteLauncher 或执行 pnpm run build。",
+        : `OCR 模块未加载：未找到 native 文件。请使用 ZIP 绿色版或重新安装最新版；开发者请执行 pnpm run build。\n已检查路径：\n${formatLiteSnapNativeAddonProbePaths()}`,
       moduleLoaded: false,
       nativeAddonExists,
       availableLanguages: [],

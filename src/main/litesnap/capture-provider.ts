@@ -1,5 +1,3 @@
-import fs from "node:fs";
-
 import {
   desktopCapturer,
   nativeImage,
@@ -12,7 +10,12 @@ import {
 import {
   type LiteSnapOcrLanguagePreference
 } from "../../shared/litesnap-ocr-quality";
-import { resolveLiteSnapNativeAddonPath } from "./native-addon-path";
+import {
+  formatLiteSnapNativeAddonProbePaths,
+  isLiteSnapNativeAddonPresent,
+  resolveLiteSnapNativeAddonCandidates,
+  resolveLiteSnapNativeAddonPath
+} from "./native-addon-path";
 
 export interface LiteSnapRecognizeTextOptions {
   languagePreference?: LiteSnapOcrLanguagePreference;
@@ -365,23 +368,44 @@ function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
   };
 }
 
+function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
+  for (const candidate of resolveLiteSnapNativeAddonCandidates()) {
+    try {
+      const addon = require(candidate) as NativeLiteSnapCaptureAddon;
+      if (addon && typeof addon.captureDisplayRect === "function") {
+        return addon;
+      }
+    } catch (error) {
+      console.warn(`[litesnap] failed to load native addon from ${candidate}`, error);
+    }
+  }
+
+  return null;
+}
+
 function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
   if (process.platform !== "win32") {
     return null;
   }
 
-  const nativeAddonPath = resolveLiteSnapNativeAddonPath();
-  if (!fs.existsSync(nativeAddonPath)) {
+  if (!isLiteSnapNativeAddonPresent()) {
+    console.warn(
+      "[litesnap] native addon file not found; checked paths:\n",
+      formatLiteSnapNativeAddonProbePaths()
+    );
     return null;
   }
 
   try {
-    const addon = require(nativeAddonPath) as NativeLiteSnapCaptureAddon;
-    if (!addon || typeof addon.captureDisplayRect !== "function") {
+    const addon = loadNativeLiteSnapCaptureAddon();
+    if (!addon) {
       return null;
     }
 
-    console.info("[litesnap] using Windows native capture provider");
+    console.info(
+      "[litesnap] using Windows native capture provider from",
+      resolveLiteSnapNativeAddonPath()
+    );
     if (typeof addon.recognizeText !== "function") {
       console.warn(
         "[litesnap] native capture addon loaded without OCR support; run pnpm run build to rebuild litesnap-capture.node"

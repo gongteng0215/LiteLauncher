@@ -1,4 +1,5 @@
 import {
+  app,
   BrowserWindow,
   clipboard,
   nativeImage,
@@ -638,6 +639,7 @@ export class LiteSnapCaptureSessionManager {
     }
 
     result.message = formatLiteSnapOcrProbeSummary(result);
+    result.message = `当前版本 v${app.getVersion()}\n${result.message}`;
     return result;
   }
 

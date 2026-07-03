@@ -19,6 +19,18 @@ test("resolveLiteSnapNativeAddonCandidates includes module-relative and packaged
   }
 });
 
+test("resolveLiteSnapNativeAddonCandidates prioritizes packaged unpacked path", () => {
+  const candidates = resolveLiteSnapNativeAddonCandidates();
+  const unpackedIndex = candidates.findIndex((candidate) =>
+    candidate.includes("app.asar.unpacked")
+  );
+  if (unpackedIndex < 0) {
+    return;
+  }
+
+  assert.equal(unpackedIndex, 0, "packaged unpacked path should be first");
+});
+
 test("resolveLiteSnapNativeAddonPath returns an existing addon when present", () => {
   const resolved = resolveLiteSnapNativeAddonPath();
   assert.match(resolved, /litesnap-capture\.node$/);
