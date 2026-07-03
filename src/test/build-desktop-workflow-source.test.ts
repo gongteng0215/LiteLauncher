@@ -129,3 +129,23 @@ test("desktop build workflow keeps tag-triggered mac builds releasable even with
     "workflow_dispatch mac builds should not inherit an empty CSC_LINK at the job level because electron-builder treats that as a broken signing input"
   );
 });
+
+test("desktop build workflow requires LiteSnap native addon on Windows", () => {
+  const workflow = readWorkflow();
+
+  assert.match(
+    workflow,
+    /LITELAUNCHER_REQUIRE_NATIVE_CAPTURE:\s*"1"/,
+    "windows build should require the LiteSnap native addon"
+  );
+});
+
+test("build-native script discovers Visual Studio 2026 toolchains", () => {
+  const buildNativeSource = fs.readFileSync(
+    path.join(process.cwd(), "scripts", "build-native.cjs"),
+    "utf8"
+  );
+
+  assert.match(buildNativeSource, /"2026"/);
+  assert.match(buildNativeSource, /"18"/);
+});

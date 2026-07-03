@@ -23,13 +23,29 @@ const programFiles = process.env.ProgramFiles || "C:\\Program Files";
 const windowsKitsRoot = path.join(programFilesX86, "Windows Kits", "10");
 
 function resolveVcVars64Path() {
-  const candidates = [
-    path.join(programFilesX86, "Microsoft Visual Studio", "2022", "BuildTools"),
-    path.join(programFiles, "Microsoft Visual Studio", "2022", "BuildTools"),
-    path.join(programFiles, "Microsoft Visual Studio", "2022", "Community"),
-    path.join(programFiles, "Microsoft Visual Studio", "2022", "Professional"),
-    path.join(programFiles, "Microsoft Visual Studio", "2022", "Enterprise")
-  ].map((root) => path.join(root, "VC", "Auxiliary", "Build", "vcvars64.bat"));
+  const editions = ["BuildTools", "Community", "Professional", "Enterprise"];
+  const years = ["2026", "2022", "2019", "18"];
+  const roots = [programFilesX86, programFiles];
+  const candidates = [];
+
+  for (const root of roots) {
+    for (const year of years) {
+      for (const edition of editions) {
+        candidates.push(
+          path.join(
+            root,
+            "Microsoft Visual Studio",
+            year,
+            edition,
+            "VC",
+            "Auxiliary",
+            "Build",
+            "vcvars64.bat"
+          )
+        );
+      }
+    }
+  }
 
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
