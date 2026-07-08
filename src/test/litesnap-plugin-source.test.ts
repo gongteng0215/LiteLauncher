@@ -250,8 +250,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     providerSource,
-    /resolvePreviewOutputSize\(display: Display\)[\s\S]*display\.bounds\.width[\s\S]*display\.bounds\.height/,
-    "LiteSnap preview capture should match the overlay viewport at 1:1 for a crisp background"
+    /resolvePreviewOutputSize\(display: Display\)[\s\S]*display\.bounds\.width \* scale[\s\S]*display\.bounds\.height \* scale/,
+    "LiteSnap preview capture should use physical pixels (bounds * scaleFactor) so HiDPI overlays stay sharp"
   );
   assert.match(
     providerSource,

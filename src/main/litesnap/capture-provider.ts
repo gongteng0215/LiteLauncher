@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {
   desktopCapturer,
   nativeImage,
@@ -94,9 +95,17 @@ type ScreenWithDipTransforms = typeof screen & {
 const PREVIEW_JPEG_QUALITY = 92;
 
 function resolvePreviewOutputSize(display: Display): { width: number; height: number } {
+  // Capture at physical pixels (bounds * scaleFactor). Using DIP-only size made the
+  // overlay background soft/blurry on HiDPI displays because CSS stretched a
+  // 1x bitmap across a 1.25x/1.5x/2x window backing store, and selection text
+  // became unreadable before OCR/translate.
+  const scale =
+    Number.isFinite(display.scaleFactor) && display.scaleFactor > 0
+      ? display.scaleFactor
+      : 1;
   return {
-    width: Math.max(1, display.bounds.width),
-    height: Math.max(1, display.bounds.height)
+    width: Math.max(1, Math.round(display.bounds.width * scale)),
+    height: Math.max(1, Math.round(display.bounds.height * scale))
   };
 }
 
@@ -370,6 +379,10 @@ function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
 
 function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
   for (const candidate of resolveLiteSnapNativeAddonCandidates()) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
     try {
       const addon = require(candidate) as NativeLiteSnapCaptureAddon;
       if (addon && typeof addon.captureDisplayRect === "function") {
