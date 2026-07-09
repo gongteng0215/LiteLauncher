@@ -381,15 +381,15 @@ If `src/renderer/plugin-panel-impls.ts` was not touched, leave it out of `git ad
 In `src/test/e2e-plugin-panels-smoke.test.ts`, change the focused plugins to reuse the existing narrow helper and add a minimal CodeAgent Switch check:
 
 ```ts
-await openPluginFromSearch(page, "plugin:password", "瀵嗙爜宸ュ叿", "webtools-password");
+await openPluginFromSearch(page, "plugin:password", "密码工具", "webtools-password");
 await assertPanelFitsNarrowViewport("form.webtools-password-form");
 await returnToSearch(page);
 
-await openPluginFromSearch(page, "plugin:json", "JSON 宸ュ叿", "webtools-json");
+await openPluginFromSearch(page, "plugin:json", "JSON 工具", "webtools-json");
 await assertPanelFitsNarrowViewport("form.webtools-json-form");
 await returnToSearch(page);
 
-await openPluginFromSearch(page, "plugin:cron", "Cron 鐢熸垚鍣?", "webtools-cron");
+await openPluginFromSearch(page, "plugin:cron", "Cron 生成器", "webtools-cron");
 await assertPanelFitsNarrowViewport("form.webtools-cron-form");
 await returnToSearch(page);
 

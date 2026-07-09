@@ -28,8 +28,6 @@ export type LiteSnapAnnotationTool =
   | "blur"
   | "highlight";
 
-export type LiteSnapBaiduTranslateEngine = "standard" | "llm";
-
 export interface LiteSnapSettings {
   screenshotShortcut: string;
   pinShortcut: string;
@@ -41,14 +39,6 @@ export interface LiteSnapSettings {
   annotationTextSize: number;
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
-  /** Baidu translate open-platform AppID. */
-  translateBaiduAppId: string;
-  /** Baidu translate open-platform secret key (standard API). */
-  translateBaiduSecret: string;
-  /** Baidu translate engine: classic VIP API or LLM text translate API. */
-  translateBaiduEngine: LiteSnapBaiduTranslateEngine;
-  /** Baidu LLM text translate API Key (Bearer token). */
-  translateBaiduApiKey: string;
 }
 
 export interface LiteSnapPanelPayload {
@@ -112,22 +102,7 @@ export interface LiteSnapTranslateSelectionInput {
   selection: LiteSnapOverlaySelection;
 }
 
-export interface LiteSnapTranslateSelectionResult {
-  ok: boolean;
-  sourceText: string;
-  translatedText: string;
-  message: string;
-}
-
-export interface LiteSnapTranslateTextInput {
-  text: string;
-  appId?: string;
-  secret?: string;
-  apiKey?: string;
-  engine?: LiteSnapBaiduTranslateEngine;
-}
-
-export type LiteSnapTranslateTextResult = LiteSnapTranslateSelectionResult;
+export type { TranslateResult as LiteSnapTranslateSelectionResult } from "./translate";
 
 export interface LiteSnapPinnedWindowsToggleResult {
   hidden: boolean;
@@ -199,10 +174,6 @@ export function createDefaultLiteSnapSettings(): LiteSnapSettings {
     annotationLineWidth: 3,
     annotationTextSize: 16,
     annotationTool: "select",
-    annotationFillShapes: false,
-    translateBaiduAppId: "",
-    translateBaiduSecret: "",
-    translateBaiduEngine: "standard",
-    translateBaiduApiKey: ""
+    annotationFillShapes: false
   };
 }

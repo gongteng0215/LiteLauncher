@@ -45,6 +45,11 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "timestamp-to-date"
   },
   {
+    pluginId: handlerConstants.WEBTOOLS_TRANSLATE_PLUGIN_ID,
+    formSelector: "form.webtools-translate-form",
+    enterActionKey: "translate-run"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_REGEX_PLUGIN_ID,
     formSelector: "form.webtools-regex-form",
     enterActionKey: "regex-refresh"

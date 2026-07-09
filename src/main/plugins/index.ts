@@ -27,6 +27,7 @@ import { webtoolsRegexPlugin } from "./webtools-regex";
 import { webtoolsSqlFormatPlugin } from "./webtools-sql-format";
 import { webtoolsStringsPlugin } from "./webtools-strings";
 import { webtoolsTimestampPlugin } from "./webtools-timestamp";
+import { webtoolsTranslatePlugin } from "./webtools-translate";
 import { webtoolsUaPlugin } from "./webtools-ua";
 import { webtoolsUnitConvertPlugin } from "./webtools-unit-convert";
 import { webtoolsUrlParsePlugin } from "./webtools-url-parse";
@@ -42,6 +43,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsCryptoPlugin,
   webtoolsJwtPlugin,
   webtoolsTimestampPlugin,
+  webtoolsTranslatePlugin,
   webtoolsRegexPlugin,
   webtoolsStringsPlugin,
   webtoolsColorsPlugin,
@@ -73,6 +75,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-crypto",
   "webtools-jwt",
   "webtools-timestamp",
+  "webtools-translate",
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
@@ -187,6 +190,12 @@ function parsePluginArg(
 export function getPluginCatalogItems(): LaunchItem[] {
   return dedupeItems(
     getVisiblePlugins().flatMap((plugin) => plugin.createCatalogItems())
+  );
+}
+
+export function getAllPluginCatalogItems(): LaunchItem[] {
+  return dedupeItems(
+    ALL_PLUGINS.flatMap((plugin) => plugin.createCatalogItems())
   );
 }
 

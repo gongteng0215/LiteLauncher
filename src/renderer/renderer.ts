@@ -335,6 +335,8 @@ interface LauncherApi {
   ): Promise<CatalogScanConfig>;
   getVisiblePluginIds(): Promise<string[]>;
   setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
+  getAllPluginItems(): Promise<LaunchItem[]>;
+  getRequiredVisiblePluginIds(): Promise<string[]>;
   getLiteSnapSettings(): Promise<unknown>;
   setLiteSnapSettings(patch: Record<string, unknown>): Promise<unknown>;
   liteSnapStartCapture(): Promise<boolean>;
@@ -370,7 +372,24 @@ interface LauncherApi {
   onClearInput(handler: () => void): () => void;
   onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
   onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
-  liteSnapTranslateText?(input: {
+  getTranslateToolSettings?(): Promise<{
+    baiduAppId: string;
+    baiduSecret: string;
+    baiduEngine: "standard" | "llm";
+    baiduApiKey: string;
+  }>;
+  setTranslateToolSettings?(patch: {
+    baiduAppId?: string;
+    baiduSecret?: string;
+    baiduEngine?: "standard" | "llm";
+    baiduApiKey?: string;
+  }): Promise<{
+    baiduAppId: string;
+    baiduSecret: string;
+    baiduEngine: "standard" | "llm";
+    baiduApiKey: string;
+  }>;
+  translateToolTranslateText?(input: {
     text: string;
     appId?: string;
     secret?: string;
@@ -666,6 +685,8 @@ let catalogScanConfig: CatalogScanConfig = {
   resultExcludeDirs: []
 };
 let visiblePluginIds: string[] = [...DEFAULT_VISIBLE_PLUGIN_IDS];
+let allPluginCatalogItems: LaunchItem[] = [];
+let requiredVisiblePluginIdSet = new Set<string>();
 let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
   supported: false,
@@ -1663,6 +1684,168 @@ function parseVisiblePluginIdsText(value: string): string[] {
   return result;
 }
 
+function pluginIdFromCatalogItem(item: LaunchItem): string {
+  const id = item.id.trim();
+  return id.startsWith("plugin:") ? id.slice("plugin:".length) : id;
+}
+
+function createSettingsPluginPickerIcon(item: LaunchItem): HTMLDivElement {
+  const icon = document.createElement("div");
+  icon.className = "result-icon";
+
+  const fallback = () => {
+    icon.replaceChildren();
+    icon.classList.add("fallback");
+    icon.textContent = item.title.trim().slice(0, 1) || "?";
+  };
+
+  const iconPath = item.iconPath?.trim() ?? "";
+  if (!iconPath.startsWith("data:image/")) {
+    fallback();
+    return icon;
+  }
+
+  const image = document.createElement("img");
+  image.className = "result-icon-image";
+  image.addEventListener("error", fallback, { once: true });
+  image.src = iconPath;
+  image.alt = "";
+  icon.appendChild(image);
+  return icon;
+}
+
+function readVisiblePluginIdsFromSettingsForm(form: HTMLFormElement): string[] {
+  const picker = form.querySelector<HTMLElement>("[data-settings-plugin-picker]");
+  if (!picker) {
+    const legacyNode = form.elements.namedItem("visiblePluginIds");
+    if (legacyNode instanceof HTMLTextAreaElement) {
+      return parseVisiblePluginIdsText(legacyNode.value);
+    }
+    return visiblePluginIds;
+  }
+
+  const selected = new Set<string>(requiredVisiblePluginIdSet);
+  picker
+    .querySelectorAll<HTMLElement>(".settings-plugin-tile.is-selected")
+    .forEach((tile) => {
+      const pluginId = tile.dataset.pluginId?.trim().toLowerCase();
+      if (pluginId) {
+        selected.add(pluginId);
+      }
+    });
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const item of allPluginCatalogItems) {
+    const pluginId = pluginIdFromCatalogItem(item);
+    if (!selected.has(pluginId) || seen.has(pluginId)) {
+      continue;
+    }
+    seen.add(pluginId);
+    ordered.push(pluginId);
+    if (ordered.length >= VISIBLE_PLUGIN_IDS_MAX) {
+      break;
+    }
+  }
+
+  for (const pluginId of selected) {
+    if (seen.has(pluginId)) {
+      continue;
+    }
+    seen.add(pluginId);
+    ordered.push(pluginId);
+    if (ordered.length >= VISIBLE_PLUGIN_IDS_MAX) {
+      break;
+    }
+  }
+
+  return ordered;
+}
+
+function createVisiblePluginPicker(
+  selectedPluginIds: string[]
+): HTMLDivElement {
+  const wrap = document.createElement("div");
+  wrap.className = "settings-plugin-picker";
+  wrap.dataset.settingsPluginPicker = "true";
+
+  const summary = document.createElement("div");
+  summary.className = "settings-plugin-picker-summary";
+  const selectedSet = new Set(
+    selectedPluginIds.map((id) => id.trim().toLowerCase())
+  );
+  for (const pluginId of requiredVisiblePluginIdSet) {
+    selectedSet.add(pluginId);
+  }
+
+  const updateSummary = (): void => {
+    const count = wrap.querySelectorAll(".settings-plugin-tile.is-selected").length;
+    summary.textContent = `已选择 ${count} 个插件，点击图标切换显示；带「必选」标记的插件无法隐藏。`;
+  };
+
+  const grid = document.createElement("ul");
+  grid.className = "settings-plugin-grid section-grid";
+
+  const sortedItems = [...allPluginCatalogItems].sort((left, right) =>
+    left.title.localeCompare(right.title, "zh-CN")
+  );
+
+  for (const item of sortedItems) {
+    const pluginId = pluginIdFromCatalogItem(item);
+    const required = requiredVisiblePluginIdSet.has(pluginId);
+    const selected = required || selectedSet.has(pluginId);
+
+    const tile = document.createElement("li");
+    tile.className = "settings-plugin-tile result-item result-tile";
+    tile.dataset.pluginId = pluginId;
+    if (selected) {
+      tile.classList.add("is-selected");
+    }
+    if (required) {
+      tile.classList.add("is-required");
+      tile.title = `${item.title}（必选插件，无法隐藏）`;
+    } else {
+      tile.title = selected
+        ? `点击隐藏：${item.title}`
+        : `点击显示：${item.title}`;
+    }
+
+    const icon = createSettingsPluginPickerIcon(item);
+    const title = document.createElement("div");
+    title.className = "tile-title";
+    title.textContent = item.title;
+
+    tile.append(icon, title);
+    if (required) {
+      const badge = document.createElement("span");
+      badge.className = "settings-plugin-required-badge";
+      badge.textContent = "必选";
+      tile.appendChild(badge);
+    }
+
+    tile.addEventListener("click", () => {
+      if (required) {
+        setStatus(`${item.title} 为必选插件，无法隐藏。`);
+        return;
+      }
+      tile.classList.toggle("is-selected");
+      tile.title = tile.classList.contains("is-selected")
+        ? `点击隐藏：${item.title}`
+        : `点击显示：${item.title}`;
+      updateSummary();
+    });
+
+    grid.appendChild(tile);
+  }
+
+  wrap.append(summary, grid);
+  updateSummary();
+  window.requestAnimationFrame(() => {
+    applyAdaptiveSectionGridColumns(grid);
+  });
+  return wrap;
+}
+
 function normalizeCatalogScanConfigInput(
   inputConfig: Partial<CatalogScanConfig>,
   base: CatalogScanConfig = catalogScanConfig
@@ -2521,7 +2704,6 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
   const excludeScanDirsNode = form.elements.namedItem("excludeScanDirs");
   const resultIncludeDirsNode = form.elements.namedItem("resultIncludeDirs");
   const resultExcludeDirsNode = form.elements.namedItem("resultExcludeDirs");
-  const visiblePluginIdsNode = form.elements.namedItem("visiblePluginIds");
   const catalogInputConfig: Partial<CatalogScanConfig> = {
     scanProgramFiles:
       scanProgramFilesNode instanceof HTMLInputElement
@@ -2544,10 +2726,7 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
         ? parseResultExcludeDirsText(resultExcludeDirsNode.value)
         : catalogScanConfig.resultExcludeDirs
   };
-  const nextVisiblePluginIds =
-    visiblePluginIdsNode instanceof HTMLTextAreaElement
-      ? parseVisiblePluginIdsText(visiblePluginIdsNode.value)
-      : visiblePluginIds;
+  const nextVisiblePluginIds = readVisiblePluginIdsFromSettingsForm(form);
 
   const launchAtLoginNode = form.elements.namedItem("launchAtLogin");
   const nextLaunchAtLoginEnabled =
@@ -2856,24 +3035,15 @@ function renderSettingsPanel(): void {
 
   const pluginGroup = createGroup(
     "插件可见性",
-    "按插件 ID 控制主界面插件分区显示项，一行一个，留空表示隐藏全部插件。"
+    "点击图标选择要在主界面插件分区显示的插件。"
   );
-  const {
-    row: visiblePluginIdsRow,
-    control: visiblePluginIdsControl
-  } = createRow(
-    "可见插件 ID",
-    `最多 ${VISIBLE_PLUGIN_IDS_MAX} 个，可写插件完整 ID（如 webtools-json）`,
-    { textarea: true }
-  );
-  const visiblePluginIdsInput = document.createElement("textarea");
-  visiblePluginIdsInput.name = "visiblePluginIds";
-  visiblePluginIdsInput.className = "settings-value settings-textarea";
-  visiblePluginIdsInput.placeholder =
-    "一行一个插件 ID，例如：\ncashflow-game\nwebtools-password\nwebtools-json";
-  visiblePluginIdsInput.value = visiblePluginIds.join("\n");
-  visiblePluginIdsControl.appendChild(visiblePluginIdsInput);
-  pluginGroup.body.appendChild(visiblePluginIdsRow);
+  const pickerRow = document.createElement("div");
+  pickerRow.className = "settings-row settings-row-plugin-picker";
+  const pickerControl = document.createElement("div");
+  pickerControl.className = "settings-control settings-control-wide";
+  pickerControl.appendChild(createVisiblePluginPicker(visiblePluginIds));
+  pickerRow.appendChild(pickerControl);
+  pluginGroup.body.appendChild(pickerRow);
   form.appendChild(pluginGroup.section);
 
   const systemGroup = createGroup(
@@ -3366,6 +3536,8 @@ async function refreshEntries(query: string): Promise<void> {
         nextSearchConfig,
         nextCatalogScanConfig,
         nextVisiblePluginIds,
+        nextAllPluginItems,
+        nextRequiredVisiblePluginIds,
         nextLaunchAtLoginStatus,
         nextAppUpdaterStatus,
         nextAppVersion,
@@ -3375,6 +3547,8 @@ async function refreshEntries(query: string): Promise<void> {
           launcher.getSearchDisplayConfig(),
           launcher.getCatalogScanConfig(),
           launcher.getVisiblePluginIds(),
+          launcher.getAllPluginItems(),
+          launcher.getRequiredVisiblePluginIds(),
           launcher.getLaunchAtLoginStatus(),
           launcher.getAppUpdaterStatus().catch(() => appUpdaterStatus),
           launcher.getAppVersion().catch(() => ""),
@@ -3385,6 +3559,14 @@ async function refreshEntries(query: string): Promise<void> {
       visiblePluginIds = Array.isArray(nextVisiblePluginIds)
         ? parseVisiblePluginIdsText(nextVisiblePluginIds.join("\n"))
         : [];
+      allPluginCatalogItems = Array.isArray(nextAllPluginItems)
+        ? nextAllPluginItems
+        : [];
+      requiredVisiblePluginIdSet = new Set(
+        Array.isArray(nextRequiredVisiblePluginIds)
+          ? nextRequiredVisiblePluginIds.map((id) => id.trim().toLowerCase())
+          : []
+      );
       launchAtLoginStatus = nextLaunchAtLoginStatus;
       appUpdaterStatus = nextAppUpdaterStatus;
       errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];

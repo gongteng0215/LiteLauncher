@@ -141,15 +141,15 @@ type WebtoolsImagePromptStylePresetId =
   | "retro-magazine";
 
 type WebtoolsImagePromptStylePresetGroup =
-  | "閸熷棗鎼ч崯鍡曠瑹"
-  | "閸愬懎顔愮亸渚€娼?"
-  | "娴滃搫鍎氱憴鎺曞"
-  | "缁屾椽妫垮铏圭摎"
-  | "妞佹劙銈悽鐔告た"
-  | "缁夋垶濡ф潪顖欐"
-  | "濞茶濮╅懞鍌涙）"
-  | "鐞涘奔绗熼張宥呭"
-  | "閼圭儤婀崇悰銊у箛";
+  | "商品商业"
+  | "内容封面"
+  | "人像角色"
+  | "空间建筑"
+  | "餐饮生活"
+  | "科技软件"
+  | "活动节日"
+  | "行业服务"
+  | "艺术表现";
 
 type WebtoolsImagePromptOptionGroupKey =
   | "subject"

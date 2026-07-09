@@ -10,10 +10,12 @@ import {
   type LiteSnapRecognizeTextInput,
   type LiteSnapSettings,
   type LiteSnapShortcutRegistrationResult,
-  type LiteSnapTranslateSelectionInput,
-  type LiteSnapTranslateTextInput,
-  type LiteSnapTranslateTextResult
+  type LiteSnapTranslateSelectionInput
 } from "../shared/litesnap";
+import {
+  type TranslateResult,
+  type TranslateTextInput
+} from "../shared/translate";
 import {
   AppErrorLogInput,
   CatalogRebuildResult,
@@ -38,7 +40,8 @@ import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
 import { LiteSnapImageStore } from "./litesnap/image-store";
-import { translateWithBaidu } from "./litesnap/baidu-translator";
+import { translateWithBaidu } from "./translate/baidu-translator";
+import { TranslateSettingsStore } from "./translate/settings";
 import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
 import { LiteSnapSettingsStore } from "./litesnap/settings";
 import {
@@ -58,6 +61,7 @@ import {
 } from "./plugins/cashflow-game";
 import {
   getDefaultVisiblePluginIds,
+  getAllPluginCatalogItems,
   getPluginCatalogItems,
   getPluginQueryItems,
   isPluginCatalogItem,
@@ -110,6 +114,7 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-crypto",
   "webtools-jwt",
   "webtools-timestamp",
+  "webtools-translate",
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
@@ -157,10 +162,11 @@ const PRE_CLIPBOARD_WORKBENCH_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-api-client",
   "codeagent-switch"
 ] as const;
-const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
+const PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
   "hardware-inspector",
   "clipboard-workbench",
+  "litesnap",
   "webtools-password",
   "webtools-cron",
   "webtools-json",
@@ -185,6 +191,9 @@ const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-ua",
   "webtools-api-client",
   "codeagent-switch"
+] as const;
+const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
+  ...PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS
 ] as const;
 const PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -1386,6 +1395,10 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       applied,
       [...LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS]
     );
+    const shouldUpgradePreWebtoolsTranslateDefault = areStringArraysSetEqual(
+      applied,
+      [...PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS]
+    );
     const shouldUpgradePreHardwareDefault = areStringArraysSetEqual(
       applied,
       [...PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS]
@@ -1410,6 +1423,7 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldFallback ||
       shouldUpgradeCurrentDefault ||
       shouldUpgradeLastCurrentDefault ||
+      shouldUpgradePreWebtoolsTranslateDefault ||
       shouldUpgradePreHardwareDefault ||
       shouldUpgradePreClipboardWorkbenchDefault ||
       shouldUpgradeLegacyDefault ||
@@ -1423,6 +1437,7 @@ async function loadVisiblePluginIds(db: LiteDatabase): Promise<string[]> {
       shouldFallback ||
       shouldUpgradeCurrentDefault ||
       shouldUpgradeLastCurrentDefault ||
+      shouldUpgradePreWebtoolsTranslateDefault ||
       shouldUpgradePreHardwareDefault ||
       shouldUpgradePreClipboardWorkbenchDefault ||
       shouldUpgradeLegacyDefault ||
@@ -1783,6 +1798,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
+  const translateSettingsStore = new TranslateSettingsStore(activeDatabase);
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
   liteSnapPinWindowManager.setSaveImageProvider(async (image) => {
@@ -1955,9 +1971,9 @@ async function bootstrap(): Promise<void> {
     return result;
   };
 
-  const translateLiteSnapText = async (
-    input: LiteSnapTranslateTextInput
-  ): Promise<LiteSnapTranslateTextResult> => {
+  const translateTextForTool = async (
+    input: TranslateTextInput
+  ): Promise<TranslateResult> => {
     const source = input.text.replace(/\r\n/g, "\n").trim();
     if (!source) {
       return {
@@ -1968,13 +1984,13 @@ async function bootstrap(): Promise<void> {
       };
     }
 
-    const settings = await liteSnapSettingsStore.getSettings();
+    const settings = await translateSettingsStore.getSettings();
     const translated = await translateWithBaidu({
       text: source,
-      appId: input.appId?.trim() || settings.translateBaiduAppId,
-      secret: input.secret?.trim() || settings.translateBaiduSecret,
-      apiKey: input.apiKey?.trim() || settings.translateBaiduApiKey,
-      engine: input.engine ?? settings.translateBaiduEngine
+      appId: input.appId?.trim() || settings.baiduAppId,
+      secret: input.secret?.trim() || settings.baiduSecret,
+      apiKey: input.apiKey?.trim() || settings.baiduApiKey,
+      engine: input.engine ?? settings.baiduEngine
     });
 
     if (!translated.ok) {
@@ -2040,13 +2056,13 @@ async function bootstrap(): Promise<void> {
         translateText: ""
       });
 
-      const settings = await liteSnapSettingsStore.getSettings();
+      const settings = await translateSettingsStore.getSettings();
       const translated = await translateWithBaidu({
         text: recognized.text,
-        appId: settings?.translateBaiduAppId ?? "",
-        secret: settings?.translateBaiduSecret ?? "",
-        apiKey: settings?.translateBaiduApiKey ?? "",
-        engine: settings?.translateBaiduEngine ?? "standard"
+        appId: settings.baiduAppId,
+        secret: settings.baiduSecret,
+        apiKey: settings.baiduApiKey,
+        engine: settings.baiduEngine
       });
 
       if (!translated.ok) {
@@ -2185,6 +2201,8 @@ async function bootstrap(): Promise<void> {
       getVisiblePluginIds: () => [...visiblePluginIds],
       setVisiblePluginIds: (pluginIds) =>
         saveVisiblePluginIds(activeDatabase, pluginIds),
+      getAllPluginItems: () => getAllPluginCatalogItems(),
+      getRequiredVisiblePluginIds: () => [...REQUIRED_VISIBLE_PLUGIN_IDS],
       getLaunchAtLoginStatus: () => getLaunchAtLoginStatus(),
       setLaunchAtLoginEnabled: (enabled) =>
         setLaunchAtLoginEnabled(enabled)
@@ -2211,8 +2229,6 @@ async function bootstrap(): Promise<void> {
             recognizeLiteSnapTextAndShowPanel(input),
           translateSelection: (input: LiteSnapTranslateSelectionInput) =>
             translateLiteSnapSelectionAndShowPanel(input),
-          translateText: (input: LiteSnapTranslateTextInput) =>
-            translateLiteSnapText(input),
           probeOcr: () => liteSnapCaptureSessionManager.probeOcrStatusAsync(),
           getOcrCapabilities: () =>
             liteSnapCaptureSessionManager.listOcrCapabilities(),
@@ -2226,6 +2242,11 @@ async function bootstrap(): Promise<void> {
           cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture(),
           ensureSourceImage: async () =>
             liteSnapCaptureSessionManager.ensureSourceImageDataUrl()
+        },
+        translateToolProvider: {
+          getSettings: () => translateSettingsStore.getSettings(),
+          updateSettings: (patch) => translateSettingsStore.updateSettings(patch),
+          translateText: (input) => translateTextForTool(input)
         },
     catalogProvider: {
       rebuildCatalog: () => rebuildCatalogIndex(activeDatabase)

@@ -1278,13 +1278,28 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
     "capture provider should resolve native addon via packaged fallbacks"
   );
 
-  assert.match(sharedSource, /interface LiteSnapTranslateSelectionResult/);
+  assert.match(
+    sharedSource,
+    /LiteSnapTranslateSelectionResult.*from "\.\/translate"/
+  );
   assert.match(channelsSource, /liteSnapTranslateSelection:/);
-  assert.match(channelsSource, /liteSnapTranslateText:/);
+  assert.doesNotMatch(
+    channelsSource,
+    /liteSnapTranslateText:/,
+    "text translate should use translateToolTranslateText instead"
+  );
   assert.match(preloadSource, /liteSnapTranslateSelection\(/);
-  assert.match(preloadSource, /liteSnapTranslateText\(/);
+  assert.doesNotMatch(
+    preloadSource,
+    /liteSnapTranslateText\(/,
+    "preload should not expose liteSnapTranslateText"
+  );
   assert.match(ipcSource, /IPC_CHANNELS\.liteSnapTranslateSelection/);
-  assert.match(ipcSource, /IPC_CHANNELS\.liteSnapTranslateText/);
+  assert.doesNotMatch(
+    ipcSource,
+    /IPC_CHANNELS\.liteSnapTranslateText/,
+    "IPC should not register liteSnapTranslateText"
+  );
   assert.match(
     captureSource,
     /recognizeTextFromSelection/,
@@ -1322,7 +1337,7 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   );
   assert.match(
     fs.readFileSync(
-      path.join(process.cwd(), "src", "main", "litesnap", "baidu-translator.ts"),
+      path.join(process.cwd(), "src", "main", "translate", "baidu-translator.ts"),
       "utf8"
     ),
     /BAIDU_TRANSLATE_ENDPOINT[\s\S]*BAIDU_LLM_TRANSLATE_ENDPOINT/,
@@ -1336,19 +1351,9 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
     /fanyi-api\.baidu\.com\/api\/trans\/vip\/translate[\s\S]*fanyi-api\.baidu\.com\/ait\/api\/aiTextTranslate/,
     "shared Baidu helper should define standard and LLM translate endpoints"
   );
-  assert.match(
+  assert.doesNotMatch(
     panelImplsSource,
-    /translateBaiduEngine[\s\S]*translateBaiduApiKey/,
-    "LiteSnap settings should let users choose Baidu translate engine and API Key"
-  );
-  assert.match(
-    panelImplsSource,
-    /liteSnapTranslateText[\s\S]*translateBaiduAppId/,
-    "LiteSnap settings should translate typed text with Baidu credentials"
-  );
-  assert.match(
-    panelImplsSource,
-    /litesnap-settings-translate-source[\s\S]*litesnap-settings-translate-result/,
-    "LiteSnap settings should provide source and result text areas for manual translate"
+    /translateBaiduEngine/,
+    "LiteSnap settings should not include Baidu translate credentials"
   );
 });

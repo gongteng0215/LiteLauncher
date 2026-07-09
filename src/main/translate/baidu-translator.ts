@@ -11,7 +11,7 @@ import {
   readBaiduTranslateError,
   type BaiduTranslateResponsePayload
 } from "../../shared/baidu-translate";
-import type { LiteSnapBaiduTranslateEngine } from "../../shared/litesnap";
+import type { TranslateEngine } from "../../shared/translate";
 
 const BAIDU_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -20,7 +20,7 @@ export type BaiduTranslateOptions = {
   appId: string;
   secret?: string;
   apiKey?: string;
-  engine?: LiteSnapBaiduTranslateEngine;
+  engine?: TranslateEngine;
   from?: string;
   to?: string;
 };
@@ -72,7 +72,7 @@ async function fetchBaiduTranslatePayload(
     try {
       payload = (await response.json()) as BaiduTranslateResponsePayload;
     } catch (error) {
-      console.warn("[litesnap] Baidu translate response parse failed", error);
+      console.warn("[translate] Baidu translate response parse failed", error);
       return { ok: false, message: "百度翻译返回了无效数据。" };
     }
 
@@ -83,7 +83,7 @@ async function fetchBaiduTranslatePayload(
 
     return { ok: true, payload };
   } catch (error) {
-    console.warn("[litesnap] Baidu translate request failed", error);
+    console.warn("[translate] Baidu translate request failed", error);
     const aborted =
       error instanceof Error &&
       (error.name === "AbortError" || error.message.includes("aborted"));
@@ -168,7 +168,7 @@ async function translateWithBaiduStandard(
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "LiteLauncher LiteSnap"
+        "User-Agent": "LiteLauncher Translate"
       },
       body: body.toString()
     });
@@ -189,7 +189,7 @@ async function translateWithBaiduLlm(
   if (!apiKey) {
     return {
       ok: false,
-      message: "大模型翻译需要在 LiteSnap 设置中填写百度翻译 API Key。"
+      message: "大模型翻译需要在文本翻译设置中填写百度翻译 API Key。"
     };
   }
 
@@ -213,7 +213,7 @@ async function translateWithBaiduLlm(
         Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "User-Agent": "LiteLauncher LiteSnap"
+        "User-Agent": "LiteLauncher Translate"
       },
       body: JSON.stringify({
         appid: appId,

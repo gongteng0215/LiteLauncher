@@ -13,7 +13,28 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 const ROOTS = ["docs", "scripts", "src"];
+// Known mojibake fragments (UTF-8 Chinese misread as Latin-1), stored as escapes.
+const MOJIBAKE_SEQUENCES = [
+  "\u7035\u55DC\u721C", // 密码
+  "\u59FF\u6C34\u5E36", // 桥接
+  "\u7487\u71D5\u20AC", // 请选
+  "\u95C0\u57CF\u5BB3", // 长度
+  "\u9588\u71B5\u68FA", // image-prompt groups
+  "\u6D5E\u5C6C\u7D93", // 从当前
+  "\u7035\u55DC\u721C\u5DE5\u5177", // 密码工具
+  "\u9588\u71B5\u61D0\u984F" // 人像角色 (mojibake variant)
+];
+
 const decoder = new TextDecoder("utf-8", { fatal: true });
+
+function findMojibake(content) {
+  for (const sequence of MOJIBAKE_SEQUENCES) {
+    if (content.includes(sequence)) {
+      return sequence;
+    }
+  }
+  return null;
+}
 
 function shouldSkipDirectory(name) {
   return name === "dist" || name === "node_modules" || name === ".git";
@@ -42,7 +63,7 @@ function walkFiles(baseDir, result) {
   }
 }
 
-function checkUtf8(filePath) {
+function checkUtf8(filePath, relativePath) {
   const buffer = fs.readFileSync(filePath);
 
   try {
@@ -51,6 +72,14 @@ function checkUtf8(filePath) {
       return {
         ok: false,
         reason: "contains replacement character U+FFFD"
+      };
+    }
+
+    const mojibake = findMojibake(content);
+    if (mojibake) {
+      return {
+        ok: false,
+        reason: `suspected mojibake sequence (${mojibake.length} chars)`
       };
     }
 
@@ -73,10 +102,11 @@ function main() {
 
   const failures = [];
   for (const filePath of files) {
-    const result = checkUtf8(filePath);
+    const relativePath = path.relative(process.cwd(), filePath);
+    const result = checkUtf8(filePath, relativePath);
     if (!result.ok) {
       failures.push({
-        file: path.relative(process.cwd(), filePath),
+        file: relativePath,
         reason: result.reason
       });
     }

@@ -12,10 +12,13 @@ import {
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult,
   LiteSnapTranslateSelectionInput,
-  LiteSnapTranslateSelectionResult,
-  LiteSnapTranslateTextInput,
-  LiteSnapTranslateTextResult
+  LiteSnapTranslateSelectionResult
 } from "../shared/litesnap";
+import {
+  TranslateResult,
+  TranslateSettings,
+  TranslateTextInput
+} from "../shared/translate";
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
@@ -93,6 +96,12 @@ const api = {
   setVisiblePluginIds(pluginIds: string[]): Promise<string[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.setVisiblePluginIds, pluginIds);
   },
+  getAllPluginItems(): Promise<LaunchItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getAllPluginItems);
+  },
+  getRequiredVisiblePluginIds(): Promise<string[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getRequiredVisiblePluginIds);
+  },
   getLiteSnapSettings(): Promise<LiteSnapSettings> {
     return ipcRenderer.invoke(IPC_CHANNELS.getLiteSnapSettings);
   },
@@ -141,10 +150,18 @@ const api = {
   ): Promise<LiteSnapTranslateSelectionResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateSelection, input);
   },
-  liteSnapTranslateText(
-    input: LiteSnapTranslateTextInput
-  ): Promise<LiteSnapTranslateTextResult> {
-    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateText, input);
+  getTranslateToolSettings(): Promise<TranslateSettings> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getTranslateToolSettings);
+  },
+  setTranslateToolSettings(
+    patch: Partial<TranslateSettings>
+  ): Promise<TranslateSettings> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setTranslateToolSettings, patch);
+  },
+  translateToolTranslateText(
+    input: TranslateTextInput
+  ): Promise<TranslateResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.translateToolTranslateText, input);
   },
   liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapProbeOcr);

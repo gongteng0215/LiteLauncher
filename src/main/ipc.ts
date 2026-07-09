@@ -15,10 +15,13 @@ import {
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult,
   LiteSnapTranslateSelectionInput,
-  LiteSnapTranslateSelectionResult,
-  LiteSnapTranslateTextInput,
-  LiteSnapTranslateTextResult
+  LiteSnapTranslateSelectionResult
 } from "../shared/litesnap";
+import {
+  TranslateResult,
+  TranslateSettings,
+  TranslateTextInput
+} from "../shared/translate";
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
@@ -73,6 +76,8 @@ type SettingsProvider = {
   ) => Promise<CatalogScanConfig>;
   getVisiblePluginIds: () => string[];
   setVisiblePluginIds: (pluginIds: string[]) => Promise<string[]>;
+  getAllPluginItems: () => LaunchItem[];
+  getRequiredVisiblePluginIds: () => string[];
   getLaunchAtLoginStatus: () => LaunchAtLoginStatus;
   setLaunchAtLoginEnabled: (
     enabled: boolean
@@ -101,9 +106,6 @@ type LiteSnapProvider = {
   translateSelection: (
     input: LiteSnapTranslateSelectionInput
   ) => Promise<LiteSnapTranslateSelectionResult>;
-  translateText: (
-    input: LiteSnapTranslateTextInput
-  ) => Promise<LiteSnapTranslateTextResult>;
   probeOcr: () => Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
   getOcrCapabilities: () => Promise<
     import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
@@ -121,6 +123,12 @@ type LiteSnapProvider = {
   ) => Promise<boolean>;
   cancelCapture: () => Promise<boolean>;
   ensureSourceImage: () => Promise<string | null>;
+};
+
+type TranslateToolProvider = {
+  getSettings: () => Promise<TranslateSettings>;
+  updateSettings: (patch: Partial<TranslateSettings>) => Promise<TranslateSettings>;
+  translateText: (input: TranslateTextInput) => Promise<TranslateResult>;
 };
 
 type CatalogProvider = {
@@ -153,6 +161,7 @@ type IpcOptions = {
   clipProvider: ClipProvider;
   settingsProvider: SettingsProvider;
   liteSnapProvider: LiteSnapProvider;
+  translateToolProvider: TranslateToolProvider;
   catalogProvider: CatalogProvider;
   updaterProvider: UpdaterProvider;
   errorLogProvider: ErrorLogProvider;
@@ -173,6 +182,8 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.setCatalogScanConfig,
   IPC_CHANNELS.getVisiblePluginIds,
   IPC_CHANNELS.setVisiblePluginIds,
+  IPC_CHANNELS.getAllPluginItems,
+  IPC_CHANNELS.getRequiredVisiblePluginIds,
   IPC_CHANNELS.getLiteSnapSettings,
   IPC_CHANNELS.setLiteSnapSettings,
   IPC_CHANNELS.liteSnapStartCapture,
@@ -181,6 +192,10 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapGetOverlayState,
   IPC_CHANNELS.liteSnapCommitCapture,
   IPC_CHANNELS.liteSnapRecognizeText,
+  IPC_CHANNELS.liteSnapTranslateSelection,
+  IPC_CHANNELS.getTranslateToolSettings,
+  IPC_CHANNELS.setTranslateToolSettings,
+  IPC_CHANNELS.translateToolTranslateText,
   IPC_CHANNELS.liteSnapProbeOcr,
   IPC_CHANNELS.liteSnapGetOcrCapabilities,
   IPC_CHANNELS.liteSnapInstallOcrCapabilities,
@@ -1297,6 +1312,14 @@ export function registerIpcHandlers(
     return options.settingsProvider.getVisiblePluginIds();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getAllPluginItems, () => {
+    return options.settingsProvider.getAllPluginItems();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRequiredVisiblePluginIds, () => {
+    return options.settingsProvider.getRequiredVisiblePluginIds();
+  });
+
   ipcMain.handle(IPC_CHANNELS.getLiteSnapSettings, () => {
     return options.liteSnapProvider.getSettings();
   });
@@ -1430,18 +1453,36 @@ export function registerIpcHandlers(
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.getTranslateToolSettings, () => {
+    return options.translateToolProvider.getSettings();
+  });
+
   ipcMain.handle(
-    IPC_CHANNELS.liteSnapTranslateText,
-    async (_, input: LiteSnapTranslateTextInput | null) => {
-      const normalizedInput: LiteSnapTranslateTextInput =
+    IPC_CHANNELS.setTranslateToolSettings,
+    async (_, patchInput: Partial<TranslateSettings> | null) => {
+      const patch =
+        patchInput && typeof patchInput === "object" ? patchInput : {};
+      return options.translateToolProvider.updateSettings(patch);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.translateToolTranslateText,
+    async (_, input: TranslateTextInput | null) => {
+      const normalizedInput: TranslateTextInput =
         input && typeof input === "object"
           ? {
               text: typeof input.text === "string" ? input.text : "",
               appId: typeof input.appId === "string" ? input.appId : undefined,
-              secret: typeof input.secret === "string" ? input.secret : undefined
+              secret: typeof input.secret === "string" ? input.secret : undefined,
+              apiKey: typeof input.apiKey === "string" ? input.apiKey : undefined,
+              engine:
+                input.engine === "llm" || input.engine === "standard"
+                  ? input.engine
+                  : undefined
             }
           : { text: "" };
-      return options.liteSnapProvider.translateText(normalizedInput);
+      return options.translateToolProvider.translateText(normalizedInput);
     }
   );
 

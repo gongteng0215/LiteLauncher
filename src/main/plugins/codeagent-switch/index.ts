@@ -938,7 +938,7 @@ function createRootInput(command: CodeAgentSwitchCommand) {
 
 function createProfileInput(command: CodeAgentSwitchCommand): CodexProfileConfig {
   if (!command.profile) {
-    throw new Error("璇烽€夋嫨瑕佷繚瀛樼殑 Profile");
+    throw new Error("请选择要保存的 Profile");
   }
   return {
     id: command.profile,
@@ -964,7 +964,7 @@ function createProfileInput(command: CodeAgentSwitchCommand): CodexProfileConfig
 function createProviderInput(command: CodeAgentSwitchCommand): CodexProviderConfigInput {
   const providerId = command.provider;
   if (!providerId) {
-    throw new Error("璇烽€夋嫨瑕佷繚瀛樼殑 Provider");
+    throw new Error("请选择要保存的 Provider");
   }
   return {
     id: providerId,
@@ -1122,7 +1122,7 @@ function saveProfile(command: CodeAgentSwitchCommand): CodeAgentSwitchPanelData 
 function migrateProfile(command: CodeAgentSwitchCommand): CodeAgentSwitchPanelData {
   const configPath = command.configPath ?? getDefaultCodexConfigPath();
   if (!command.profile) {
-    throw new Error("璇烽€夋嫨瑕佽縼绉荤殑 Profile");
+    throw new Error("请选择要迁移的 Profile");
   }
   const source = readCodexConfigSource(configPath);
   const migration = migrateLegacyCodexProfileToStandalone(source, command.profile);

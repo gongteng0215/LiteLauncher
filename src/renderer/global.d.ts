@@ -23,11 +23,14 @@ import {
   LiteSnapRecognizeTextResult,
   LiteSnapTranslateSelectionInput,
   LiteSnapTranslateSelectionResult,
-  LiteSnapTranslateTextInput,
-  LiteSnapTranslateTextResult,
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult
 } from "../shared/litesnap";
+import {
+  TranslateResult,
+  TranslateSettings,
+  TranslateTextInput
+} from "../shared/translate";
 
 interface RendererPluginConstants {
   CASHFLOW_PLUGIN_ID: string;
@@ -39,6 +42,7 @@ interface RendererPluginConstants {
   WEBTOOLS_URL_PLUGIN_ID: string;
   WEBTOOLS_DIFF_PLUGIN_ID: string;
   WEBTOOLS_TIMESTAMP_PLUGIN_ID: string;
+  WEBTOOLS_TRANSLATE_PLUGIN_ID: string;
   WEBTOOLS_REGEX_PLUGIN_ID: string;
   WEBTOOLS_CRON_PLUGIN_ID: string;
   WEBTOOLS_CRYPTO_PLUGIN_ID: string;
@@ -208,6 +212,8 @@ interface RendererPanelImpls {
   renderWebtoolsDiffPanel(): void;
   applyWebtoolsTimestampPanelPayload(panel: unknown): void;
   renderWebtoolsTimestampPanel(): void;
+  applyWebtoolsTranslatePanelPayload(panel: unknown): void;
+  renderWebtoolsTranslatePanel(): void;
   applyWebtoolsRegexPanelPayload(panel: unknown): void;
   renderWebtoolsRegexPanel(): void;
   applyWebtoolsCryptoPanelPayload(panel: unknown): void;
@@ -316,6 +322,8 @@ declare global {
       ): Promise<CatalogScanConfig>;
       getVisiblePluginIds(): Promise<string[]>;
       setVisiblePluginIds(pluginIds: string[]): Promise<string[]>;
+      getAllPluginItems(): Promise<LaunchItem[]>;
+      getRequiredVisiblePluginIds(): Promise<string[]>;
       getLiteSnapSettings(): Promise<LiteSnapSettings>;
       setLiteSnapSettings(
         patch: Partial<LiteSnapSettings>
@@ -340,9 +348,13 @@ declare global {
       liteSnapTranslateSelection(
         input: LiteSnapTranslateSelectionInput
       ): Promise<LiteSnapTranslateSelectionResult>;
-      liteSnapTranslateText(
-        input: LiteSnapTranslateTextInput
-      ): Promise<LiteSnapTranslateTextResult>;
+      getTranslateToolSettings(): Promise<TranslateSettings>;
+      setTranslateToolSettings(
+        patch: Partial<TranslateSettings>
+      ): Promise<TranslateSettings>;
+      translateToolTranslateText(
+        input: TranslateTextInput
+      ): Promise<TranslateResult>;
       liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
       liteSnapGetOcrCapabilities(): Promise<
         import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult

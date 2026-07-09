@@ -978,7 +978,7 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     panelImplsSource,
-    /从当前配置生成配置组|浠庡綋鍓嶉厤缃敓鎴愰厤缃粍/,
+    /从当前配置生成配置组/,
     "CodeAgent Switch should expose a direct create-from-current-config action when there are no standalone config groups yet"
   );
   assert.doesNotMatch(
@@ -2138,6 +2138,26 @@ test("lightweight webtools wrappers are removed from renderer handlers", () => {
   }
 });
 
+test("webtools-translate panel is registered with settings hydration", () => {
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /\[WEBTOOLS_TRANSLATE_PLUGIN_ID\]:\s*\{[\s\S]*renderWebtoolsTranslatePanel/,
+    "translate handler should render through panel impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /hydrateTranslateToolPanelFromSettings\(\)/,
+    "translate panel should hydrate settings on open"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderWebtoolsTranslatePanel\(\): void/,
+    "translate render implementation should stay in plugin-panel-impls"
+  );
+});
+
 test("remaining submit-driven webtools handlers enter through form submission", () => {
   const panelImplsSource = readPanelImplsSource();
 
@@ -2368,7 +2388,7 @@ test("hardware inspector helper flow lives with plugin-panel-impls instead of re
 
   assert.match(
     panelImplsSource,
-    /function applyHardwareInspectorSnapshot\(\s*snapshot: HardwareInspectorSnapshot,\s*infoText\?: string\s*\): void/s,
+    /function applyHardwareInspectorSnapshot\(\s*snapshot: HardwareInspectorSnapshot,\s*infoText\?: string,\s*options\?: \{ loadPreview\?: boolean \}\s*\): void/s,
     "Hardware Inspector snapshot applier should live in plugin-panel-impls"
   );
   assert.match(
