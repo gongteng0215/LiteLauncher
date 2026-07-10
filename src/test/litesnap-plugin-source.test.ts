@@ -265,8 +265,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /wheel[\s\S]*event\.ctrlKey[\s\S]*opacity[\s\S]*scale/,
-    "LiteSnap pinned images should support wheel zoom and Ctrl+wheel opacity"
+    /wheel[\s\S]*dragging[\s\S]*deltaX[\s\S]*deltaY[\s\S]*event\.ctrlKey[\s\S]*opacity[\s\S]*scale/,
+    "LiteSnap pinned images should support wheel zoom and Ctrl+wheel opacity without horizontal-pan zoom"
   );
   assert.match(
     pinSource,
@@ -280,8 +280,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /PIN_MOVE_CHANNEL[\s\S]*window\.setPosition\(/,
-    "LiteSnap pin windows should move through IPC instead of a CSS drag region"
+    /PIN_MOVE_CHANNEL[\s\S]*resolvePinWindowSize[\s\S]*window\.setBounds\(/,
+    "LiteSnap pin windows should move through IPC with size locked to avoid HiDPI growth"
   );
   assert.match(
     pinSource,

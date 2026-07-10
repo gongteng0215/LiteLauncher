@@ -77,6 +77,13 @@ function ensurePinSaveHandler(): void {
   });
 }
 
+function resolvePinWindowSize(meta: PinWindowMeta): { width: number; height: number } {
+  return {
+    width: Math.max(40, Math.round(meta.baseWidth * meta.lastScale)),
+    height: Math.max(40, Math.round(meta.baseHeight * meta.lastScale))
+  };
+}
+
 function ensurePinMoveHandler(): void {
   if (pinMoveHandlerRegistered) {
     return;
@@ -93,8 +100,20 @@ function ensurePinMoveHandler(): void {
       return;
     }
 
-    const [x, y] = window.getPosition();
-    window.setPosition(Math.round(x + deltaX), Math.round(y + deltaY), false);
+    // Keep width/height locked from meta. On Windows HiDPI, repeated
+    // setPosition() can let the OS/Electron grow the frameless window.
+    const bounds = window.getBounds();
+    const meta = pinWindowMeta.get(window.id);
+    const size = meta ? resolvePinWindowSize(meta) : { width: bounds.width, height: bounds.height };
+    window.setBounds(
+      {
+        x: Math.round(bounds.x + deltaX),
+        y: Math.round(bounds.y + deltaY),
+        width: size.width,
+        height: size.height
+      },
+      false
+    );
   });
 }
 
@@ -125,12 +144,12 @@ function ensurePinVisualHandlers(): void {
     const opacityChanged = Math.abs(nextOpacity - meta.lastOpacity) > 0.001;
 
     if (scaleChanged) {
-      const [x, y] = window.getPosition();
-      const [currentWidth, currentHeight] = window.getSize();
+      const bounds = window.getBounds();
+      const currentSize = resolvePinWindowSize(meta);
       const nextWidth = Math.max(40, Math.round(meta.baseWidth * nextScale));
       const nextHeight = Math.max(40, Math.round(meta.baseHeight * nextScale));
-      const nextX = Math.round(x + (currentWidth - nextWidth) / 2);
-      const nextY = Math.round(y + (currentHeight - nextHeight) / 2);
+      const nextX = Math.round(bounds.x + (currentSize.width - nextWidth) / 2);
+      const nextY = Math.round(bounds.y + (currentSize.height - nextHeight) / 2);
 
       window.setBounds(
         {
@@ -459,6 +478,14 @@ function buildPinWindowHtml(
       });
       window.addEventListener("wheel", function (event) {
         event.preventDefault();
+        // Ignore accidental trackpad pans / horizontal scrolls while dragging
+        // or when the gesture is mostly left-right (those used to zoom the pin).
+        if (dragging || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+          return;
+        }
+        if (event.deltaY === 0) {
+          return;
+        }
         if (event.ctrlKey) {
           opacity = Math.min(1, Math.max(0.2, opacity + (event.deltaY < 0 ? 0.05 : -0.05)));
         } else {
