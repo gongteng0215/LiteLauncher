@@ -191,6 +191,9 @@ const api = {
   liteSnapCancelCapture(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCancelCapture);
   },
+  liteSnapSetDisplayFollowLocked(locked: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapSetDisplayFollowLocked, Boolean(locked));
+  },
   liteSnapEnsureSourceImage(): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapEnsureSourceImage);
   },

@@ -143,6 +143,11 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
   );
   assert.match(
     channelsSource,
+    /liteSnapSetDisplayFollowLocked:\s*"launcher:litesnap-set-display-follow-locked"/,
+    "LiteSnap should expose an IPC channel to lock multi-display follow once selection starts"
+  );
+  assert.match(
+    channelsSource,
     /liteSnapEnsureSourceImage:\s*"launcher:litesnap-ensure-source-image"/
   );
   assert.match(channelsSource, /pickDirectoryPath:\s*"launcher:pick-directory-path"/);
@@ -163,6 +168,11 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
   assert.match(preloadSource, /liteSnapGetWindowRectAtPoint\(/);
   assert.match(preloadSource, /liteSnapCommitCapture\(/);
   assert.match(preloadSource, /liteSnapCancelCapture\(\): Promise<boolean>/);
+  assert.match(
+    preloadSource,
+    /liteSnapSetDisplayFollowLocked\(locked: boolean\): Promise<boolean>/,
+    "LiteSnap preload should bridge display-follow lock updates from the overlay"
+  );
   assert.match(preloadSource, /liteSnapEnsureSourceImage\(\): Promise<string \| null>/);
   assert.match(preloadSource, /pickDirectoryPath\(\): Promise<string \| null>/);
   assert.match(
@@ -197,6 +207,16 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   assert.match(captureSource, /async getOverlayState\(\): Promise/);
   assert.match(captureSource, /async commitCapture\(/);
   assert.match(captureSource, /async cancelCapture\(\): Promise<boolean>/);
+  assert.match(
+    captureSource,
+    /startDisplayFollowWatch\(\)|maybeFollowCursorDisplay\(|switchCaptureDisplay\(/,
+    "LiteSnap capture should follow the cursor across displays before a selection locks"
+  );
+  assert.match(
+    captureSource,
+    /setDisplayFollowLocked\(locked: boolean\): void/,
+    "LiteSnap capture should allow the overlay to lock display following after selection starts"
+  );
   assert.match(providerSource, /export interface LiteSnapCaptureProvider/);
   assert.match(providerSource, /export function createLiteSnapCaptureProvider\(\)/);
   assert.match(overlaySource, /export function createLiteSnapOverlayWindow\(/);
@@ -879,6 +899,11 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
 
   assert.match(overlayRendererSource, /copy|save|pin|cancel/);
   assert.match(overlayRendererSource, /pointerdown/);
+  assert.match(
+    overlayRendererSource,
+    /function syncDisplayFollowLock\(\): void[\s\S]*liteSnapSetDisplayFollowLocked/,
+    "LiteSnap overlay should lock display follow after the user starts selecting"
+  );
   assert.match(
     overlayRendererSource,
     /window\.launcher\.onLiteSnapOverlayStateChanged\(\(nextState\) => \{/,

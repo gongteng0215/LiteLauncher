@@ -2123,6 +2123,17 @@ function findLaunchEntryIndexInCurrentEntries(itemId: string): number {
   );
 }
 
+function isLaunchEntryPinned(index: number, item: LaunchItem): boolean {
+  if (item.pinned) {
+    return true;
+  }
+
+  // Defensive: items listed under the pinned section are pinned even if a stale
+  // icon-cache payload lost the `pinned` flag.
+  const pinnedSection = searchSections.find((section) => section.id === "pinned");
+  return Boolean(pinnedSection?.indexes.includes(index));
+}
+
 async function togglePinned(index: number, expectedItemId?: string): Promise<void> {
   if (mode !== "search") {
     return;
@@ -2157,7 +2168,7 @@ async function togglePinned(index: number, expectedItemId?: string): Promise<voi
     setStatus("置顶失败：当前结果已过期，请重新搜索");
     return;
   }
-  const nextPinned = !Boolean(item.pinned);
+  const nextPinned = !isLaunchEntryPinned(index, item);
   const pinResult = await launcher.setItemPinned(item.id, nextPinned, item);
   if (!pinResult.ok) {
     setStatus(formatPinnedToggleStatus(item.title, pinResult));
@@ -2295,7 +2306,7 @@ function openSearchContextMenu(
   const pinButton = document.createElement("button");
   pinButton.type = "button";
   pinButton.className = "search-context-menu-item";
-  pinButton.textContent = entry.item.pinned ? "取消置顶" : "置顶";
+  pinButton.textContent = isLaunchEntryPinned(index, entry.item) ? "取消置顶" : "置顶";
   pinButton.addEventListener("click", () => {
     closeSearchContextMenu();
     void togglePinned(index, entry.item.id);
@@ -2368,8 +2379,15 @@ function bindResultInteractions(
     }
     event.preventDefault();
     event.stopPropagation();
+    const previousIndex = selectedIndex;
     selectedIndex = index;
-    renderList();
+    // Avoid full renderList() here: it closes the menu and can race with
+    // opening a fresh one while selection chips/highlight update in place.
+    if (canUpdateSelectionHighlightInPlace()) {
+      updateSelectionHighlight(previousIndex, selectedIndex);
+    } else {
+      renderList();
+    }
     openSearchContextMenu(event, index, entry);
   });
 }

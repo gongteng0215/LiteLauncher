@@ -122,6 +122,7 @@ type LiteSnapProvider = {
     cache: import("../shared/litesnap-ocr-help").LiteSnapOcrProbeCache
   ) => Promise<boolean>;
   cancelCapture: () => Promise<boolean>;
+  setDisplayFollowLocked: (locked: boolean) => void;
   ensureSourceImage: () => Promise<string | null>;
 };
 
@@ -202,6 +203,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapGetOcrProbeCache,
   IPC_CHANNELS.liteSnapSetOcrProbeCache,
   IPC_CHANNELS.liteSnapCancelCapture,
+  IPC_CHANNELS.liteSnapSetDisplayFollowLocked,
   IPC_CHANNELS.liteSnapEnsureSourceImage,
   IPC_CHANNELS.rebuildCatalog,
   IPC_CHANNELS.reportErrorLog,
@@ -1164,7 +1166,12 @@ async function attachIcon(item: LaunchItem): Promise<LaunchItem> {
   const cacheKey = buildAttachIconCacheKey(item);
   const cachedItem = readLruMapValue(attachedIconCache, cacheKey);
   if (cachedItem) {
-    return { ...cachedItem };
+    // Only reuse the resolved icon. Returning the whole cached LaunchItem would
+    // overwrite live fields such as `pinned` after pin/unpin toggles.
+    return {
+      ...item,
+      iconPath: cachedItem.iconPath ?? item.iconPath
+    };
   }
 
   const sanitizedItem = stripInvalidIconPath(item);
@@ -1286,7 +1293,18 @@ export function registerIpcHandlers(
     const iconById = new Map(withIcons.map((item) => [item.id, item]));
 
     const attachSectionIcons = (items: LaunchItem[]): LaunchItem[] =>
-      items.map((item) => iconById.get(item.id) ?? item);
+      items.map((item) => {
+        const withIcon = iconById.get(item.id);
+        if (!withIcon) {
+          return item;
+        }
+        // Keep the section item's live fields (especially pinned) and only
+        // borrow the resolved icon path from the deduplicated attach pass.
+        return {
+          ...item,
+          iconPath: withIcon.iconPath ?? item.iconPath
+        };
+      });
 
     const sections: HomeSections = {
       recent: attachSectionIcons(recent),
@@ -1522,6 +1540,11 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.liteSnapCancelCapture, async () => {
     return options.liteSnapProvider.cancelCapture();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapSetDisplayFollowLocked, (_event, lockedInput: unknown) => {
+    options.liteSnapProvider.setDisplayFollowLocked(Boolean(lockedInput));
+    return true;
   });
 
   ipcMain.handle(IPC_CHANNELS.liteSnapEnsureSourceImage, async () => {

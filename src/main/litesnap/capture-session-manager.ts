@@ -61,6 +61,7 @@ type CaptureSession = {
   previewImageDataUrl: string | null;
   sourceImage: NativeImage | null;
   sourceImageDataUrl: string | null;
+  displayFollowLocked: boolean;
 };
 
 type DisplayFrameCache = {
@@ -77,12 +78,15 @@ const FRAME_CACHE_REFRESH_MS = 2200;
 const OVERLAY_READY_TIMEOUT_MS = 8000;
 const FRAME_CACHE_REFRESH_MAX_MS = 8000;
 const PREVIEW_JPEG_QUALITY = 92;
+const DISPLAY_FOLLOW_POLL_MS = 50;
 
 export class LiteSnapCaptureSessionManager {
   private session: CaptureSession | null = null;
   private overlayWindow: BrowserWindow | null = null;
   private overlayReadyPromise: Promise<void> | null = null;
   private startingCapture = false;
+  private switchingDisplay = false;
+  private displayFollowTimer: NodeJS.Timeout | null = null;
   private frameCache: DisplayFrameCache | null = null;
   private frameCacheWarmPromise: Promise<void> | null = null;
   private frameCacheWarmDisplayId: number | null = null;
@@ -241,7 +245,8 @@ export class LiteSnapCaptureSessionManager {
       previewImage: null,
       previewImageDataUrl: null,
       sourceImage: null,
-      sourceImageDataUrl: null
+      sourceImageDataUrl: null,
+      displayFollowLocked: false
     };
 
     const framesPromise = this.resolveCaptureFrames(display);
@@ -292,7 +297,16 @@ export class LiteSnapCaptureSessionManager {
 
     await this.emitOverlayStateChanged(await this.getOverlayState());
     await this.showInteractiveOverlay(overlayWindow);
+    this.warmSiblingDisplays(display);
+    this.startDisplayFollowWatch();
     return true;
+  }
+
+  public setDisplayFollowLocked(locked: boolean): void {
+    if (!this.session) {
+      return;
+    }
+    this.session.displayFollowLocked = Boolean(locked);
   }
 
   public async getOverlayState(): Promise<LiteSnapOverlayState | null> {
@@ -652,6 +666,8 @@ export class LiteSnapCaptureSessionManager {
   }
 
   public async cancelCapture(): Promise<boolean> {
+    this.stopDisplayFollowWatch();
+    this.switchingDisplay = false;
     const session = this.session;
     this.session = null;
     if (!session) {
@@ -671,6 +687,116 @@ export class LiteSnapCaptureSessionManager {
       this.startFrameCacheRefresh();
     }
     return true;
+  }
+
+  private startDisplayFollowWatch(): void {
+    this.stopDisplayFollowWatch();
+    if (process.platform !== "win32" || screen.getAllDisplays().length < 2) {
+      return;
+    }
+
+    this.displayFollowTimer = setInterval(() => {
+      void this.maybeFollowCursorDisplay();
+    }, DISPLAY_FOLLOW_POLL_MS);
+    this.displayFollowTimer.unref?.();
+  }
+
+  private stopDisplayFollowWatch(): void {
+    if (!this.displayFollowTimer) {
+      return;
+    }
+    clearInterval(this.displayFollowTimer);
+    this.displayFollowTimer = null;
+  }
+
+  private async maybeFollowCursorDisplay(): Promise<void> {
+    const session = this.session;
+    if (
+      !session ||
+      session.displayFollowLocked ||
+      this.switchingDisplay ||
+      this.startingCapture
+    ) {
+      return;
+    }
+
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (display.id === session.display.id) {
+      return;
+    }
+
+    await this.switchCaptureDisplay(display);
+  }
+
+  private async switchCaptureDisplay(display: Display): Promise<void> {
+    const session = this.session;
+    if (!session || this.switchingDisplay || session.displayFollowLocked) {
+      return;
+    }
+
+    const overlayWindow = session.overlayWindow;
+    if (overlayWindow.isDestroyed()) {
+      return;
+    }
+
+    this.switchingDisplay = true;
+    try {
+      const captureId = `capture-${Date.now()}`;
+      session.captureId = captureId;
+      session.display = display;
+      session.previewImage = null;
+      session.previewImageDataUrl = null;
+      session.sourceImage = null;
+      session.sourceImageDataUrl = null;
+      session.displayFollowLocked = false;
+
+      this.activateOverlayWindow(overlayWindow, display);
+      this.showPreparingOverlay(overlayWindow);
+      await this.prepareOverlayRenderer(overlayWindow);
+
+      const frames = await this.resolveCaptureFrames(display);
+      if (this.session?.captureId !== captureId) {
+        return;
+      }
+      if (!frames) {
+        console.warn("[litesnap] display switch failed: no frames for target display");
+        await this.cancelCapture();
+        return;
+      }
+
+      session.previewImage = frames.previewImage;
+      session.previewImageDataUrl = frames.previewImageDataUrl;
+      session.sourceImage = frames.sourceImage;
+      session.sourceImageDataUrl = null;
+
+      if (frames.fromCache) {
+        this.warmDisplayFrameCache(display);
+      } else {
+        this.frameCache = {
+          displayId: display.id,
+          scaleFactor: display.scaleFactor,
+          previewImage: frames.previewImage,
+          previewImageDataUrl: frames.previewImageDataUrl,
+          sourceImage: frames.sourceImage,
+          capturedAt: Date.now()
+        };
+      }
+
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+      await this.showInteractiveOverlay(overlayWindow);
+      this.warmSiblingDisplays(display);
+    } finally {
+      this.switchingDisplay = false;
+    }
+  }
+
+  private warmSiblingDisplays(activeDisplay: Display): void {
+    for (const display of screen.getAllDisplays()) {
+      if (display.id === activeDisplay.id) {
+        continue;
+      }
+      this.warmDisplayFrameCache(display);
+    }
   }
 
   private ensureOverlayWindow(display: Display): BrowserWindow {

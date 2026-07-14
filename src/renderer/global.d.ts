@@ -365,6 +365,7 @@ declare global {
         import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilityInstallResult
       >;
       liteSnapCancelCapture(): Promise<boolean>;
+      liteSnapSetDisplayFollowLocked(locked: boolean): Promise<boolean>;
       liteSnapEnsureSourceImage(): Promise<string | null>;
       rebuildCatalog(): Promise<CatalogRebuildResult>;
       getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;

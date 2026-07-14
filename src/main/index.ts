@@ -2240,6 +2240,8 @@ async function bootstrap(): Promise<void> {
             return true;
           },
           cancelCapture: () => liteSnapCaptureSessionManager.cancelCapture(),
+          setDisplayFollowLocked: (locked) =>
+            liteSnapCaptureSessionManager.setDisplayFollowLocked(locked),
           ensureSourceImage: async () =>
             liteSnapCaptureSessionManager.ensureSourceImageDataUrl()
         },

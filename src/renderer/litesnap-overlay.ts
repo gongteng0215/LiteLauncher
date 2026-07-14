@@ -1056,6 +1056,7 @@
       canvasNode.hidden = true;
     }
     renderAnnotations();
+    syncDisplayFollowLock();
   }
 
   function prepareCaptureView(): void {
@@ -1133,10 +1134,24 @@
     }
   }
 
+  function syncDisplayFollowLock(): void {
+    const locked =
+      isValidSelection(selection) ||
+      dragMode === "selecting" ||
+      dragMode === "moving" ||
+      dragMode === "resizing" ||
+      dragMode === "drawing" ||
+      dragMode === "annotation-moving" ||
+      Boolean(draftAnnotation) ||
+      annotations.length > 0;
+    void window.launcher.liteSnapSetDisplayFollowLocked?.(locked);
+  }
+
   function markSelectionCommittedIfValid(): void {
     if (isValidSelection(selection)) {
       selectionCommitted = true;
     }
+    syncDisplayFollowLock();
   }
 
   function updateSelectionChrome(): void {
@@ -2432,6 +2447,7 @@
     }
 
     renderSelection();
+    syncDisplayFollowLock();
   }
 
   function handlePointerMove(event: PointerEvent): void {
@@ -2486,12 +2502,14 @@
     if (wasDrawing) {
       finalizeDraftAnnotation();
       updateSelectionChrome();
+      syncDisplayFollowLock();
       return;
     }
 
     if (wasMovingAnnotation) {
       rebuildVectorLayer();
       renderAnnotations();
+      syncDisplayFollowLock();
       return;
     }
 

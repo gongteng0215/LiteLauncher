@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   liteSnapGetOcrProbeCache: "launcher:litesnap-get-ocr-probe-cache",
   liteSnapSetOcrProbeCache: "launcher:litesnap-set-ocr-probe-cache",
   liteSnapCancelCapture: "launcher:litesnap-cancel-capture",
+  liteSnapSetDisplayFollowLocked: "launcher:litesnap-set-display-follow-locked",
   liteSnapEnsureSourceImage: "launcher:litesnap-ensure-source-image",
   rebuildCatalog: "launcher:rebuild-catalog",
   reportErrorLog: "launcher:report-error-log",

@@ -627,6 +627,11 @@ test("icon resolution keeps bounded in-memory caches for sources and attached it
     ipcSource,
     /const cachedItem = readLruMapValue\(attachedIconCache, cacheKey\);/
   );
+  assert.match(
+    ipcSource,
+    /return \{\s*\.\.\.item,\s*iconPath: cachedItem\.iconPath \?\? item\.iconPath\s*\};/,
+    "attachIcon cache hits must preserve live LaunchItem fields such as pinned"
+  );
 });
 
 test("home sections use a single IPC path with deduplicated icon attachment", () => {
@@ -647,6 +652,11 @@ test("home sections use a single IPC path with deduplicated icon attachment", ()
   assert.match(channelsSource, /getHomeSections:/);
   assert.match(ipcSource, /IPC_CHANNELS\.getHomeSections/);
   assert.match(ipcSource, /const mergedById = new Map<string, LaunchItem>\(\);/);
+  assert.match(
+    ipcSource,
+    /return \{\s*\.\.\.item,\s*iconPath: withIcon\.iconPath \?\? item\.iconPath\s*\};/,
+    "home section icon merge must keep section-specific fields like pinned"
+  );
   assert.match(preloadSource, /getHomeSections\(\): Promise<HomeSections>/);
   assert.match(rendererSource, /await launcher\.getHomeSections\(\)/);
 });
