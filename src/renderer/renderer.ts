@@ -340,8 +340,31 @@ interface LauncherApi {
   getLiteSnapSettings(): Promise<unknown>;
   setLiteSnapSettings(patch: Record<string, unknown>): Promise<unknown>;
   liteSnapStartCapture(): Promise<boolean>;
+  liteSnapStartColorCapture(): Promise<boolean>;
   liteSnapPinClipboard(): Promise<boolean>;
   liteSnapTogglePinnedWindows(): Promise<{ hidden: boolean; count: number }>;
+  liteSnapCloseAllPinnedWindows(): Promise<{ count: number }>;
+  liteSnapToggleNearestPinClickThrough(): Promise<{
+    toggled: boolean;
+    enabled: boolean;
+    count: number;
+  }>;
+  liteSnapRecordRecentColor(color: string): Promise<string[]>;
+  liteSnapListHistory(): Promise<
+    Array<{
+      id: string;
+      filePath: string;
+      thumbPath: string | null;
+      width: number;
+      height: number;
+      source: string;
+      createdAt: number;
+    }>
+  >;
+  liteSnapDeleteHistoryItem(id: string): Promise<boolean>;
+  liteSnapClearHistory(): Promise<number>;
+  liteSnapHistoryCopy(id: string): Promise<boolean>;
+  liteSnapHistoryPin(id: string): Promise<boolean>;
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;
@@ -2824,7 +2847,7 @@ function renderSettingsPanel(): void {
   const description = document.createElement("p");
   description.className = "settings-description";
   description.textContent =
-    "统一管理搜索展示、索引扫描、系统行为和错误日志。索引源变更后需要手动重建索引。";
+    "统一管理搜索展示、索引扫描、系统行为和错误日志。开始菜单变更会自动刷新；扫描目录改动后仍可手动重建索引。";
 
   const form = document.createElement("form");
   form.className = "settings-form settings-form-grouped";
@@ -2932,7 +2955,7 @@ function renderSettingsPanel(): void {
 
   const scanGroup = createGroup(
     "索引扫描",
-    "配置扫描目录与结果过滤规则，减少无关结果；扫描源改动后可立即重建索引。"
+    "配置扫描目录与结果过滤规则。开始菜单安装/卸载一般会自动更新；改扫描源后也可立即重建。"
   );
   const {
     row: scanProgramRow,

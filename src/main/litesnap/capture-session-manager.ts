@@ -11,8 +11,11 @@ import {
 
 import {
   createDefaultLiteSnapSettings,
+  pushLiteSnapRecentColor,
   type LiteSnapCommitCaptureInput,
   type LiteSnapCommitCaptureResult,
+  type LiteSnapHistorySource,
+  type LiteSnapOverlayMode,
   type LiteSnapOverlaySelection,
   type LiteSnapOverlayState,
   type LiteSnapRecognizeTextInput,
@@ -34,6 +37,7 @@ import {
   type LiteSnapCaptureProvider
 } from "./capture-provider";
 import { createLiteSnapOverlayWindow } from "./overlay-window";
+import { LiteSnapHistoryStore } from "./history-store";
 import { LiteSnapImageStore } from "./image-store";
 import { LiteSnapPinWindowManager } from "./pin-window-manager";
 import { LiteSnapSettingsStore } from "./settings";
@@ -54,6 +58,7 @@ import {
 
 type CaptureSession = {
   captureId: string;
+  mode: LiteSnapOverlayMode;
   overlayWindow: BrowserWindow;
   display: Display;
   settings: LiteSnapSettings;
@@ -99,7 +104,8 @@ export class LiteSnapCaptureSessionManager {
   public constructor(
     private readonly settingsStore: LiteSnapSettingsStore,
     private readonly imageStore: LiteSnapImageStore,
-    private readonly pinWindowManager: LiteSnapPinWindowManager
+    private readonly pinWindowManager: LiteSnapPinWindowManager,
+    private readonly historyStore: LiteSnapHistoryStore | null = null
   ) {
     this.captureProvider = createLiteSnapCaptureProvider();
   }
@@ -201,6 +207,19 @@ export class LiteSnapCaptureSessionManager {
   public async startCapture(
     beforeImageCapture?: () => Promise<void> | void
   ): Promise<boolean> {
+    return this.startCaptureWithMode("capture", beforeImageCapture);
+  }
+
+  public async startColorCapture(
+    beforeImageCapture?: () => Promise<void> | void
+  ): Promise<boolean> {
+    return this.startCaptureWithMode("color", beforeImageCapture);
+  }
+
+  private async startCaptureWithMode(
+    mode: LiteSnapOverlayMode,
+    beforeImageCapture?: () => Promise<void> | void
+  ): Promise<boolean> {
     if (process.platform !== "win32") {
       return false;
     }
@@ -214,13 +233,14 @@ export class LiteSnapCaptureSessionManager {
     }
     this.startingCapture = true;
     try {
-      return await this.startCaptureInternal(beforeImageCapture);
+      return await this.startCaptureInternal(mode, beforeImageCapture);
     } finally {
       this.startingCapture = false;
     }
   }
 
   private async startCaptureInternal(
+    mode: LiteSnapOverlayMode,
     beforeImageCapture?: () => Promise<void> | void
   ): Promise<boolean> {
     this.stopFrameCacheRefresh();
@@ -239,6 +259,7 @@ export class LiteSnapCaptureSessionManager {
     const captureId = `capture-${Date.now()}`;
     this.session = {
       captureId,
+      mode,
       overlayWindow,
       display,
       settings: createDefaultLiteSnapSettings(),
@@ -246,7 +267,7 @@ export class LiteSnapCaptureSessionManager {
       previewImageDataUrl: null,
       sourceImage: null,
       sourceImageDataUrl: null,
-      displayFollowLocked: false
+      displayFollowLocked: mode === "color"
     };
 
     const framesPromise = this.resolveCaptureFrames(display);
@@ -317,6 +338,7 @@ export class LiteSnapCaptureSessionManager {
     const settings = this.session.settings;
     return {
       captureId: this.session.captureId,
+      mode: this.session.mode ?? "capture",
       // Send only the display-sized preview to the overlay renderer. Encoding and
       // IPC-ing the full physical-resolution source as a data URL can take many
       // seconds (or fail outright) on high-DPI displays, which makes F1 appear
@@ -330,7 +352,8 @@ export class LiteSnapCaptureSessionManager {
       annotationLineWidth: settings.annotationLineWidth,
       annotationTextSize: settings.annotationTextSize,
       annotationTool: settings.annotationTool,
-      annotationFillShapes: settings.annotationFillShapes
+      annotationFillShapes: settings.annotationFillShapes,
+      recentColors: [...(settings.recentColors ?? [])]
     };
   }
 
@@ -388,6 +411,7 @@ export class LiteSnapCaptureSessionManager {
 
     if (input.action === "copy") {
       clipboard.writeImage(cropped);
+      await this.recordHistory(cropped, "capture-copy");
       await this.cancelCapture();
       return {
         ok: true,
@@ -402,6 +426,7 @@ export class LiteSnapCaptureSessionManager {
         await this.yieldAfterOverlayTeardown();
         const savedPath = await this.imageStore.saveImage(cropped, settings);
         this.revealSavedCapture(savedPath);
+        await this.recordHistory(cropped, "capture-save");
         return {
           ok: true,
           message: `Screenshot saved: ${savedPath}`,
@@ -436,11 +461,49 @@ export class LiteSnapCaptureSessionManager {
       };
     }
 
+    await this.recordHistory(cropped, "capture-pin");
     await this.cancelCapture();
     return {
       ok: true,
       message: "Screenshot pinned to the screen and copied to the clipboard."
     };
+  }
+
+  public async recordHistory(
+    image: NativeImage,
+    source: LiteSnapHistorySource
+  ): Promise<void> {
+    if (!this.historyStore) {
+      return;
+    }
+    try {
+      const settings = await this.settingsStore.getSettings();
+      if (!settings.historyEnabled) {
+        return;
+      }
+      await this.historyStore.add(image, source, settings.historyMaxItems);
+    } catch (error) {
+      console.warn("[litesnap] history record failed", error);
+    }
+  }
+
+  public async recordRecentColor(color: string): Promise<string[]> {
+    const nextColor = color.trim().toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(nextColor)) {
+      const settings = await this.settingsStore.getSettings();
+      return settings.recentColors;
+    }
+
+    const settings = await this.settingsStore.getSettings();
+    const recentColors = pushLiteSnapRecentColor(settings.recentColors, nextColor);
+    const next = await this.settingsStore.updateSettings({ recentColors });
+    if (this.session) {
+      this.session.settings = {
+        ...this.session.settings,
+        recentColors: [...next.recentColors]
+      };
+    }
+    return next.recentColors;
   }
 
   private async recognizeWithLanguage(

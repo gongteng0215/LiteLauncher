@@ -198,8 +198,8 @@ test("LiteSnap settings subview handles Esc inside plugin mode before leaving to
   );
   assert.match(
     panelImplsSource,
-    /let liteSnapPanelView: "main" \| "settings" \| "ocr" \| "translate" = "main";/,
-    "LiteSnap should keep local main/settings/ocr subview state"
+    /let liteSnapPanelView: "main" \| "settings" \| "ocr" \| "translate" \| "history"\s*=\s*"main";/,
+    "LiteSnap should keep local main/settings/ocr/translate/history subview state"
   );
   assert.match(
     panelImplsSource,
@@ -221,6 +221,25 @@ test("LiteSnap settings subview handles Esc inside plugin mode before leaving to
     rendererHtmlSource,
     /litesnap-text-utils\.js/,
     "renderer index should load litesnap-text-utils before plugin panels"
+  );
+});
+
+test("LiteSnap panel covers close-all pins, history view, and color capture controls", () => {
+  const panelImplsSource = readPanelImplsSource();
+  assert.match(panelImplsSource, /关闭全部贴图/);
+  assert.match(panelImplsSource, /liteSnapCloseAllPinnedWindows/);
+  assert.match(panelImplsSource, /liteSnapListHistory/);
+  assert.match(panelImplsSource, /liteSnapHistoryCopy/);
+  assert.match(panelImplsSource, /liteSnapHistoryPin/);
+  assert.match(panelImplsSource, /liteSnapStartColorCapture/);
+  assert.match(panelImplsSource, /historyEnabled/);
+  assert.match(panelImplsSource, /historyMaxItems/);
+  assert.match(panelImplsSource, /colorShortcut/);
+  assert.match(panelImplsSource, /togglePinClickThroughShortcut/);
+  assert.match(
+    panelImplsSource,
+    /liteSnapPanelView === "history"/,
+    "LiteSnap panel should render a history subview"
   );
 });
 

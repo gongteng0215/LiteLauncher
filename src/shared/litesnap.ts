@@ -3,6 +3,12 @@ import type { LiteSnapOcrIssue } from "../shared/litesnap-ocr-help";
 export const LITESNAP_PLUGIN_ID = "litesnap";
 export const LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT = "F1";
 export const LITESNAP_DEFAULT_PIN_SHORTCUT = "F3";
+export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "F4";
+export const LITESNAP_DEFAULT_TOGGLE_PIN_CLICK_THROUGH_SHORTCUT = "Ctrl+Shift+T";
+export const LITESNAP_RECENT_COLORS_MAX = 8;
+export const LITESNAP_HISTORY_MAX_ITEMS_DEFAULT = 20;
+export const LITESNAP_HISTORY_MAX_ITEMS_MIN = 5;
+export const LITESNAP_HISTORY_MAX_ITEMS_MAX = 50;
 
 export type { LiteSnapOcrIssue };
 export type { LiteSnapOcrProbeResult } from "./litesnap-ocr-help";
@@ -11,9 +17,19 @@ export type LiteSnapPanelAction =
   | "open"
   | "start-capture"
   | "pin-from-clipboard"
-  | "open-settings";
+  | "open-settings"
+  | "open-history"
+  | "start-color-capture";
 
 export type LiteSnapCaptureAction = "copy" | "save" | "pin";
+
+export type LiteSnapOverlayMode = "capture" | "color";
+
+export type LiteSnapHistorySource =
+  | "capture-copy"
+  | "capture-save"
+  | "capture-pin"
+  | "clipboard-pin";
 
 export type LiteSnapAnnotationTool =
   | "select"
@@ -31,6 +47,8 @@ export type LiteSnapAnnotationTool =
 export interface LiteSnapSettings {
   screenshotShortcut: string;
   pinShortcut: string;
+  colorShortcut: string;
+  togglePinClickThroughShortcut: string;
   saveDirectory: string;
   saveFormat: "png" | "jpg";
   postCaptureBehavior: "toolbar" | "copy" | "save" | "pin";
@@ -39,16 +57,39 @@ export interface LiteSnapSettings {
   annotationTextSize: number;
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
+  recentColors: string[];
+  historyEnabled: boolean;
+  historyMaxItems: number;
 }
 
 export interface LiteSnapPanelPayload {
   settings: LiteSnapSettings;
   statusMessage?: string;
-  preferredView?: "main" | "settings" | "ocr" | "translate";
+  preferredView?: "main" | "settings" | "ocr" | "translate" | "history";
   ocrText?: string;
   ocrIssue?: LiteSnapOcrIssue;
   translateSourceText?: string;
   translateText?: string;
+}
+
+export interface LiteSnapHistoryItem {
+  id: string;
+  filePath: string;
+  thumbPath: string | null;
+  width: number;
+  height: number;
+  source: LiteSnapHistorySource;
+  createdAt: number;
+}
+
+export interface LiteSnapCloseAllPinnedWindowsResult {
+  count: number;
+}
+
+export interface LiteSnapTogglePinClickThroughResult {
+  toggled: boolean;
+  enabled: boolean;
+  count: number;
 }
 
 export interface LiteSnapOverlaySelection {
@@ -62,6 +103,7 @@ export type LiteSnapWindowRect = LiteSnapOverlaySelection;
 
 export interface LiteSnapOverlayState {
   captureId: string;
+  mode: LiteSnapOverlayMode;
   imageDataUrl: string | null;
   sourceImageDataUrl: string | null;
   viewportWidth: number;
@@ -72,6 +114,7 @@ export interface LiteSnapOverlayState {
   annotationTextSize: number;
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
+  recentColors: string[];
 }
 
 export interface LiteSnapCommitCaptureInput {
@@ -112,6 +155,8 @@ export interface LiteSnapPinnedWindowsToggleResult {
 export interface LiteSnapShortcutRegistrationResult {
   screenshot: boolean;
   pin: boolean;
+  color: boolean;
+  togglePinClickThrough: boolean;
   message: string;
 }
 
@@ -163,10 +208,47 @@ export function normalizeLiteSnapOcrText(text: string): string {
   );
 }
 
+export function normalizeLiteSnapRecentColors(
+  value: unknown,
+  fallback: string[] = []
+): string[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const colors: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of source) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    const color = entry.trim().toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(color) || seen.has(color)) {
+      continue;
+    }
+    seen.add(color);
+    colors.push(color);
+    if (colors.length >= LITESNAP_RECENT_COLORS_MAX) {
+      break;
+    }
+  }
+  return colors;
+}
+
+export function pushLiteSnapRecentColor(
+  colors: string[],
+  nextColor: string
+): string[] {
+  const color = nextColor.trim().toLowerCase();
+  if (!/^#[0-9a-f]{6}$/.test(color)) {
+    return normalizeLiteSnapRecentColors(colors);
+  }
+  return normalizeLiteSnapRecentColors([color, ...colors]);
+}
+
 export function createDefaultLiteSnapSettings(): LiteSnapSettings {
   return {
     screenshotShortcut: LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT,
     pinShortcut: LITESNAP_DEFAULT_PIN_SHORTCUT,
+    colorShortcut: LITESNAP_DEFAULT_COLOR_SHORTCUT,
+    togglePinClickThroughShortcut: LITESNAP_DEFAULT_TOGGLE_PIN_CLICK_THROUGH_SHORTCUT,
     saveDirectory: "",
     saveFormat: "png",
     postCaptureBehavior: "toolbar",
@@ -174,6 +256,9 @@ export function createDefaultLiteSnapSettings(): LiteSnapSettings {
     annotationLineWidth: 3,
     annotationTextSize: 16,
     annotationTool: "select",
-    annotationFillShapes: false
+    annotationFillShapes: false,
+    recentColors: [],
+    historyEnabled: true,
+    historyMaxItems: LITESNAP_HISTORY_MAX_ITEMS_DEFAULT
   };
 }

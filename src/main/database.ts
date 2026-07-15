@@ -173,6 +173,22 @@ export class LiteDatabase {
     );
 
     await this.run(
+      `CREATE TABLE IF NOT EXISTS litesnap_history (
+         id TEXT PRIMARY KEY,
+         filePath TEXT NOT NULL,
+         thumbPath TEXT,
+         width INTEGER NOT NULL,
+         height INTEGER NOT NULL,
+         source TEXT NOT NULL,
+         createdAt INTEGER NOT NULL
+       )`
+    );
+
+    await this.run(
+      "CREATE INDEX IF NOT EXISTS litesnap_history_created_idx ON litesnap_history(createdAt DESC)"
+    );
+
+    await this.run(
       `CREATE TABLE IF NOT EXISTS cashflow_games (
          id INTEGER PRIMARY KEY AUTOINCREMENT,
          status TEXT NOT NULL,
@@ -810,6 +826,125 @@ export class LiteDatabase {
 
   public async clearClipItems(): Promise<number> {
     return this.runWithChanges("DELETE FROM clip_items");
+  }
+
+  public async insertLiteSnapHistoryItem(input: {
+    id: string;
+    filePath: string;
+    thumbPath: string | null;
+    width: number;
+    height: number;
+    source: string;
+    createdAt: number;
+  }): Promise<void> {
+    await this.run(
+      `INSERT INTO litesnap_history
+         (id, filePath, thumbPath, width, height, source, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.id,
+        input.filePath,
+        input.thumbPath,
+        input.width,
+        input.height,
+        input.source,
+        input.createdAt
+      ]
+    );
+  }
+
+  public async listLiteSnapHistoryItems(limit: number): Promise<
+    Array<{
+      id: string;
+      filePath: string;
+      thumbPath: string | null;
+      width: number;
+      height: number;
+      source: string;
+      createdAt: number;
+    }>
+  > {
+    return this.all(
+      `SELECT id, filePath, thumbPath, width, height, source, createdAt
+       FROM litesnap_history
+       ORDER BY createdAt DESC
+       LIMIT ?`,
+      [limit]
+    );
+  }
+
+  public async getLiteSnapHistoryItem(id: string): Promise<{
+    id: string;
+    filePath: string;
+    thumbPath: string | null;
+    width: number;
+    height: number;
+    source: string;
+    createdAt: number;
+  } | null> {
+    const row = await this.get<{
+      id: string;
+      filePath: string;
+      thumbPath: string | null;
+      width: number;
+      height: number;
+      source: string;
+      createdAt: number;
+    }>(
+      `SELECT id, filePath, thumbPath, width, height, source, createdAt
+       FROM litesnap_history
+       WHERE id = ?`,
+      [id]
+    );
+    return row ?? null;
+  }
+
+  public async deleteLiteSnapHistoryItem(id: string): Promise<boolean> {
+    const affected = await this.runWithChanges(
+      "DELETE FROM litesnap_history WHERE id = ?",
+      [id]
+    );
+    return affected > 0;
+  }
+
+  public async clearLiteSnapHistoryItems(): Promise<
+    Array<{ id: string; filePath: string; thumbPath: string | null }>
+  > {
+    const rows = await this.all<{
+      id: string;
+      filePath: string;
+      thumbPath: string | null;
+    }>("SELECT id, filePath, thumbPath FROM litesnap_history");
+    await this.run("DELETE FROM litesnap_history");
+    return rows;
+  }
+
+  public async trimLiteSnapHistoryItems(maxItems: number): Promise<
+    Array<{ id: string; filePath: string; thumbPath: string | null }>
+  > {
+    const overflow = await this.all<{
+      id: string;
+      filePath: string;
+      thumbPath: string | null;
+    }>(
+      `SELECT id, filePath, thumbPath
+       FROM litesnap_history
+       WHERE id NOT IN (
+         SELECT id FROM litesnap_history ORDER BY createdAt DESC LIMIT ?
+       )`,
+      [maxItems]
+    );
+    if (overflow.length === 0) {
+      return [];
+    }
+    await this.run(
+      `DELETE FROM litesnap_history
+       WHERE id NOT IN (
+         SELECT id FROM litesnap_history ORDER BY createdAt DESC LIMIT ?
+       )`,
+      [maxItems]
+    );
+    return overflow;
   }
 
   public async recordErrorLog(input: AppErrorLogInput): Promise<void> {

@@ -15,12 +15,16 @@ import {
   SearchDisplayConfig
 } from "../shared/types";
 import {
+  LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapHistoryItem,
+  LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
   LiteSnapRecognizeTextInput,
   LiteSnapRecognizeTextResult,
+  LiteSnapTogglePinClickThroughResult,
   LiteSnapTranslateSelectionInput,
   LiteSnapTranslateSelectionResult,
   LiteSnapSettings,
@@ -329,8 +333,16 @@ declare global {
         patch: Partial<LiteSnapSettings>
       ): Promise<LiteSnapSettingsUpdateResult>;
       liteSnapStartCapture(): Promise<boolean>;
+      liteSnapStartColorCapture(): Promise<boolean>;
       liteSnapPinClipboard(): Promise<boolean>;
       liteSnapTogglePinnedWindows(): Promise<LiteSnapPinnedWindowsToggleResult>;
+      liteSnapCloseAllPinnedWindows(): Promise<LiteSnapCloseAllPinnedWindowsResult>;
+      liteSnapToggleNearestPinClickThrough(): Promise<LiteSnapTogglePinClickThroughResult>;
+      liteSnapListHistory(): Promise<LiteSnapHistoryItem[]>;
+      liteSnapDeleteHistoryItem(id: string): Promise<boolean>;
+      liteSnapClearHistory(): Promise<number>;
+      liteSnapHistoryCopy(id: string): Promise<boolean>;
+      liteSnapHistoryPin(id: string): Promise<boolean>;
       liteSnapGetOverlayState(): Promise<LiteSnapOverlayState | null>;
       liteSnapGetWindowRectAtPoint(
         x: number,
@@ -348,6 +360,7 @@ declare global {
       liteSnapTranslateSelection(
         input: LiteSnapTranslateSelectionInput
       ): Promise<LiteSnapTranslateSelectionResult>;
+      liteSnapRecordRecentColor(color: string): Promise<string[]>;
       getTranslateToolSettings(): Promise<TranslateSettings>;
       setTranslateToolSettings(
         patch: Partial<TranslateSettings>

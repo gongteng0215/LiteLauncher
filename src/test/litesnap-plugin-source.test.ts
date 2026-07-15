@@ -102,6 +102,16 @@ test("LiteSnap shared defaults expose Snipaste-compatible first-version shortcut
     /export const LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT = "F1";/
   );
   assert.match(source, /export const LITESNAP_DEFAULT_PIN_SHORTCUT = "F3";/);
+  assert.match(source, /export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "F4";/);
+  assert.match(
+    source,
+    /export const LITESNAP_DEFAULT_TOGGLE_PIN_CLICK_THROUGH_SHORTCUT = "Ctrl\+Shift\+T";/
+  );
+  assert.match(source, /recentColors: string\[\]/);
+  assert.match(source, /historyEnabled: boolean/);
+  assert.match(source, /historyMaxItems: number/);
+  assert.match(source, /mode: LiteSnapOverlayMode/);
+  assert.match(source, /export function pushLiteSnapRecentColor/);
   assert.match(source, /export type LiteSnapPanelAction =/);
   assert.match(source, /export interface LiteSnapSettings/);
   assert.match(source, /export interface LiteSnapShortcutRegistrationResult/);
@@ -120,6 +130,22 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
   assert.match(
     channelsSource,
     /liteSnapTogglePinnedWindows:\s*"launcher:litesnap-toggle-pinned-windows"/
+  );
+  assert.match(
+    channelsSource,
+    /liteSnapCloseAllPinnedWindows:\s*"launcher:litesnap-close-all-pinned-windows"/
+  );
+  assert.match(
+    channelsSource,
+    /liteSnapStartColorCapture:\s*"launcher:litesnap-start-color-capture"/
+  );
+  assert.match(
+    channelsSource,
+    /liteSnapListHistory:\s*"launcher:litesnap-list-history"/
+  );
+  assert.match(
+    channelsSource,
+    /liteSnapRecordRecentColor:\s*"launcher:litesnap-record-recent-color"/
   );
   assert.match(
     channelsSource,
@@ -252,6 +278,46 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
     pinSource,
     /togglePinnedWindowsVisibility\(\): \{ hidden: boolean; count: number \}/,
     "LiteSnap pin manager should support hiding or showing all pinned windows"
+  );
+  assert.match(
+    pinSource,
+    /closeAllPinnedWindows\(\): \{ count: number \}/,
+    "LiteSnap pin manager should support closing all pinned windows"
+  );
+  assert.match(
+    pinSource,
+    /toggleNearestPinClickThrough\(\)/,
+    "LiteSnap pin manager should toggle click-through on the nearest pin window"
+  );
+  assert.match(
+    pinSource,
+    /setIgnoreMouseEvents\(true, \{ forward: true \}\)/,
+    "LiteSnap pin click-through should ignore mouse events with forward tracking"
+  );
+  assert.match(
+    pinSource,
+    /disableAllClickThrough\(\)|PIN_CLICK_THROUGH_ESCAPE_ACCELERATOR|globalShortcut\.register/,
+    "LiteSnap should register a global Esc escape hatch while pin click-through is active"
+  );
+  assert.match(
+    pinSource,
+    /setIgnoreMouseEvents\(false\)/,
+    "LiteSnap should restore mouse hit-testing without the forward option"
+  );
+  assert.match(
+    pinSource,
+    /PIN_DRAG_END_CHANNEL[\s\S]*getDisplayMatching[\s\S]*rebakePinImageForDisplay/,
+    "LiteSnap pin windows should rebake pixels when dragged onto a different-scale display"
+  );
+  assert.match(
+    pinSource,
+    /sourceImage:[\s\S]*bakedScaleFactor:[\s\S]*usePng:[\s\S]*clickThrough:/,
+    "LiteSnap pin metadata should keep the source image and baked scale factor for DPI rebake"
+  );
+  assert.match(
+    pinSource,
+    /toggle-click-through[\s\S]*close-all[\s\S]*notifyDragEnd/,
+    "LiteSnap pin menu should expose click-through and close-all commands"
   );
   assert.match(
     nativeAddonSource,
@@ -711,7 +777,7 @@ test("LiteSnap renderer panel actions call the preload bridge for capture and pi
   );
   assert.match(
     panelImplsSource,
-    /隐藏\/显示全部贴图/,
+    /隐藏\/显示贴图/,
     "LiteSnap panel should expose a hide/show all pinned windows action"
   );
   assert.match(
@@ -838,7 +904,7 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
   );
   assert.match(
     mainIndexSource,
-    /registerLiteSnapLocalShortcut\(window, startCapture, pinClipboardImage\)/,
+    /registerLiteSnapLocalShortcut\(\s*window,\s*startCapture,\s*pinClipboardImage,\s*startColorCapture,\s*togglePinClickThrough\s*\)/,
     "LiteSnap should also handle screenshot shortcuts locally when the launcher window is focused"
   );
   assert.match(
@@ -992,8 +1058,8 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     overlayRendererSource,
-    /navigator\.clipboard\?\.writeText\(hoveredColor\)/,
-    "LiteSnap overlay should copy the currently sampled color"
+    /async function copyHoveredColor[\s\S]*navigator\.clipboard\?\.writeText\(color\)[\s\S]*liteSnapRecordRecentColor/,
+    "LiteSnap overlay should copy the currently sampled color and record it as a recent color"
   );
   assert.match(
     overlayRendererSource,
@@ -1381,4 +1447,48 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
     /translateBaiduEngine/,
     "LiteSnap settings should not include Baidu translate credentials"
   );
+});
+
+test("LiteSnap history store, color mode, and recent colors are wired", () => {
+  const databaseSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "database.ts"),
+    "utf8"
+  );
+  const historySource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "litesnap", "history-store.ts"),
+    "utf8"
+  );
+  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
+  const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
+  const pluginSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "plugins", "litesnap", "index.ts"),
+    "utf8"
+  );
+  const mainIndexSource = fs.readFileSync(mainIndexPath, "utf8");
+
+  assert.match(databaseSource, /CREATE TABLE IF NOT EXISTS litesnap_history/);
+  assert.match(historySource, /export class LiteSnapHistoryStore/);
+  assert.match(historySource, /async add\(/);
+  assert.match(captureSource, /startColorCapture\(/);
+  assert.match(captureSource, /mode: LiteSnapOverlayMode/);
+  assert.match(captureSource, /recordHistory\(/);
+  assert.match(captureSource, /recordRecentColor\(/);
+  assert.match(captureSource, /"capture-copy"/);
+  assert.match(captureSource, /"capture-save"/);
+  assert.match(captureSource, /"capture-pin"/);
+  assert.match(settingsSource, /recentColors:/);
+  assert.match(settingsSource, /historyEnabled:/);
+  assert.match(settingsSource, /colorShortcut:/);
+  assert.match(overlayRendererSource, /isColorMode\(\)/);
+  assert.match(overlayRendererSource, /liteSnapRecordRecentColor/);
+  assert.match(overlayRendererSource, /litesnap-overlay__color--recent/);
+  assert.match(overlayRendererSource, /mode === "color"/);
+  assert.match(pluginSource, /open-history/);
+  assert.match(pluginSource, /start-color-capture/);
+  assert.match(pluginSource, /snap history|截图历史/);
+  assert.match(pluginSource, /取色/);
+  assert.match(mainIndexSource, /LiteSnapHistoryStore/);
+  assert.match(mainIndexSource, /clipboard-pin/);
+  assert.match(mainIndexSource, /startLiteSnapColorCapture/);
 });

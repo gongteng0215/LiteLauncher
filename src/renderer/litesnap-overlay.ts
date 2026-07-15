@@ -23,6 +23,7 @@
 
   type OverlayState = {
     captureId: string;
+    mode?: "capture" | "color";
     imageDataUrl: string | null;
     sourceImageDataUrl: string | null;
     viewportWidth: number;
@@ -33,6 +34,7 @@
     annotationTextSize: number;
     annotationTool: AnnotationTool;
     annotationFillShapes: boolean;
+    recentColors?: string[];
   };
 
   type SelectionRect = {
@@ -161,6 +163,8 @@
 
   let overlayState: OverlayState | null = null;
   let activeCaptureId = "";
+  let overlayMode: "capture" | "color" = "capture";
+  let recentColors: string[] = [];
   let selection: SelectionRect | null = null;
   let dragMode: DragMode = "idle";
   let pointerStart: PointerStartState | null = null;
@@ -871,6 +875,29 @@
     if ("start" in annotation && "end" in annotation) {
       annotation.start = { x: annotation.start.x + dx, y: annotation.start.y + dy };
       annotation.end = { x: annotation.end.x + dx, y: annotation.end.y + dy };
+    }
+  }
+
+  function isColorMode(): boolean {
+    return overlayMode === "color";
+  }
+
+  async function copyHoveredColor(options?: { exitAfter?: boolean }): Promise<void> {
+    const color = hoveredColor;
+    void navigator.clipboard?.writeText(color).catch(() => undefined);
+    showStatus(`已复制颜色 ${color}`);
+    try {
+      if (window.launcher?.liteSnapRecordRecentColor) {
+        recentColors = await window.launcher.liteSnapRecordRecentColor(color);
+        if (!isColorMode()) {
+          buildColorControls();
+        }
+      }
+    } catch {
+      // Ignore persistence failures; clipboard write already succeeded.
+    }
+    if (options?.exitAfter || isColorMode()) {
+      void commitSelection("cancel");
     }
   }
 
@@ -2326,6 +2353,14 @@
 
     noteCapturePointerActivity();
 
+    if (isColorMode()) {
+      if (event.button === 0) {
+        event.preventDefault();
+        void copyHoveredColor({ exitAfter: true });
+      }
+      return;
+    }
+
     if (toolbarNode && !toolbarNode.hidden && toolbarNode.contains(event.target as Node)) {
       return;
     }
@@ -2574,6 +2609,25 @@
       return;
     }
     colorsNode.innerHTML = "";
+
+    const uniqueRecent = recentColors.filter(
+      (color, index, all) =>
+        /^#[0-9a-f]{6}$/i.test(color) &&
+        all.findIndex((entry) => entry.toLowerCase() === color.toLowerCase()) === index
+    );
+
+    for (const color of uniqueRecent) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "litesnap-overlay__color litesnap-overlay__color--recent";
+      button.dataset.color = color.toLowerCase();
+      button.style.background = color;
+      button.title = `最近 ${color}`;
+      button.setAttribute("aria-label", `最近颜色 ${color}`);
+      button.addEventListener("click", () => setActiveColor(color));
+      colorsNode.appendChild(button);
+    }
+
     for (const color of PRESET_COLORS) {
       const button = document.createElement("button");
       button.type = "button";
@@ -2715,6 +2769,14 @@
         return;
       }
 
+      if (isColorMode()) {
+        if (event.key === "c" || event.key === "C") {
+          event.preventDefault();
+          void copyHoveredColor({ exitAfter: true });
+        }
+        return;
+      }
+
       if (
         (event.key === "z" || event.key === "Z") &&
         (event.ctrlKey || event.metaKey)
@@ -2750,8 +2812,7 @@
 
       if (event.key === "c" || event.key === "C") {
         event.preventDefault();
-        void navigator.clipboard?.writeText(hoveredColor).catch(() => undefined);
-        showStatus(`已复制颜色 ${hoveredColor}`);
+        void copyHoveredColor();
         return;
       }
 
@@ -2801,10 +2862,35 @@
     }
 
     overlayState = state;
+    overlayMode = state.mode === "color" ? "color" : "capture";
+    recentColors = Array.isArray(state.recentColors) ? [...state.recentColors] : recentColors;
     applyAnnotationDefaults(state);
 
     if (!overlayRoot) {
       return;
+    }
+
+    if (hintNode) {
+      hintNode.textContent = isColorMode()
+        ? "取色模式：移动鼠标取样，单击或按 C 复制颜色后退出，Esc 取消。"
+        : "拖拽选择区域，松开后可标注。Enter 复制，Esc 取消。";
+    }
+
+    if (isColorMode()) {
+      if (toolbarNode) {
+        toolbarNode.hidden = true;
+      }
+      if (selectionNode) {
+        selectionNode.hidden = true;
+      }
+      if (dimNode) {
+        dimNode.hidden = true;
+      }
+      if (windowHintNode) {
+        windowHintNode.hidden = true;
+      }
+    } else {
+      buildColorControls();
     }
 
     if (!state.imageDataUrl) {

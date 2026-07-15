@@ -12823,6 +12823,8 @@ interface LiteSnapPanelData {
   settings: {
     screenshotShortcut: string;
     pinShortcut: string;
+    colorShortcut: string;
+    togglePinClickThroughShortcut: string;
     saveDirectory: string;
     saveFormat: "png" | "jpg";
     postCaptureBehavior: "toolbar" | "copy" | "save" | "pin";
@@ -12831,6 +12833,9 @@ interface LiteSnapPanelData {
     annotationTextSize: number;
     annotationTool: string;
     annotationFillShapes: boolean;
+    recentColors: string[];
+    historyEnabled: boolean;
+    historyMaxItems: number;
   };
   statusMessage: string;
   ocrIssue?: "module_missing" | "language_pack";
@@ -12840,6 +12845,8 @@ const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
   settings: {
     screenshotShortcut: "F1",
     pinShortcut: "F3",
+    colorShortcut: "F4",
+    togglePinClickThroughShortcut: "Ctrl+Shift+T",
     saveDirectory: "",
     saveFormat: "png",
     postCaptureBehavior: "toolbar",
@@ -12847,7 +12854,10 @@ const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
     annotationLineWidth: 3,
     annotationTextSize: 16,
     annotationTool: "select",
-    annotationFillShapes: false
+    annotationFillShapes: false,
+    recentColors: [],
+    historyEnabled: true,
+    historyMaxItems: 20
   },
   statusMessage: "按 F1 进入截图，主窗口会保持可见，便于截取启动器界面。"
 };
@@ -12857,7 +12867,17 @@ let liteSnapPanelData: LiteSnapPanelData = {
   statusMessage: DEFAULT_LITESNAP_PANEL_DATA.statusMessage
 };
 let liteSnapOcrIssue: "module_missing" | "language_pack" | null = null;
-let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" = "main";
+let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" | "history" =
+  "main";
+let liteSnapHistoryItems: Array<{
+  id: string;
+  filePath: string;
+  thumbPath: string | null;
+  width: number;
+  height: number;
+  source: string;
+  createdAt: number;
+}> = [];
 let liteSnapOcrText = "";
 let liteSnapTranslateSourceText = "";
 let liteSnapTranslateText = "";
@@ -13257,6 +13277,16 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
   const record = toRecord(value);
   const settingsRecord = toRecord(record?.settings);
 
+  const recentColors = Array.isArray(settingsRecord?.recentColors)
+    ? settingsRecord.recentColors.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : DEFAULT_LITESNAP_PANEL_DATA.settings.recentColors;
+  const historyMaxItemsRaw =
+    typeof settingsRecord?.historyMaxItems === "number"
+      ? settingsRecord.historyMaxItems
+      : DEFAULT_LITESNAP_PANEL_DATA.settings.historyMaxItems;
+
   return {
     settings: {
       screenshotShortcut:
@@ -13267,6 +13297,14 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
         typeof settingsRecord?.pinShortcut === "string"
           ? settingsRecord.pinShortcut
           : DEFAULT_LITESNAP_PANEL_DATA.settings.pinShortcut,
+      colorShortcut:
+        typeof settingsRecord?.colorShortcut === "string"
+          ? settingsRecord.colorShortcut
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.colorShortcut,
+      togglePinClickThroughShortcut:
+        typeof settingsRecord?.togglePinClickThroughShortcut === "string"
+          ? settingsRecord.togglePinClickThroughShortcut
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.togglePinClickThroughShortcut,
       saveDirectory:
         typeof settingsRecord?.saveDirectory === "string"
           ? settingsRecord.saveDirectory
@@ -13298,7 +13336,15 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
       annotationFillShapes:
         typeof settingsRecord?.annotationFillShapes === "boolean"
           ? settingsRecord.annotationFillShapes
-          : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationFillShapes
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationFillShapes,
+      recentColors,
+      historyEnabled:
+        typeof settingsRecord?.historyEnabled === "boolean"
+          ? settingsRecord.historyEnabled
+          : DEFAULT_LITESNAP_PANEL_DATA.settings.historyEnabled,
+      historyMaxItems: Number.isFinite(historyMaxItemsRaw)
+        ? Math.min(50, Math.max(5, Math.round(historyMaxItemsRaw)))
+        : DEFAULT_LITESNAP_PANEL_DATA.settings.historyMaxItems
     },
     statusMessage:
       typeof record?.statusMessage === "string"
@@ -13308,7 +13354,12 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
 }
 
 function buildLiteSnapTarget(
-  action: "start-capture" | "pin-from-clipboard" | "open-settings"
+  action:
+    | "start-capture"
+    | "pin-from-clipboard"
+    | "open-settings"
+    | "open-history"
+    | "start-color-capture"
 ): string {
   const params = new URLSearchParams();
   params.set("action", action);
@@ -13328,6 +13379,23 @@ function formatLiteSnapPostCaptureBehavior(
     default:
       return "保留工具条";
   }
+}
+
+function createLiteSnapFormSection(children: HTMLElement[]): HTMLDivElement {
+  const section = document.createElement("div");
+  section.className = "litesnap-form-section";
+  section.append(...children);
+  return section;
+}
+
+function createLiteSnapFieldsGrid(rows: HTMLElement[]): HTMLDivElement {
+  const grid = document.createElement("div");
+  grid.className = "litesnap-fields-grid";
+  for (const row of rows) {
+    row.classList.add("litesnap-fields-grid-item");
+    grid.appendChild(row);
+  }
+  return grid;
 }
 
 function createLiteSnapInfoRow(
@@ -13754,6 +13822,10 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   const formData = new FormData(form);
   const screenshotShortcut = String(formData.get("screenshotShortcut") ?? "").trim();
   const pinShortcut = String(formData.get("pinShortcut") ?? "").trim();
+  const colorShortcut = String(formData.get("colorShortcut") ?? "").trim();
+  const togglePinClickThroughShortcut = String(
+    formData.get("togglePinClickThroughShortcut") ?? ""
+  ).trim();
   const screenshotShortcutError = getLiteSnapShortcutValidationError(screenshotShortcut);
   if (screenshotShortcutError) {
     setStatus(`截图快捷键无效：${screenshotShortcutError}`);
@@ -13764,10 +13836,31 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
     setStatus(`贴图快捷键无效：${pinShortcutError}`);
     return;
   }
+  const colorShortcutError = getLiteSnapShortcutValidationError(colorShortcut);
+  if (colorShortcutError) {
+    setStatus(`取色快捷键无效：${colorShortcutError}`);
+    return;
+  }
+  if (togglePinClickThroughShortcut) {
+    const togglePinClickThroughError = getLiteSnapShortcutValidationError(
+      togglePinClickThroughShortcut
+    );
+    if (togglePinClickThroughError) {
+      setStatus(`点击穿透快捷键无效：${togglePinClickThroughError}`);
+      return;
+    }
+  }
+
+  const historyMaxItemsRaw = Number(formData.get("historyMaxItems"));
+  const historyMaxItems = Number.isFinite(historyMaxItemsRaw)
+    ? Math.min(50, Math.max(5, Math.round(historyMaxItemsRaw)))
+    : DEFAULT_LITESNAP_PANEL_DATA.settings.historyMaxItems;
 
   const patch = {
     screenshotShortcut,
     pinShortcut,
+    colorShortcut,
+    togglePinClickThroughShortcut,
     saveDirectory: String(formData.get("saveDirectory") ?? "").trim(),
     saveFormat:
       formData.get("saveFormat") === "jpg" ? "jpg" : "png",
@@ -13780,7 +13873,9 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
     annotationColor: String(formData.get("annotationColor") ?? "").trim(),
     annotationLineWidth: Number(formData.get("annotationLineWidth")),
     annotationTextSize: Number(formData.get("annotationTextSize")),
-    annotationFillShapes: formData.get("annotationFillShapes") === "on"
+    annotationFillShapes: formData.get("annotationFillShapes") === "on",
+    historyEnabled: formData.get("historyEnabled") === "on",
+    historyMaxItems
   };
 
   const previousLabel = submitButton?.textContent ?? "保存设置";
@@ -14057,7 +14152,10 @@ async function executeLiteSnapPanelAction(
     | "start-capture"
     | "pin-from-clipboard"
     | "toggle-pinned-windows"
+    | "close-all-pinned-windows"
     | "open-settings"
+    | "open-history"
+    | "start-color-capture"
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
@@ -14070,9 +14168,24 @@ async function executeLiteSnapPanelAction(
     return;
   }
 
+  if (action === "open-history") {
+    openLiteSnapHistoryView();
+    return;
+  }
+
   if (action === "start-capture") {
     const ok = await launcher.liteSnapStartCapture();
     setStatus(ok ? "已进入截图模式，主窗口保持可见。" : "LiteSnap 截图启动失败。");
+    return;
+  }
+
+  if (action === "start-color-capture") {
+    if (!launcher.liteSnapStartColorCapture) {
+      setStatus("当前版本暂不支持取色，请升级 LiteLauncher。");
+      return;
+    }
+    const ok = await launcher.liteSnapStartColorCapture();
+    setStatus(ok ? "已进入取色模式。" : "LiteSnap 取色启动失败。");
     return;
   }
 
@@ -14086,6 +14199,20 @@ async function executeLiteSnapPanelAction(
     return;
   }
 
+  if (action === "close-all-pinned-windows") {
+    if (!launcher.liteSnapCloseAllPinnedWindows) {
+      setStatus("当前版本暂不支持关闭全部贴图，请升级 LiteLauncher。");
+      return;
+    }
+    const result = await launcher.liteSnapCloseAllPinnedWindows();
+    setStatus(
+      result.count === 0
+        ? "当前没有打开的贴图窗口。"
+        : `已关闭 ${result.count} 个贴图。`
+    );
+    return;
+  }
+
   const ok = await launcher.liteSnapPinClipboard();
   setStatus(ok ? "已尝试将剪贴板图片贴到屏幕。" : "剪贴板里没有可贴图的图片，或贴图功能暂不可用。");
 }
@@ -14096,10 +14223,181 @@ function openLiteSnapSettingsView(): void {
   renderList();
 }
 
+function openLiteSnapHistoryView(): void {
+  liteSnapPanelView = "history";
+  setStatus("已进入截图历史。");
+  renderList();
+  void hydrateLiteSnapHistory();
+}
+
 function returnToLiteSnapMainView(): void {
   liteSnapPanelView = "main";
   setStatus("已返回 LiteSnap 主页面。");
   renderList();
+}
+
+function toLiteSnapFileUrl(filePath: string): string {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^(?:file|data|https?):/i.test(trimmed)) {
+    return trimmed;
+  }
+  const normalized = trimmed.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  if (normalized.startsWith("/")) {
+    return `file://${normalized}`;
+  }
+  return `file:///${normalized}`;
+}
+
+function formatLiteSnapHistorySource(source: string): string {
+  switch (source) {
+    case "capture-copy":
+      return "复制";
+    case "capture-save":
+      return "保存";
+    case "capture-pin":
+      return "贴图";
+    case "clipboard-pin":
+      return "剪贴板贴图";
+    default:
+      return source;
+  }
+}
+
+function formatLiteSnapHistoryTime(createdAt: number): string {
+  if (!Number.isFinite(createdAt) || createdAt <= 0) {
+    return "";
+  }
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const now = Date.now();
+  const deltaMs = Math.max(0, now - createdAt);
+  if (deltaMs < 60_000) {
+    return "刚刚";
+  }
+  if (deltaMs < 3_600_000) {
+    return `${Math.floor(deltaMs / 60_000)} 分钟前`;
+  }
+  if (deltaMs < 86_400_000) {
+    return `${Math.floor(deltaMs / 3_600_000)} 小时前`;
+  }
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
+async function hydrateLiteSnapHistory(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapListHistory) {
+    liteSnapHistoryItems = [];
+    return;
+  }
+
+  try {
+    const items = await launcher.liteSnapListHistory();
+    liteSnapHistoryItems = Array.isArray(items)
+      ? items.map((item) => ({
+          id: item.id,
+          filePath: item.filePath,
+          thumbPath: item.thumbPath,
+          width: item.width,
+          height: item.height,
+          source: item.source,
+          createdAt: item.createdAt
+        }))
+      : [];
+  } catch (error) {
+    console.warn("[litesnap] list history failed", error);
+    liteSnapHistoryItems = [];
+  }
+
+  if (
+    activePluginPanel?.pluginId === LITESNAP_PLUGIN_ID &&
+    liteSnapPanelView === "history"
+  ) {
+    renderList();
+  }
+}
+
+async function runLiteSnapHistoryCopy(id: string): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapHistoryCopy) {
+    setStatus("当前版本暂不支持历史复制，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    const ok = await launcher.liteSnapHistoryCopy(id);
+    setStatus(ok ? "已复制历史截图到剪贴板。" : "复制失败，请重试。");
+  } catch (error) {
+    console.warn("[litesnap] history copy failed", error);
+    setStatus("复制失败，请重试。");
+  }
+}
+
+async function runLiteSnapHistoryPin(id: string): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapHistoryPin) {
+    setStatus("当前版本暂不支持历史贴图，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    const ok = await launcher.liteSnapHistoryPin(id);
+    setStatus(ok ? "已将历史截图贴到屏幕。" : "贴图失败，请重试。");
+  } catch (error) {
+    console.warn("[litesnap] history pin failed", error);
+    setStatus("贴图失败，请重试。");
+  }
+}
+
+async function runLiteSnapHistoryDelete(id: string): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapDeleteHistoryItem) {
+    setStatus("当前版本暂不支持删除历史，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    const ok = await launcher.liteSnapDeleteHistoryItem(id);
+    if (ok) {
+      liteSnapHistoryItems = liteSnapHistoryItems.filter((item) => item.id !== id);
+      setStatus("已删除该历史记录。");
+      if (liteSnapPanelView === "history") {
+        renderList();
+      }
+    } else {
+      setStatus("删除失败，请重试。");
+    }
+  } catch (error) {
+    console.warn("[litesnap] history delete failed", error);
+    setStatus("删除失败，请重试。");
+  }
+}
+
+async function runLiteSnapClearHistory(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapClearHistory) {
+    setStatus("当前版本暂不支持清空历史，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    const count = await launcher.liteSnapClearHistory();
+    liteSnapHistoryItems = [];
+    setStatus(count === 0 ? "历史记录已为空。" : `已清空 ${count} 条历史记录。`);
+    if (liteSnapPanelView === "history") {
+      renderList();
+    }
+  } catch (error) {
+    console.warn("[litesnap] clear history failed", error);
+    setStatus("清空历史失败，请重试。");
+  }
 }
 
 const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
@@ -14514,6 +14812,7 @@ window.__LL_PANEL_IMPLS__ = {
   cleanupPluginPanelTransientState(activePluginId: string | null): void {
     if (activePluginId !== LITESNAP_PLUGIN_ID) {
       liteSnapPanelView = "main";
+      liteSnapHistoryItems = [];
     }
     if (activePluginId !== WEBTOOLS_TRANSLATE_PLUGIN_ID) {
       translateToolPanelView = "main";
@@ -15740,6 +16039,9 @@ window.__LL_PANEL_IMPLS__ = {
           : "";
     } else if (dataRecord?.preferredView === "settings") {
       liteSnapPanelView = "settings";
+    } else if (dataRecord?.preferredView === "history") {
+      liteSnapPanelView = "history";
+      void hydrateLiteSnapHistory();
     } else {
       liteSnapPanelView = "main";
     }
@@ -15770,8 +16072,12 @@ window.__LL_PANEL_IMPLS__ = {
       event.preventDefault();
       if (liteSnapPanelView === "settings") {
         void saveLiteSnapSettings(form);
-      } else if (liteSnapPanelView === "ocr" || liteSnapPanelView === "translate") {
-        // OCR / translate views use explicit buttons; Enter should not start a capture.
+      } else if (
+        liteSnapPanelView === "ocr" ||
+        liteSnapPanelView === "translate" ||
+        liteSnapPanelView === "history"
+      ) {
+        // OCR / translate / history views use explicit buttons; Enter should not start a capture.
       } else {
         void executeLiteSnapPanelAction("start-capture");
       }
@@ -15812,7 +16118,7 @@ window.__LL_PANEL_IMPLS__ = {
       ocrField.append(ocrLabel, ocrTextarea);
 
       const ocrActions = document.createElement("div");
-      ocrActions.className = "settings-actions";
+      ocrActions.className = "litesnap-panel-footer";
 
       const ocrFailureIssue =
         liteSnapOcrIssue ??
@@ -15845,6 +16151,9 @@ window.__LL_PANEL_IMPLS__ = {
         void executeLiteSnapPanelAction("start-capture");
       });
 
+      const footerSpacer = document.createElement("div");
+      footerSpacer.className = "litesnap-panel-footer-spacer";
+
       const backToMainButton = document.createElement("button");
       backToMainButton.type = "button";
       backToMainButton.className = "settings-btn settings-btn-secondary";
@@ -15864,6 +16173,7 @@ window.__LL_PANEL_IMPLS__ = {
       ocrActions.append(
         copyButton,
         captureAgainButton,
+        footerSpacer,
         backToMainButton,
         backToSearchButton
       );
@@ -15920,7 +16230,7 @@ window.__LL_PANEL_IMPLS__ = {
       translateField.append(translateLabel, translateTextarea);
 
       const translateActions = document.createElement("div");
-      translateActions.className = "settings-actions";
+      translateActions.className = "litesnap-panel-footer";
 
       const translateHelpSection =
         liteSnapOcrIssue ??
@@ -15954,6 +16264,9 @@ window.__LL_PANEL_IMPLS__ = {
         void executeLiteSnapPanelAction("start-capture");
       });
 
+      const translateFooterSpacer = document.createElement("div");
+      translateFooterSpacer.className = "litesnap-panel-footer-spacer";
+
       const backToMainButton = document.createElement("button");
       backToMainButton.type = "button";
       backToMainButton.className = "settings-btn settings-btn-secondary";
@@ -15973,6 +16286,7 @@ window.__LL_PANEL_IMPLS__ = {
       translateActions.append(
         copyTranslationButton,
         captureAgainButton,
+        translateFooterSpacer,
         backToMainButton,
         backToSearchButton
       );
@@ -16025,15 +16339,39 @@ window.__LL_PANEL_IMPLS__ = {
           "例如 F3、Ctrl+Alt+P"
         ),
         createLiteSnapFieldRow(
-          "保存目录",
-          createLiteSnapDirectoryControl(
-            "litesnap-save-directory",
-            "saveDirectory",
-            liteSnapPanelData.settings.saveDirectory,
-            "留空使用图片/LiteSnap"
+          "取色快捷键",
+          createLiteSnapShortcutControl(
+            "litesnap-color-shortcut",
+            "colorShortcut",
+            liteSnapPanelData.settings.colorShortcut,
+            "F4"
           ),
-          "留空时保存到系统图片目录下的 LiteSnap 文件夹"
+          "例如 F4、Ctrl+Alt+C"
         ),
+        createLiteSnapFieldRow(
+          "贴图点击穿透",
+          createLiteSnapShortcutControl(
+            "litesnap-toggle-pin-click-through",
+            "togglePinClickThroughShortcut",
+            liteSnapPanelData.settings.togglePinClickThroughShortcut,
+            "Ctrl+Shift+T"
+          ),
+          "可留空关闭；例如 Ctrl+Shift+T"
+        ),
+        (() => {
+          const row = createLiteSnapFieldRow(
+            "保存目录",
+            createLiteSnapDirectoryControl(
+              "litesnap-save-directory",
+              "saveDirectory",
+              liteSnapPanelData.settings.saveDirectory,
+              "留空使用图片/LiteSnap"
+            ),
+            "留空时保存到系统图片目录下的 LiteSnap 文件夹"
+          );
+          row.classList.add("litesnap-fields-grid-item--wide");
+          return row;
+        })(),
         createLiteSnapFieldRow(
           "保存格式",
           createLiteSnapSelect(
@@ -16101,6 +16439,26 @@ window.__LL_PANEL_IMPLS__ = {
             liteSnapPanelData.settings.annotationFillShapes
           ),
           "开启后矩形/椭圆默认填充颜色"
+        ),
+        createLiteSnapFieldRow(
+          "启用截图历史",
+          createLiteSnapCheckbox(
+            "litesnap-history-enabled",
+            "historyEnabled",
+            liteSnapPanelData.settings.historyEnabled
+          ),
+          "关闭后不再写入截图历史"
+        ),
+        createLiteSnapFieldRow(
+          "历史条数上限",
+          createLiteSnapNumberInput(
+            "litesnap-history-max-items",
+            "historyMaxItems",
+            liteSnapPanelData.settings.historyMaxItems,
+            5,
+            50
+          ),
+          "范围 5–50，超出部分会自动清理"
         )
       ];
 
@@ -16110,7 +16468,7 @@ window.__LL_PANEL_IMPLS__ = {
       });
 
       const settingsActions = document.createElement("div");
-      settingsActions.className = "settings-actions";
+      settingsActions.className = "litesnap-panel-footer";
 
       const saveButton = document.createElement("button");
       saveButton.type = "submit";
@@ -16124,14 +16482,27 @@ window.__LL_PANEL_IMPLS__ = {
       resetShortcutsButton.addEventListener("click", () => {
         const screenshotInput = form.elements.namedItem("screenshotShortcut");
         const pinInput = form.elements.namedItem("pinShortcut");
+        const colorInput = form.elements.namedItem("colorShortcut");
+        const togglePinClickThroughInput = form.elements.namedItem(
+          "togglePinClickThroughShortcut"
+        );
         if (screenshotInput instanceof HTMLInputElement) {
           screenshotInput.value = "F1";
         }
         if (pinInput instanceof HTMLInputElement) {
           pinInput.value = "F3";
         }
+        if (colorInput instanceof HTMLInputElement) {
+          colorInput.value = "F4";
+        }
+        if (togglePinClickThroughInput instanceof HTMLInputElement) {
+          togglePinClickThroughInput.value = "Ctrl+Shift+T";
+        }
         setStatus("已填入默认快捷键，点击保存后生效。");
       });
+
+      const settingsFooterSpacer = document.createElement("div");
+      settingsFooterSpacer.className = "litesnap-panel-footer-spacer";
 
       const backToMainButton = document.createElement("button");
       backToMainButton.type = "button";
@@ -16152,16 +16523,148 @@ window.__LL_PANEL_IMPLS__ = {
       settingsActions.append(
         saveButton,
         resetShortcutsButton,
+        settingsFooterSpacer,
         backToMainButton,
         backToSearchButton
       );
       form.append(
         settingsStatusRow,
         shortcutStatusRow,
-        ...ocrConfigurationNodes,
-        ...settingsRows,
+        createLiteSnapFormSection(ocrConfigurationNodes),
+        createLiteSnapFieldsGrid(settingsRows),
         settingsActions
       );
+    } else if (liteSnapPanelView === "history") {
+      const historyHead = document.createElement("div");
+      historyHead.className = "litesnap-history-head";
+
+      const historyTitleGroup = document.createElement("div");
+      historyTitleGroup.className = "litesnap-history-title-group";
+      const historyTitle = document.createElement("div");
+      historyTitle.className = "litesnap-history-title";
+      historyTitle.textContent = "截图历史";
+      const historyMeta = document.createElement("div");
+      historyMeta.className = "litesnap-history-meta";
+      historyMeta.textContent = liteSnapPanelData.settings.historyEnabled
+        ? `最近 ${liteSnapHistoryItems.length} 条 · 最多保留 ${liteSnapPanelData.settings.historyMaxItems} 条`
+        : "历史写入已关闭，仅可管理现有条目";
+      historyTitleGroup.append(historyTitle, historyMeta);
+      historyHead.appendChild(historyTitleGroup);
+
+      const historyList = document.createElement("div");
+      historyList.className = "litesnap-history-list";
+
+      if (liteSnapHistoryItems.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "litesnap-history-empty";
+        empty.textContent = "暂无截图历史。完成截图后会显示在这里。";
+        historyList.appendChild(empty);
+      } else {
+        for (const item of liteSnapHistoryItems) {
+          const row = document.createElement("article");
+          row.className = "litesnap-history-row";
+
+          const thumbWrap = document.createElement("div");
+          thumbWrap.className = "litesnap-history-thumb-wrap";
+          const thumbSrc = toLiteSnapFileUrl(item.thumbPath || item.filePath);
+          if (thumbSrc) {
+            const thumb = document.createElement("img");
+            thumb.className = "litesnap-history-thumb";
+            thumb.src = thumbSrc;
+            thumb.alt = formatLiteSnapHistorySource(item.source);
+            thumb.loading = "lazy";
+            thumbWrap.appendChild(thumb);
+          }
+
+          const body = document.createElement("div");
+          body.className = "litesnap-history-row-body";
+
+          const bodyTop = document.createElement("div");
+          bodyTop.className = "litesnap-history-row-top";
+          const sourceBadge = document.createElement("span");
+          sourceBadge.className = "litesnap-history-source";
+          sourceBadge.textContent = formatLiteSnapHistorySource(item.source);
+          const sizeText = document.createElement("span");
+          sizeText.className = "litesnap-history-size";
+          sizeText.textContent = `${item.width}×${item.height}`;
+          bodyTop.append(sourceBadge, sizeText);
+
+          const timeText = document.createElement("div");
+          timeText.className = "litesnap-history-time";
+          timeText.textContent = formatLiteSnapHistoryTime(item.createdAt);
+
+          const itemActions = document.createElement("div");
+          itemActions.className = "litesnap-history-row-actions";
+
+          const copyButton = document.createElement("button");
+          copyButton.type = "button";
+          copyButton.className = "litesnap-history-action";
+          copyButton.textContent = "复制";
+          copyButton.addEventListener("click", () => {
+            void runLiteSnapHistoryCopy(item.id);
+          });
+
+          const pinButton = document.createElement("button");
+          pinButton.type = "button";
+          pinButton.className = "litesnap-history-action is-primary";
+          pinButton.textContent = "贴图";
+          pinButton.addEventListener("click", () => {
+            void runLiteSnapHistoryPin(item.id);
+          });
+
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "litesnap-history-action is-danger";
+          deleteButton.textContent = "删除";
+          deleteButton.addEventListener("click", () => {
+            void runLiteSnapHistoryDelete(item.id);
+          });
+
+          itemActions.append(copyButton, pinButton, deleteButton);
+          body.append(bodyTop, timeText, itemActions);
+          row.append(thumbWrap, body);
+          historyList.appendChild(row);
+        }
+      }
+
+      const historyFooter = document.createElement("div");
+      historyFooter.className = "litesnap-panel-footer";
+
+      const clearHistoryButton = document.createElement("button");
+      clearHistoryButton.type = "button";
+      clearHistoryButton.className = "settings-btn settings-btn-secondary";
+      clearHistoryButton.textContent = "清空历史";
+      clearHistoryButton.disabled = liteSnapHistoryItems.length === 0;
+      clearHistoryButton.addEventListener("click", () => {
+        void runLiteSnapClearHistory();
+      });
+
+      const footerSpacer = document.createElement("div");
+      footerSpacer.className = "litesnap-panel-footer-spacer";
+
+      const backToMainButton = document.createElement("button");
+      backToMainButton.type = "button";
+      backToMainButton.className = "settings-btn settings-btn-secondary";
+      backToMainButton.textContent = "返回主页面";
+      backToMainButton.addEventListener("click", () => {
+        returnToLiteSnapMainView();
+      });
+
+      const backToSearchButton = document.createElement("button");
+      backToSearchButton.type = "button";
+      backToSearchButton.className = "settings-btn settings-btn-secondary";
+      backToSearchButton.textContent = "返回搜索";
+      backToSearchButton.addEventListener("click", () => {
+        backToSearch();
+      });
+
+      historyFooter.append(
+        clearHistoryButton,
+        footerSpacer,
+        backToMainButton,
+        backToSearchButton
+      );
+      form.append(historyHead, historyList, historyFooter);
     } else {
       const statusRow = createLiteSnapInfoRow(
         "使用提示",
@@ -16181,6 +16684,11 @@ window.__LL_PANEL_IMPLS__ = {
           "默认 F3"
         ),
         createLiteSnapInfoRow(
+          "取色快捷键",
+          liteSnapPanelData.settings.colorShortcut,
+          "默认 F4"
+        ),
+        createLiteSnapInfoRow(
           "保存格式",
           liteSnapPanelData.settings.saveFormat.toUpperCase(),
           saveDirectory ? `保存目录：${saveDirectory}` : "默认保存到图片/LiteSnap"
@@ -16198,13 +16706,13 @@ window.__LL_PANEL_IMPLS__ = {
         )
       ];
 
-      const actions = document.createElement("div");
-      actions.className = "settings-actions";
-
       const mainOcrNodes = buildLiteSnapOcrConfigurationSection({
         resultTextareaId: "litesnap-main-ocr-probe-result",
         includeFailureHelp: true
       });
+
+      const primaryActions = document.createElement("div");
+      primaryActions.className = "litesnap-action-row litesnap-action-row--primary";
 
       const captureButton = document.createElement("button");
       captureButton.type = "submit";
@@ -16214,27 +16722,64 @@ window.__LL_PANEL_IMPLS__ = {
       const pinButton = document.createElement("button");
       pinButton.type = "button";
       pinButton.className = "settings-btn settings-btn-secondary";
-      pinButton.textContent = `贴图到屏幕 (${liteSnapPanelData.settings.pinShortcut})`;
+      pinButton.textContent = `贴图 (${liteSnapPanelData.settings.pinShortcut})`;
       pinButton.addEventListener("click", () => {
         void executeLiteSnapPanelAction("pin-from-clipboard");
+      });
+
+      const colorButton = document.createElement("button");
+      colorButton.type = "button";
+      colorButton.className = "settings-btn settings-btn-secondary";
+      colorButton.textContent = `取色 (${liteSnapPanelData.settings.colorShortcut || "F4"})`;
+      colorButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("start-color-capture");
+      });
+
+      primaryActions.append(captureButton, pinButton, colorButton);
+
+      const secondaryActions = document.createElement("div");
+      secondaryActions.className =
+        "litesnap-action-row litesnap-action-row--secondary";
+
+      const historyButton = document.createElement("button");
+      historyButton.type = "button";
+      historyButton.className = "settings-btn settings-btn-secondary";
+      historyButton.textContent = "截图历史";
+      historyButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("open-history");
       });
 
       const togglePinsButton = document.createElement("button");
       togglePinsButton.type = "button";
       togglePinsButton.className = "settings-btn settings-btn-secondary";
-      togglePinsButton.textContent = "隐藏/显示全部贴图";
+      togglePinsButton.textContent = "隐藏/显示贴图";
       togglePinsButton.addEventListener("click", () => {
         void executeLiteSnapPanelAction("toggle-pinned-windows");
       });
+
+      const closeAllPinsButton = document.createElement("button");
+      closeAllPinsButton.type = "button";
+      closeAllPinsButton.className = "settings-btn settings-btn-secondary";
+      closeAllPinsButton.textContent = "关闭全部贴图";
+      closeAllPinsButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("close-all-pinned-windows");
+      });
+
+      secondaryActions.append(historyButton, togglePinsButton, closeAllPinsButton);
+
+      const footer = document.createElement("div");
+      footer.className = "litesnap-panel-footer";
 
       const settingsButton = document.createElement("button");
       settingsButton.type = "button";
       settingsButton.className = "settings-btn settings-btn-secondary";
       settingsButton.textContent = "打开设置";
       settingsButton.addEventListener("click", () => {
-        liteSnapPanelView = "settings";
         openLiteSnapSettingsView();
       });
+
+      const footerSpacer = document.createElement("div");
+      footerSpacer.className = "litesnap-panel-footer-spacer";
 
       const backButton = document.createElement("button");
       backButton.type = "button";
@@ -16244,8 +16789,15 @@ window.__LL_PANEL_IMPLS__ = {
         backToSearch();
       });
 
-      actions.append(captureButton, pinButton, togglePinsButton, settingsButton, backButton);
-      form.append(statusRow, ...mainOcrNodes, ...settingsRows, actions);
+      footer.append(settingsButton, footerSpacer, backButton);
+      form.append(
+        statusRow,
+        createLiteSnapFormSection(mainOcrNodes),
+        createLiteSnapFieldsGrid(settingsRows),
+        primaryActions,
+        secondaryActions,
+        footer
+      );
     }
 
     panel.append(title, description, form);

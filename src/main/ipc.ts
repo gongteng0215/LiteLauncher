@@ -5,8 +5,10 @@ import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapHistoryItem,
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
@@ -14,6 +16,7 @@ import {
   LiteSnapRecognizeTextResult,
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult,
+  LiteSnapTogglePinClickThroughResult,
   LiteSnapTranslateSelectionInput,
   LiteSnapTranslateSelectionResult
 } from "../shared/litesnap";
@@ -90,8 +93,11 @@ type LiteSnapProvider = {
     patch: Partial<LiteSnapSettings>
   ) => Promise<LiteSnapSettingsUpdateResult>;
   startCapture: () => Promise<boolean>;
+  startColorCapture: () => Promise<boolean>;
   pinClipboardImage: () => Promise<boolean>;
   togglePinnedWindowsVisibility: () => LiteSnapPinnedWindowsToggleResult;
+  closeAllPinnedWindows: () => LiteSnapCloseAllPinnedWindowsResult;
+  toggleNearestPinClickThrough: () => LiteSnapTogglePinClickThroughResult;
   getOverlayState: () => Promise<LiteSnapOverlayState | null>;
   getWindowRectAtPoint: (
     x: number,
@@ -106,6 +112,12 @@ type LiteSnapProvider = {
   translateSelection: (
     input: LiteSnapTranslateSelectionInput
   ) => Promise<LiteSnapTranslateSelectionResult>;
+  recordRecentColor: (color: string) => Promise<string[]>;
+  listHistory: () => Promise<LiteSnapHistoryItem[]>;
+  deleteHistoryItem: (id: string) => Promise<boolean>;
+  clearHistory: () => Promise<number>;
+  historyCopy: (id: string) => Promise<boolean>;
+  historyPin: (id: string) => Promise<boolean>;
   probeOcr: () => Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
   getOcrCapabilities: () => Promise<
     import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
@@ -188,12 +200,21 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getLiteSnapSettings,
   IPC_CHANNELS.setLiteSnapSettings,
   IPC_CHANNELS.liteSnapStartCapture,
+  IPC_CHANNELS.liteSnapStartColorCapture,
   IPC_CHANNELS.liteSnapPinClipboard,
   IPC_CHANNELS.liteSnapTogglePinnedWindows,
+  IPC_CHANNELS.liteSnapCloseAllPinnedWindows,
+  IPC_CHANNELS.liteSnapToggleNearestPinClickThrough,
   IPC_CHANNELS.liteSnapGetOverlayState,
   IPC_CHANNELS.liteSnapCommitCapture,
   IPC_CHANNELS.liteSnapRecognizeText,
   IPC_CHANNELS.liteSnapTranslateSelection,
+  IPC_CHANNELS.liteSnapRecordRecentColor,
+  IPC_CHANNELS.liteSnapListHistory,
+  IPC_CHANNELS.liteSnapDeleteHistoryItem,
+  IPC_CHANNELS.liteSnapClearHistory,
+  IPC_CHANNELS.liteSnapHistoryCopy,
+  IPC_CHANNELS.liteSnapHistoryPin,
   IPC_CHANNELS.getTranslateToolSettings,
   IPC_CHANNELS.setTranslateToolSettings,
   IPC_CHANNELS.translateToolTranslateText,
@@ -1409,12 +1430,24 @@ export function registerIpcHandlers(
     return options.liteSnapProvider.startCapture();
   });
 
+  ipcMain.handle(IPC_CHANNELS.liteSnapStartColorCapture, async () => {
+    return options.liteSnapProvider.startColorCapture();
+  });
+
   ipcMain.handle(IPC_CHANNELS.liteSnapPinClipboard, async () => {
     return options.liteSnapProvider.pinClipboardImage();
   });
 
   ipcMain.handle(IPC_CHANNELS.liteSnapTogglePinnedWindows, () => {
     return options.liteSnapProvider.togglePinnedWindowsVisibility();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapCloseAllPinnedWindows, () => {
+    return options.liteSnapProvider.closeAllPinnedWindows();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapToggleNearestPinClickThrough, () => {
+    return options.liteSnapProvider.toggleNearestPinClickThrough();
   });
 
   ipcMain.handle(IPC_CHANNELS.liteSnapGetOverlayState, async () => {
@@ -1470,6 +1503,40 @@ export function registerIpcHandlers(
       return options.liteSnapProvider.translateSelection(normalizedInput);
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapRecordRecentColor,
+    async (_, colorInput: unknown) => {
+      const color = typeof colorInput === "string" ? colorInput : "";
+      return options.liteSnapProvider.recordRecentColor(color);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapListHistory, async () => {
+    return options.liteSnapProvider.listHistory();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapDeleteHistoryItem,
+    async (_, idInput: unknown) => {
+      const id = typeof idInput === "string" ? idInput : "";
+      return options.liteSnapProvider.deleteHistoryItem(id);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapClearHistory, async () => {
+    return options.liteSnapProvider.clearHistory();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapHistoryCopy, async (_, idInput: unknown) => {
+    const id = typeof idInput === "string" ? idInput : "";
+    return options.liteSnapProvider.historyCopy(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapHistoryPin, async (_, idInput: unknown) => {
+    const id = typeof idInput === "string" ? idInput : "";
+    return options.liteSnapProvider.historyPin(id);
+  });
 
   ipcMain.handle(IPC_CHANNELS.getTranslateToolSettings, () => {
     return options.translateToolProvider.getSettings();

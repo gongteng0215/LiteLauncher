@@ -595,6 +595,16 @@ test("main process startup prefers cached catalog before filesystem scan", () =>
     /scheduleCatalogBackgroundRefresh\(activeDatabase\);/,
     "bootstrap should refresh the filesystem catalog in the background after startup"
   );
+  assert.match(
+    mainIndexSource,
+    /startCatalogChangeWatcher\(activeDatabase\);/,
+    "bootstrap should watch Start Menu / scan roots for install and uninstall changes"
+  );
+  assert.match(
+    mainIndexSource,
+    /catalogChangeWatcher\?\.maybeRefreshIfStale\(\)/,
+    "showing the launcher should refresh a stale catalog in the background"
+  );
   assert.doesNotMatch(
     mainIndexSource,
     /await persistCatalogSnapshot\(\s*activeDatabase,\s*replaceCatalogPluginItems\(catalog\)\s*\);/,

@@ -2,8 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
+  LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapHistoryItem,
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
@@ -11,6 +13,7 @@ import {
   LiteSnapRecognizeTextResult,
   LiteSnapSettings,
   LiteSnapSettingsUpdateResult,
+  LiteSnapTogglePinClickThroughResult,
   LiteSnapTranslateSelectionInput,
   LiteSnapTranslateSelectionResult
 } from "../shared/litesnap";
@@ -113,11 +116,20 @@ const api = {
   liteSnapStartCapture(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartCapture);
   },
+  liteSnapStartColorCapture(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartColorCapture);
+  },
   liteSnapPinClipboard(): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapPinClipboard);
   },
   liteSnapTogglePinnedWindows(): Promise<LiteSnapPinnedWindowsToggleResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTogglePinnedWindows);
+  },
+  liteSnapCloseAllPinnedWindows(): Promise<LiteSnapCloseAllPinnedWindowsResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapCloseAllPinnedWindows);
+  },
+  liteSnapToggleNearestPinClickThrough(): Promise<LiteSnapTogglePinClickThroughResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapToggleNearestPinClickThrough);
   },
   liteSnapGetOverlayState(): Promise<LiteSnapOverlayState | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetOverlayState);
@@ -149,6 +161,24 @@ const api = {
     input: LiteSnapTranslateSelectionInput
   ): Promise<LiteSnapTranslateSelectionResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapTranslateSelection, input);
+  },
+  liteSnapRecordRecentColor(color: string): Promise<string[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapRecordRecentColor, color);
+  },
+  liteSnapListHistory(): Promise<LiteSnapHistoryItem[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapListHistory);
+  },
+  liteSnapDeleteHistoryItem(id: string): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapDeleteHistoryItem, id);
+  },
+  liteSnapClearHistory(): Promise<number> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapClearHistory);
+  },
+  liteSnapHistoryCopy(id: string): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapHistoryCopy, id);
+  },
+  liteSnapHistoryPin(id: string): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapHistoryPin, id);
   },
   getTranslateToolSettings(): Promise<TranslateSettings> {
     return ipcRenderer.invoke(IPC_CHANNELS.getTranslateToolSettings);

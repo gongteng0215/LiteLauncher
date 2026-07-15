@@ -1,4 +1,4 @@
-import { BrowserWindow, clipboard, ipcMain, nativeImage, screen, type BrowserWindowConstructorOptions, type NativeImage } from "electron";
+import { BrowserWindow, clipboard, globalShortcut, ipcMain, nativeImage, screen, type BrowserWindowConstructorOptions, type NativeImage } from "electron";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,12 @@ const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
 const PIN_SAVE_CHANNEL = "litesnap-pin:save";
 const PIN_MOVE_CHANNEL = "litesnap-pin:move-by";
+const PIN_DRAG_END_CHANNEL = "litesnap-pin:drag-end";
+const PIN_SET_CLICK_THROUGH_CHANNEL = "litesnap-pin:set-click-through";
+const PIN_CLOSE_ALL_CHANNEL = "litesnap-pin:close-all";
+const PIN_IMAGE_UPDATED_CHANNEL = "litesnap-pin:image-updated";
+const PIN_CLICK_THROUGH_CHANGED_CHANNEL = "litesnap-pin:click-through-changed";
+const PIN_CLICK_THROUGH_ESCAPE_ACCELERATOR = "Escape";
 
 type PinWindowMeta = {
   baseWidth: number;
@@ -16,6 +22,10 @@ type PinWindowMeta = {
   lastScale: number;
   lastOpacity: number;
   imagePath: string;
+  sourceImage: NativeImage;
+  bakedScaleFactor: number;
+  usePng: boolean;
+  clickThrough: boolean;
 };
 
 type PinSaveImageProvider = (image: NativeImage) => Promise<string>;
@@ -24,7 +34,12 @@ let pinVisualHandlersRegistered = false;
 let pinCopyHandlerRegistered = false;
 let pinSaveHandlerRegistered = false;
 let pinMoveHandlerRegistered = false;
+let pinDragEndHandlerRegistered = false;
+let pinClickThroughHandlerRegistered = false;
+let pinCloseAllHandlerRegistered = false;
+let pinClickThroughEscapeRegistered = false;
 let pinSaveImageProvider: PinSaveImageProvider | null = null;
+let activePinWindowManager: LiteSnapPinWindowManager | null = null;
 const pinWindowMeta = new Map<number, PinWindowMeta>();
 
 function ensurePinCopyHandler(): void {
@@ -114,6 +129,147 @@ function ensurePinMoveHandler(): void {
       },
       false
     );
+  });
+}
+
+async function rebakePinImageForDisplay(
+  window: BrowserWindow,
+  meta: PinWindowMeta,
+  scaleFactor: number
+): Promise<void> {
+  if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+    return;
+  }
+  if (Math.abs(scaleFactor - meta.bakedScaleFactor) < 0.001) {
+    return;
+  }
+
+  const displayImage = preparePinDisplayImage(
+    meta.sourceImage,
+    meta.baseWidth,
+    meta.baseHeight,
+    scaleFactor
+  );
+  if (displayImage.isEmpty()) {
+    return;
+  }
+
+  const imageBytes = meta.usePng ? displayImage.toPNG() : displayImage.toJPEG(88);
+  await fs.writeFile(meta.imagePath, imageBytes);
+  meta.bakedScaleFactor = scaleFactor;
+
+  if (!window.isDestroyed()) {
+    window.webContents.send(PIN_IMAGE_UPDATED_CHANNEL);
+    // Re-affirm mouse hit-testing after rewriting the bitmap on HiDPI screens.
+    if (!meta.clickThrough) {
+      window.setIgnoreMouseEvents(false);
+    }
+  }
+}
+
+function ensurePinDragEndHandler(): void {
+  if (pinDragEndHandlerRegistered) {
+    return;
+  }
+
+  pinDragEndHandlerRegistered = true;
+  ipcMain.on(PIN_DRAG_END_CHANNEL, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta?.sourceImage || meta.sourceImage.isEmpty()) {
+      return;
+    }
+
+    const bounds = window.getBounds();
+    const display = screen.getDisplayMatching(bounds);
+    void rebakePinImageForDisplay(window, meta, display.scaleFactor).catch(() => undefined);
+  });
+}
+
+function applyPinClickThrough(window: BrowserWindow, meta: PinWindowMeta, enabled: boolean): void {
+  meta.clickThrough = enabled;
+  if (window.isDestroyed()) {
+    syncPinClickThroughEscapeWatch();
+    return;
+  }
+
+  // On Windows, restoring interactions must call setIgnoreMouseEvents(false)
+  // without the forward option, otherwise hit-testing can stay broken.
+  if (enabled) {
+    window.setIgnoreMouseEvents(true, { forward: true });
+  } else {
+    window.setIgnoreMouseEvents(false);
+  }
+  window.webContents.send(PIN_CLICK_THROUGH_CHANGED_CHANNEL, enabled);
+  syncPinClickThroughEscapeWatch();
+}
+
+function anyPinClickThroughEnabled(): boolean {
+  for (const meta of pinWindowMeta.values()) {
+    if (meta.clickThrough) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function syncPinClickThroughEscapeWatch(): void {
+  const shouldWatch = anyPinClickThroughEnabled();
+  if (shouldWatch && !pinClickThroughEscapeRegistered) {
+    try {
+      const ok = globalShortcut.register(PIN_CLICK_THROUGH_ESCAPE_ACCELERATOR, () => {
+        activePinWindowManager?.disableAllClickThrough();
+      });
+      pinClickThroughEscapeRegistered = ok;
+    } catch {
+      pinClickThroughEscapeRegistered = false;
+    }
+    return;
+  }
+
+  if (!shouldWatch && pinClickThroughEscapeRegistered) {
+    try {
+      globalShortcut.unregister(PIN_CLICK_THROUGH_ESCAPE_ACCELERATOR);
+    } catch {
+      // Ignore unregister failures.
+    }
+    pinClickThroughEscapeRegistered = false;
+  }
+}
+
+function ensurePinClickThroughHandler(): void {
+  if (pinClickThroughHandlerRegistered) {
+    return;
+  }
+
+  pinClickThroughHandlerRegistered = true;
+  ipcMain.on(PIN_SET_CLICK_THROUGH_CHANNEL, (event, enabledInput: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta) {
+      return;
+    }
+
+    applyPinClickThrough(window, meta, Boolean(enabledInput));
+  });
+}
+
+function ensurePinCloseAllHandler(): void {
+  if (pinCloseAllHandlerRegistered) {
+    return;
+  }
+
+  pinCloseAllHandlerRegistered = true;
+  ipcMain.on(PIN_CLOSE_ALL_CHANNEL, () => {
+    activePinWindowManager?.closeAllPinnedWindows();
   });
 }
 
@@ -259,6 +415,27 @@ function buildPinWindowHtml(
         outline: 1px solid rgba(255, 255, 255, 0.45);
         outline-offset: -1px;
       }
+      .pin-shell.is-click-through {
+        outline: 2px dashed rgba(125, 211, 252, 0.95);
+        outline-offset: -2px;
+      }
+      .pin-click-through-banner {
+        position: absolute;
+        left: 10px;
+        right: 46px;
+        top: 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(8, 47, 73, 0.88);
+        color: #e0f2fe;
+        font-size: 11px;
+        line-height: 1.35;
+        pointer-events: none;
+        -webkit-app-region: no-drag;
+      }
+      .pin-click-through-banner[hidden] {
+        display: none;
+      }
       img {
         display: block;
         width: 100%;
@@ -357,6 +534,9 @@ function buildPinWindowHtml(
         draggable="false"
       />
       <button type="button" class="pin-close" id="close-btn" title="关闭">×</button>
+      <div class="pin-click-through-banner" id="pin-click-through-banner" hidden>
+        点击穿透中 · Esc 退出穿透 · Ctrl+Shift+T 也可切换
+      </div>
       <div class="pin-menu" id="pin-menu" hidden>
         <div class="pin-menu__label" id="pin-menu-label">缩放 100% / 透明度 100%</div>
         <button type="button" data-command="zoom-in">放大</button>
@@ -379,8 +559,10 @@ function buildPinWindowHtml(
         <button type="button" data-command="copy">复制到剪贴板</button>
         <button type="button" data-command="save">保存图片</button>
         <button type="button" data-command="toggle-border">切换边框</button>
+        <button type="button" data-command="toggle-click-through" id="pin-click-through-btn">点击穿透</button>
         <div class="pin-menu__divider"></div>
         <button type="button" data-command="close">关闭贴图</button>
+        <button type="button" data-command="close-all">关闭所有贴图</button>
       </div>
     </div>
     <script>
@@ -389,13 +571,35 @@ function buildPinWindowHtml(
       const menuLabel = document.getElementById("pin-menu-label");
       const opacitySlider = document.getElementById("pin-opacity-slider");
       const opacityValue = document.getElementById("pin-opacity-value");
+      const pinImage = shell ? shell.querySelector("img") : null;
+      const clickThroughBtn = document.getElementById("pin-click-through-btn");
+      const clickThroughBanner = document.getElementById("pin-click-through-banner");
       const pinApi = window.liteSnapPin;
+      const imgBaseSrc = pinImage ? pinImage.getAttribute("src") || "" : "";
       let scale = 1;
       let opacity = 1;
       let visualFrame = 0;
       let dragging = false;
       let dragScreenX = 0;
       let dragScreenY = 0;
+      let clickThrough = false;
+
+      function syncClickThroughLabel() {
+        if (clickThroughBtn) {
+          clickThroughBtn.textContent = clickThrough
+            ? "取消点击穿透"
+            : "点击穿透";
+        }
+        if (clickThroughBanner) {
+          clickThroughBanner.hidden = !clickThrough;
+        }
+        shell?.classList.toggle("is-click-through", clickThrough);
+      }
+
+      function setClickThroughState(enabled) {
+        clickThrough = Boolean(enabled);
+        syncClickThroughLabel();
+      }
 
       function syncOpacityControls() {
         const percent = Math.round(opacity * 100);
@@ -435,6 +639,7 @@ function buildPinWindowHtml(
         }
         menu.hidden = false;
         syncOpacityControls();
+        syncClickThroughLabel();
         const rect = menu.getBoundingClientRect();
         menu.style.left = Math.min(x, window.innerWidth - rect.width - 8) + "px";
         menu.style.top = Math.min(y, window.innerHeight - rect.height - 8) + "px";
@@ -463,8 +668,16 @@ function buildPinWindowHtml(
         } else if (command === "toggle-border") {
           shell?.classList.toggle("is-border-enabled");
           return;
+        } else if (command === "toggle-click-through") {
+          const next = !clickThrough;
+          setClickThroughState(next);
+          pinApi?.setClickThrough?.(next);
+          return;
         } else if (command === "close") {
           window.close();
+          return;
+        } else if (command === "close-all") {
+          pinApi?.closeAllPins?.();
           return;
         }
         applyVisualState();
@@ -557,19 +770,17 @@ function buildPinWindowHtml(
         dragScreenY = event.screenY;
         pinApi?.moveBy?.(deltaX, deltaY);
       });
-      window.addEventListener("pointerup", function (event) {
+      function endDrag(event) {
         if (!dragging) {
           return;
         }
         dragging = false;
         shell?.classList.remove("is-dragging");
         shell?.releasePointerCapture?.(event.pointerId);
-      });
-      window.addEventListener("pointercancel", function (event) {
-        dragging = false;
-        shell?.classList.remove("is-dragging");
-        shell?.releasePointerCapture?.(event.pointerId);
-      });
+        pinApi?.notifyDragEnd?.();
+      }
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("pointercancel", endDrag);
       window.addEventListener("blur", function () {
         hideMenu();
       });
@@ -594,6 +805,16 @@ function buildPinWindowHtml(
           resetTransform();
         }
       });
+      pinApi?.onImageRefresh?.(function () {
+        if (!pinImage || !imgBaseSrc) {
+          return;
+        }
+        pinImage.src = imgBaseSrc + "?v=" + Date.now();
+      });
+      pinApi?.onClickThroughChanged?.(function (enabled) {
+        setClickThroughState(enabled);
+      });
+      syncClickThroughLabel();
     </script>
   </body>
 </html>`;
@@ -602,7 +823,12 @@ function buildPinWindowHtml(
 async function writePinWindowAssets(
   displayImage: NativeImage,
   exact: boolean
-): Promise<{ htmlPath: string; imagePath: string; cleanup: () => Promise<void> }> {
+): Promise<{
+  htmlPath: string;
+  imagePath: string;
+  usePng: boolean;
+  cleanup: () => Promise<void>;
+}> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ll-pin-"));
   const imageSize = displayImage.getSize();
   const usePng = imageLikelyHasTransparency(displayImage);
@@ -627,6 +853,7 @@ async function writePinWindowAssets(
   return {
     htmlPath,
     imagePath,
+    usePng,
     cleanup: async () => {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -666,6 +893,10 @@ export class LiteSnapPinWindowManager {
   private hiddenByManager = false;
   private prewarmedWindow: BrowserWindow | null = null;
   private pinningClipboard = false;
+
+  public constructor() {
+    activePinWindowManager = this;
+  }
 
   // Lets the host wire saving a pinned image to disk (settings-aware save +
   // reveal in Explorer) without this module depending on the settings/image
@@ -825,6 +1056,9 @@ export class LiteSnapPinWindowManager {
     ensurePinCopyHandler();
     ensurePinSaveHandler();
     ensurePinMoveHandler();
+    ensurePinDragEndHandler();
+    ensurePinClickThroughHandler();
+    ensurePinCloseAllHandler();
 
     const window = this.takePrewarmedWindow({ x, y, width, height });
     void this.prewarmPinWindow();
@@ -836,14 +1070,26 @@ export class LiteSnapPinWindowManager {
       baseHeight: height,
       lastScale: 1,
       lastOpacity: 1,
-      imagePath: assets.imagePath
+      imagePath: assets.imagePath,
+      sourceImage: image,
+      bakedScaleFactor: display.scaleFactor,
+      usePng: assets.usePng,
+      clickThrough: false
     });
 
     window.setAlwaysOnTop(true, "screen-saver");
+    // Always start interactive; reused/prewarmed windows can inherit a bad
+    // ignore-mouse state from previous pins on some Windows DPI setups.
+    window.setIgnoreMouseEvents(false);
     this.windows.add(window);
     window.webContents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         event.preventDefault();
+        const meta = pinWindowMeta.get(window.id);
+        if (meta?.clickThrough) {
+          applyPinClickThrough(window, meta, false);
+          return;
+        }
         window.close();
       }
     });
@@ -851,6 +1097,7 @@ export class LiteSnapPinWindowManager {
     window.on("closed", () => {
       pinWindowMeta.delete(window.id);
       this.windows.delete(window);
+      syncPinClickThroughEscapeWatch();
       void assets.cleanup();
     });
 
@@ -886,5 +1133,94 @@ export class LiteSnapPinWindowManager {
     }
     this.hiddenByManager = shouldHide;
     return { hidden: this.hiddenByManager, count: windows.length };
+  }
+
+  public closeAllPinnedWindows(): { count: number } {
+    // Restore hit-testing first so close paths are reliable even if some
+    // windows were left in click-through mode.
+    this.disableAllClickThrough();
+    const windows = [...this.windows].filter((window) => !window.isDestroyed());
+    for (const window of windows) {
+      window.close();
+    }
+    this.hiddenByManager = false;
+    return { count: windows.length };
+  }
+
+  public disableAllClickThrough(): { count: number } {
+    let count = 0;
+    for (const window of this.windows) {
+      if (window.isDestroyed()) {
+        continue;
+      }
+      const meta = pinWindowMeta.get(window.id);
+      if (!meta?.clickThrough) {
+        // Also repair windows that somehow lost mouse hit-testing.
+        window.setIgnoreMouseEvents(false);
+        continue;
+      }
+      applyPinClickThrough(window, meta, false);
+      count += 1;
+    }
+    syncPinClickThroughEscapeWatch();
+    return { count };
+  }
+
+  public toggleNearestPinClickThrough(): {
+    toggled: boolean;
+    enabled: boolean;
+    count: number;
+  } {
+    const windows = [...this.windows].filter((window) => !window.isDestroyed());
+    if (windows.length === 0) {
+      return { toggled: false, enabled: false, count: 0 };
+    }
+
+    // If any pin is already transparent to clicks, prefer clearing them all so
+    // a stuck pin never requires hunting for the "nearest" window.
+    if (anyPinClickThroughEnabled()) {
+      const cleared = this.disableAllClickThrough();
+      return { toggled: cleared.count > 0, enabled: false, count: windows.length };
+    }
+
+    const cursor = screen.getCursorScreenPoint();
+    let bestWindow: BrowserWindow | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const window of windows) {
+      const bounds = window.getBounds();
+      const contains =
+        cursor.x >= bounds.x &&
+        cursor.x <= bounds.x + bounds.width &&
+        cursor.y >= bounds.y &&
+        cursor.y <= bounds.y + bounds.height;
+      if (contains) {
+        bestWindow = window;
+        break;
+      }
+
+      const centerX = bounds.x + bounds.width / 2;
+      const centerY = bounds.y + bounds.height / 2;
+      const distance =
+        (centerX - cursor.x) * (centerX - cursor.x) +
+        (centerY - cursor.y) * (centerY - cursor.y);
+      if (distance < bestScore) {
+        bestScore = distance;
+        bestWindow = window;
+      }
+    }
+
+    if (!bestWindow) {
+      return { toggled: false, enabled: false, count: windows.length };
+    }
+
+    const meta = pinWindowMeta.get(bestWindow.id);
+    if (!meta) {
+      return { toggled: false, enabled: false, count: windows.length };
+    }
+
+    const next = !meta.clickThrough;
+    applyPinClickThrough(bestWindow, meta, next);
+    return { toggled: true, enabled: next, count: windows.length };
   }
 }

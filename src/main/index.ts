@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app, BrowserWindow, globalShortcut, shell, type Event, type Input } from "electron";
+import { app, BrowserWindow, clipboard, globalShortcut, nativeImage, shell, type Event, type Input } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
@@ -35,10 +35,12 @@ import {
 } from "../shared/settings";
 import { createAppUpdater } from "./app-updater";
 import { buildCatalogWithOptions } from "./catalog";
+import { CatalogChangeWatcher } from "./catalog-watcher";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
+import { LiteSnapHistoryStore } from "./litesnap/history-store";
 import { LiteSnapImageStore } from "./litesnap/image-store";
 import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
@@ -265,6 +267,7 @@ let usageStore: UsageStore | null = null;
 let catalog: LaunchItem[] = [];
 let catalogInitialized = false;
 let catalogBackgroundRefreshScheduled = false;
+let catalogChangeWatcher: CatalogChangeWatcher | null = null;
 let shortcutRegistered = false;
 let activeShortcut: string | null = null;
 let searchWorker: SearchWorkerClient | null = null;
@@ -288,9 +291,13 @@ let devReloadTimer: NodeJS.Timeout | null = null;
 const liteSnapShortcutState: {
   screenshot: string | null;
   pin: string | null;
+  color: string | null;
+  togglePinClickThrough: string | null;
 } = {
   screenshot: null,
-  pin: null
+  pin: null,
+  color: null,
+  togglePinClickThrough: null
 };
 let liteSnapCaptureShortcutTriggeredAt = 0;
 let liteSnapLocalShortcutHandler: ((event: Event, input: Input) => void) | null = null;
@@ -370,6 +377,7 @@ function showLauncherWindowWithTrigger(
     trigger,
     at: Date.now()
   };
+  catalogChangeWatcher?.maybeRefreshIfStale();
   showLauncherWindow(window, {
     trigger,
     reportDiagnostic: (event: LauncherWindowDiagnosticEvent) => {
@@ -1018,7 +1026,9 @@ function unregisterLiteSnapLocalShortcut(window: BrowserWindow): void {
 function registerLiteSnapLocalShortcut(
   window: BrowserWindow,
   startCapture: () => Promise<boolean>,
-  pinClipboardImage: () => Promise<boolean>
+  pinClipboardImage: () => Promise<boolean>,
+  startColorCapture: () => Promise<boolean>,
+  togglePinClickThrough: () => boolean
 ): void {
   unregisterLiteSnapLocalShortcut(window);
 
@@ -1042,6 +1052,29 @@ function registerLiteSnapLocalShortcut(
       void pinClipboardImage().catch((error) => {
         console.warn("LiteSnap pin local shortcut failed", error);
       });
+      return;
+    }
+
+    const colorShortcut = liteSnapShortcutState.color;
+    if (colorShortcut && matchAcceleratorInput(input, colorShortcut)) {
+      event.preventDefault();
+      void startColorCapture().catch((error) => {
+        console.warn("LiteSnap color local shortcut failed", error);
+      });
+      return;
+    }
+
+    const togglePinClickThroughShortcut = liteSnapShortcutState.togglePinClickThrough;
+    if (
+      togglePinClickThroughShortcut &&
+      matchAcceleratorInput(input, togglePinClickThroughShortcut)
+    ) {
+      event.preventDefault();
+      try {
+        togglePinClickThrough();
+      } catch (error) {
+        console.warn("LiteSnap pin click-through local shortcut failed", error);
+      }
     }
   };
 
@@ -1052,24 +1085,36 @@ function registerLiteSnapShortcutSet(
   settings: LiteSnapSettings,
   window: BrowserWindow,
   startCapture: () => Promise<boolean>,
-  pinClipboardImage: () => Promise<boolean>
+  pinClipboardImage: () => Promise<boolean>,
+  startColorCapture: () => Promise<boolean>,
+  togglePinClickThrough: () => boolean
 ): LiteSnapShortcutRegistrationResult {
   const screenshotShortcut = settings.screenshotShortcut.trim();
   const pinShortcut = settings.pinShortcut.trim();
+  const colorShortcut = settings.colorShortcut.trim();
+  const togglePinClickThroughShortcut = settings.togglePinClickThroughShortcut.trim();
 
   if (
     screenshotShortcut === liteSnapShortcutState.screenshot &&
-    pinShortcut === liteSnapShortcutState.pin
+    pinShortcut === liteSnapShortcutState.pin &&
+    colorShortcut === liteSnapShortcutState.color &&
+    togglePinClickThroughShortcut === liteSnapShortcutState.togglePinClickThrough
   ) {
     return {
       screenshot: Boolean(screenshotShortcut),
       pin: Boolean(pinShortcut),
+      color: !colorShortcut || Boolean(liteSnapShortcutState.color),
+      togglePinClickThrough:
+        !togglePinClickThroughShortcut ||
+        Boolean(liteSnapShortcutState.togglePinClickThrough),
       message: "LiteSnap 快捷键已立即生效。"
     };
   }
 
   unregisterLiteSnapGlobalShortcut("screenshot");
   unregisterLiteSnapGlobalShortcut("pin");
+  unregisterLiteSnapGlobalShortcut("color");
+  unregisterLiteSnapGlobalShortcut("togglePinClickThrough");
   const screenshot = registerLiteSnapGlobalShortcut(
     screenshotShortcut,
     () => startCapture(),
@@ -1090,16 +1135,53 @@ function registerLiteSnapShortcutSet(
     liteSnapShortcutState.pin = pinShortcut;
   }
 
-  registerLiteSnapLocalShortcut(window, startCapture, pinClipboardImage);
+  const colorRegistered = registerLiteSnapGlobalShortcut(
+    colorShortcut,
+    () => startColorCapture(),
+    window,
+    "color"
+  );
+  if (colorRegistered) {
+    liteSnapShortcutState.color = colorShortcut;
+  }
+  // Empty color shortcut means intentionally disabled.
+  const color = !colorShortcut || colorRegistered;
+
+  const togglePinClickThroughRegistered = registerLiteSnapGlobalShortcut(
+    togglePinClickThroughShortcut,
+    () => togglePinClickThrough(),
+    window,
+    "toggle-pin-click-through"
+  );
+  if (togglePinClickThroughRegistered) {
+    liteSnapShortcutState.togglePinClickThrough = togglePinClickThroughShortcut;
+  }
+  // Empty click-through shortcut means intentionally disabled.
+  const togglePinClickThroughOk =
+    !togglePinClickThroughShortcut || togglePinClickThroughRegistered;
+
+  registerLiteSnapLocalShortcut(
+    window,
+    startCapture,
+    pinClipboardImage,
+    startColorCapture,
+    togglePinClickThrough
+  );
 
   const failed = [
     screenshot ? null : `截图快捷键 ${screenshotShortcut || "(空)"}`,
-    pin ? null : `贴图快捷键 ${pinShortcut || "(空)"}`
+    pin ? null : `贴图快捷键 ${pinShortcut || "(空)"}`,
+    color ? null : `取色快捷键 ${colorShortcut}`,
+    togglePinClickThroughOk
+      ? null
+      : `贴图穿透快捷键 ${togglePinClickThroughShortcut}`
   ].filter((item): item is string => Boolean(item));
 
   return {
     screenshot,
     pin,
+    color,
+    togglePinClickThrough: togglePinClickThroughOk,
     message:
       failed.length === 0
         ? "LiteSnap 快捷键已立即生效。"
@@ -1112,7 +1194,9 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
   patch: Partial<LiteSnapSettings>,
   window: BrowserWindow,
   startCapture: () => Promise<boolean>,
-  pinClipboardImage: () => Promise<boolean>
+  pinClipboardImage: () => Promise<boolean>,
+  startColorCapture: () => Promise<boolean>,
+  togglePinClickThrough: () => boolean
 ): Promise<LiteSnapSettings & { shortcutRegistration?: LiteSnapShortcutRegistrationResult }> {
   const previous = await store.getSettings();
   const shortcutsChanged =
@@ -1120,7 +1204,12 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
       String(patch.screenshotShortcut ?? "").trim() !==
         previous.screenshotShortcut.trim()) ||
     (Object.prototype.hasOwnProperty.call(patch, "pinShortcut") &&
-      String(patch.pinShortcut ?? "").trim() !== previous.pinShortcut.trim());
+      String(patch.pinShortcut ?? "").trim() !== previous.pinShortcut.trim()) ||
+    (Object.prototype.hasOwnProperty.call(patch, "colorShortcut") &&
+      String(patch.colorShortcut ?? "").trim() !== previous.colorShortcut.trim()) ||
+    (Object.prototype.hasOwnProperty.call(patch, "togglePinClickThroughShortcut") &&
+      String(patch.togglePinClickThroughShortcut ?? "").trim() !==
+        previous.togglePinClickThroughShortcut.trim());
 
   const next = await store.updateSettings(patch);
   if (!shortcutsChanged) {
@@ -1131,10 +1220,17 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
     next,
     window,
     startCapture,
-    pinClipboardImage
+    pinClipboardImage,
+    startColorCapture,
+    togglePinClickThrough
   );
 
-  if (requestedRegistration.screenshot && requestedRegistration.pin) {
+  if (
+    requestedRegistration.screenshot &&
+    requestedRegistration.pin &&
+    requestedRegistration.color &&
+    requestedRegistration.togglePinClickThrough
+  ) {
     return { ...next, shortcutRegistration: requestedRegistration };
   }
 
@@ -1145,20 +1241,32 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
       : previous.screenshotShortcut,
     pinShortcut: requestedRegistration.pin
       ? next.pinShortcut
-      : previous.pinShortcut
+      : previous.pinShortcut,
+    colorShortcut: requestedRegistration.color
+      ? next.colorShortcut
+      : previous.colorShortcut,
+    togglePinClickThroughShortcut: requestedRegistration.togglePinClickThrough
+      ? next.togglePinClickThroughShortcut
+      : previous.togglePinClickThroughShortcut
   };
   const saved = await store.updateSettings(effective);
   const fallbackRegistration = registerLiteSnapShortcutSet(
     saved,
     window,
     startCapture,
-    pinClipboardImage
+    pinClipboardImage,
+    startColorCapture,
+    togglePinClickThrough
   );
   const failed = [
     requestedRegistration.screenshot
       ? null
       : `截图快捷键 ${next.screenshotShortcut}`,
-    requestedRegistration.pin ? null : `贴图快捷键 ${next.pinShortcut}`
+    requestedRegistration.pin ? null : `贴图快捷键 ${next.pinShortcut}`,
+    requestedRegistration.color ? null : `取色快捷键 ${next.colorShortcut}`,
+    requestedRegistration.togglePinClickThrough
+      ? null
+      : `贴图穿透快捷键 ${next.togglePinClickThroughShortcut}`
   ].filter((item): item is string => Boolean(item));
 
   return {
@@ -1166,6 +1274,10 @@ async function updateLiteSnapSettingsWithShortcutRegistration(
     shortcutRegistration: {
       screenshot: requestedRegistration.screenshot && fallbackRegistration.screenshot,
       pin: requestedRegistration.pin && fallbackRegistration.pin,
+      color: requestedRegistration.color && fallbackRegistration.color,
+      togglePinClickThrough:
+        requestedRegistration.togglePinClickThrough &&
+        fallbackRegistration.togglePinClickThrough,
       message: `${failed.join("、")} 注册失败，已保留旧快捷键。可能已被系统或其他应用占用。`
     }
   };
@@ -1221,6 +1333,7 @@ async function saveCatalogScanConfig(
   await db.setSetting(CATALOG_SCAN_CONFIG_KEY, JSON.stringify(next));
   catalogScanConfig = next;
   markSearchWorkerStateDirty();
+  catalogChangeWatcher?.restart();
   return next;
 }
 
@@ -1476,10 +1589,27 @@ function scheduleCatalogBackgroundRefresh(db: LiteDatabase): void {
 
   catalogBackgroundRefreshScheduled = true;
   setImmediate(() => {
-    void rebuildCatalogIndex(db).catch((error) => {
-      console.error("[catalog] background refresh failed", error);
-    });
+    void rebuildCatalogIndex(db)
+      .then(() => {
+        catalogChangeWatcher?.markRebuilt();
+      })
+      .catch((error) => {
+        console.error("[catalog] background refresh failed", error);
+      });
   });
+}
+
+function startCatalogChangeWatcher(db: LiteDatabase): void {
+  if (E2E_MODE || process.platform !== "win32") {
+    return;
+  }
+
+  catalogChangeWatcher?.dispose();
+  catalogChangeWatcher = new CatalogChangeWatcher(
+    () => catalogScanConfig,
+    () => rebuildCatalogIndex(db)
+  );
+  catalogChangeWatcher.start();
 }
 
 async function rebuildCatalogIndex(
@@ -1489,6 +1619,7 @@ async function rebuildCatalogIndex(
   try {
     const nextCatalog = buildCatalogWithOptions(catalogScanConfig);
     await persistCatalogSnapshot(db, nextCatalog);
+    catalogChangeWatcher?.markRebuilt();
 
     return {
       ok: true,
@@ -1800,6 +1931,7 @@ async function bootstrap(): Promise<void> {
   const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
   const translateSettingsStore = new TranslateSettingsStore(activeDatabase);
   const liteSnapImageStore = new LiteSnapImageStore();
+  const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
   liteSnapPinWindowManager.setSaveImageProvider(async (image) => {
     const settings = await liteSnapSettingsStore.getSettings();
@@ -1814,7 +1946,8 @@ async function bootstrap(): Promise<void> {
   const liteSnapCaptureSessionManager = new LiteSnapCaptureSessionManager(
     liteSnapSettingsStore,
     liteSnapImageStore,
-    liteSnapPinWindowManager
+    liteSnapPinWindowManager,
+    liteSnapHistoryStore
   );
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
   catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
@@ -1822,6 +1955,7 @@ async function bootstrap(): Promise<void> {
   catalog = replaceCatalogPluginItems(catalog);
   markSearchWorkerStateDirty();
   scheduleCatalogBackgroundRefresh(activeDatabase);
+  startCatalogChangeWatcher(activeDatabase);
   setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
   const liteSnapSettings = await liteSnapSettingsStore.getSettings();
   const catalogIdSet = new Set(catalog.map((item) => item.id));
@@ -1905,8 +2039,42 @@ async function bootstrap(): Promise<void> {
     }
     return started;
   };
+  const startLiteSnapColorCapture = async (): Promise<boolean> => {
+    const now = Date.now();
+    if (now - liteSnapCaptureShortcutTriggeredAt < 500) {
+      return true;
+    }
+    liteSnapCaptureShortcutTriggeredAt = now;
+
+    const started = await liteSnapCaptureSessionManager.startColorCapture();
+    if (started && !launcherWindow.isDestroyed() && !launcherWindow.isFocused()) {
+      liteSnapCaptureSessionManager.startFrameCacheRefresh();
+    }
+    return started;
+  };
   const pinLiteSnapClipboardImage = async (): Promise<boolean> => {
-    return liteSnapPinWindowManager.pinClipboardImage();
+    const pinned = await liteSnapPinWindowManager.pinClipboardImage();
+    if (!pinned) {
+      return false;
+    }
+
+    try {
+      const image = clipboard.readImage();
+      if (!image.isEmpty()) {
+        const settings = await liteSnapSettingsStore.getSettings();
+        if (settings.historyEnabled) {
+          await liteSnapHistoryStore.add(image, "clipboard-pin", settings.historyMaxItems);
+        }
+      }
+    } catch (error) {
+      console.warn("[litesnap] clipboard-pin history record failed", error);
+    }
+
+    return true;
+  };
+  const toggleLiteSnapNearestPinClickThrough = (): boolean => {
+    liteSnapPinWindowManager.toggleNearestPinClickThrough();
+    return true;
   };
   const sendLiteSnapPluginPanel = async (payload: {
     trigger: "litesnap-ocr" | "litesnap-translate";
@@ -2215,12 +2383,18 @@ async function bootstrap(): Promise<void> {
               patch,
               launcherWindow,
               startLiteSnapCapture,
-              pinLiteSnapClipboardImage
+              pinLiteSnapClipboardImage,
+              startLiteSnapColorCapture,
+              toggleLiteSnapNearestPinClickThrough
             ),
           startCapture: () => startLiteSnapCapture(),
+          startColorCapture: () => startLiteSnapColorCapture(),
           pinClipboardImage: () => pinLiteSnapClipboardImage(),
           togglePinnedWindowsVisibility: () =>
             liteSnapPinWindowManager.togglePinnedWindowsVisibility(),
+          closeAllPinnedWindows: () => liteSnapPinWindowManager.closeAllPinnedWindows(),
+          toggleNearestPinClickThrough: () =>
+            liteSnapPinWindowManager.toggleNearestPinClickThrough(),
           getOverlayState: () => liteSnapCaptureSessionManager.getOverlayState(),
           getWindowRectAtPoint: (x, y) =>
             liteSnapCaptureSessionManager.getWindowRectAtPoint(x, y),
@@ -2229,6 +2403,37 @@ async function bootstrap(): Promise<void> {
             recognizeLiteSnapTextAndShowPanel(input),
           translateSelection: (input: LiteSnapTranslateSelectionInput) =>
             translateLiteSnapSelectionAndShowPanel(input),
+          recordRecentColor: (color) =>
+            liteSnapCaptureSessionManager.recordRecentColor(color),
+          listHistory: async () => {
+            const settings = await liteSnapSettingsStore.getSettings();
+            return liteSnapHistoryStore.list(settings.historyMaxItems);
+          },
+          deleteHistoryItem: (id) => liteSnapHistoryStore.remove(id),
+          clearHistory: () => liteSnapHistoryStore.clear(),
+          historyCopy: async (id) => {
+            const item = await liteSnapHistoryStore.get(id);
+            if (!item) {
+              return false;
+            }
+            const image = nativeImage.createFromPath(item.filePath);
+            if (image.isEmpty()) {
+              return false;
+            }
+            clipboard.writeImage(image);
+            return true;
+          },
+          historyPin: async (id) => {
+            const item = await liteSnapHistoryStore.get(id);
+            if (!item) {
+              return false;
+            }
+            const image = nativeImage.createFromPath(item.filePath);
+            if (image.isEmpty()) {
+              return false;
+            }
+            return liteSnapPinWindowManager.pinImage(image);
+          },
           probeOcr: () => liteSnapCaptureSessionManager.probeOcrStatusAsync(),
           getOcrCapabilities: () =>
             liteSnapCaptureSessionManager.listOcrCapabilities(),
@@ -2288,7 +2493,9 @@ async function bootstrap(): Promise<void> {
       liteSnapSettings,
       launcherWindow,
       startLiteSnapCapture,
-      pinLiteSnapClipboardImage
+      pinLiteSnapClipboardImage,
+      startLiteSnapColorCapture,
+      toggleLiteSnapNearestPinClickThrough
     );
   }
 
@@ -2402,6 +2609,8 @@ app.on("will-quit", () => {
     clipboardWorkbenchService = null;
   }
   setClipboardWorkbenchService(null);
+  catalogChangeWatcher?.dispose();
+  catalogChangeWatcher = null;
   if (searchWorker) {
     void searchWorker.terminate();
     searchWorker = null;

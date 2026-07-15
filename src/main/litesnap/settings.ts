@@ -1,7 +1,10 @@
 import {
   createDefaultLiteSnapSettings,
   LiteSnapAnnotationTool,
-  LiteSnapSettings
+  LiteSnapSettings,
+  normalizeLiteSnapRecentColors,
+  LITESNAP_HISTORY_MAX_ITEMS_MAX,
+  LITESNAP_HISTORY_MAX_ITEMS_MIN
 } from "../../shared/litesnap";
 import { LiteDatabase } from "../database";
 
@@ -33,20 +36,37 @@ function clampNumber(
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function normalizeLiteSnapSettings(
+function normalizeShortcut(
+  value: unknown,
+  fallback: string,
+  options?: { allowEmpty?: boolean }
+): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return options?.allowEmpty ? "" : fallback;
+  }
+  return trimmed;
+}
+
+export function normalizeLiteSnapSettings(
   value: Partial<LiteSnapSettings> | null | undefined,
   base: LiteSnapSettings = createDefaultLiteSnapSettings()
 ): LiteSnapSettings {
   return {
-    screenshotShortcut:
-      typeof value?.screenshotShortcut === "string" &&
-      value.screenshotShortcut.trim()
-        ? value.screenshotShortcut.trim()
-        : base.screenshotShortcut,
-    pinShortcut:
-      typeof value?.pinShortcut === "string" && value.pinShortcut.trim()
-        ? value.pinShortcut.trim()
-        : base.pinShortcut,
+    screenshotShortcut: normalizeShortcut(
+      value?.screenshotShortcut,
+      base.screenshotShortcut
+    ),
+    pinShortcut: normalizeShortcut(value?.pinShortcut, base.pinShortcut),
+    colorShortcut: normalizeShortcut(value?.colorShortcut, base.colorShortcut),
+    togglePinClickThroughShortcut: normalizeShortcut(
+      value?.togglePinClickThroughShortcut,
+      base.togglePinClickThroughShortcut,
+      { allowEmpty: true }
+    ),
     saveDirectory:
       typeof value?.saveDirectory === "string" ? value.saveDirectory.trim() : base.saveDirectory,
     saveFormat: value?.saveFormat === "jpg" ? "jpg" : base.saveFormat,
@@ -81,7 +101,21 @@ function normalizeLiteSnapSettings(
     annotationFillShapes:
       typeof value?.annotationFillShapes === "boolean"
         ? value.annotationFillShapes
-        : base.annotationFillShapes
+        : base.annotationFillShapes,
+    recentColors: normalizeLiteSnapRecentColors(
+      value?.recentColors,
+      base.recentColors
+    ),
+    historyEnabled:
+      typeof value?.historyEnabled === "boolean"
+        ? value.historyEnabled
+        : base.historyEnabled,
+    historyMaxItems: clampNumber(
+      value?.historyMaxItems,
+      base.historyMaxItems,
+      LITESNAP_HISTORY_MAX_ITEMS_MIN,
+      LITESNAP_HISTORY_MAX_ITEMS_MAX
+    )
   };
 }
 
@@ -92,7 +126,7 @@ export class LiteSnapSettingsStore {
 
   public async getSettings(): Promise<LiteSnapSettings> {
     if (this.cachedSettings) {
-      return { ...this.cachedSettings };
+      return { ...this.cachedSettings, recentColors: [...this.cachedSettings.recentColors] };
     }
 
     const fallback = createDefaultLiteSnapSettings();
@@ -100,7 +134,7 @@ export class LiteSnapSettingsStore {
     if (!raw) {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
       this.cachedSettings = fallback;
-      return { ...fallback };
+      return { ...fallback, recentColors: [...fallback.recentColors] };
     }
 
     try {
@@ -113,11 +147,11 @@ export class LiteSnapSettingsStore {
         );
       }
       this.cachedSettings = normalized;
-      return { ...normalized };
+      return { ...normalized, recentColors: [...normalized.recentColors] };
     } catch {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
       this.cachedSettings = fallback;
-      return { ...fallback };
+      return { ...fallback, recentColors: [...fallback.recentColors] };
     }
   }
 
@@ -128,6 +162,6 @@ export class LiteSnapSettingsStore {
     const next = normalizeLiteSnapSettings(patch, current);
     await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(next));
     this.cachedSettings = next;
-    return { ...next };
+    return { ...next, recentColors: [...next.recentColors] };
   }
 }

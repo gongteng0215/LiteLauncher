@@ -756,6 +756,245 @@ body {
   margin-top: 4px;
 }
 
+.litesnap-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.litesnap-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 12px;
+  width: 100%;
+}
+
+.litesnap-fields-grid-item--wide {
+  grid-column: 1 / -1;
+}
+
+.litesnap-fields-grid .settings-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.litesnap-fields-grid .settings-row-label {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.litesnap-fields-grid .settings-row-hint {
+  grid-column: 1;
+  margin-top: 0;
+  line-height: 1.45;
+}
+
+.litesnap-fields-grid .settings-row-info-value {
+  width: 100%;
+  max-width: 100%;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.litesnap-form .litesnap-ocr-textarea {
+  min-height: 120px;
+}
+
+.litesnap-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.litesnap-action-row--primary {
+  margin-top: 10px;
+}
+
+.litesnap-action-row--secondary {
+  margin-top: 8px;
+}
+
+.litesnap-action-row--secondary .settings-btn {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.litesnap-panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.litesnap-panel-footer-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.litesnap-history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 2px 0 10px;
+}
+
+.litesnap-history-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.litesnap-history-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: rgba(241, 245, 249, 0.96);
+}
+
+.litesnap-history-meta {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.62);
+}
+
+.litesnap-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-height: min(46vh, 420px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.litesnap-history-empty {
+  padding: 28px 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(233, 242, 255, 0.62);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.litesnap-history-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.litesnap-history-row:hover {
+  border-color: rgba(125, 211, 252, 0.28);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.litesnap-history-thumb-wrap {
+  width: 96px;
+  height: 68px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(2, 6, 23, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.litesnap-history-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.litesnap-history-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.litesnap-history-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.litesnap-history-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  background: rgba(56, 189, 248, 0.12);
+  color: #c8ebff;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.litesnap-history-size,
+.litesnap-history-time {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.64);
+}
+
+.litesnap-history-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.litesnap-history-action {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(233, 242, 255, 0.9);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.litesnap-history-action:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.litesnap-history-action.is-primary {
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(56, 189, 248, 0.16);
+  color: #dff6ff;
+}
+
+.litesnap-history-action.is-danger:hover {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+}
+
 .settings-number {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.2);

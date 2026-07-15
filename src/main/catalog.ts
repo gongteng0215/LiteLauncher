@@ -176,6 +176,28 @@ function getStartMenuDirs(): string[] {
   return dirs;
 }
 
+function isExistingDirectory(candidate: string): boolean {
+  try {
+    return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Directories to watch for install/uninstall-driven catalog refresh. */
+export function getCatalogWatchDirectories(options: CatalogScanConfig): string[] {
+  const dirs = new Set<string>();
+  for (const dir of getStartMenuDirs()) {
+    if (isExistingDirectory(dir)) {
+      dirs.add(dir);
+    }
+  }
+  for (const root of getWindowsExecutableRoots(options)) {
+    dirs.add(root);
+  }
+  return Array.from(dirs);
+}
+
 function walkShortcutFiles(dirPath: string, result: string[]): void {
   let entries: fs.Dirent[];
   try {

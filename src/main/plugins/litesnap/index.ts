@@ -57,7 +57,12 @@ function createCatalogItem(
       "pin",
       "screenshot",
       "截图",
-      "贴图"
+      "贴图",
+      "history",
+      "color",
+      "取色",
+      "历史",
+      "截图历史"
     ]
   };
 }
@@ -76,6 +81,12 @@ function getQueryAction(query: string): LiteSnapPanelAction | null {
   }
   if (normalized === "snap settings") {
     return "open-settings";
+  }
+  if (normalized === "snap history" || normalized === "截图历史") {
+    return "open-history";
+  }
+  if (normalized === "color" || normalized === "取色") {
+    return "start-color-capture";
   }
   if (QUERY_ALIASES.includes(normalized)) {
     return normalized === "snap" || normalized === "screenshot" || normalized === "截图"
@@ -96,6 +107,8 @@ function parseAction(optionsText: string | undefined): LiteSnapPanelAction {
     case "start-capture":
     case "pin-from-clipboard":
     case "open-settings":
+    case "open-history":
+    case "start-color-capture":
       return action;
     default:
       return "open";
@@ -125,6 +138,18 @@ function createPanelPayload(action: LiteSnapPanelAction): LiteSnapPanelPayload {
         settings,
         statusMessage: "可在此调整快捷键、保存目录与标注预设。",
         preferredView: "settings"
+      };
+    case "open-history":
+      return {
+        settings,
+        statusMessage: "查看最近截图，可复制、贴图或删除。",
+        preferredView: "history"
+      };
+    case "start-color-capture":
+      return {
+        settings,
+        statusMessage: "按 F4 取色，或在面板中启动取色。",
+        preferredView: "main"
       };
     case "open":
     default:
@@ -157,6 +182,18 @@ export const liteSnapPlugin: LauncherPlugin = {
     if (action === "open-settings") {
       return [
         createCatalogItem(action, "截图贴图设置", "打开 LiteSnap 设置")
+      ];
+    }
+
+    if (action === "open-history") {
+      return [
+        createCatalogItem(action, "截图历史", "查看最近截图并复制、贴图或删除")
+      ];
+    }
+
+    if (action === "start-color-capture") {
+      return [
+        createCatalogItem(action, "屏幕取色", "打开 LiteSnap 并准备取色")
       ];
     }
 

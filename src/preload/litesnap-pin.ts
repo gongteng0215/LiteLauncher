@@ -4,6 +4,11 @@ const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
 const PIN_SAVE_CHANNEL = "litesnap-pin:save";
 const PIN_MOVE_CHANNEL = "litesnap-pin:move-by";
+const PIN_DRAG_END_CHANNEL = "litesnap-pin:drag-end";
+const PIN_SET_CLICK_THROUGH_CHANNEL = "litesnap-pin:set-click-through";
+const PIN_CLOSE_ALL_CHANNEL = "litesnap-pin:close-all";
+const PIN_IMAGE_UPDATED_CHANNEL = "litesnap-pin:image-updated";
+const PIN_CLICK_THROUGH_CHANGED_CHANNEL = "litesnap-pin:click-through-changed";
 
 contextBridge.exposeInMainWorld("liteSnapPin", {
   setVisualState(scale: number, opacity: number): void {
@@ -25,5 +30,32 @@ contextBridge.exposeInMainWorld("liteSnapPin", {
     }
 
     ipcRenderer.send(PIN_MOVE_CHANNEL, deltaX, deltaY);
+  },
+  notifyDragEnd(): void {
+    ipcRenderer.send(PIN_DRAG_END_CHANNEL);
+  },
+  setClickThrough(enabled: boolean): void {
+    ipcRenderer.send(PIN_SET_CLICK_THROUGH_CHANNEL, Boolean(enabled));
+  },
+  closeAllPins(): void {
+    ipcRenderer.send(PIN_CLOSE_ALL_CHANNEL);
+  },
+  onImageRefresh(callback: () => void): () => void {
+    const listener = (): void => {
+      callback();
+    };
+    ipcRenderer.on(PIN_IMAGE_UPDATED_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(PIN_IMAGE_UPDATED_CHANNEL, listener);
+    };
+  },
+  onClickThroughChanged(callback: (enabled: boolean) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, enabled: unknown): void => {
+      callback(Boolean(enabled));
+    };
+    ipcRenderer.on(PIN_CLICK_THROUGH_CHANGED_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(PIN_CLICK_THROUGH_CHANGED_CHANNEL, listener);
+    };
   }
 });

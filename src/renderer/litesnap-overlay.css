@@ -334,6 +334,10 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
+.litesnap-overlay__color--recent {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(125, 211, 252, 0.95);
+}
+
 .litesnap-overlay__color.is-active {
   border-color: #f8fafc;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
