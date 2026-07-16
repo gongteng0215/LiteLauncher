@@ -1,13 +1,49 @@
+<!--
+  Source of truth for LiteLauncher planning docs.
+  Migrated from Cursor plan: 划词翻译与离线词典_062158c9.plan.md
+  Local Cursor copy may still exist under ~/.cursor/plans/ — prefer this repo path.
+-->
+---
+name: 划词翻译与离线词典
+overview: 新增“划词翻译/查词”功能：通过全局快捷键模拟 Ctrl+C 获取选中文本，单词走离线 ECDICT 词典卡片展示，短句/中文走现有百度翻译，结果显示在鼠标附近的悬浮小窗；同时在现有“文本翻译”面板中为单词输入增加词典卡片展示。
+todos:
+  - id: build-ecdict-db
+    content: 编写 scripts/build-ecdict-db.cjs，生成 src/assets/ecdict.db（ECDICT mini 数据）
+    status: pending
+  - id: shared-dictionary-types
+    content: 新增 src/shared/dictionary.ts 与 channels.ts 中的 lookupDictionaryWord 通道
+    status: pending
+  - id: dictionary-store
+    content: 新增 src/main/dictionary/store.ts 的 DictionaryStore（独立只读连接、查找、词形还原）
+    status: pending
+  - id: dictionary-ipc
+    content: 接入 ipc.ts/preload/index.ts 的 DictionaryProvider
+    status: pending
+  - id: selection-capture
+    content: 新增 src/main/selection-translate/capture.ts（SendKeys('^c') + 剪贴板轮询 + 还原）
+    status: pending
+  - id: selection-hotkey
+    content: 在 index.ts 新增划词翻译全局快捷键注册与单词/句子分流逻辑
+    status: pending
+  - id: selection-popup-window
+    content: 新增 selection-translate 悬浮弹窗窗口 + preload + 渲染器（词典卡片/翻译卡片两态）
+    status: pending
+  - id: selection-settings
+    content: 新增 SelectionTranslateSettingsStore 并在文本翻译设置视图中加入划词翻译开关/快捷键
+    status: pending
+  - id: panel-dictionary-card
+    content: 在 webtools-translate 面板中为单词输入增加词典卡片展示
+    status: pending
+  - id: tests-and-build
+    content: 新增/更新回归测试，build + 针对性测试，批次完成后跑一次 smoke
+    status: pending
+isProject: false
+---
+
+
 # 划词翻译 + 离线词典 实施方案
 
-> 仓库计划索引与 Cursor 计划迁入副本：[`docs/plans/selection-translate-dictionary.md`](../../plans/selection-translate-dictionary.md)·总览 [`docs/plans/README.md`](../../plans/README.md)
-
-## 概述
-
-新增“划词翻译/查词”功能：通过全局快捷键模拟 Ctrl+C 获取选中文本，单词走离线 ECDICT 词典卡片展示，短句/中文走现有百度翻译，结果显示在鼠标附近的悬浮小窗；同时在现有“文本翻译”面板中为单词输入增加词典卡片展示。
-
 ## 背景与已确认决策
-
 - 词典数据源：**ECDICT 离线词库**（MIT 协议，`skywind3000/ECDICT`），无需申请 Key，含音标/中英释义/词性/考纲标签，缺点是仅覆盖英文单词，不含中文词/短语查询。
 - 划词触发方式：**全局快捷键 + 模拟 Ctrl+C 读取剪贴板**（不做 UI Automation，不做剪贴板监听自动触发）。
 - 现状确认（来自代码探查）：
@@ -70,23 +106,7 @@
 - 更新 `src/test/webtools-translate-plugin-source.test.ts`：断言设置视图新增“划词翻译”开关/快捷键字段。
 - 全部改动完成后：`pnpm run build` + 针对性回归测试；批量改动完成后再跑一次 smoke（遵循 `AGENTS.md` 的验证顺序，不在过程中反复启动 Electron）。
 
-## 待确认/风险点
-
-- 词典库版本用 **mini 精简版**（体积小，覆盖常用词），而非 76 万词条完整版，以控制安装包体积；如果需要完整版覆盖冷门词汇，可以之后换成完整数据文件，代码结构不变。
+## 待确认/风险点（会在执行前口头再和你确认一次细节，但先说明）
+- 词典库版本用 **mini 精简版**（体积小，覆盖常用词），而非 76 万词条完整版，以控制安装包体积；如果你需要完整版覆盖冷门词汇，可以之后换成完整数据文件，代码结构不变。
 - 模拟 Ctrl+C 依赖 PowerShell `SendKeys`，对某些以管理员权限运行、或使用 UAC 隔离的前台窗口可能不生效（和现有粘贴功能有同样的已知限制）。
 - 弹窗默认快捷键定为 `F2`（当前未被占用），可在设置里改。
-
-## 实施任务清单
-
-| ID | 任务 |
-|---|---|
-| build-ecdict-db | 编写 `scripts/build-ecdict-db.cjs`，生成 `src/assets/ecdict.db`（ECDICT mini 数据） |
-| shared-dictionary-types | 新增 `src/shared/dictionary.ts` 与 `channels.ts` 中的 `lookupDictionaryWord` 通道 |
-| dictionary-store | 新增 `src/main/dictionary/store.ts` 的 `DictionaryStore`（独立只读连接、查找、词形还原） |
-| dictionary-ipc | 接入 `ipc.ts`/`preload/index.ts` 的 `DictionaryProvider` |
-| selection-capture | 新增 `src/main/selection-translate/capture.ts`（SendKeys('^c') + 剪贴板轮询 + 还原） |
-| selection-hotkey | 在 `index.ts` 新增划词翻译全局快捷键注册与单词/句子分流逻辑 |
-| selection-popup-window | 新增 selection-translate 悬浮弹窗窗口 + preload + 渲染器（词典卡片/翻译卡片两态） |
-| selection-settings | 新增 `SelectionTranslateSettingsStore` 并在文本翻译设置视图中加入划词翻译开关/快捷键 |
-| panel-dictionary-card | 在 webtools-translate 面板中为单词输入增加词典卡片展示 |
-| tests-and-build | 新增/更新回归测试，build + 针对性测试，批次完成后跑一次 smoke |
