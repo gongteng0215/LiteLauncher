@@ -368,6 +368,19 @@ declare global {
       translateToolTranslateText(
         input: TranslateTextInput
       ): Promise<TranslateResult>;
+      lookupDictionaryWord(
+        word: string
+      ): Promise<import("../shared/dictionary").DictionaryEntry | undefined>;
+      getSelectionTranslateSettings(): Promise<
+        import("../shared/selection-translate").SelectionTranslateSettings
+      >;
+      setSelectionTranslateSettings(
+        patch: Partial<
+          import("../shared/selection-translate").SelectionTranslateSettings
+        >
+      ): Promise<
+        import("../shared/selection-translate").SelectionTranslateSettings
+      >;
       liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
       liteSnapGetOcrCapabilities(): Promise<
         import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult

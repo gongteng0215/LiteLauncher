@@ -50,6 +50,11 @@ test("webtools-translate plugin is registered with IPC and renderer panel", () =
     /applyWebtoolsTranslatePanelPayload[\s\S]*translateToolSourceText = ""/,
     "translate panel should clear previous text on open"
   );
+  assert.match(panelImplsSource, /selectionTranslateEnabled/);
+  assert.match(panelImplsSource, /selectionTranslateHotkey/);
+  assert.match(panelImplsSource, /webtools-translate-dictionary-card/);
+  assert.match(panelImplsSource, /lookupDictionaryWord/);
+  assert.match(panelImplsSource, /setSelectionTranslateSettings/);
   assert.match(handlerConfigSource, /webtools-translate-form/);
   assert.match(handlerConfigSource, /translate-run/);
   assert.match(iconsSource, /"webtools-translate"/);

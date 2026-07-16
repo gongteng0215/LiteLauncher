@@ -7,10 +7,12 @@ native/litesnap-capture/*.exp
 litesnap-capture.node
 .codegraph/
 artifacts/
+scripts/vendor/
 *.log
 *.db
 *.db-wal
 *.db-shm
+!src/assets/ecdict.db
 _tmp_*
 tmp-*
 pnpm-debug.log*

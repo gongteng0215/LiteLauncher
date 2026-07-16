@@ -424,6 +424,34 @@ interface LauncherApi {
     translatedText: string;
     message: string;
   }>;
+  lookupDictionaryWord?(word: string): Promise<
+    | {
+        word: string;
+        phonetic: string;
+        translation: string;
+        definition: string;
+        pos: string;
+        tags: string;
+        collins: number;
+        oxford: number;
+        exchange: string;
+      }
+    | undefined
+  >;
+  getSelectionTranslateSettings?(): Promise<{
+    enabled: boolean;
+    hotkey: string;
+    restoreClipboard: boolean;
+  }>;
+  setSelectionTranslateSettings?(patch: {
+    enabled?: boolean;
+    hotkey?: string;
+    restoreClipboard?: boolean;
+  }): Promise<{
+    enabled: boolean;
+    hotkey: string;
+    restoreClipboard: boolean;
+  }>;
   liteSnapProbeOcr?(): Promise<{
     ok: boolean;
     message: string;

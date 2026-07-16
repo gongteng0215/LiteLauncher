@@ -25,6 +25,8 @@ import {
   TranslateSettings,
   TranslateTextInput
 } from "../shared/translate";
+import type { DictionaryEntry } from "../shared/dictionary";
+import type { SelectionTranslateSettings } from "../shared/selection-translate";
 import {
   AppErrorLogEntry,
   AppErrorLogInput,
@@ -144,6 +146,17 @@ type TranslateToolProvider = {
   translateText: (input: TranslateTextInput) => Promise<TranslateResult>;
 };
 
+type DictionaryProvider = {
+  lookup: (word: string) => Promise<DictionaryEntry | undefined>;
+};
+
+type SelectionTranslateProvider = {
+  getSettings: () => Promise<SelectionTranslateSettings>;
+  updateSettings: (
+    patch: Partial<SelectionTranslateSettings>
+  ) => Promise<SelectionTranslateSettings>;
+};
+
 type CatalogProvider = {
   rebuildCatalog: () => Promise<CatalogRebuildResult>;
 };
@@ -175,6 +188,8 @@ type IpcOptions = {
   settingsProvider: SettingsProvider;
   liteSnapProvider: LiteSnapProvider;
   translateToolProvider: TranslateToolProvider;
+  dictionaryProvider: DictionaryProvider;
+  selectionTranslateProvider: SelectionTranslateProvider;
   catalogProvider: CatalogProvider;
   updaterProvider: UpdaterProvider;
   errorLogProvider: ErrorLogProvider;
@@ -1568,6 +1583,27 @@ export function registerIpcHandlers(
             }
           : { text: "" };
       return options.translateToolProvider.translateText(normalizedInput);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.lookupDictionaryWord,
+    async (_, wordInput: unknown) => {
+      const word = typeof wordInput === "string" ? wordInput : "";
+      return options.dictionaryProvider.lookup(word);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getSelectionTranslateSettings, () => {
+    return options.selectionTranslateProvider.getSettings();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.setSelectionTranslateSettings,
+    async (_, patchInput: Partial<SelectionTranslateSettings> | null) => {
+      const patch =
+        patchInput && typeof patchInput === "object" ? patchInput : {};
+      return options.selectionTranslateProvider.updateSettings(patch);
     }
   );
 

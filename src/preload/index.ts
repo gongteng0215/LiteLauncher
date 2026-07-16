@@ -193,6 +193,23 @@ const api = {
   ): Promise<TranslateResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.translateToolTranslateText, input);
   },
+  lookupDictionaryWord(
+    word: string
+  ): Promise<import("../shared/dictionary").DictionaryEntry | undefined> {
+    return ipcRenderer.invoke(IPC_CHANNELS.lookupDictionaryWord, word);
+  },
+  getSelectionTranslateSettings(): Promise<
+    import("../shared/selection-translate").SelectionTranslateSettings
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.getSelectionTranslateSettings);
+  },
+  setSelectionTranslateSettings(
+    patch: Partial<
+      import("../shared/selection-translate").SelectionTranslateSettings
+    >
+  ): Promise<import("../shared/selection-translate").SelectionTranslateSettings> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setSelectionTranslateSettings, patch);
+  },
   liteSnapProbeOcr(): Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapProbeOcr);
   },

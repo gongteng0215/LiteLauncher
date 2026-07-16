@@ -13961,6 +13961,19 @@ let translateToolPanelData: TranslateToolPanelData = {
 let translateToolPanelView: "main" | "settings" = "main";
 let translateToolSourceText = "";
 let translateToolResultText = "";
+let translateToolDictionaryEntry: {
+  word: string;
+  phonetic: string;
+  translation: string;
+  definition: string;
+  pos: string;
+  tags: string;
+} | null = null;
+let selectionTranslateSettingsState = {
+  enabled: true,
+  hotkey: "F2",
+  restoreClipboard: true
+};
 
 function normalizeTranslateToolPanelData(value: unknown): TranslateToolPanelData {
   const record = toRecord(value);
@@ -14018,6 +14031,10 @@ async function hydrateTranslateToolPanelFromSettings(): Promise<void> {
       ...translateToolPanelData,
       settings
     });
+    if (launcher.getSelectionTranslateSettings) {
+      selectionTranslateSettingsState =
+        await launcher.getSelectionTranslateSettings();
+    }
     if (activePluginPanel?.pluginId === WEBTOOLS_TRANSLATE_PLUGIN_ID) {
       renderList();
     }
@@ -14062,8 +14079,60 @@ async function runTranslateToolPanelTranslate(form: HTMLFormElement): Promise<vo
     resultTextarea.placeholder = "正在翻译，请稍候…";
   }
 
+  const dictionaryCardHost = form.querySelector<HTMLElement>(
+    "#webtools-translate-dictionary-card"
+  );
+  if (dictionaryCardHost) {
+    dictionaryCardHost.hidden = true;
+    dictionaryCardHost.replaceChildren();
+  }
+  translateToolDictionaryEntry = null;
+
   try {
     const formData = new FormData(form);
+    if (
+      /^[A-Za-z][A-Za-z'\-]*$/.test(text) &&
+      launcher.lookupDictionaryWord
+    ) {
+      const entry = await launcher.lookupDictionaryWord(text);
+      if (entry) {
+        translateToolDictionaryEntry = {
+          word: entry.word,
+          phonetic: entry.phonetic,
+          translation: entry.translation,
+          definition: entry.definition,
+          pos: entry.pos,
+          tags: entry.tags
+        };
+        if (dictionaryCardHost) {
+          dictionaryCardHost.hidden = false;
+          const wordEl = document.createElement("div");
+          wordEl.className = "translate-dictionary-card__word";
+          wordEl.textContent = entry.word;
+          dictionaryCardHost.appendChild(wordEl);
+          if (entry.phonetic) {
+            const phoneticEl = document.createElement("div");
+            phoneticEl.className = "translate-dictionary-card__phonetic";
+            phoneticEl.textContent = `/${entry.phonetic}/`;
+            dictionaryCardHost.appendChild(phoneticEl);
+          }
+          const metaText = [entry.pos, entry.tags].filter(Boolean).join(" · ");
+          if (metaText) {
+            const metaEl = document.createElement("div");
+            metaEl.className = "translate-dictionary-card__meta";
+            metaEl.textContent = metaText;
+            dictionaryCardHost.appendChild(metaEl);
+          }
+          if (entry.translation) {
+            const translationEl = document.createElement("div");
+            translationEl.className = "translate-dictionary-card__text";
+            translationEl.textContent = entry.translation;
+            dictionaryCardHost.appendChild(translationEl);
+          }
+        }
+      }
+    }
+
     const result = await launcher.translateToolTranslateText({
       text,
       appId: String(formData.get("baiduAppId") ?? "").trim() || undefined,
@@ -14084,7 +14153,13 @@ async function runTranslateToolPanelTranslate(form: HTMLFormElement): Promise<vo
         ? ""
         : result.message || "翻译失败，请检查百度翻译配置。";
     }
-    setStatus(result.ok ? "翻译完成。" : result.message);
+    setStatus(
+      result.ok
+        ? translateToolDictionaryEntry
+          ? "已显示词典释义，并完成在线翻译。"
+          : "翻译完成。"
+        : result.message
+    );
   } catch (error) {
     console.warn("[webtools-translate] translate failed", error);
     if (resultTextarea) {
@@ -14121,6 +14196,11 @@ async function saveTranslateToolSettings(form: HTMLFormElement): Promise<void> {
       formData.get("baiduEngine") === "llm" ? ("llm" as const) : ("standard" as const),
     baiduApiKey: String(formData.get("baiduApiKey") ?? "").trim()
   };
+  const selectionPatch = {
+    enabled: formData.get("selectionTranslateEnabled") === "on",
+    hotkey: String(formData.get("selectionTranslateHotkey") ?? "").trim() || "F2",
+    restoreClipboard: formData.get("selectionTranslateRestoreClipboard") === "on"
+  };
 
   const previousLabel = submitButton?.textContent ?? "保存设置";
   if (submitButton) {
@@ -14134,6 +14214,10 @@ async function saveTranslateToolSettings(form: HTMLFormElement): Promise<void> {
       ...translateToolPanelData,
       settings
     });
+    if (launcher.setSelectionTranslateSettings) {
+      selectionTranslateSettingsState =
+        await launcher.setSelectionTranslateSettings(selectionPatch);
+    }
     setStatus("翻译设置已保存。");
     returnToTranslateToolMainView();
   } catch (error) {
@@ -23653,6 +23737,7 @@ window.__LL_PANEL_IMPLS__ = {
     translateToolPanelView = "main";
     translateToolSourceText = "";
     translateToolResultText = "";
+    translateToolDictionaryEntry = null;
   },
 
   renderWebtoolsTranslatePanel(): void {
@@ -23735,6 +23820,34 @@ window.__LL_PANEL_IMPLS__ = {
             "password"
           ),
           "仅大模型文本翻译需要，保存在本机"
+        ),
+        createLiteSnapFieldRow(
+          "启用划词翻译",
+          createLiteSnapCheckbox(
+            "webtools-selection-translate-enabled",
+            "selectionTranslateEnabled",
+            selectionTranslateSettingsState.enabled
+          ),
+          "选中文字后按快捷键弹出词典/翻译卡片"
+        ),
+        createLiteSnapFieldRow(
+          "划词快捷键",
+          createLiteSnapTextInput(
+            "webtools-selection-translate-hotkey",
+            "selectionTranslateHotkey",
+            selectionTranslateSettingsState.hotkey,
+            "F2"
+          ),
+          "默认 F2，可改为 Ctrl+Shift+D 等"
+        ),
+        createLiteSnapFieldRow(
+          "恢复剪贴板",
+          createLiteSnapCheckbox(
+            "webtools-selection-translate-restore",
+            "selectionTranslateRestoreClipboard",
+            selectionTranslateSettingsState.restoreClipboard
+          ),
+          "划词抓取后还原原剪贴板内容，避免污染"
         )
       ];
 
@@ -23791,6 +23904,41 @@ window.__LL_PANEL_IMPLS__ = {
         translateToolSourceText = sourceTextarea.value;
       });
       sourceField.append(sourceLabel, sourceTextarea);
+
+      const dictionaryCard = document.createElement("div");
+      dictionaryCard.id = "webtools-translate-dictionary-card";
+      dictionaryCard.className = "translate-dictionary-card";
+      dictionaryCard.hidden = !translateToolDictionaryEntry;
+      if (translateToolDictionaryEntry) {
+        const wordEl = document.createElement("div");
+        wordEl.className = "translate-dictionary-card__word";
+        wordEl.textContent = translateToolDictionaryEntry.word;
+        dictionaryCard.appendChild(wordEl);
+        if (translateToolDictionaryEntry.phonetic) {
+          const phoneticEl = document.createElement("div");
+          phoneticEl.className = "translate-dictionary-card__phonetic";
+          phoneticEl.textContent = `/${translateToolDictionaryEntry.phonetic}/`;
+          dictionaryCard.appendChild(phoneticEl);
+        }
+        const metaText = [
+          translateToolDictionaryEntry.pos,
+          translateToolDictionaryEntry.tags
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (metaText) {
+          const metaEl = document.createElement("div");
+          metaEl.className = "translate-dictionary-card__meta";
+          metaEl.textContent = metaText;
+          dictionaryCard.appendChild(metaEl);
+        }
+        if (translateToolDictionaryEntry.translation) {
+          const translationEl = document.createElement("div");
+          translationEl.className = "translate-dictionary-card__text";
+          translationEl.textContent = translateToolDictionaryEntry.translation;
+          dictionaryCard.appendChild(translationEl);
+        }
+      }
 
       const resultField = document.createElement("div");
       resultField.className = "settings-field litesnap-ocr-field";
@@ -23857,7 +24005,7 @@ window.__LL_PANEL_IMPLS__ = {
         settingsButton,
         backToSearchButton
       );
-      form.append(statusRow, sourceField, resultField, actions);
+      form.append(statusRow, sourceField, dictionaryCard, resultField, actions);
     }
 
     panel.append(title, description, form);

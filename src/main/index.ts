@@ -44,6 +44,14 @@ import { LiteSnapHistoryStore } from "./litesnap/history-store";
 import { LiteSnapImageStore } from "./litesnap/image-store";
 import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
+import { DictionaryStore } from "./dictionary/store";
+import { captureSelectedText } from "./selection-translate/capture";
+import { showSelectionPopup } from "./selection-translate/popup-window";
+import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
+import { isSingleEnglishWord } from "../shared/dictionary";
+import {
+  type SelectionTranslateSettings
+} from "../shared/selection-translate";
 import { LiteSnapPinWindowManager } from "./litesnap/pin-window-manager";
 import { LiteSnapSettingsStore } from "./litesnap/settings";
 import {
@@ -299,6 +307,8 @@ const liteSnapShortcutState: {
   color: null,
   togglePinClickThrough: null
 };
+let selectionTranslateShortcut: string | null = null;
+let selectionTranslateRunning = false;
 let liteSnapCaptureShortcutTriggeredAt = 0;
 let liteSnapLocalShortcutHandler: ((event: Event, input: Input) => void) | null = null;
 let lastLauncherShowMeta: {
@@ -963,6 +973,75 @@ function unregisterLiteSnapGlobalShortcut(kind: keyof typeof liteSnapShortcutSta
     console.warn(`Failed to unregister LiteSnap ${kind} shortcut: ${shortcut}`, error);
   }
   liteSnapShortcutState[kind] = null;
+}
+
+function unregisterSelectionTranslateShortcut(): void {
+  if (!selectionTranslateShortcut) {
+    return;
+  }
+  try {
+    globalShortcut.unregister(selectionTranslateShortcut);
+  } catch (error) {
+    console.warn(
+      `Failed to unregister selection-translate shortcut: ${selectionTranslateShortcut}`,
+      error
+    );
+  }
+  selectionTranslateShortcut = null;
+}
+
+function registerSelectionTranslateShortcut(
+  settings: SelectionTranslateSettings,
+  window: BrowserWindow,
+  runSelectionTranslate: () => Promise<boolean>
+): boolean {
+  unregisterSelectionTranslateShortcut();
+  if (!settings.enabled) {
+    return true;
+  }
+
+  const normalizedShortcut = settings.hotkey.trim();
+  if (!normalizedShortcut) {
+    return false;
+  }
+
+  try {
+    const success = globalShortcut.register(normalizedShortcut, () => {
+      emitDebugKey(window, {
+        source: "main",
+        phase: "global-shortcut",
+        key: normalizedShortcut,
+        ts: Date.now(),
+        note: "selection-translate shortcut callback fired"
+      });
+      void Promise.resolve(runSelectionTranslate())
+        .then((ok) => {
+          if (!ok) {
+            console.warn("selection-translate shortcut action returned false");
+          }
+        })
+        .catch((error) => {
+          console.warn("selection-translate shortcut failed", error);
+        });
+    });
+    if (!success) {
+      console.warn(
+        `Failed to register selection-translate shortcut: ${normalizedShortcut}`
+      );
+      return false;
+    }
+    selectionTranslateShortcut = normalizedShortcut;
+    console.info(
+      `selection-translate shortcut registered: ${normalizedShortcut}`
+    );
+    return true;
+  } catch (error) {
+    console.warn(
+      `selection-translate shortcut registration failed: ${normalizedShortcut}`,
+      error
+    );
+    return false;
+  }
 }
 
 function matchAcceleratorInput(input: Input, accelerator: string): boolean {
@@ -1930,6 +2009,10 @@ async function bootstrap(): Promise<void> {
 
   const liteSnapSettingsStore = new LiteSnapSettingsStore(activeDatabase);
   const translateSettingsStore = new TranslateSettingsStore(activeDatabase);
+  const selectionTranslateSettingsStore = new SelectionTranslateSettingsStore(
+    activeDatabase
+  );
+  const dictionaryStore = new DictionaryStore();
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
@@ -2176,6 +2259,104 @@ async function bootstrap(): Promise<void> {
       translatedText: translated.text,
       message: "已翻译为中文。"
     };
+  };
+
+  const runSelectionTranslate = async (): Promise<boolean> => {
+    if (selectionTranslateRunning) {
+      return false;
+    }
+    selectionTranslateRunning = true;
+    try {
+      const settings = await selectionTranslateSettingsStore.getSettings();
+      if (!settings.enabled) {
+        return false;
+      }
+
+      const captured = await captureSelectedText({
+        restoreClipboard: settings.restoreClipboard
+      });
+      if (!captured.ok || !captured.text.trim()) {
+        await showSelectionPopup({
+          mode: "empty",
+          message:
+            captured.reason === "unsupported"
+              ? "当前系统暂不支持划词翻译。"
+              : "未检测到选中文字，请先选中再按快捷键。"
+        });
+        return true;
+      }
+
+      const sourceText = captured.text.replace(/\r\n/g, "\n").trim();
+      if (isSingleEnglishWord(sourceText)) {
+        const entry = dictionaryStore.lookup(sourceText);
+        if (entry) {
+          await showSelectionPopup({
+            mode: "dictionary",
+            sourceText,
+            entry
+          });
+          return true;
+        }
+      }
+
+      const translated = await translateTextForTool({ text: sourceText });
+      if (!translated.ok) {
+        await showSelectionPopup({
+          mode: "error",
+          message: translated.message || "翻译失败，请检查百度翻译设置。"
+        });
+        return true;
+      }
+
+      await showSelectionPopup({
+        mode: "translate",
+        sourceText: translated.sourceText,
+        translatedText: translated.translatedText
+      });
+      return true;
+    } catch (error) {
+      console.warn("[selection-translate] failed", error);
+      await showSelectionPopup({
+        mode: "error",
+        message: "划词翻译失败，请重试。"
+      });
+      return false;
+    } finally {
+      selectionTranslateRunning = false;
+    }
+  };
+
+  const updateSelectionTranslateSettingsWithShortcut = async (
+    patch: Partial<SelectionTranslateSettings>
+  ): Promise<SelectionTranslateSettings> => {
+    const previous = await selectionTranslateSettingsStore.getSettings();
+    const next = await selectionTranslateSettingsStore.updateSettings(patch);
+    const shortcutChanged =
+      previous.enabled !== next.enabled ||
+      previous.hotkey.trim() !== next.hotkey.trim();
+    if (!shortcutChanged || E2E_MODE) {
+      return next;
+    }
+
+    const registered = registerSelectionTranslateShortcut(
+      next,
+      launcherWindow,
+      runSelectionTranslate
+    );
+    if (registered) {
+      return next;
+    }
+
+    const rolledBack = await selectionTranslateSettingsStore.updateSettings({
+      enabled: previous.enabled,
+      hotkey: previous.hotkey
+    });
+    registerSelectionTranslateShortcut(
+      rolledBack,
+      launcherWindow,
+      runSelectionTranslate
+    );
+    return rolledBack;
   };
 
   const translateLiteSnapSelectionAndShowPanel = async (
@@ -2455,6 +2636,14 @@ async function bootstrap(): Promise<void> {
           updateSettings: (patch) => translateSettingsStore.updateSettings(patch),
           translateText: (input) => translateTextForTool(input)
         },
+        dictionaryProvider: {
+          lookup: async (word) => dictionaryStore.lookup(word)
+        },
+        selectionTranslateProvider: {
+          getSettings: () => selectionTranslateSettingsStore.getSettings(),
+          updateSettings: (patch) =>
+            updateSelectionTranslateSettingsWithShortcut(patch)
+        },
     catalogProvider: {
       rebuildCatalog: () => rebuildCatalogIndex(activeDatabase)
     },
@@ -2497,6 +2686,13 @@ async function bootstrap(): Promise<void> {
       startLiteSnapColorCapture,
       toggleLiteSnapNearestPinClickThrough
     );
+    void selectionTranslateSettingsStore.getSettings().then((settings) => {
+      registerSelectionTranslateShortcut(
+        settings,
+        launcherWindow,
+        runSelectionTranslate
+      );
+    });
   }
 
   if (E2E_MODE) {

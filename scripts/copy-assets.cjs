@@ -6,7 +6,9 @@ const WATCHED_RENDERER_FILES = new Set([
   "index.html",
   "styles.css",
   "litesnap-overlay.html",
-  "litesnap-overlay.css"
+  "litesnap-overlay.css",
+  "selection-popup.html",
+  "selection-popup.css"
 ]);
 const activeWatchers = [];
 let watchLogTimer = null;
@@ -73,7 +75,9 @@ function copyAllAssets() {
     ["src/renderer/index.html", "dist/renderer/index.html"],
     ["src/renderer/styles.css", "dist/renderer/styles.css"],
     ["src/renderer/litesnap-overlay.html", "dist/renderer/litesnap-overlay.html"],
-    ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"]
+    ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"],
+    ["src/renderer/selection-popup.html", "dist/renderer/selection-popup.html"],
+    ["src/renderer/selection-popup.css", "dist/renderer/selection-popup.css"]
   ];
 
   for (const [src, dest] of filesToCopy) {

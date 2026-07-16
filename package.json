@@ -78,7 +78,8 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "**/assets/ecdict.db"
     ],
     "mac": {
       "minimumSystemVersion": "12.0.0",

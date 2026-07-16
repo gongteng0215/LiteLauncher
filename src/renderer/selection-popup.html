@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>划词翻译</title>
+    <link rel="stylesheet" href="./selection-popup.css" />
+  </head>
+  <body>
+    <main class="selection-popup" id="root">
+      <header class="selection-popup__head">
+        <div class="selection-popup__title" id="title">划词翻译</div>
+        <button type="button" class="selection-popup__icon-btn" id="closeBtn" title="关闭">
+          ×
+        </button>
+      </header>
+      <section class="selection-popup__body" id="body"></section>
+      <footer class="selection-popup__foot">
+        <button type="button" class="selection-popup__btn" id="copyBtn">复制</button>
+        <button type="button" class="selection-popup__btn" id="closeFootBtn">关闭</button>
+      </footer>
+    </main>
+    <script src="./selection-popup.js"></script>
+  </body>
+</html>

@@ -7,14 +7,13 @@
 
 ## 待完成
 
-| 计划 | 文件 | 说明 |
-|------|------|------|
-| 划词翻译与离线词典 | [selection-translate-dictionary.md](./selection-translate-dictionary.md) | F2 划词 + ECDICT；设计稿另见 [selection-translate-dictionary-design](../superpowers/specs/2026-07-09-selection-translate-dictionary-design.md) |
+（暂无）
 
 ## 已完成
 
 | 计划 | 文件 | 说明 |
 |------|------|------|
+| 划词翻译与离线词典 | [selection-translate-dictionary.md](./selection-translate-dictionary.md) | F2 划词 + ECDICT；设计稿另见 [selection-translate-dictionary-design](../superpowers/specs/2026-07-09-selection-translate-dictionary-design.md) |
 | LiteSnap 体验三件套 | [litesnap-experience-pack.md](./litesnap-experience-pack.md) | 已随 v1.0.43 发布 |
 | 拆分翻译为独立插件 | [split-translate-plugin.md](./split-translate-plugin.md) | `webtools-translate` |
 | Cron 动态模板 | [cron-dynamic-templates.md](./cron-dynamic-templates.md) | |

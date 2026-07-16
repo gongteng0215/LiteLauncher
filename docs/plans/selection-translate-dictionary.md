@@ -9,34 +9,34 @@ overview: 新增“划词翻译/查词”功能：通过全局快捷键模拟 Ct
 todos:
   - id: build-ecdict-db
     content: 编写 scripts/build-ecdict-db.cjs，生成 src/assets/ecdict.db（ECDICT mini 数据）
-    status: pending
+    status: completed
   - id: shared-dictionary-types
     content: 新增 src/shared/dictionary.ts 与 channels.ts 中的 lookupDictionaryWord 通道
-    status: pending
+    status: completed
   - id: dictionary-store
     content: 新增 src/main/dictionary/store.ts 的 DictionaryStore（独立只读连接、查找、词形还原）
-    status: pending
+    status: completed
   - id: dictionary-ipc
     content: 接入 ipc.ts/preload/index.ts 的 DictionaryProvider
-    status: pending
+    status: completed
   - id: selection-capture
     content: 新增 src/main/selection-translate/capture.ts（SendKeys('^c') + 剪贴板轮询 + 还原）
-    status: pending
+    status: completed
   - id: selection-hotkey
     content: 在 index.ts 新增划词翻译全局快捷键注册与单词/句子分流逻辑
-    status: pending
+    status: completed
   - id: selection-popup-window
     content: 新增 selection-translate 悬浮弹窗窗口 + preload + 渲染器（词典卡片/翻译卡片两态）
-    status: pending
+    status: completed
   - id: selection-settings
     content: 新增 SelectionTranslateSettingsStore 并在文本翻译设置视图中加入划词翻译开关/快捷键
-    status: pending
+    status: completed
   - id: panel-dictionary-card
     content: 在 webtools-translate 面板中为单词输入增加词典卡片展示
-    status: pending
+    status: completed
   - id: tests-and-build
     content: 新增/更新回归测试，build + 针对性测试，批次完成后跑一次 smoke
-    status: pending
+    status: completed
 isProject: false
 ---
 

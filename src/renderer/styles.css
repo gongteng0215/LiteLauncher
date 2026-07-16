@@ -807,6 +807,41 @@ body {
   min-height: 120px;
 }
 
+.translate-dictionary-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  background: rgba(15, 35, 52, 0.45);
+}
+
+.translate-dictionary-card[hidden] {
+  display: none;
+}
+
+.translate-dictionary-card__word {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.translate-dictionary-card__phonetic {
+  font-size: 12px;
+  color: rgba(186, 230, 253, 0.88);
+}
+
+.translate-dictionary-card__meta {
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.62);
+}
+
+.translate-dictionary-card__text {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .litesnap-action-row {
   display: flex;
   flex-wrap: wrap;
