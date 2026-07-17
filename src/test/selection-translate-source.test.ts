@@ -65,13 +65,17 @@ test("selection-translate settings store is wired", () => {
   const preloadSource = readSource("src/preload/index.ts");
 
   assert.match(sharedSource, /dismissOnOutsideClick/);
+  assert.match(sharedSource, /hotkey:\s*"F4"/);
   assert.match(settingsSource, /dismissOnOutsideClick/);
+  assert.match(settingsSource, /raw === "F2" \? "F4"/);
+  assert.match(settingsSource, /selectionTranslateSettings/);
   assert.match(popupSource, /dismissOnOutsideClickEnabled/);
   assert.match(popupSource, /selection-backdrop\.html/);
   assert.match(popupSource, /resolveBackdropPreloadPath/);
   assert.match(mainSource, /dismissOnOutsideClick:\s*settings\.dismissOnOutsideClick/);
   assert.match(panelImplsSource, /selectionTranslateDismissOutside/);
-  assert.match(settingsSource, /selectionTranslateSettings/);
+  assert.match(panelImplsSource, /默认 F4/);
+  assert.doesNotMatch(panelImplsSource, /默认 F2/);
   const copyAssets = readSource("scripts/copy-assets.cjs");
   assert.match(copyAssets, /selection-backdrop\.html/);
   assert.ok(

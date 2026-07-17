@@ -102,7 +102,7 @@ test("LiteSnap shared defaults expose Snipaste-compatible first-version shortcut
     /export const LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT = "F1";/
   );
   assert.match(source, /export const LITESNAP_DEFAULT_PIN_SHORTCUT = "F3";/);
-  assert.match(source, /export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "F4";/);
+  assert.match(source, /export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "";/);
   assert.match(
     source,
     /export const LITESNAP_DEFAULT_TOGGLE_PIN_CLICK_THROUGH_SHORTCUT = "Ctrl\+Shift\+T";/

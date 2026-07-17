@@ -3,7 +3,8 @@ import type { LiteSnapOcrIssue } from "../shared/litesnap-ocr-help";
 export const LITESNAP_PLUGIN_ID = "litesnap";
 export const LITESNAP_DEFAULT_SCREENSHOT_SHORTCUT = "F1";
 export const LITESNAP_DEFAULT_PIN_SHORTCUT = "F3";
-export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "F4";
+/** Color picker has no global shortcut; use the LiteSnap panel button instead. */
+export const LITESNAP_DEFAULT_COLOR_SHORTCUT = "";
 export const LITESNAP_DEFAULT_TOGGLE_PIN_CLICK_THROUGH_SHORTCUT = "Ctrl+Shift+T";
 export const LITESNAP_RECENT_COLORS_MAX = 8;
 export const LITESNAP_HISTORY_MAX_ITEMS_DEFAULT = 20;

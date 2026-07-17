@@ -1,7 +1,7 @@
 export interface SelectionTranslateSettings {
   /** Whether the global selection-translate hotkey is active. */
   enabled: boolean;
-  /** Accelerator registered with Electron globalShortcut, e.g. F2. */
+  /** Accelerator registered with Electron globalShortcut, e.g. F4. */
   hotkey: string;
   /** Restore the previous clipboard text after capturing the selection. */
   restoreClipboard: boolean;
@@ -44,7 +44,7 @@ export type SelectionPopupPayload =
 export function createDefaultSelectionTranslateSettings(): SelectionTranslateSettings {
   return {
     enabled: true,
-    hotkey: "F2",
+    hotkey: "F4",
     restoreClipboard: true,
     dismissOnOutsideClick: true
   };

@@ -12846,7 +12846,7 @@ const DEFAULT_LITESNAP_PANEL_DATA: LiteSnapPanelData = {
   settings: {
     screenshotShortcut: "F1",
     pinShortcut: "F3",
-    colorShortcut: "F4",
+    colorShortcut: "",
     togglePinClickThroughShortcut: "Ctrl+Shift+T",
     saveDirectory: "",
     saveFormat: "png",
@@ -13298,10 +13298,7 @@ function normalizeLiteSnapPanelData(value: unknown): LiteSnapPanelData {
         typeof settingsRecord?.pinShortcut === "string"
           ? settingsRecord.pinShortcut
           : DEFAULT_LITESNAP_PANEL_DATA.settings.pinShortcut,
-      colorShortcut:
-        typeof settingsRecord?.colorShortcut === "string"
-          ? settingsRecord.colorShortcut
-          : DEFAULT_LITESNAP_PANEL_DATA.settings.colorShortcut,
+      colorShortcut: "",
       togglePinClickThroughShortcut:
         typeof settingsRecord?.togglePinClickThroughShortcut === "string"
           ? settingsRecord.togglePinClickThroughShortcut
@@ -13823,7 +13820,6 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   const formData = new FormData(form);
   const screenshotShortcut = String(formData.get("screenshotShortcut") ?? "").trim();
   const pinShortcut = String(formData.get("pinShortcut") ?? "").trim();
-  const colorShortcut = String(formData.get("colorShortcut") ?? "").trim();
   const togglePinClickThroughShortcut = String(
     formData.get("togglePinClickThroughShortcut") ?? ""
   ).trim();
@@ -13835,11 +13831,6 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   const pinShortcutError = getLiteSnapShortcutValidationError(pinShortcut);
   if (pinShortcutError) {
     setStatus(`贴图快捷键无效：${pinShortcutError}`);
-    return;
-  }
-  const colorShortcutError = getLiteSnapShortcutValidationError(colorShortcut);
-  if (colorShortcutError) {
-    setStatus(`取色快捷键无效：${colorShortcutError}`);
     return;
   }
   if (togglePinClickThroughShortcut) {
@@ -13860,7 +13851,7 @@ async function saveLiteSnapSettings(form: HTMLFormElement): Promise<void> {
   const patch = {
     screenshotShortcut,
     pinShortcut,
-    colorShortcut,
+    colorShortcut: "",
     togglePinClickThroughShortcut,
     saveDirectory: String(formData.get("saveDirectory") ?? "").trim(),
     saveFormat:
@@ -13972,7 +13963,7 @@ let translateToolDictionaryEntry: {
 } | null = null;
 let selectionTranslateSettingsState = {
   enabled: true,
-  hotkey: "F2",
+  hotkey: "F4",
   restoreClipboard: true,
   dismissOnOutsideClick: true
 };
@@ -14666,7 +14657,7 @@ async function saveTranslateToolSettings(form: HTMLFormElement): Promise<void> {
   };
   const selectionPatch = {
     enabled: formData.get("selectionTranslateEnabled") === "on",
-    hotkey: String(formData.get("selectionTranslateHotkey") ?? "").trim() || "F2",
+    hotkey: String(formData.get("selectionTranslateHotkey") ?? "").trim() || "F4",
     restoreClipboard: formData.get("selectionTranslateRestoreClipboard") === "on",
     dismissOnOutsideClick:
       formData.get("selectionTranslateDismissOutside") === "on"
@@ -16915,16 +16906,6 @@ window.__LL_PANEL_IMPLS__ = {
           "例如 F3、Ctrl+Alt+P"
         ),
         createLiteSnapFieldRow(
-          "取色快捷键",
-          createLiteSnapShortcutControl(
-            "litesnap-color-shortcut",
-            "colorShortcut",
-            liteSnapPanelData.settings.colorShortcut,
-            "F4"
-          ),
-          "例如 F4、Ctrl+Alt+C"
-        ),
-        createLiteSnapFieldRow(
           "贴图点击穿透",
           createLiteSnapShortcutControl(
             "litesnap-toggle-pin-click-through",
@@ -17058,7 +17039,6 @@ window.__LL_PANEL_IMPLS__ = {
       resetShortcutsButton.addEventListener("click", () => {
         const screenshotInput = form.elements.namedItem("screenshotShortcut");
         const pinInput = form.elements.namedItem("pinShortcut");
-        const colorInput = form.elements.namedItem("colorShortcut");
         const togglePinClickThroughInput = form.elements.namedItem(
           "togglePinClickThroughShortcut"
         );
@@ -17067,9 +17047,6 @@ window.__LL_PANEL_IMPLS__ = {
         }
         if (pinInput instanceof HTMLInputElement) {
           pinInput.value = "F3";
-        }
-        if (colorInput instanceof HTMLInputElement) {
-          colorInput.value = "F4";
         }
         if (togglePinClickThroughInput instanceof HTMLInputElement) {
           togglePinClickThroughInput.value = "Ctrl+Shift+T";
@@ -17260,11 +17237,6 @@ window.__LL_PANEL_IMPLS__ = {
           "默认 F3"
         ),
         createLiteSnapInfoRow(
-          "取色快捷键",
-          liteSnapPanelData.settings.colorShortcut,
-          "默认 F4"
-        ),
-        createLiteSnapInfoRow(
           "保存格式",
           liteSnapPanelData.settings.saveFormat.toUpperCase(),
           saveDirectory ? `保存目录：${saveDirectory}` : "默认保存到图片/LiteSnap"
@@ -17306,7 +17278,7 @@ window.__LL_PANEL_IMPLS__ = {
       const colorButton = document.createElement("button");
       colorButton.type = "button";
       colorButton.className = "settings-btn settings-btn-secondary";
-      colorButton.textContent = `取色 (${liteSnapPanelData.settings.colorShortcut || "F4"})`;
+      colorButton.textContent = "取色";
       colorButton.addEventListener("click", () => {
         void executeLiteSnapPanelAction("start-color-capture");
       });
@@ -24646,9 +24618,9 @@ window.__LL_PANEL_IMPLS__ = {
             "webtools-selection-translate-hotkey",
             "selectionTranslateHotkey",
             selectionTranslateSettingsState.hotkey,
-            "F2"
+            "F4"
           ),
-          "默认 F2，可改为 Ctrl+Shift+D 等"
+          "默认 F4，可改为 Ctrl+Shift+D 等"
         ),
         createLiteSnapFieldRow(
           "恢复剪贴板",

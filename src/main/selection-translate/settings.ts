@@ -12,10 +12,14 @@ function normalizeSelectionTranslateSettings(
 ): SelectionTranslateSettings {
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : base.enabled,
-    hotkey:
-      typeof value?.hotkey === "string" && value.hotkey.trim()
-        ? value.hotkey.trim()
-        : base.hotkey,
+    hotkey: (() => {
+      const raw =
+        typeof value?.hotkey === "string" && value.hotkey.trim()
+          ? value.hotkey.trim()
+          : base.hotkey;
+      // F2 is Windows Explorer rename; migrate the old default to F4.
+      return raw === "F2" ? "F4" : raw;
+    })(),
     restoreClipboard:
       typeof value?.restoreClipboard === "boolean"
         ? value.restoreClipboard

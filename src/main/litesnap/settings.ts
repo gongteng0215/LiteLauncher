@@ -61,7 +61,8 @@ export function normalizeLiteSnapSettings(
       base.screenshotShortcut
     ),
     pinShortcut: normalizeShortcut(value?.pinShortcut, base.pinShortcut),
-    colorShortcut: normalizeShortcut(value?.colorShortcut, base.colorShortcut),
+    // Color picker is button-only; never register a global hotkey.
+    colorShortcut: "",
     togglePinClickThroughShortcut: normalizeShortcut(
       value?.togglePinClickThroughShortcut,
       base.togglePinClickThroughShortcut,
