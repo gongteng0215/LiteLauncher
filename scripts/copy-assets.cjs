@@ -8,7 +8,8 @@ const WATCHED_RENDERER_FILES = new Set([
   "litesnap-overlay.html",
   "litesnap-overlay.css",
   "selection-popup.html",
-  "selection-popup.css"
+  "selection-popup.css",
+  "selection-backdrop.html"
 ]);
 const activeWatchers = [];
 let watchLogTimer = null;
@@ -70,6 +71,18 @@ function copyAssetPath(relativePath) {
   copyFile(sourcePath, destinationPath);
 }
 
+function patchDistEcdictFts() {
+  const patchPath = path.join(__dirname, "patch-ecdict-fts.cjs");
+  if (!fs.existsSync(patchPath)) {
+    return;
+  }
+  // eslint-disable-next-line import/no-dynamic-require, global-require
+  const { patchEcdictFts } = require(patchPath);
+  if (typeof patchEcdictFts === "function") {
+    patchEcdictFts(path.join("dist", "assets", "ecdict.db"));
+  }
+}
+
 function copyAllAssets() {
   const filesToCopy = [
     ["src/renderer/index.html", "dist/renderer/index.html"],
@@ -77,7 +90,8 @@ function copyAllAssets() {
     ["src/renderer/litesnap-overlay.html", "dist/renderer/litesnap-overlay.html"],
     ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"],
     ["src/renderer/selection-popup.html", "dist/renderer/selection-popup.html"],
-    ["src/renderer/selection-popup.css", "dist/renderer/selection-popup.css"]
+    ["src/renderer/selection-popup.css", "dist/renderer/selection-popup.css"],
+    ["src/renderer/selection-backdrop.html", "dist/renderer/selection-backdrop.html"]
   ];
 
   for (const [src, dest] of filesToCopy) {
@@ -85,6 +99,7 @@ function copyAllAssets() {
   }
 
   copyDirIfExists("src/assets", "dist/assets");
+  patchDistEcdictFts();
   writeImagePromptDataScript();
 }
 
@@ -176,6 +191,9 @@ function startWatchMode() {
     watchPath("src/assets", { recursive: true }, (_eventType, filename) => {
       const relativePath = filename.replace(/\\/g, path.sep);
       copyAssetPath(relativePath);
+      if (relativePath.replace(/\\/g, "/").endsWith("ecdict.db")) {
+        patchDistEcdictFts();
+      }
       scheduleWatchLog(`asset updated: ${filename || "."}`);
     });
   }

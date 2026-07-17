@@ -19,7 +19,11 @@ function normalizeSelectionTranslateSettings(
     restoreClipboard:
       typeof value?.restoreClipboard === "boolean"
         ? value.restoreClipboard
-        : base.restoreClipboard
+        : base.restoreClipboard,
+    dismissOnOutsideClick:
+      typeof value?.dismissOnOutsideClick === "boolean"
+        ? value.dismissOnOutsideClick
+        : base.dismissOnOutsideClick
   };
 }
 

@@ -52,6 +52,7 @@ test("webtools-translate plugin is registered with IPC and renderer panel", () =
   );
   assert.match(panelImplsSource, /selectionTranslateEnabled/);
   assert.match(panelImplsSource, /selectionTranslateHotkey/);
+  assert.match(panelImplsSource, /selectionTranslateDismissOutside/);
   assert.match(panelImplsSource, /webtools-translate-dictionary-card/);
   assert.match(panelImplsSource, /lookupDictionaryWord/);
   assert.match(panelImplsSource, /setSelectionTranslateSettings/);

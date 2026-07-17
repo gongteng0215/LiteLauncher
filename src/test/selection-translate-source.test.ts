@@ -18,7 +18,7 @@ test("selection-translate global shortcut and word/sentence routing exist", () =
   const mainSource = readSource("src/main/index.ts");
   assert.match(mainSource, /registerSelectionTranslateShortcut/);
   assert.match(mainSource, /runSelectionTranslate/);
-  assert.match(mainSource, /isEnglishWordOrPhrase/);
+  assert.match(mainSource, /isDictionaryLookupText/);
   assert.match(mainSource, /dictionaryStore\.lookup/);
   assert.match(mainSource, /translateTextForTool/);
   assert.match(mainSource, /showSelectionPopup/);
@@ -36,25 +36,50 @@ test("selection-translate popup window and renderer assets exist", () => {
   assert.match(popupSource, /showSelectionPopup/);
   assert.match(popupSource, /getCursorScreenPoint/);
   assert.match(popupSource, /dismissBackdropWindow/);
-  assert.match(popupSource, /before-input-event/);
+  assert.match(popupSource, /selection-backdrop\.html/);
+  assert.match(popupSource, /resolveBackdropPreloadPath/);
+  assert.match(popupSource, /ensureDismissBackdropVisible/);
+  assert.match(popupSource, /dismissOnOutsideClickEnabled/);
+  assert.match(popupSource, /setAlwaysOnTop\(true, "floating"\)/);
+  assert.match(popupSource, /setAlwaysOnTop\(true, "screen-saver"\)/);
   assert.match(preloadSource, /selectionPopup/);
   assert.match(htmlSource, /selection-popup\.js/);
   assert.match(cssSource, /\.selection-popup/);
   assert.match(tsSource, /mode === "dictionary"/);
+  assert.match(tsSource, /其他释义|selection-popup__candidate/);
+  assert.match(tsSource, /中→英|英→中/);
   assert.match(tsSource, /^\(\(\) => \{/m);
   assert.doesNotMatch(tsSource, /^import /m);
   assert.match(copyAssets, /selection-popup\.html/);
+  assert.match(copyAssets, /selection-backdrop\.html/);
 });
 
 test("selection-translate settings store is wired", () => {
   const settingsSource = readSource("src/main/selection-translate/settings.ts");
   const sharedSource = readSource("src/shared/selection-translate.ts");
+  const popupSource = readSource("src/main/selection-translate/popup-window.ts");
+  const mainSource = readSource("src/main/index.ts");
+  const panelImplsSource = readSource("src/renderer/plugin-panel-impls.ts");
   const channelsSource = readSource("src/shared/channels.ts");
   const ipcSource = readSource("src/main/ipc.ts");
   const preloadSource = readSource("src/preload/index.ts");
 
-  assert.match(sharedSource, /hotkey:\s*"F2"/);
+  assert.match(sharedSource, /dismissOnOutsideClick/);
+  assert.match(settingsSource, /dismissOnOutsideClick/);
+  assert.match(popupSource, /dismissOnOutsideClickEnabled/);
+  assert.match(popupSource, /selection-backdrop\.html/);
+  assert.match(popupSource, /resolveBackdropPreloadPath/);
+  assert.match(mainSource, /dismissOnOutsideClick:\s*settings\.dismissOnOutsideClick/);
+  assert.match(panelImplsSource, /selectionTranslateDismissOutside/);
   assert.match(settingsSource, /selectionTranslateSettings/);
+  const copyAssets = readSource("scripts/copy-assets.cjs");
+  assert.match(copyAssets, /selection-backdrop\.html/);
+  assert.ok(
+    fs.existsSync(path.join(process.cwd(), "src/renderer/selection-backdrop.html"))
+  );
+  assert.ok(
+    fs.existsSync(path.join(process.cwd(), "src/preload/selection-backdrop.ts"))
+  );
   assert.match(channelsSource, /getSelectionTranslateSettings:/);
   assert.match(channelsSource, /setSelectionTranslateSettings:/);
   assert.match(ipcSource, /selectionTranslateProvider/);

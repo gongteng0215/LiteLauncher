@@ -13973,7 +13973,8 @@ let translateToolDictionaryEntry: {
 let selectionTranslateSettingsState = {
   enabled: true,
   hotkey: "F2",
-  restoreClipboard: true
+  restoreClipboard: true,
+  dismissOnOutsideClick: true
 };
 type DictionaryPanelEntry = {
   word: string;
@@ -13985,7 +13986,249 @@ type DictionaryPanelEntry = {
 };
 let dictionaryQueryText = "";
 let dictionaryPanelEntry: DictionaryPanelEntry | null = null;
+let dictionaryPanelCandidates: DictionaryPanelEntry[] = [];
 let dictionaryPanelStatusMessage = "输入英文单词或词组后查询。";
+let dictionaryPanelHistoryFilter: "all" | "en" | "zh" = "all";
+let dictionaryPanelHistory: Array<{
+  word: string;
+  phonetic: string;
+  translationPreview: string;
+  note?: string;
+  savedAt: number;
+}> = [];
+let dictionaryPanelFavorites: Array<{
+  word: string;
+  phonetic: string;
+  translationPreview: string;
+  note?: string;
+  savedAt: number;
+}> = [];
+
+function applyDictionaryPanelState(state: {
+  history: typeof dictionaryPanelHistory;
+  favorites: typeof dictionaryPanelFavorites;
+}): void {
+  dictionaryPanelHistory = [...state.history];
+  dictionaryPanelFavorites = [...state.favorites];
+}
+
+function isCurrentDictionaryEntryFavorited(): boolean {
+  if (!dictionaryPanelEntry) {
+    return false;
+  }
+  const key = dictionaryPanelEntry.word.trim().toLowerCase();
+  return dictionaryPanelFavorites.some(
+    (item) => item.word.trim().toLowerCase() === key
+  );
+}
+
+function formatDictionaryBookmarkTime(savedAt: number): string {
+  return new Date(savedAt).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+async function hydrateDictionaryPanelState(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.getDictionaryPanelState) {
+    return;
+  }
+  try {
+    const state = await launcher.getDictionaryPanelState();
+    applyDictionaryPanelState(state);
+  } catch (error) {
+    console.warn("[dictionary] load panel state failed", error);
+  }
+}
+
+function renderDictionaryBookmarkList(
+  container: HTMLElement,
+  items: typeof dictionaryPanelHistory,
+  options: {
+    emptyText: string;
+    removeLabel: string;
+    onSelect: (word: string) => void;
+    onRemove: (word: string) => void;
+  }
+): void {
+  container.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "dictionary-word-empty";
+    empty.textContent = options.emptyText;
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "dictionary-word-row";
+
+    const mainButton = document.createElement("button");
+    mainButton.type = "button";
+    mainButton.className = "dictionary-word-row-main";
+    const wordEl = document.createElement("div");
+    wordEl.className = "dictionary-word-row-word";
+    wordEl.textContent = item.word;
+    const previewEl = document.createElement("div");
+    previewEl.className = "dictionary-word-row-preview";
+    previewEl.textContent =
+      item.note?.trim()
+        ? item.note.trim()
+        : item.translationPreview || item.phonetic
+          ? [item.phonetic ? `/${item.phonetic}/` : "", item.translationPreview]
+              .filter(Boolean)
+              .join(" · ")
+          : "点击再次查询";
+    const timeEl = document.createElement("div");
+    timeEl.className = "dictionary-word-row-time";
+    timeEl.textContent = formatDictionaryBookmarkTime(item.savedAt);
+    mainButton.append(wordEl, previewEl, timeEl);
+    mainButton.addEventListener("click", () => {
+      options.onSelect(item.word);
+    });
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "dictionary-word-row-remove";
+    removeButton.textContent = options.removeLabel;
+    removeButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void options.onRemove(item.word);
+    });
+
+    row.append(mainButton, removeButton);
+    container.appendChild(row);
+  }
+}
+
+async function lookupDictionaryWordFromPanel(
+  form: HTMLFormElement,
+  word: string
+): Promise<void> {
+  dictionaryQueryText = word;
+  const input = form.querySelector<HTMLInputElement>("#dictionary-query");
+  if (input) {
+    input.value = word;
+  }
+  await runDictionaryPanelLookup(form);
+}
+
+async function toggleDictionaryPanelFavorite(form: HTMLFormElement): Promise<void> {
+  if (!dictionaryPanelEntry) {
+    setStatus("请先查询一个词再收藏。");
+    return;
+  }
+  const launcher = getLauncherApi();
+  if (!launcher?.toggleDictionaryFavorite) {
+    setStatus("收藏功能不可用，请重启应用后重试。");
+    return;
+  }
+  try {
+    const state = await launcher.toggleDictionaryFavorite({
+      word: dictionaryPanelEntry.word,
+      entry: dictionaryPanelEntry
+    });
+    applyDictionaryPanelState(state);
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
+    setStatus(
+      isCurrentDictionaryEntryFavorited()
+        ? `已收藏「${dictionaryPanelEntry.word}」。`
+        : `已取消收藏「${dictionaryPanelEntry.word}」。`
+    );
+  } catch (error) {
+    console.warn("[dictionary] toggle favorite failed", error);
+    setStatus("收藏操作失败，请稍后重试。");
+  }
+}
+
+async function removeDictionaryPanelHistoryItem(
+  form: HTMLFormElement,
+  word: string
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.removeDictionaryHistoryItem) {
+    return;
+  }
+  try {
+    const state = await launcher.removeDictionaryHistoryItem(word);
+    applyDictionaryPanelState(state);
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
+    setStatus(`已移除历史记录「${word}」。`);
+  } catch (error) {
+    console.warn("[dictionary] remove history failed", error);
+    setStatus("移除历史失败，请稍后重试。");
+  }
+}
+
+async function clearDictionaryPanelHistory(form: HTMLFormElement): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.clearDictionaryHistory) {
+    return;
+  }
+  try {
+    const state = await launcher.clearDictionaryHistory();
+    applyDictionaryPanelState(state);
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
+    setStatus("已清空查询历史。");
+  } catch (error) {
+    console.warn("[dictionary] clear history failed", error);
+    setStatus("清空历史失败，请稍后重试。");
+  }
+}
+
+async function removeDictionaryPanelFavorite(
+  form: HTMLFormElement,
+  word: string
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.removeDictionaryFavorite) {
+    return;
+  }
+  try {
+    const state = await launcher.removeDictionaryFavorite(word);
+    applyDictionaryPanelState(state);
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
+    setStatus(`已取消收藏「${word}」。`);
+  } catch (error) {
+    console.warn("[dictionary] remove favorite failed", error);
+    setStatus("取消收藏失败，请稍后重试。");
+  }
+}
+
+async function saveDictionaryFavoriteNote(
+  form: HTMLFormElement,
+  word: string,
+  note: string
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.updateDictionaryFavoriteNote) {
+    setStatus("收藏备注不可用，请重启应用后重试。");
+    return;
+  }
+  try {
+    const state = await launcher.updateDictionaryFavoriteNote({ word, note });
+    applyDictionaryPanelState(state);
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
+    setStatus(`已更新「${word}」的收藏备注。`);
+  } catch (error) {
+    console.warn("[dictionary] update favorite note failed", error);
+    setStatus("更新收藏备注失败，请稍后重试。");
+  }
+}
 
 function populateDictionaryEntryCard(
   card: HTMLElement,
@@ -14038,6 +14281,22 @@ function normalizeDictionaryPanelData(value: unknown): {
   };
 }
 
+function isDictionaryLookupText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.length <= 64 && /^[A-Za-z][A-Za-z' \-]*$/.test(trimmed)) {
+    return true;
+  }
+  if (!/[\u3400-\u9fff]/.test(trimmed) || trimmed.length > 32) {
+    return false;
+  }
+  return /^[\u3400-\u9fffA-Za-z0-9\s·，、；：""''（）()《》【】…—\-]+$/.test(
+    trimmed
+  );
+}
+
 async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher) {
@@ -14062,17 +14321,17 @@ async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
     return;
   }
 
-  if (!/^[A-Za-z][A-Za-z' \-]*$/.test(text) || text.length > 64) {
+  if (!isDictionaryLookupText(text)) {
     dictionaryPanelEntry = null;
     if (cardHost) {
       cardHost.hidden = true;
       cardHost.replaceChildren();
     }
-    setStatus("仅支持英文单词或词组（字母、空格、连字符）。");
+    setStatus("仅支持英文或中文单词/词组查询。");
     return;
   }
 
-  if (!launcher.lookupDictionaryWord) {
+  if (!launcher.lookupDictionaryWord && !launcher.lookupDictionaryCandidates) {
     setStatus("词典接口不可用，请重启应用后重试。");
     return;
   }
@@ -14085,9 +14344,18 @@ async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
   setStatus(`正在查询「${text}」…`);
 
   try {
-    const entry = await launcher.lookupDictionaryWord(text);
+    const candidates =
+      typeof launcher.lookupDictionaryCandidates === "function"
+        ? await launcher.lookupDictionaryCandidates(text, 8)
+        : launcher.lookupDictionaryWord
+          ? [await launcher.lookupDictionaryWord(text)].filter(
+              (item): item is NonNullable<typeof item> => Boolean(item)
+            )
+          : [];
+    const entry = candidates[0];
     if (!entry) {
       dictionaryPanelEntry = null;
+      dictionaryPanelCandidates = [];
       if (cardHost) {
         cardHost.hidden = true;
         cardHost.replaceChildren();
@@ -14096,22 +14364,42 @@ async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
       return;
     }
 
-    dictionaryPanelEntry = {
-      word: entry.word,
-      phonetic: entry.phonetic,
-      translation: entry.translation,
-      definition: entry.definition,
-      pos: entry.pos,
-      tags: entry.tags
-    };
-    if (cardHost) {
+    dictionaryPanelCandidates = candidates.map((item) => ({
+      word: item.word,
+      phonetic: item.phonetic,
+      translation: item.translation,
+      definition: item.definition,
+      pos: item.pos,
+      tags: item.tags
+    }));
+    dictionaryPanelEntry = dictionaryPanelCandidates[0] ?? null;
+    if (launcher.recordDictionaryLookup && dictionaryPanelEntry) {
+      try {
+        const state = await launcher.recordDictionaryLookup({
+          query: text,
+          entry
+        });
+        applyDictionaryPanelState(state);
+      } catch (error) {
+        console.warn("[dictionary] record lookup failed", error);
+      }
+    }
+    if (cardHost && dictionaryPanelEntry) {
       cardHost.hidden = false;
       populateDictionaryEntryCard(cardHost, dictionaryPanelEntry);
     }
-    setStatus(`已找到「${entry.word}」。`);
+    setStatus(
+      dictionaryPanelCandidates.length > 1
+        ? `已找到「${entry.word}」，另有 ${dictionaryPanelCandidates.length - 1} 个相关词条。`
+        : `已找到「${entry.word}」。`
+    );
+    if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+      renderList();
+    }
   } catch (error) {
     console.warn("[dictionary] lookup failed", error);
     dictionaryPanelEntry = null;
+    dictionaryPanelCandidates = [];
     if (cardHost) {
       cardHost.hidden = true;
       cardHost.replaceChildren();
@@ -14257,43 +14545,57 @@ async function runTranslateToolPanelTranslate(form: HTMLFormElement): Promise<vo
     const formData = new FormData(form);
     if (
       text.length <= 64 &&
-      /^[A-Za-z][A-Za-z' \-]*$/.test(text) &&
-      launcher.lookupDictionaryWord
+      (typeof launcher.lookupDictionaryCandidates === "function" ||
+        typeof launcher.lookupDictionaryWord === "function")
     ) {
-      const entry = await launcher.lookupDictionaryWord(text);
-      if (entry) {
-        translateToolDictionaryEntry = {
-          word: entry.word,
-          phonetic: entry.phonetic,
-          translation: entry.translation,
-          definition: entry.definition,
-          pos: entry.pos,
-          tags: entry.tags
-        };
-        if (dictionaryCardHost) {
-          dictionaryCardHost.hidden = false;
-          const wordEl = document.createElement("div");
-          wordEl.className = "translate-dictionary-card__word";
-          wordEl.textContent = entry.word;
-          dictionaryCardHost.appendChild(wordEl);
-          if (entry.phonetic) {
-            const phoneticEl = document.createElement("div");
-            phoneticEl.className = "translate-dictionary-card__phonetic";
-            phoneticEl.textContent = `/${entry.phonetic}/`;
-            dictionaryCardHost.appendChild(phoneticEl);
-          }
-          const metaText = [entry.pos, entry.tags].filter(Boolean).join(" · ");
-          if (metaText) {
-            const metaEl = document.createElement("div");
-            metaEl.className = "translate-dictionary-card__meta";
-            metaEl.textContent = metaText;
-            dictionaryCardHost.appendChild(metaEl);
-          }
-          if (entry.translation) {
-            const translationEl = document.createElement("div");
-            translationEl.className = "translate-dictionary-card__text";
-            translationEl.textContent = entry.translation;
-            dictionaryCardHost.appendChild(translationEl);
+      const isLookupText =
+        /^[A-Za-z][A-Za-z' \-]*$/.test(text) ||
+        (/[\u3400-\u9fff]/.test(text) &&
+          /^[\u3400-\u9fffA-Za-z0-9\s·，、；：""''（）()《》【】…—\-]+$/.test(text));
+      if (isLookupText) {
+        const candidates =
+          typeof launcher.lookupDictionaryCandidates === "function"
+            ? await launcher.lookupDictionaryCandidates(text, 1)
+            : launcher.lookupDictionaryWord
+              ? [await launcher.lookupDictionaryWord(text)].filter(
+                  (item): item is NonNullable<typeof item> => Boolean(item)
+                )
+              : [];
+        const entry = candidates[0];
+        if (entry) {
+          translateToolDictionaryEntry = {
+            word: entry.word,
+            phonetic: entry.phonetic,
+            translation: entry.translation,
+            definition: entry.definition,
+            pos: entry.pos,
+            tags: entry.tags
+          };
+          if (dictionaryCardHost) {
+            dictionaryCardHost.hidden = false;
+            const wordEl = document.createElement("div");
+            wordEl.className = "translate-dictionary-card__word";
+            wordEl.textContent = entry.word;
+            dictionaryCardHost.appendChild(wordEl);
+            if (entry.phonetic) {
+              const phoneticEl = document.createElement("div");
+              phoneticEl.className = "translate-dictionary-card__phonetic";
+              phoneticEl.textContent = `/${entry.phonetic}/`;
+              dictionaryCardHost.appendChild(phoneticEl);
+            }
+            const metaText = [entry.pos, entry.tags].filter(Boolean).join(" · ");
+            if (metaText) {
+              const metaEl = document.createElement("div");
+              metaEl.className = "translate-dictionary-card__meta";
+              metaEl.textContent = metaText;
+              dictionaryCardHost.appendChild(metaEl);
+            }
+            if (entry.translation) {
+              const translationEl = document.createElement("div");
+              translationEl.className = "translate-dictionary-card__text";
+              translationEl.textContent = entry.translation;
+              dictionaryCardHost.appendChild(translationEl);
+            }
           }
         }
       }
@@ -14365,7 +14667,9 @@ async function saveTranslateToolSettings(form: HTMLFormElement): Promise<void> {
   const selectionPatch = {
     enabled: formData.get("selectionTranslateEnabled") === "on",
     hotkey: String(formData.get("selectionTranslateHotkey") ?? "").trim() || "F2",
-    restoreClipboard: formData.get("selectionTranslateRestoreClipboard") === "on"
+    restoreClipboard: formData.get("selectionTranslateRestoreClipboard") === "on",
+    dismissOnOutsideClick:
+      formData.get("selectionTranslateDismissOutside") === "on"
   };
 
   const previousLabel = submitButton?.textContent ?? "保存设置";
@@ -14744,7 +15048,12 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     },
     onOpen: (panel) => {
       getRegisteredPanelImpls().applyDictionaryPanelPayload(panel);
-      void maybeAutoRunDictionaryPanelLookup();
+      void hydrateDictionaryPanelState().then(async () => {
+        if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+          renderList();
+        }
+        await maybeAutoRunDictionaryPanelLookup();
+      });
     },
     onEnter: runWithPluginForm("form.dictionary-form", (form) => {
       form.requestSubmit();
@@ -15084,6 +15393,7 @@ window.__LL_PANEL_IMPLS__ = {
     if (activePluginId !== DICTIONARY_PLUGIN_ID) {
       dictionaryQueryText = "";
       dictionaryPanelEntry = null;
+      dictionaryPanelCandidates = [];
     }
     if (activePluginId !== WEBTOOLS_JSON_PLUGIN_ID && webtoolsJsonAutoTimer !== null) {
       window.clearTimeout(webtoolsJsonAutoTimer);
@@ -23919,6 +24229,7 @@ window.__LL_PANEL_IMPLS__ = {
     dictionaryQueryText = data.query;
     dictionaryPanelStatusMessage = data.statusMessage;
     dictionaryPanelEntry = null;
+    dictionaryPanelCandidates = [];
   },
 
   renderDictionaryPanel(): void {
@@ -23948,7 +24259,7 @@ window.__LL_PANEL_IMPLS__ = {
     const statusRow = createLiteSnapInfoRow(
       "使用提示",
       dictionaryPanelStatusMessage,
-      "约 76 万词条，无需联网；连字符词组会自动尝试多种写法"
+      "约 76 万词条，支持英译中与中译英；连字符词组会自动尝试多种写法"
     );
 
     const queryField = document.createElement("div");
@@ -23956,7 +24267,7 @@ window.__LL_PANEL_IMPLS__ = {
 
     const queryLabel = document.createElement("label");
     queryLabel.className = "settings-field-label";
-    queryLabel.textContent = "英文单词或词组";
+    queryLabel.textContent = "查询词（英文或中文）";
     queryLabel.htmlFor = "dictionary-query";
 
     const queryInput = document.createElement("input");
@@ -23966,7 +24277,7 @@ window.__LL_PANEL_IMPLS__ = {
     queryInput.className = "settings-value";
     queryInput.spellcheck = false;
     queryInput.autocomplete = "off";
-    queryInput.placeholder = "例如：apple、user agent、context-path";
+    queryInput.placeholder = "例如：apple、context-path、苹果、上下文";
     queryInput.value = dictionaryQueryText;
     queryInput.addEventListener("input", () => {
       dictionaryQueryText = queryInput.value;
@@ -23981,6 +24292,186 @@ window.__LL_PANEL_IMPLS__ = {
       populateDictionaryEntryCard(dictionaryCard, dictionaryPanelEntry);
     }
 
+    const favoriteNoteField = document.createElement("div");
+    favoriteNoteField.className = "settings-field dictionary-favorite-note-field";
+    favoriteNoteField.hidden = !isCurrentDictionaryEntryFavorited();
+    const favoriteNoteLabel = document.createElement("label");
+    favoriteNoteLabel.className = "settings-field-label";
+    favoriteNoteLabel.textContent = "收藏备注";
+    favoriteNoteLabel.htmlFor = "dictionary-favorite-note";
+    const favoriteNoteInput = document.createElement("input");
+    favoriteNoteInput.id = "dictionary-favorite-note";
+    favoriteNoteInput.type = "text";
+    favoriteNoteInput.className = "settings-value";
+    favoriteNoteInput.maxLength = 120;
+    favoriteNoteInput.placeholder = "可选，例如：工作常用 / 考试词汇";
+    favoriteNoteInput.value =
+      dictionaryPanelFavorites.find(
+        (item) =>
+          dictionaryPanelEntry &&
+          item.word.trim().toLowerCase() ===
+            dictionaryPanelEntry.word.trim().toLowerCase()
+      )?.note ?? "";
+    const favoriteNoteActions = document.createElement("div");
+    favoriteNoteActions.className = "dictionary-favorite-note-actions";
+    const favoriteNoteSave = document.createElement("button");
+    favoriteNoteSave.type = "button";
+    favoriteNoteSave.className = "settings-btn settings-btn-secondary";
+    favoriteNoteSave.textContent = "保存备注";
+    favoriteNoteSave.addEventListener("click", () => {
+      if (!dictionaryPanelEntry) {
+        return;
+      }
+      void saveDictionaryFavoriteNote(
+        form,
+        dictionaryPanelEntry.word,
+        favoriteNoteInput.value
+      );
+    });
+    favoriteNoteActions.appendChild(favoriteNoteSave);
+    favoriteNoteField.append(
+      favoriteNoteLabel,
+      favoriteNoteInput,
+      favoriteNoteActions
+    );
+
+    const candidatesSection = document.createElement("section");
+    candidatesSection.className = "dictionary-side-section";
+    candidatesSection.hidden = dictionaryPanelCandidates.length <= 1;
+    const candidatesHead = document.createElement("div");
+    candidatesHead.className = "dictionary-side-head";
+    const candidatesTitle = document.createElement("h4");
+    candidatesTitle.className = "dictionary-side-title";
+    candidatesTitle.textContent = "其他释义";
+    const candidatesMeta = document.createElement("span");
+    candidatesMeta.className = "dictionary-side-meta";
+    candidatesMeta.textContent = `${Math.max(0, dictionaryPanelCandidates.length - 1)} 条`;
+    candidatesHead.append(candidatesTitle, candidatesMeta);
+    const candidatesList = document.createElement("div");
+    candidatesList.className = "dictionary-word-list";
+    for (const candidate of dictionaryPanelCandidates.slice(1)) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "dictionary-word-row-main";
+      const wordEl = document.createElement("div");
+      wordEl.className = "dictionary-word-row-word";
+      wordEl.textContent = candidate.word;
+      const previewEl = document.createElement("div");
+      previewEl.className = "dictionary-word-row-preview";
+      previewEl.textContent =
+        candidate.translation.split("\n")[0]?.trim() ||
+        (candidate.phonetic ? `/${candidate.phonetic}/` : "点击切换到该词条");
+      row.append(wordEl, previewEl);
+      row.addEventListener("click", () => {
+        dictionaryPanelEntry = candidate;
+        dictionaryPanelCandidates = [
+          candidate,
+          ...dictionaryPanelCandidates.filter((item) => item.word !== candidate.word)
+        ];
+        if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+          renderList();
+        }
+        setStatus(`已切换到「${candidate.word}」。`);
+      });
+      candidatesList.appendChild(row);
+    }
+    candidatesSection.append(candidatesHead, candidatesList);
+
+    const favoritesSection = document.createElement("section");
+    favoritesSection.className = "dictionary-side-section";
+    const favoritesHead = document.createElement("div");
+    favoritesHead.className = "dictionary-side-head";
+    const favoritesTitle = document.createElement("h4");
+    favoritesTitle.className = "dictionary-side-title";
+    favoritesTitle.textContent = "收藏";
+    const favoritesMeta = document.createElement("span");
+    favoritesMeta.className = "dictionary-side-meta";
+    favoritesMeta.textContent = `${dictionaryPanelFavorites.length} 条`;
+    favoritesHead.append(favoritesTitle, favoritesMeta);
+    const favoritesList = document.createElement("div");
+    favoritesList.className = "dictionary-word-list";
+    renderDictionaryBookmarkList(favoritesList, dictionaryPanelFavorites, {
+      emptyText: "还没有收藏词。查询后点「收藏」即可加入。",
+      removeLabel: "取消",
+      onSelect: (word) => {
+        void lookupDictionaryWordFromPanel(form, word);
+      },
+      onRemove: (word) => {
+        void removeDictionaryPanelFavorite(form, word);
+      }
+    });
+    favoritesSection.append(favoritesHead, favoritesList);
+
+    const historySection = document.createElement("section");
+    historySection.className = "dictionary-side-section";
+    const historyHead = document.createElement("div");
+    historyHead.className = "dictionary-side-head";
+    const historyTitle = document.createElement("h4");
+    historyTitle.className = "dictionary-side-title";
+    historyTitle.textContent = "最近查询";
+    const historyMeta = document.createElement("span");
+    historyMeta.className = "dictionary-side-meta";
+    const filteredHistory = dictionaryPanelHistory.filter((item) => {
+      if (dictionaryPanelHistoryFilter === "en") {
+        return /^[A-Za-z]/.test(item.word);
+      }
+      if (dictionaryPanelHistoryFilter === "zh") {
+        return /[\u3400-\u9fff]/.test(item.word) || /[\u3400-\u9fff]/.test(item.translationPreview);
+      }
+      return true;
+    });
+    historyMeta.textContent = `${filteredHistory.length} / ${dictionaryPanelHistory.length}`;
+    const clearHistoryButton = document.createElement("button");
+    clearHistoryButton.type = "button";
+    clearHistoryButton.className = "dictionary-side-action";
+    clearHistoryButton.textContent = "清空";
+    clearHistoryButton.disabled = dictionaryPanelHistory.length === 0;
+    clearHistoryButton.addEventListener("click", () => {
+      void clearDictionaryPanelHistory(form);
+    });
+    historyHead.append(historyTitle, historyMeta, clearHistoryButton);
+
+    const historyFilterRow = document.createElement("div");
+    historyFilterRow.className = "dictionary-history-filters";
+    (
+      [
+        ["all", "全部"],
+        ["en", "英文"],
+        ["zh", "中文"]
+      ] as const
+    ).forEach(([value, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `dictionary-history-filter${
+        dictionaryPanelHistoryFilter === value ? " is-active" : ""
+      }`;
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        dictionaryPanelHistoryFilter = value;
+        if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+          renderList();
+        }
+      });
+      historyFilterRow.appendChild(button);
+    });
+
+    const historyList = document.createElement("div");
+    historyList.className = "dictionary-word-list";
+    renderDictionaryBookmarkList(historyList, filteredHistory, {
+      emptyText:
+        dictionaryPanelHistoryFilter === "all"
+          ? "还没有查询记录。成功查词后会显示在这里。"
+          : "当前筛选下没有记录。",
+      removeLabel: "删除",
+      onSelect: (word) => {
+        void lookupDictionaryWordFromPanel(form, word);
+      },
+      onRemove: (word) => {
+        void removeDictionaryPanelHistoryItem(form, word);
+      }
+    });
+    historySection.append(historyHead, historyFilterRow, historyList);
+
     const actions = document.createElement("div");
     actions.className = "settings-actions";
 
@@ -23989,6 +24480,17 @@ window.__LL_PANEL_IMPLS__ = {
     lookupButton.className = "settings-btn settings-btn-primary";
     lookupButton.textContent = "查询";
     lookupButton.setAttribute("data-action", "dictionary-lookup");
+
+    const favoriteButton = document.createElement("button");
+    favoriteButton.type = "button";
+    favoriteButton.className = "settings-btn settings-btn-secondary";
+    favoriteButton.textContent = isCurrentDictionaryEntryFavorited()
+      ? "取消收藏"
+      : "收藏";
+    favoriteButton.disabled = !dictionaryPanelEntry;
+    favoriteButton.addEventListener("click", () => {
+      void toggleDictionaryPanelFavorite(form);
+    });
 
     const copyButton = document.createElement("button");
     copyButton.type = "button";
@@ -24019,8 +24521,22 @@ window.__LL_PANEL_IMPLS__ = {
       backToSearch();
     });
 
-    actions.append(lookupButton, copyButton, backToSearchButton);
-    form.append(statusRow, queryField, dictionaryCard, actions);
+    actions.append(
+      lookupButton,
+      favoriteButton,
+      copyButton,
+      backToSearchButton
+    );
+    form.append(
+      statusRow,
+      queryField,
+      dictionaryCard,
+      favoriteNoteField,
+      candidatesSection,
+      favoritesSection,
+      historySection,
+      actions
+    );
     panel.append(title, description, form);
     panelItem.appendChild(panel);
     list.appendChild(panelItem);
@@ -24142,6 +24658,15 @@ window.__LL_PANEL_IMPLS__ = {
             selectionTranslateSettingsState.restoreClipboard
           ),
           "划词抓取后还原原剪贴板内容，避免污染"
+        ),
+        createLiteSnapFieldRow(
+          "点击空白关闭",
+          createLiteSnapCheckbox(
+            "webtools-selection-translate-dismiss-outside",
+            "selectionTranslateDismissOutside",
+            selectionTranslateSettingsState.dismissOnOutsideClick
+          ),
+          "开启后点击弹窗外空白处或失焦时自动关闭；关闭则需手动点关闭按钮或 Esc"
         )
       ];
 

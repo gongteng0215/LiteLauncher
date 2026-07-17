@@ -2175,6 +2175,16 @@ test("dictionary panel is registered with lookup handler", () => {
     /renderDictionaryPanel\(\): void/,
     "dictionary render implementation should stay in plugin-panel-impls"
   );
+  assert.match(
+    panelImplsSource,
+    /hydrateDictionaryPanelState\(\)/,
+    "dictionary panel should hydrate history and favorites on open"
+  );
+  assert.match(
+    panelImplsSource,
+    /recordDictionaryLookup/,
+    "dictionary panel should persist successful lookups into history"
+  );
 });
 
 test("webtools-translate panel is registered with settings hydration", () => {

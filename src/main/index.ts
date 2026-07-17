@@ -45,10 +45,11 @@ import { LiteSnapImageStore } from "./litesnap/image-store";
 import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
 import { DictionaryStore } from "./dictionary/store";
+import { DictionaryPanelStateStore } from "./dictionary/panel-state";
 import { captureSelectedText } from "./selection-translate/capture";
 import { showSelectionPopup } from "./selection-translate/popup-window";
 import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
-import { isEnglishWordOrPhrase } from "../shared/dictionary";
+import { isDictionaryLookupText, isEnglishWordOrPhrase, isChineseWordOrPhrase } from "../shared/dictionary";
 import {
   type SelectionTranslateSettings
 } from "../shared/selection-translate";
@@ -2042,6 +2043,7 @@ async function bootstrap(): Promise<void> {
     activeDatabase
   );
   const dictionaryStore = new DictionaryStore();
+  const dictionaryPanelStateStore = new DictionaryPanelStateStore(activeDatabase);
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
@@ -2301,61 +2303,83 @@ async function bootstrap(): Promise<void> {
         return false;
       }
 
+      const popupOptions = {
+        dismissOnOutsideClick: settings.dismissOnOutsideClick
+      };
+
       const captured = await captureSelectedText({
         restoreClipboard: settings.restoreClipboard
       });
       if (!captured.ok || !captured.text.trim()) {
-        await showSelectionPopup({
-          mode: "empty",
-          message:
-            captured.reason === "unsupported"
-              ? "当前系统暂不支持划词翻译。"
-              : "未检测到选中文字，请先选中再按快捷键。"
-        });
+        await showSelectionPopup(
+          {
+            mode: "empty",
+            message:
+              captured.reason === "unsupported"
+                ? "当前系统暂不支持划词翻译。"
+                : "未检测到选中文字，请先选中再按快捷键。"
+          },
+          popupOptions
+        );
         return true;
       }
 
       const sourceText = captured.text.replace(/\r\n/g, "\n").trim();
-      if (isEnglishWordOrPhrase(sourceText)) {
-        const entry = dictionaryStore.lookup(sourceText);
+      if (isDictionaryLookupText(sourceText)) {
+        const candidates = dictionaryStore.lookupCandidates(sourceText, 8);
+        const entry = candidates[0];
         if (entry) {
-          await showSelectionPopup({
-            mode: "dictionary",
-            sourceText,
-            entry
-          });
+          await showSelectionPopup(
+            {
+              mode: "dictionary",
+              sourceText,
+              entry,
+              candidates: candidates.length > 1 ? candidates : undefined
+            },
+            popupOptions
+          );
           return true;
         }
       }
 
-      // Offline miss (or non-English text): fall back to Baidu translate.
+      // Offline miss (or unsupported text): fall back to Baidu translate.
       const translated = await translateTextForTool({ text: sourceText });
       if (!translated.ok) {
         const dictionaryReady = dictionaryStore.isReady();
         const offlineHint = !dictionaryReady
           ? "（离线词典未加载，请确认安装包完整）"
-          : isEnglishWordOrPhrase(sourceText)
+          : isDictionaryLookupText(sourceText)
             ? "（离线词典未收录该词）"
             : "";
-        await showSelectionPopup({
-          mode: "error",
-          message: `${translated.message || "翻译失败，请检查百度翻译设置。"}${offlineHint}`
-        });
+        await showSelectionPopup(
+          {
+            mode: "error",
+            message: `${translated.message || "翻译失败，请检查百度翻译设置。"}${offlineHint}`
+          },
+          popupOptions
+        );
         return true;
       }
 
-      await showSelectionPopup({
-        mode: "translate",
-        sourceText: translated.sourceText,
-        translatedText: translated.translatedText
-      });
+      await showSelectionPopup(
+        {
+          mode: "translate",
+          sourceText: translated.sourceText,
+          translatedText: translated.translatedText
+        },
+        popupOptions
+      );
       return true;
     } catch (error) {
       console.warn("[selection-translate] failed", error);
-      await showSelectionPopup({
-        mode: "error",
-        message: "划词翻译失败，请重试。"
-      });
+      const settings = await selectionTranslateSettingsStore.getSettings();
+      await showSelectionPopup(
+        {
+          mode: "error",
+          message: "划词翻译失败，请重试。"
+        },
+        { dismissOnOutsideClick: settings.dismissOnOutsideClick }
+      );
       return false;
     } finally {
       selectionTranslateRunning = false;
@@ -2673,7 +2697,18 @@ async function bootstrap(): Promise<void> {
           translateText: (input) => translateTextForTool(input)
         },
         dictionaryProvider: {
-          lookup: async (word) => dictionaryStore.lookup(word)
+          lookup: async (word) => dictionaryStore.lookup(word),
+          lookupCandidates: async (word, limit) =>
+            dictionaryStore.lookupCandidates(word, limit),
+          getPanelState: () => dictionaryPanelStateStore.getState(),
+          recordLookup: (input) => dictionaryPanelStateStore.recordLookup(input),
+          toggleFavorite: (input) => dictionaryPanelStateStore.toggleFavorite(input),
+          removeHistoryItem: (word) =>
+            dictionaryPanelStateStore.removeHistoryItem(word),
+          clearHistory: () => dictionaryPanelStateStore.clearHistory(),
+          removeFavorite: (word) => dictionaryPanelStateStore.removeFavorite(word),
+          updateFavoriteNote: (word, note) =>
+            dictionaryPanelStateStore.updateFavoriteNote(word, note)
         },
         selectionTranslateProvider: {
           getSettings: () => selectionTranslateSettingsStore.getSettings(),

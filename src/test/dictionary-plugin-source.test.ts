@@ -27,7 +27,17 @@ test("dictionary plugin is registered with IPC lookup and renderer panel", () =>
     panelImplsSource,
     /renderDictionaryPanel[\s\S]*dictionary-query[\s\S]*dictionary-result-card/
   );
-  assert.match(panelImplsSource, /lookupDictionaryWord/);
+  assert.match(panelImplsSource, /lookupDictionaryCandidates/);
+  assert.match(panelImplsSource, /其他释义/);
+  assert.match(panelImplsSource, /收藏备注|updateDictionaryFavoriteNote/);
+  assert.match(panelImplsSource, /dictionary-history-filters/);
+  assert.match(panelImplsSource, /getDictionaryPanelState/);
+  assert.match(panelImplsSource, /recordDictionaryLookup/);
+  assert.match(panelImplsSource, /toggleDictionaryFavorite/);
+  assert.match(
+    panelImplsSource,
+    /dictionary-side-section[\s\S]*最近查询[\s\S]*收藏/
+  );
   assert.match(panelImplsSource, /applyDictionaryPanelPayload/);
   assert.match(handlerConfigSource, /dictionary-form/);
   assert.match(handlerConfigSource, /dictionary-lookup/);

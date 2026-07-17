@@ -311,6 +311,9 @@ function writeDatabase(rows) {
     insert.run(...row);
   }
   db.exec("COMMIT");
+  // FTS reverse-lookup index is applied at package/build time via
+  // scripts/patch-ecdict-fts.cjs so the committed src/assets/ecdict.db
+  // stays under GitHub's 100MB limit (~88MB).
   db.close();
 }
 

@@ -1,4 +1,33 @@
 export const DICTIONARY_PLUGIN_ID = "dictionary";
+export const DICTIONARY_HISTORY_MAX = 30;
+export const DICTIONARY_FAVORITES_MAX = 100;
+
+export interface DictionaryWordBookmark {
+  word: string;
+  phonetic: string;
+  translationPreview: string;
+  note: string;
+  savedAt: number;
+}
+
+export interface DictionaryPanelState {
+  history: DictionaryWordBookmark[];
+  favorites: DictionaryWordBookmark[];
+}
+
+export function createDefaultDictionaryPanelState(): DictionaryPanelState {
+  return { history: [], favorites: [] };
+}
+
+export function isDictionaryWordFavorited(
+  state: DictionaryPanelState,
+  word: string
+): boolean {
+  const key = normalizeDictionaryLookupWord(word);
+  return state.favorites.some(
+    (item) => normalizeDictionaryLookupWord(item.word) === key
+  );
+}
 
 export interface DictionaryEntry {
   word: string;
@@ -28,6 +57,113 @@ export function isEnglishWordOrPhrase(text: string): boolean {
     return false;
   }
   return /^[A-Za-z][A-Za-z' \-]*$/.test(trimmed);
+}
+
+/** Chinese word or short phrase for reverse ECDICT lookup. */
+export function isChineseWordOrPhrase(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 32) {
+    return false;
+  }
+  if (!/[\u3400-\u9fff]/.test(trimmed)) {
+    return false;
+  }
+  return /^[\u3400-\u9fffA-Za-z0-9\s·，、；：""''（）()《》【】…—\-]+$/.test(
+    trimmed
+  );
+}
+
+export function isDictionaryLookupText(text: string): boolean {
+  return isEnglishWordOrPhrase(text) || isChineseWordOrPhrase(text);
+}
+
+export function normalizeChineseLookupText(text: string): string {
+  return text.trim().replace(/\s+/g, "");
+}
+
+export function buildChineseTranslationFtsQuery(text: string): string {
+  const normalized = normalizeChineseLookupText(text);
+  if (!normalized) {
+    return "";
+  }
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+export function scoreChineseDictionaryMatch(
+  query: string,
+  entry: DictionaryEntry
+): number {
+  const normalizedQuery = normalizeChineseLookupText(query);
+  if (!normalizedQuery) {
+    return 0;
+  }
+
+  const translation = formatDictionaryMultilineText(entry.translation);
+  let score = 0;
+  if (translation.includes(normalizedQuery)) {
+    score += 120;
+  }
+
+  const boundary = new RegExp(
+    `(?:^|[；;\\n\\s])${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[；;\\s，,])`
+  );
+  if (boundary.test(translation)) {
+    score += 80;
+  } else if (normalizedQuery.length === 1) {
+    // Single-character queries are very ambiguous; require a boundary hit.
+    return 0;
+  }
+
+  if (/^[\u3400-\u9fff]+$/.test(normalizedQuery) && entry.word === normalizedQuery) {
+    score -= 40;
+  }
+
+  score += Math.min(entry.collins, 5) * 8;
+  score += entry.oxford ? 20 : 0;
+  score -= Math.min(entry.word.length, 24);
+  if (normalizedQuery.length === 1) {
+    score -= 30;
+  }
+  return score;
+}
+
+export function pickBestChineseDictionaryMatch(
+  query: string,
+  entries: DictionaryEntry[]
+): DictionaryEntry | undefined {
+  return rankChineseDictionaryMatches(query, entries, 1)[0];
+}
+
+export function rankChineseDictionaryMatches(
+  query: string,
+  entries: DictionaryEntry[],
+  limit = 8
+): DictionaryEntry[] {
+  if (entries.length === 0 || limit <= 0) {
+    return [];
+  }
+  const ranked = [...entries]
+    .map((entry) => ({
+      entry,
+      score: scoreChineseDictionaryMatch(query, entry)
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  const seen = new Set<string>();
+  const result: DictionaryEntry[] = [];
+  for (const item of ranked) {
+    const key = normalizeDictionaryLookupWord(item.entry.word);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(item.entry);
+    if (result.length >= limit) {
+      break;
+    }
+  }
+  return result;
 }
 
 export function normalizeDictionaryLookupWord(text: string): string {

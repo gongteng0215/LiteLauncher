@@ -438,19 +438,166 @@ interface LauncherApi {
       }
     | undefined
   >;
+  lookupDictionaryCandidates?(
+    word: string,
+    limit?: number
+  ): Promise<
+    Array<{
+      word: string;
+      phonetic: string;
+      translation: string;
+      definition: string;
+      pos: string;
+      tags: string;
+      collins: number;
+      oxford: number;
+      exchange: string;
+    }>
+  >;
+  getDictionaryPanelState?(): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+  }>;
+  recordDictionaryLookup?(input: {
+    query: string;
+    entry?: {
+      word: string;
+      phonetic: string;
+      translation: string;
+      definition: string;
+      pos: string;
+      tags: string;
+      collins: number;
+      oxford: number;
+      exchange: string;
+    } | null;
+  }): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+  }>;
+  toggleDictionaryFavorite?(input: {
+    word: string;
+    entry?: {
+      word: string;
+      phonetic: string;
+      translation: string;
+      definition: string;
+      pos: string;
+      tags: string;
+    } | null;
+  }): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+  }>;
+  removeDictionaryHistoryItem?(word: string): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+  }>;
+  clearDictionaryHistory?(): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+  }>;
+  removeDictionaryFavorite?(word: string): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      note?: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      note?: string;
+      savedAt: number;
+    }>;
+  }>;
+  updateDictionaryFavoriteNote?(input: {
+    word: string;
+    note: string;
+  }): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      note?: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      note?: string;
+      savedAt: number;
+    }>;
+  }>;
   getSelectionTranslateSettings?(): Promise<{
     enabled: boolean;
     hotkey: string;
     restoreClipboard: boolean;
+    dismissOnOutsideClick: boolean;
   }>;
   setSelectionTranslateSettings?(patch: {
     enabled?: boolean;
     hotkey?: string;
     restoreClipboard?: boolean;
+    dismissOnOutsideClick?: boolean;
   }): Promise<{
     enabled: boolean;
     hotkey: string;
     restoreClipboard: boolean;
+    dismissOnOutsideClick: boolean;
   }>;
   liteSnapProbeOcr?(): Promise<{
     ok: boolean;
@@ -1776,17 +1923,33 @@ function readVisiblePluginIdsFromSettingsForm(form: HTMLFormElement): string[] {
   }
 
   const selected = new Set<string>(requiredVisiblePluginIdSet);
+  const pinned: string[] = [];
   picker
     .querySelectorAll<HTMLElement>(".settings-plugin-tile.is-selected")
     .forEach((tile) => {
       const pluginId = tile.dataset.pluginId?.trim().toLowerCase();
-      if (pluginId) {
-        selected.add(pluginId);
+      if (!pluginId) {
+        return;
+      }
+      selected.add(pluginId);
+      if (tile.classList.contains("is-pinned") && !pinned.includes(pluginId)) {
+        pinned.push(pluginId);
       }
     });
 
   const ordered: string[] = [];
   const seen = new Set<string>();
+  for (const pluginId of pinned) {
+    if (!selected.has(pluginId) || seen.has(pluginId)) {
+      continue;
+    }
+    seen.add(pluginId);
+    ordered.push(pluginId);
+    if (ordered.length >= VISIBLE_PLUGIN_IDS_MAX) {
+      return ordered;
+    }
+  }
+
   for (const item of allPluginCatalogItems) {
     const pluginId = pluginIdFromCatalogItem(item);
     if (!selected.has(pluginId) || seen.has(pluginId)) {
@@ -1813,6 +1976,28 @@ function readVisiblePluginIdsFromSettingsForm(form: HTMLFormElement): string[] {
   return ordered;
 }
 
+function getPluginSettingsCategory(pluginId: string): string {
+  if (
+    pluginId === "dictionary" ||
+    pluginId === "webtools-translate" ||
+    pluginId === "litesnap"
+  ) {
+    return "词典与翻译";
+  }
+  if (
+    pluginId === "clipboard-workbench" ||
+    pluginId === "hardware-inspector" ||
+    pluginId === "cashflow-game" ||
+    pluginId === "codeagent-switch"
+  ) {
+    return "工作台";
+  }
+  if (pluginId.startsWith("webtools-")) {
+    return "开发工具";
+  }
+  return "其他";
+}
+
 function createVisiblePluginPicker(
   selectedPluginIds: string[]
 ): HTMLDivElement {
@@ -1828,72 +2013,247 @@ function createVisiblePluginPicker(
   for (const pluginId of requiredVisiblePluginIdSet) {
     selectedSet.add(pluginId);
   }
+  const pinnedSet = new Set(
+    selectedPluginIds
+      .slice(0, 8)
+      .map((id) => id.trim().toLowerCase())
+      .filter((id) => selectedSet.has(id))
+  );
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "settings-plugin-picker-toolbar";
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "settings-value settings-plugin-picker-search";
+  searchInput.placeholder = "搜索插件名称…";
+  searchInput.autocomplete = "off";
+
+  const restoreDefaultsButton = document.createElement("button");
+  restoreDefaultsButton.type = "button";
+  restoreDefaultsButton.className = "settings-btn settings-btn-secondary";
+  restoreDefaultsButton.textContent = "恢复默认可见";
+  restoreDefaultsButton.title = "恢复为当前版本默认可见插件集";
+  toolbar.append(searchInput, restoreDefaultsButton);
+
+  const defaultVisibleSet = new Set(
+    DEFAULT_VISIBLE_PLUGIN_IDS.map((id) => id.trim().toLowerCase())
+  );
+  const initialVisibleSet = new Set(selectedSet);
+  const newlySuggestedIds = [...defaultVisibleSet].filter(
+    (id) => !initialVisibleSet.has(id)
+  );
 
   const updateSummary = (): void => {
     const count = wrap.querySelectorAll(".settings-plugin-tile.is-selected").length;
-    summary.textContent = `已选择 ${count} 个插件，点击图标切换显示；带「必选」标记的插件无法隐藏。`;
+    const pinnedCount = wrap.querySelectorAll(
+      ".settings-plugin-tile.is-selected.is-pinned"
+    ).length;
+    const unselectedDefaults = wrap.querySelectorAll(
+      ".settings-plugin-tile.is-default:not(.is-selected)"
+    ).length;
+    const parts = [
+      `已选择 ${count} 个插件（置顶 ${pinnedCount}）`,
+      "可搜索、按分类浏览，点击右上角★置顶常用插件"
+    ];
+    if (newlySuggestedIds.length > 0 || unselectedDefaults > 0) {
+      parts.push(
+        `有 ${Math.max(newlySuggestedIds.length, unselectedDefaults)} 个默认推荐插件未启用，可点「恢复默认可见」`
+      );
+    }
+    summary.textContent = `${parts.join("；")}。`;
   };
 
-  const grid = document.createElement("ul");
-  grid.className = "settings-plugin-grid section-grid";
+  const groupsHost = document.createElement("div");
+  groupsHost.className = "settings-plugin-groups";
 
   const sortedItems = [...allPluginCatalogItems].sort((left, right) =>
     left.title.localeCompare(right.title, "zh-CN")
   );
-
+  const categoryOrder = ["词典与翻译", "工作台", "开发工具", "其他"];
+  const itemsByCategory = new Map<string, LaunchItem[]>();
   for (const item of sortedItems) {
-    const pluginId = pluginIdFromCatalogItem(item);
-    const required = requiredVisiblePluginIdSet.has(pluginId);
-    const selected = required || selectedSet.has(pluginId);
-
-    const tile = document.createElement("li");
-    tile.className = "settings-plugin-tile result-item result-tile";
-    tile.dataset.pluginId = pluginId;
-    if (selected) {
-      tile.classList.add("is-selected");
-    }
-    if (required) {
-      tile.classList.add("is-required");
-      tile.title = `${item.title}（必选插件，无法隐藏）`;
-    } else {
-      tile.title = selected
-        ? `点击隐藏：${item.title}`
-        : `点击显示：${item.title}`;
-    }
-
-    const icon = createSettingsPluginPickerIcon(item);
-    const title = document.createElement("div");
-    title.className = "tile-title";
-    title.textContent = item.title;
-
-    tile.append(icon, title);
-    if (required) {
-      const badge = document.createElement("span");
-      badge.className = "settings-plugin-required-badge";
-      badge.textContent = "必选";
-      tile.appendChild(badge);
-    }
-
-    tile.addEventListener("click", () => {
-      if (required) {
-        setStatus(`${item.title} 为必选插件，无法隐藏。`);
-        return;
-      }
-      tile.classList.toggle("is-selected");
-      tile.title = tile.classList.contains("is-selected")
-        ? `点击隐藏：${item.title}`
-        : `点击显示：${item.title}`;
-      updateSummary();
-    });
-
-    grid.appendChild(tile);
+    const category = getPluginSettingsCategory(pluginIdFromCatalogItem(item));
+    const list = itemsByCategory.get(category) ?? [];
+    list.push(item);
+    itemsByCategory.set(category, list);
   }
 
-  wrap.append(summary, grid);
-  updateSummary();
-  window.requestAnimationFrame(() => {
-    applyAdaptiveSectionGridColumns(grid);
+  const allTiles: HTMLLIElement[] = [];
+
+  for (const category of categoryOrder) {
+    const items = itemsByCategory.get(category) ?? [];
+    if (items.length === 0) {
+      continue;
+    }
+
+    const section = document.createElement("section");
+    section.className = "settings-plugin-group";
+    section.dataset.pluginCategory = category;
+
+    const heading = document.createElement("h4");
+    heading.className = "settings-plugin-group-title";
+    heading.textContent = category;
+    section.appendChild(heading);
+
+    const grid = document.createElement("ul");
+    grid.className = "settings-plugin-grid section-grid";
+
+    for (const item of items) {
+      const pluginId = pluginIdFromCatalogItem(item);
+      const required = requiredVisiblePluginIdSet.has(pluginId);
+      const selected = required || selectedSet.has(pluginId);
+      const pinned = selected && pinnedSet.has(pluginId);
+      const isDefault = defaultVisibleSet.has(pluginId);
+      const isNewSuggestion =
+        isDefault && newlySuggestedIds.includes(pluginId);
+
+      const tile = document.createElement("li");
+      tile.className = "settings-plugin-tile result-item result-tile";
+      tile.dataset.pluginId = pluginId;
+      tile.dataset.pluginTitle = item.title;
+      if (selected) {
+        tile.classList.add("is-selected");
+      }
+      if (isDefault) {
+        tile.classList.add("is-default");
+      }
+      if (required) {
+        tile.classList.add("is-required");
+        tile.title = `${item.title}（必选插件，无法隐藏）`;
+      } else {
+        tile.title = selected
+          ? `点击隐藏：${item.title}`
+          : `点击显示：${item.title}`;
+      }
+      if (pinned) {
+        tile.classList.add("is-pinned");
+      }
+
+      const icon = createSettingsPluginPickerIcon(item);
+      const title = document.createElement("div");
+      title.className = "tile-title";
+      title.textContent = item.title;
+
+      const pinButton = document.createElement("button");
+      pinButton.type = "button";
+      pinButton.className = "settings-plugin-pin-btn";
+      pinButton.textContent = pinned ? "★" : "☆";
+      pinButton.title = pinned ? "取消置顶" : "置顶到搜索结果靠前";
+      pinButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (!tile.classList.contains("is-selected")) {
+          setStatus("请先选择该插件再置顶。");
+          return;
+        }
+        tile.classList.toggle("is-pinned");
+        pinButton.textContent = tile.classList.contains("is-pinned") ? "★" : "☆";
+        pinButton.title = tile.classList.contains("is-pinned")
+          ? "取消置顶"
+          : "置顶到搜索结果靠前";
+        updateSummary();
+      });
+
+      tile.append(icon, title, pinButton);
+      if (required) {
+        const badge = document.createElement("span");
+        badge.className = "settings-plugin-required-badge";
+        badge.textContent = "必选";
+        tile.appendChild(badge);
+      } else if (isNewSuggestion) {
+        const badge = document.createElement("span");
+        badge.className = "settings-plugin-new-badge";
+        badge.textContent = "新增";
+        tile.appendChild(badge);
+      }
+
+      tile.addEventListener("click", () => {
+        if (required) {
+          setStatus(`${item.title} 为必选插件，无法隐藏。`);
+          return;
+        }
+        tile.classList.toggle("is-selected");
+        const nowSelected = tile.classList.contains("is-selected");
+        tile.title = nowSelected
+          ? `点击隐藏：${item.title}`
+          : `点击显示：${item.title}`;
+        if (!nowSelected) {
+          tile.classList.remove("is-pinned");
+          pinButton.textContent = "☆";
+          pinButton.title = "置顶到搜索结果靠前";
+        }
+        updateSummary();
+      });
+
+      grid.appendChild(tile);
+      allTiles.push(tile);
+    }
+
+    section.appendChild(grid);
+    groupsHost.appendChild(section);
+    window.requestAnimationFrame(() => {
+      applyAdaptiveSectionGridColumns(grid);
+    });
+  }
+
+  const applySearchFilter = (): void => {
+    const query = searchInput.value.trim().toLowerCase();
+    for (const tile of allTiles) {
+      const pluginId = tile.dataset.pluginId ?? "";
+      const title = (tile.dataset.pluginTitle ?? "").toLowerCase();
+      const match =
+        !query || title.includes(query) || pluginId.includes(query);
+      tile.hidden = !match;
+    }
+    groupsHost.querySelectorAll<HTMLElement>(".settings-plugin-group").forEach((section) => {
+      const visibleTiles = section.querySelectorAll(
+        ".settings-plugin-tile:not([hidden])"
+      ).length;
+      section.hidden = visibleTiles === 0;
+    });
+  };
+  searchInput.addEventListener("input", applySearchFilter);
+
+  restoreDefaultsButton.addEventListener("click", () => {
+    for (const tile of allTiles) {
+      const pluginId = tile.dataset.pluginId ?? "";
+      const shouldSelect =
+        requiredVisiblePluginIdSet.has(pluginId) || defaultVisibleSet.has(pluginId);
+      tile.classList.toggle("is-selected", shouldSelect);
+      tile.classList.remove("is-pinned");
+      const pinButton = tile.querySelector<HTMLButtonElement>(
+        ".settings-plugin-pin-btn"
+      );
+      if (pinButton) {
+        pinButton.textContent = "☆";
+        pinButton.title = "置顶到搜索结果靠前";
+      }
+      if (!requiredVisiblePluginIdSet.has(pluginId)) {
+        tile.title = shouldSelect
+          ? `点击隐藏：${tile.dataset.pluginTitle ?? pluginId}`
+          : `点击显示：${tile.dataset.pluginTitle ?? pluginId}`;
+      }
+    }
+    const preferredPins = ["dictionary", "webtools-translate", "clipboard-workbench"];
+    for (const pluginId of preferredPins) {
+      const tile = allTiles.find((item) => item.dataset.pluginId === pluginId);
+      if (!tile || !tile.classList.contains("is-selected")) {
+        continue;
+      }
+      tile.classList.add("is-pinned");
+      const pinButton = tile.querySelector<HTMLButtonElement>(
+        ".settings-plugin-pin-btn"
+      );
+      if (pinButton) {
+        pinButton.textContent = "★";
+        pinButton.title = "取消置顶";
+      }
+    }
+    updateSummary();
+    setStatus("已恢复默认可见插件，保存设置后生效。");
   });
+
+  wrap.append(summary, toolbar, groupsHost);
+  updateSummary();
   return wrap;
 }
 
@@ -3104,7 +3464,7 @@ function renderSettingsPanel(): void {
 
   const pluginGroup = createGroup(
     "插件可见性",
-    "点击图标选择要在主界面插件分区显示的插件。"
+    "可搜索、按分类浏览；点击图标选择显示，★ 置顶常用插件。"
   );
   const pickerRow = document.createElement("div");
   pickerRow.className = "settings-row settings-row-plugin-picker";

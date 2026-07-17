@@ -66,7 +66,12 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
 
   assert.match(sharedSource, /export interface DictionaryEntry/);
   assert.match(sharedSource, /stemDictionaryLookupCandidates/);
-  assert.match(sharedSource, /splitHyphenCompoundParts/);
+  assert.match(sharedSource, /isChineseWordOrPhrase/);
+  assert.match(sharedSource, /pickBestChineseDictionaryMatch/);
+  assert.match(storeSource, /lookupCandidates/);
+  assert.match(storeSource, /lookupChineseCandidates/);
+  assert.match(storeSource, /entries_translation_fts/);
+  assert.match(channelsSource, /lookupDictionaryCandidates:/);
   assert.match(storeSource, /class DictionaryStore/);
   assert.match(storeSource, /readOnly:\s*true/);
   assert.match(storeSource, /formatDictionaryMultilineText/);
@@ -75,18 +80,37 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
   assert.match(storeSource, /isInsideAsarArchive/);
   assert.match(storeSource, /opened ecdict\.db from/);
   assert.match(channelsSource, /lookupDictionaryWord:/);
+  assert.match(channelsSource, /getDictionaryPanelState:/);
+  assert.match(channelsSource, /recordDictionaryLookup:/);
+  assert.match(channelsSource, /toggleDictionaryFavorite:/);
+  assert.match(channelsSource, /updateDictionaryFavoriteNote:/);
   assert.match(ipcSource, /DictionaryProvider/);
   assert.match(ipcSource, /IPC_CHANNELS\.lookupDictionaryWord/);
+  assert.match(ipcSource, /IPC_CHANNELS\.getDictionaryPanelState/);
+  assert.match(ipcSource, /IPC_CHANNELS\.updateDictionaryFavoriteNote/);
   assert.match(preloadSource, /lookupDictionaryWord\(/);
+  assert.match(preloadSource, /getDictionaryPanelState\(/);
+  assert.match(preloadSource, /updateDictionaryFavoriteNote\(/);
   assert.match(mainSource, /dictionaryStore/);
+  assert.match(mainSource, /dictionaryPanelStateStore/);
   assert.match(mainSource, /dictionaryProvider/);
-  assert.match(mainSource, /isEnglishWordOrPhrase/);
+  assert.match(mainSource, /isDictionaryLookupText/);
 });
 
 test("ecdict.db asset and build script exist", () => {
   const buildScript = readSource("scripts/build-ecdict-db.cjs");
   assert.match(buildScript, /CREATE TABLE entries/);
   assert.match(buildScript, /src[/\\]assets[/\\]ecdict\.db|OUT_DB/);
+  assert.doesNotMatch(
+    buildScript,
+    /entries_translation_fts/,
+    "committed ecdict.db build should stay under GitHub 100MB without FTS"
+  );
+  const patchScript = readSource("scripts/patch-ecdict-fts.cjs");
+  assert.match(patchScript, /entries_translation_fts/);
+  assert.match(patchScript, /dist[/\\]assets[/\\]ecdict\.db|DEFAULT_DB/);
+  const copyAssets = readSource("scripts/copy-assets.cjs");
+  assert.match(copyAssets, /patchDistEcdictFts|patch-ecdict-fts/);
   assert.ok(
     fs.existsSync(path.join(process.cwd(), "src/assets/ecdict.db")),
     "src/assets/ecdict.db should be generated"

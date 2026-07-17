@@ -198,6 +198,50 @@ const api = {
   ): Promise<import("../shared/dictionary").DictionaryEntry | undefined> {
     return ipcRenderer.invoke(IPC_CHANNELS.lookupDictionaryWord, word);
   },
+  lookupDictionaryCandidates(
+    word: string,
+    limit?: number
+  ): Promise<import("../shared/dictionary").DictionaryEntry[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.lookupDictionaryCandidates, word, limit);
+  },
+  getDictionaryPanelState(): Promise<
+    import("../shared/dictionary").DictionaryPanelState
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.getDictionaryPanelState);
+  },
+  recordDictionaryLookup(input: {
+    query: string;
+    entry?: import("../shared/dictionary").DictionaryEntry | null;
+  }): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.recordDictionaryLookup, input);
+  },
+  toggleDictionaryFavorite(input: {
+    word: string;
+    entry?: import("../shared/dictionary").DictionaryEntry | null;
+  }): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.toggleDictionaryFavorite, input);
+  },
+  removeDictionaryHistoryItem(
+    word: string
+  ): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.removeDictionaryHistoryItem, word);
+  },
+  clearDictionaryHistory(): Promise<
+    import("../shared/dictionary").DictionaryPanelState
+  > {
+    return ipcRenderer.invoke(IPC_CHANNELS.clearDictionaryHistory);
+  },
+  removeDictionaryFavorite(
+    word: string
+  ): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.removeDictionaryFavorite, word);
+  },
+  updateDictionaryFavoriteNote(input: {
+    word: string;
+    note: string;
+  }): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.updateDictionaryFavoriteNote, input);
+  },
   getSelectionTranslateSettings(): Promise<
     import("../shared/selection-translate").SelectionTranslateSettings
   > {

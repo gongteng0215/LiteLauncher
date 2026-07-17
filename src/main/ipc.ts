@@ -25,7 +25,7 @@ import {
   TranslateSettings,
   TranslateTextInput
 } from "../shared/translate";
-import type { DictionaryEntry } from "../shared/dictionary";
+import type { DictionaryEntry, DictionaryPanelState } from "../shared/dictionary";
 import type { SelectionTranslateSettings } from "../shared/selection-translate";
 import {
   AppErrorLogEntry,
@@ -148,6 +148,26 @@ type TranslateToolProvider = {
 
 type DictionaryProvider = {
   lookup: (word: string) => Promise<DictionaryEntry | undefined>;
+  lookupCandidates: (
+    word: string,
+    limit?: number
+  ) => Promise<DictionaryEntry[]>;
+  getPanelState: () => Promise<DictionaryPanelState>;
+  recordLookup: (input: {
+    query: string;
+    entry?: DictionaryEntry | null;
+  }) => Promise<DictionaryPanelState>;
+  toggleFavorite: (input: {
+    word: string;
+    entry?: DictionaryEntry | null;
+  }) => Promise<DictionaryPanelState>;
+  removeHistoryItem: (word: string) => Promise<DictionaryPanelState>;
+  clearHistory: () => Promise<DictionaryPanelState>;
+  removeFavorite: (word: string) => Promise<DictionaryPanelState>;
+  updateFavoriteNote: (
+    word: string,
+    note: string
+  ) => Promise<DictionaryPanelState>;
 };
 
 type SelectionTranslateProvider = {
@@ -1591,6 +1611,87 @@ export function registerIpcHandlers(
     async (_, wordInput: unknown) => {
       const word = typeof wordInput === "string" ? wordInput : "";
       return options.dictionaryProvider.lookup(word);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.lookupDictionaryCandidates,
+    async (_, wordInput: unknown, limitInput: unknown) => {
+      const word = typeof wordInput === "string" ? wordInput : "";
+      const limit =
+        typeof limitInput === "number" && Number.isFinite(limitInput)
+          ? limitInput
+          : 8;
+      return options.dictionaryProvider.lookupCandidates(word, limit);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getDictionaryPanelState, () => {
+    return options.dictionaryProvider.getPanelState();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.recordDictionaryLookup,
+    async (_, input: unknown) => {
+      const record =
+        input && typeof input === "object"
+          ? (input as { query?: unknown; entry?: unknown })
+          : {};
+      const query = typeof record.query === "string" ? record.query : "";
+      const entry =
+        record.entry && typeof record.entry === "object"
+          ? (record.entry as DictionaryEntry)
+          : null;
+      return options.dictionaryProvider.recordLookup({ query, entry });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.toggleDictionaryFavorite,
+    async (_, input: unknown) => {
+      const record =
+        input && typeof input === "object"
+          ? (input as { word?: unknown; entry?: unknown })
+          : {};
+      const word = typeof record.word === "string" ? record.word : "";
+      const entry =
+        record.entry && typeof record.entry === "object"
+          ? (record.entry as DictionaryEntry)
+          : null;
+      return options.dictionaryProvider.toggleFavorite({ word, entry });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.removeDictionaryHistoryItem,
+    async (_, wordInput: unknown) => {
+      const word = typeof wordInput === "string" ? wordInput : "";
+      return options.dictionaryProvider.removeHistoryItem(word);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.clearDictionaryHistory, () => {
+    return options.dictionaryProvider.clearHistory();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.removeDictionaryFavorite,
+    async (_, wordInput: unknown) => {
+      const word = typeof wordInput === "string" ? wordInput : "";
+      return options.dictionaryProvider.removeFavorite(word);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.updateDictionaryFavoriteNote,
+    async (_, input: unknown) => {
+      const record =
+        input && typeof input === "object"
+          ? (input as { word?: unknown; note?: unknown })
+          : {};
+      const word = typeof record.word === "string" ? record.word : "";
+      const note = typeof record.note === "string" ? record.note : "";
+      return options.dictionaryProvider.updateFavoriteNote(word, note);
     }
   );
 

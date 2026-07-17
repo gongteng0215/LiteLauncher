@@ -5,6 +5,8 @@ export interface SelectionTranslateSettings {
   hotkey: string;
   /** Restore the previous clipboard text after capturing the selection. */
   restoreClipboard: boolean;
+  /** Close the popup when clicking outside it or when it loses focus. */
+  dismissOnOutsideClick: boolean;
 }
 
 export type SelectionPopupMode = "dictionary" | "translate" | "empty" | "error";
@@ -13,6 +15,8 @@ export interface SelectionPopupDictionaryPayload {
   mode: "dictionary";
   sourceText: string;
   entry: import("./dictionary").DictionaryEntry;
+  /** Additional reverse-lookup candidates for Chinese queries. */
+  candidates?: import("./dictionary").DictionaryEntry[];
 }
 
 export interface SelectionPopupTranslatePayload {
@@ -41,6 +45,11 @@ export function createDefaultSelectionTranslateSettings(): SelectionTranslateSet
   return {
     enabled: true,
     hotkey: "F2",
-    restoreClipboard: true
+    restoreClipboard: true,
+    dismissOnOutsideClick: true
   };
 }
+
+export type SelectionPopupShowOptions = {
+  dismissOnOutsideClick?: boolean;
+};

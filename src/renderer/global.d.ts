@@ -374,6 +374,34 @@ declare global {
       lookupDictionaryWord(
         word: string
       ): Promise<import("../shared/dictionary").DictionaryEntry | undefined>;
+      lookupDictionaryCandidates(
+        word: string,
+        limit?: number
+      ): Promise<import("../shared/dictionary").DictionaryEntry[]>;
+      getDictionaryPanelState(): Promise<
+        import("../shared/dictionary").DictionaryPanelState
+      >;
+      recordDictionaryLookup(input: {
+        query: string;
+        entry?: import("../shared/dictionary").DictionaryEntry | null;
+      }): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      toggleDictionaryFavorite(input: {
+        word: string;
+        entry?: import("../shared/dictionary").DictionaryEntry | null;
+      }): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      removeDictionaryHistoryItem(
+        word: string
+      ): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      clearDictionaryHistory(): Promise<
+        import("../shared/dictionary").DictionaryPanelState
+      >;
+      removeDictionaryFavorite(
+        word: string
+      ): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      updateDictionaryFavoriteNote(input: {
+        word: string;
+        note: string;
+      }): Promise<import("../shared/dictionary").DictionaryPanelState>;
       getSelectionTranslateSettings(): Promise<
         import("../shared/selection-translate").SelectionTranslateSettings
       >;

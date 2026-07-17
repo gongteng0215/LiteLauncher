@@ -101,6 +101,42 @@ body {
   color: rgba(233, 242, 255, 0.82);
 }
 
+.selection-popup__candidates {
+  display: grid;
+  gap: 6px;
+}
+
+.selection-popup__candidate {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(15, 35, 52, 0.35);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.selection-popup__candidate:hover {
+  border-color: rgba(125, 211, 252, 0.4);
+  background: rgba(15, 35, 52, 0.55);
+}
+
+.selection-popup__candidate-word {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.selection-popup__candidate-preview {
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .selection-popup__btn,
 .selection-popup__icon-btn {
   border: 1px solid rgba(255, 255, 255, 0.2);

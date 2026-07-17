@@ -2,23 +2,33 @@ import path from "node:path";
 import { BrowserWindow, clipboard, ipcMain, screen } from "electron";
 
 import { IPC_CHANNELS } from "../../shared/channels";
-import type { SelectionPopupPayload } from "../../shared/selection-translate";
+import type { SelectionPopupPayload, SelectionPopupShowOptions } from "../../shared/selection-translate";
 
 const POPUP_WIDTH = 360;
 const POPUP_HEIGHT = 280;
+const POPUP_HEIGHT_WITH_CANDIDATES = 360;
 const CURSOR_OFFSET = 16;
 
 let popupWindow: BrowserWindow | null = null;
 let dismissBackdropWindow: BrowserWindow | null = null;
 let handlersRegistered = false;
 let latestPayload: SelectionPopupPayload | null = null;
+let dismissOnOutsideClickEnabled = true;
 
 function resolvePopupPreloadPath(): string {
   return path.join(__dirname, "../../preload/selection-popup.js");
 }
 
+function resolveBackdropPreloadPath(): string {
+  return path.join(__dirname, "../../preload/selection-backdrop.js");
+}
+
 function resolvePopupHtmlPath(): string {
   return path.join(__dirname, "../../renderer/selection-popup.html");
+}
+
+function resolveBackdropHtmlPath(): string {
+  return path.join(__dirname, "../../renderer/selection-backdrop.html");
 }
 
 function getVirtualDesktopBounds(): { x: number; y: number; width: number; height: number } {
@@ -43,7 +53,21 @@ function getVirtualDesktopBounds(): { x: number; y: number; width: number; heigh
   };
 }
 
-function clampPopupBounds(point: { x: number; y: number }): {
+function resolvePopupSize(payload: SelectionPopupPayload): { width: number; height: number } {
+  const hasCandidates =
+    payload.mode === "dictionary" &&
+    Array.isArray(payload.candidates) &&
+    payload.candidates.length > 1;
+  return {
+    width: POPUP_WIDTH,
+    height: hasCandidates ? POPUP_HEIGHT_WITH_CANDIDATES : POPUP_HEIGHT
+  };
+}
+
+function clampPopupBounds(
+  point: { x: number; y: number },
+  size: { width: number; height: number }
+): {
   x: number;
   y: number;
   width: number;
@@ -51,8 +75,8 @@ function clampPopupBounds(point: { x: number; y: number }): {
 } {
   const display = screen.getDisplayNearestPoint(point);
   const { workArea } = display;
-  const width = Math.min(POPUP_WIDTH, workArea.width);
-  const height = Math.min(POPUP_HEIGHT, workArea.height);
+  const width = Math.min(size.width, workArea.width);
+  const height = Math.min(size.height, workArea.height);
   const x = Math.min(
     Math.max(point.x + CURSOR_OFFSET, workArea.x),
     workArea.x + workArea.width - width
@@ -96,7 +120,7 @@ function createDismissBackdropWindow(): BrowserWindow {
     backgroundColor: "#00000000",
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: false,
+    focusable: true,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -104,20 +128,16 @@ function createDismissBackdropWindow(): BrowserWindow {
     show: false,
     hasShadow: false,
     webPreferences: {
+      preload: resolveBackdropPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: false
     }
   });
 
   window.setAlwaysOnTop(true, "floating");
-  void window.loadURL("about:blank");
-  window.webContents.on("before-input-event", (_event, input) => {
-    if (input.type !== "mouseDown") {
-      return;
-    }
-    closeSelectionPopup();
-  });
+  window.setIgnoreMouseEvents(false);
+  void window.loadFile(resolveBackdropHtmlPath());
   window.on("closed", () => {
     if (dismissBackdropWindow === window) {
       dismissBackdropWindow = null;
@@ -188,6 +208,9 @@ function createPopupWindow(bounds: {
 
   window.setAlwaysOnTop(true, "screen-saver");
   window.on("blur", () => {
+    if (!dismissOnOutsideClickEnabled) {
+      return;
+    }
     setTimeout(() => {
       if (!popupWindow || popupWindow.isDestroyed() || popupWindow !== window) {
         return;
@@ -219,15 +242,21 @@ export function closeSelectionPopup(): void {
 }
 
 export async function showSelectionPopup(
-  payload: SelectionPopupPayload
+  payload: SelectionPopupPayload,
+  options: SelectionPopupShowOptions = {}
 ): Promise<void> {
   ensureHandlers();
   latestPayload = payload;
+  dismissOnOutsideClickEnabled = options.dismissOnOutsideClick !== false;
 
   const point = screen.getCursorScreenPoint();
-  const bounds = clampPopupBounds(point);
+  const bounds = clampPopupBounds(point, resolvePopupSize(payload));
 
-  await ensureDismissBackdropVisible();
+  if (dismissOnOutsideClickEnabled) {
+    await ensureDismissBackdropVisible();
+  } else {
+    closeDismissBackdrop();
+  }
 
   if (!popupWindow || popupWindow.isDestroyed()) {
     popupWindow = createPopupWindow(bounds);

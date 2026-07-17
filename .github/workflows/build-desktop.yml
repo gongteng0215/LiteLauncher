@@ -47,6 +47,10 @@ jobs:
           node scripts/clean-release.cjs
           pnpm exec tsc
           node scripts/copy-assets.cjs
+          # copy-assets patches dist/assets/ecdict.db with FTS; assert it exists for Chinese reverse lookup.
+          if (-not (Test-Path "dist/assets/ecdict.db")) {
+            throw "dist/assets/ecdict.db is missing after copy-assets"
+          }
           if (-not (Test-Path "dist/native/litesnap-capture.node")) {
             throw "dist/native/litesnap-capture.node is missing after build"
           }

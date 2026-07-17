@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'"
+    />
+    <title>selection-backdrop</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      (() => {
+        const api = window.selectionBackdrop;
+        const dismiss = () => {
+          if (api && typeof api.close === "function") {
+            void api.close();
+          }
+        };
+        window.addEventListener("mousedown", dismiss, true);
+        window.addEventListener("pointerdown", dismiss, true);
+      })();
+    </script>
+  </body>
+</html>

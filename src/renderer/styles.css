@@ -610,12 +610,36 @@ body {
   color: rgba(233, 242, 255, 0.68);
 }
 
+.settings-plugin-picker-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-plugin-picker-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-plugin-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-plugin-group-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(186, 230, 253, 0.9);
+}
+
 .settings-plugin-grid {
   width: 100%;
   min-width: 0;
 }
 
 .settings-plugin-tile {
+  position: relative;
   cursor: pointer;
   opacity: 0.42;
   border: 1px solid transparent;
@@ -632,9 +656,29 @@ body {
   border-color: rgba(255, 255, 255, 0.16);
 }
 
+.settings-plugin-tile.is-pinned {
+  border-color: rgba(250, 204, 21, 0.55);
+}
+
 .settings-plugin-tile.is-required {
   cursor: default;
   opacity: 1;
+}
+
+.settings-plugin-pin-btn {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: rgba(250, 204, 21, 0.95);
+  background: rgba(15, 23, 42, 0.55);
+  cursor: pointer;
 }
 
 .settings-plugin-required-badge {
@@ -647,6 +691,18 @@ body {
   line-height: 1.5;
   color: rgba(233, 242, 255, 0.92);
   background: rgba(59, 130, 246, 0.42);
+}
+
+.settings-plugin-new-badge {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 1.5;
+  color: rgba(254, 249, 195, 0.98);
+  background: rgba(202, 138, 4, 0.55);
 }
 
 .settings-row {
@@ -840,6 +896,146 @@ body {
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.dictionary-side-section {
+  display: grid;
+  gap: 8px;
+}
+
+.dictionary-side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dictionary-side-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dictionary-side-meta {
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.55);
+}
+
+.dictionary-side-action {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: rgba(186, 230, 253, 0.88);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.dictionary-side-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.dictionary-history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dictionary-history-filter {
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(15, 35, 52, 0.25);
+  color: rgba(233, 242, 255, 0.72);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dictionary-history-filter.is-active,
+.dictionary-history-filter:hover {
+  border-color: rgba(125, 211, 252, 0.4);
+  color: #e0f2fe;
+  background: rgba(15, 35, 52, 0.55);
+}
+
+.dictionary-word-list {
+  display: grid;
+  gap: 6px;
+}
+
+.dictionary-word-empty {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(125, 211, 252, 0.18);
+  color: rgba(233, 242, 255, 0.55);
+  font-size: 12px;
+}
+
+.dictionary-word-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.dictionary-word-row-main {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(15, 35, 52, 0.35);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dictionary-word-row-main:hover {
+  border-color: rgba(125, 211, 252, 0.34);
+  background: rgba(15, 35, 52, 0.55);
+}
+
+.dictionary-word-row-word {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dictionary-word-row-preview {
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(233, 242, 255, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dictionary-word-row-time {
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.45);
+}
+
+.dictionary-word-row-remove {
+  align-self: center;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(15, 35, 52, 0.25);
+  color: rgba(233, 242, 255, 0.72);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dictionary-word-row-remove:hover {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
+.dictionary-favorite-note-field {
+  margin-top: 8px;
+}
+
+.dictionary-favorite-note-actions {
+  margin-top: 8px;
 }
 
 .litesnap-action-row {

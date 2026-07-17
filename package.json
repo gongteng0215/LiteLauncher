@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.47",
+  "version": "1.0.48",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
