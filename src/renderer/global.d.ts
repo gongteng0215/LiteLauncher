@@ -47,6 +47,7 @@ interface RendererPluginConstants {
   WEBTOOLS_DIFF_PLUGIN_ID: string;
   WEBTOOLS_TIMESTAMP_PLUGIN_ID: string;
   WEBTOOLS_TRANSLATE_PLUGIN_ID: string;
+  DICTIONARY_PLUGIN_ID: string;
   WEBTOOLS_REGEX_PLUGIN_ID: string;
   WEBTOOLS_CRON_PLUGIN_ID: string;
   WEBTOOLS_CRYPTO_PLUGIN_ID: string;
@@ -218,6 +219,8 @@ interface RendererPanelImpls {
   renderWebtoolsTimestampPanel(): void;
   applyWebtoolsTranslatePanelPayload(panel: unknown): void;
   renderWebtoolsTranslatePanel(): void;
+  applyDictionaryPanelPayload(panel: unknown): void;
+  renderDictionaryPanel(): void;
   applyWebtoolsRegexPanelPayload(panel: unknown): void;
   renderWebtoolsRegexPanel(): void;
   applyWebtoolsCryptoPanelPayload(panel: unknown): void;

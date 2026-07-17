@@ -1,6 +1,7 @@
 import { BrowserWindow } from "electron";
 
 import { ExecuteResult, LaunchItem } from "../../shared/types";
+import { dictionaryPlugin } from "./dictionary";
 import { cashflowGamePlugin } from "./cashflow-game";
 import { clipboardWorkbenchPlugin } from "./clipboard-workbench";
 import { codeAgentSwitchPlugin } from "./codeagent-switch";
@@ -44,6 +45,7 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsJwtPlugin,
   webtoolsTimestampPlugin,
   webtoolsTranslatePlugin,
+  dictionaryPlugin,
   webtoolsRegexPlugin,
   webtoolsStringsPlugin,
   webtoolsColorsPlugin,
@@ -76,6 +78,7 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-jwt",
   "webtools-timestamp",
   "webtools-translate",
+  "dictionary",
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",

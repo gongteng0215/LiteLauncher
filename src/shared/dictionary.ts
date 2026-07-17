@@ -1,3 +1,5 @@
+export const DICTIONARY_PLUGIN_ID = "dictionary";
+
 export interface DictionaryEntry {
   word: string;
   phonetic: string;

@@ -33,36 +33,55 @@ function pushCandidate(candidates: string[], value: string | null | undefined): 
   }
 }
 
+function isInsideAsarArchive(filePath: string): boolean {
+  const normalized = path.normalize(filePath);
+  return normalized.includes(`${path.sep}app.asar${path.sep}`) && !normalized.includes(
+    `${path.sep}app.asar.unpacked${path.sep}`
+  );
+}
+
 function resolveEcdictDbCandidates(): string[] {
   const candidates: string[] = [];
-  pushCandidate(candidates, path.join(__dirname, "../../assets/ecdict.db"));
-  pushCandidate(candidates, path.join(process.cwd(), "dist/assets/ecdict.db"));
-  pushCandidate(candidates, path.join(process.cwd(), "src/assets/ecdict.db"));
+
+  const resourcesPath = process.resourcesPath;
+  if (typeof resourcesPath === "string" && resourcesPath.length > 0) {
+    // Prefer real on-disk unpacked paths first — native SQLite cannot open asar.
+    pushCandidate(
+      candidates,
+      path.join(resourcesPath, "app.asar.unpacked", "dist", "assets", "ecdict.db")
+    );
+    pushCandidate(
+      candidates,
+      path.join(resourcesPath, "app.asar.unpacked", "assets", "ecdict.db")
+    );
+    pushCandidate(candidates, path.join(resourcesPath, "app", "dist", "assets", "ecdict.db"));
+  }
 
   try {
     const appPath = app.getAppPath();
-    pushCandidate(candidates, path.join(appPath, "dist/assets/ecdict.db"));
-    pushCandidate(candidates, path.join(appPath, "assets/ecdict.db"));
     if (appPath.includes("app.asar")) {
       pushCandidate(
         candidates,
-        path.join(appPath.replace("app.asar", "app.asar.unpacked"), "dist/assets/ecdict.db")
+        path.join(appPath.replace("app.asar", "app.asar.unpacked"), "dist", "assets", "ecdict.db")
       );
+      pushCandidate(
+        candidates,
+        path.join(appPath.replace("app.asar", "app.asar.unpacked"), "assets", "ecdict.db")
+      );
+    } else {
+      pushCandidate(candidates, path.join(appPath, "dist", "assets", "ecdict.db"));
+      pushCandidate(candidates, path.join(appPath, "assets", "ecdict.db"));
     }
   } catch {
     // app may be unavailable in unit tests
   }
 
-  const resourcesPath = process.resourcesPath;
-  if (typeof resourcesPath === "string" && resourcesPath.length > 0) {
-    pushCandidate(
-      candidates,
-      path.join(resourcesPath, "app.asar.unpacked", "dist", "assets", "ecdict.db")
-    );
-    pushCandidate(candidates, path.join(resourcesPath, "app", "dist", "assets", "ecdict.db"));
-  }
+  // Dev / unpackaged layouts.
+  pushCandidate(candidates, path.join(__dirname, "../../assets/ecdict.db"));
+  pushCandidate(candidates, path.join(process.cwd(), "dist/assets/ecdict.db"));
+  pushCandidate(candidates, path.join(process.cwd(), "src/assets/ecdict.db"));
 
-  return candidates;
+  return candidates.filter((candidate) => !isInsideAsarArchive(candidate));
 }
 
 function mapRow(row: DictionaryRow): DictionaryEntry {
@@ -164,6 +183,10 @@ export class DictionaryStore {
     };
   }
 
+  public isReady(): boolean {
+    return this.ensureOpen() !== null;
+  }
+
   public close(): void {
     if (this.db) {
       this.db.close();
@@ -183,25 +206,35 @@ export class DictionaryStore {
     const candidates = this.dbPathOverride
       ? [this.dbPathOverride]
       : resolveEcdictDbCandidates();
-    const existing = candidates.find((candidate) => fs.existsSync(candidate));
-    if (!existing) {
+    const existing = candidates.filter((candidate) => {
+      try {
+        return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+      } catch {
+        return false;
+      }
+    });
+    if (existing.length === 0) {
       if (!this.missingWarned) {
         this.missingWarned = true;
         console.warn(
           "[dictionary] ecdict.db not found; offline lookup disabled.",
-          candidates.slice(0, 3)
+          candidates.slice(0, 5)
         );
       }
       return null;
     }
 
-    try {
-      this.db = new DatabaseSync(existing, { readOnly: true });
-      return this.db;
-    } catch (error) {
-      console.warn("[dictionary] failed to open ecdict.db", existing, error);
-      this.db = null;
-      return null;
+    for (const candidate of existing) {
+      try {
+        this.db = new DatabaseSync(candidate, { readOnly: true });
+        console.info("[dictionary] opened ecdict.db from", candidate);
+        return this.db;
+      } catch (error) {
+        console.warn("[dictionary] failed to open ecdict.db", candidate, error);
+      }
     }
+
+    this.db = null;
+    return null;
   }
 }

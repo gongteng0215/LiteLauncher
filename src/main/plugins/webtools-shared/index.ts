@@ -37,6 +37,7 @@ const ICON_COLOR_BY_PLUGIN_ID: Record<string, string> = {
   "webtools-file-hash": "#1e90ff",
   "webtools-port-helper": "#10b981",
   "webtools-translate": "#2563eb",
+  dictionary: "#0d9488",
   "codeagent-switch": "#0ea5e9"
 };
 
@@ -96,6 +97,8 @@ function getIconSymbolSvg(pluginId: string): string {
       return '<path d="M7 7h10M7 12h10M7 17h4M15 17h2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="18.5" cy="17" r="2.5" fill="none" stroke="#fff" stroke-width="2"/>';
     case "webtools-translate":
       return '<path d="m5 8 4 12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 8h6M9 8v8M9 16h2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M14 8v12M14 12h4M18 16h-3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
+    case "dictionary":
+      return '<path d="M5 4h7a2 2 0 0 1 2 2v14H7a2 2 0 0 0-2 2V4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M9 4h7a2 2 0 0 1 2 2v14h-7a2 2 0 0 1-2-2V4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M9 8h6M9 12h6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
     case "codeagent-switch":
       return '<path d="M7 7h8M15 7l2-2 2 2-2 2-2-2M9 12h8M7 17h8M15 17l2-2 2 2-2 2-2-2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
     default:

@@ -50,6 +50,11 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "translate-run"
   },
   {
+    pluginId: handlerConstants.DICTIONARY_PLUGIN_ID,
+    formSelector: "form.dictionary-form",
+    enterActionKey: "dictionary-lookup"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_REGEX_PLUGIN_ID,
     formSelector: "form.webtools-regex-form",
     enterActionKey: "regex-refresh"

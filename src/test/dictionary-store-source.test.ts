@@ -71,7 +71,9 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
   assert.match(storeSource, /readOnly:\s*true/);
   assert.match(storeSource, /formatDictionaryMultilineText/);
   assert.match(storeSource, /lookupHyphenCompound/);
-  assert.match(storeSource, /ecdict\.db/);
+  assert.match(storeSource, /app\.asar\.unpacked/);
+  assert.match(storeSource, /isInsideAsarArchive/);
+  assert.match(storeSource, /opened ecdict\.db from/);
   assert.match(channelsSource, /lookupDictionaryWord:/);
   assert.match(ipcSource, /DictionaryProvider/);
   assert.match(ipcSource, /IPC_CHANNELS\.lookupDictionaryWord/);

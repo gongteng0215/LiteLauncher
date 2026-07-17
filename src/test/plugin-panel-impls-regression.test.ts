@@ -2157,6 +2157,26 @@ test("lightweight webtools wrappers are removed from renderer handlers", () => {
   }
 });
 
+test("dictionary panel is registered with lookup handler", () => {
+  const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    panelImplsSource,
+    /\[DICTIONARY_PLUGIN_ID\]:\s*\{[\s\S]*renderDictionaryPanel/,
+    "dictionary handler should render through panel impls"
+  );
+  assert.match(
+    panelImplsSource,
+    /maybeAutoRunDictionaryPanelLookup\(\)/,
+    "dictionary panel should auto lookup when opened with a query"
+  );
+  assert.match(
+    panelImplsSource,
+    /renderDictionaryPanel\(\): void/,
+    "dictionary render implementation should stay in plugin-panel-impls"
+  );
+});
+
 test("webtools-translate panel is registered with settings hydration", () => {
   const panelImplsSource = readPanelImplsSource();
 

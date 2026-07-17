@@ -176,6 +176,11 @@ test("startup visible plugin migration includes image prompt as a new default", 
     "current app-level default visible plugin list should include Text Translate"
   );
   assert.match(
+    currentDefaultSource,
+    /"dictionary"/,
+    "current app-level default visible plugin list should include Offline Dictionary"
+  );
+  assert.match(
     mainIndexSource,
     /PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS/,
     "startup migration should recognize the pre-translate default plugin list"

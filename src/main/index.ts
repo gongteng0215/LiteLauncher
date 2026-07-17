@@ -125,6 +125,7 @@ const CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-jwt",
   "webtools-timestamp",
   "webtools-translate",
+  "dictionary",
   "webtools-strings",
   "webtools-colors",
   "webtools-diff",
@@ -203,7 +204,35 @@ const PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "codeagent-switch"
 ] as const;
 const LAST_CURRENT_DEFAULT_VISIBLE_PLUGIN_IDS = [
-  ...PRE_WEBTOOLS_TRANSLATE_DEFAULT_VISIBLE_PLUGIN_IDS
+  "cashflow-game",
+  "hardware-inspector",
+  "clipboard-workbench",
+  "litesnap",
+  "webtools-password",
+  "webtools-cron",
+  "webtools-json",
+  "webtools-crypto",
+  "webtools-jwt",
+  "webtools-timestamp",
+  "webtools-translate",
+  "webtools-strings",
+  "webtools-colors",
+  "webtools-diff",
+  "webtools-http-mock",
+  "webtools-image-base64",
+  "webtools-image-prompt",
+  "webtools-config-convert",
+  "webtools-sql-format",
+  "webtools-unit-convert",
+  "webtools-file-hash",
+  "webtools-port-helper",
+  "webtools-regex",
+  "webtools-url-parse",
+  "webtools-qrcode",
+  "webtools-markdown",
+  "webtools-ua",
+  "webtools-api-client",
+  "codeagent-switch"
 ] as const;
 const PRE_HARDWARE_INSPECTOR_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "cashflow-game",
@@ -2302,9 +2331,15 @@ async function bootstrap(): Promise<void> {
       // Offline miss (or non-English text): fall back to Baidu translate.
       const translated = await translateTextForTool({ text: sourceText });
       if (!translated.ok) {
+        const dictionaryReady = dictionaryStore.isReady();
+        const offlineHint = !dictionaryReady
+          ? "（离线词典未加载，请确认安装包完整）"
+          : isEnglishWordOrPhrase(sourceText)
+            ? "（离线词典未收录该词）"
+            : "";
         await showSelectionPopup({
           mode: "error",
-          message: translated.message || "翻译失败，请检查百度翻译设置。"
+          message: `${translated.message || "翻译失败，请检查百度翻译设置。"}${offlineHint}`
         });
         return true;
       }

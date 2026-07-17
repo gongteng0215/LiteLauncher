@@ -14,6 +14,7 @@ const {
   WEBTOOLS_DIFF_PLUGIN_ID,
   WEBTOOLS_TIMESTAMP_PLUGIN_ID,
   WEBTOOLS_TRANSLATE_PLUGIN_ID,
+  DICTIONARY_PLUGIN_ID,
   WEBTOOLS_REGEX_PLUGIN_ID,
   WEBTOOLS_CRON_PLUGIN_ID,
   WEBTOOLS_CRYPTO_PLUGIN_ID,
@@ -13974,6 +13975,170 @@ let selectionTranslateSettingsState = {
   hotkey: "F2",
   restoreClipboard: true
 };
+type DictionaryPanelEntry = {
+  word: string;
+  phonetic: string;
+  translation: string;
+  definition: string;
+  pos: string;
+  tags: string;
+};
+let dictionaryQueryText = "";
+let dictionaryPanelEntry: DictionaryPanelEntry | null = null;
+let dictionaryPanelStatusMessage = "输入英文单词或词组后查询。";
+
+function populateDictionaryEntryCard(
+  card: HTMLElement,
+  entry: DictionaryPanelEntry
+): void {
+  card.replaceChildren();
+  const wordEl = document.createElement("div");
+  wordEl.className = "translate-dictionary-card__word";
+  wordEl.textContent = entry.word;
+  card.appendChild(wordEl);
+  if (entry.phonetic) {
+    const phoneticEl = document.createElement("div");
+    phoneticEl.className = "translate-dictionary-card__phonetic";
+    phoneticEl.textContent = `/${entry.phonetic}/`;
+    card.appendChild(phoneticEl);
+  }
+  const metaText = [entry.pos, entry.tags].filter(Boolean).join(" · ");
+  if (metaText) {
+    const metaEl = document.createElement("div");
+    metaEl.className = "translate-dictionary-card__meta";
+    metaEl.textContent = metaText;
+    card.appendChild(metaEl);
+  }
+  if (entry.translation) {
+    const translationEl = document.createElement("div");
+    translationEl.className = "translate-dictionary-card__text";
+    translationEl.textContent = entry.translation;
+    card.appendChild(translationEl);
+  }
+  if (entry.definition) {
+    const definitionEl = document.createElement("div");
+    definitionEl.className = "translate-dictionary-card__text";
+    definitionEl.style.marginTop = entry.translation ? "8px" : "";
+    definitionEl.textContent = entry.definition;
+    card.appendChild(definitionEl);
+  }
+}
+
+function normalizeDictionaryPanelData(value: unknown): {
+  query: string;
+  statusMessage: string;
+} {
+  const record = toRecord(value);
+  return {
+    query: typeof record?.query === "string" ? record.query : "",
+    statusMessage:
+      typeof record?.statusMessage === "string"
+        ? record.statusMessage
+        : dictionaryPanelStatusMessage
+  };
+}
+
+async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("词典接口不可用，请重启应用后重试。");
+    return;
+  }
+  const input = form.querySelector<HTMLInputElement>("#dictionary-query");
+  const lookupButton = form.querySelector<HTMLButtonElement>(
+    'button[data-action="dictionary-lookup"]'
+  );
+  const cardHost = form.querySelector<HTMLElement>("#dictionary-result-card");
+  const text = input?.value.replace(/\r\n/g, "\n").trim() ?? "";
+  dictionaryQueryText = text;
+
+  if (!text) {
+    dictionaryPanelEntry = null;
+    if (cardHost) {
+      cardHost.hidden = true;
+      cardHost.replaceChildren();
+    }
+    setStatus("请输入英文单词或词组。");
+    return;
+  }
+
+  if (!/^[A-Za-z][A-Za-z' \-]*$/.test(text) || text.length > 64) {
+    dictionaryPanelEntry = null;
+    if (cardHost) {
+      cardHost.hidden = true;
+      cardHost.replaceChildren();
+    }
+    setStatus("仅支持英文单词或词组（字母、空格、连字符）。");
+    return;
+  }
+
+  if (!launcher.lookupDictionaryWord) {
+    setStatus("词典接口不可用，请重启应用后重试。");
+    return;
+  }
+
+  const previousLabel = lookupButton?.textContent ?? "查询";
+  if (lookupButton) {
+    lookupButton.disabled = true;
+    lookupButton.textContent = "查询中…";
+  }
+  setStatus(`正在查询「${text}」…`);
+
+  try {
+    const entry = await launcher.lookupDictionaryWord(text);
+    if (!entry) {
+      dictionaryPanelEntry = null;
+      if (cardHost) {
+        cardHost.hidden = true;
+        cardHost.replaceChildren();
+      }
+      setStatus(`离线词典未收录「${text}」，请检查拼写或尝试词组变体。`);
+      return;
+    }
+
+    dictionaryPanelEntry = {
+      word: entry.word,
+      phonetic: entry.phonetic,
+      translation: entry.translation,
+      definition: entry.definition,
+      pos: entry.pos,
+      tags: entry.tags
+    };
+    if (cardHost) {
+      cardHost.hidden = false;
+      populateDictionaryEntryCard(cardHost, dictionaryPanelEntry);
+    }
+    setStatus(`已找到「${entry.word}」。`);
+  } catch (error) {
+    console.warn("[dictionary] lookup failed", error);
+    dictionaryPanelEntry = null;
+    if (cardHost) {
+      cardHost.hidden = true;
+      cardHost.replaceChildren();
+    }
+    setStatus("查询失败，请稍后重试。");
+  } finally {
+    if (lookupButton) {
+      lookupButton.disabled = false;
+      lookupButton.textContent = previousLabel;
+    }
+  }
+}
+
+async function maybeAutoRunDictionaryPanelLookup(): Promise<void> {
+  if (!dictionaryQueryText.trim()) {
+    return;
+  }
+  const form = document.querySelector<HTMLFormElement>("form.dictionary-form");
+  if (!form) {
+    return;
+  }
+  const input = form.querySelector<HTMLInputElement>("#dictionary-query");
+  if (input && !input.value.trim()) {
+    input.value = dictionaryQueryText;
+  }
+  await runDictionaryPanelLookup(form);
+}
 
 function normalizeTranslateToolPanelData(value: unknown): TranslateToolPanelData {
   const record = toRecord(value);
@@ -14573,6 +14738,18 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
       form.requestSubmit();
     })
   },
+  [DICTIONARY_PLUGIN_ID]: {
+    render: () => {
+      getRegisteredPanelImpls().renderDictionaryPanel();
+    },
+    onOpen: (panel) => {
+      getRegisteredPanelImpls().applyDictionaryPanelPayload(panel);
+      void maybeAutoRunDictionaryPanelLookup();
+    },
+    onEnter: runWithPluginForm("form.dictionary-form", (form) => {
+      form.requestSubmit();
+    })
+  },
   [WEBTOOLS_REGEX_PLUGIN_ID]: createSubmitPluginPanelHandler(
     () => {
       getRegisteredPanelImpls().renderWebtoolsRegexPanel();
@@ -14903,6 +15080,10 @@ window.__LL_PANEL_IMPLS__ = {
       translateToolPanelView = "main";
       translateToolSourceText = "";
       translateToolResultText = "";
+    }
+    if (activePluginId !== DICTIONARY_PLUGIN_ID) {
+      dictionaryQueryText = "";
+      dictionaryPanelEntry = null;
     }
     if (activePluginId !== WEBTOOLS_JSON_PLUGIN_ID && webtoolsJsonAutoTimer !== null) {
       window.clearTimeout(webtoolsJsonAutoTimer);
@@ -23731,6 +23912,118 @@ window.__LL_PANEL_IMPLS__ = {
     list.appendChild(panelItem);
 
     refreshWebtoolsHttpMockPanelInForm(form);
+  },
+
+  applyDictionaryPanelPayload(panel: ActivePluginPanelState): void {
+    const data = normalizeDictionaryPanelData(panel.data);
+    dictionaryQueryText = data.query;
+    dictionaryPanelStatusMessage = data.statusMessage;
+    dictionaryPanelEntry = null;
+  },
+
+  renderDictionaryPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel dictionary-panel";
+
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "离线词典";
+
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent =
+      activePluginPanel?.subtitle ||
+      "ECDICT 英汉词典，支持单词与词组离线查询。";
+
+    const form = document.createElement("form");
+    form.className = "settings-form dictionary-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void runDictionaryPanelLookup(form);
+    });
+
+    const statusRow = createLiteSnapInfoRow(
+      "使用提示",
+      dictionaryPanelStatusMessage,
+      "约 76 万词条，无需联网；连字符词组会自动尝试多种写法"
+    );
+
+    const queryField = document.createElement("div");
+    queryField.className = "settings-field";
+
+    const queryLabel = document.createElement("label");
+    queryLabel.className = "settings-field-label";
+    queryLabel.textContent = "英文单词或词组";
+    queryLabel.htmlFor = "dictionary-query";
+
+    const queryInput = document.createElement("input");
+    queryInput.id = "dictionary-query";
+    queryInput.name = "dictionaryQuery";
+    queryInput.type = "text";
+    queryInput.className = "settings-value";
+    queryInput.spellcheck = false;
+    queryInput.autocomplete = "off";
+    queryInput.placeholder = "例如：apple、user agent、context-path";
+    queryInput.value = dictionaryQueryText;
+    queryInput.addEventListener("input", () => {
+      dictionaryQueryText = queryInput.value;
+    });
+    queryField.append(queryLabel, queryInput);
+
+    const dictionaryCard = document.createElement("div");
+    dictionaryCard.id = "dictionary-result-card";
+    dictionaryCard.className = "translate-dictionary-card";
+    dictionaryCard.hidden = !dictionaryPanelEntry;
+    if (dictionaryPanelEntry) {
+      populateDictionaryEntryCard(dictionaryCard, dictionaryPanelEntry);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+
+    const lookupButton = document.createElement("button");
+    lookupButton.type = "submit";
+    lookupButton.className = "settings-btn settings-btn-primary";
+    lookupButton.textContent = "查询";
+    lookupButton.setAttribute("data-action", "dictionary-lookup");
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary";
+    copyButton.textContent = "复制释义";
+    copyButton.addEventListener("click", () => {
+      if (!dictionaryPanelEntry) {
+        setStatus("没有可复制的释义。");
+        return;
+      }
+      const parts = [
+        dictionaryPanelEntry.word,
+        dictionaryPanelEntry.phonetic ? `/${dictionaryPanelEntry.phonetic}/` : "",
+        dictionaryPanelEntry.translation,
+        dictionaryPanelEntry.definition
+      ].filter(Boolean);
+      void navigator.clipboard
+        .writeText(parts.join("\n"))
+        .then(() => setStatus("已复制释义到剪贴板。"))
+        .catch(() => setStatus("复制失败，请手动选择文字复制。"));
+    });
+
+    const backToSearchButton = document.createElement("button");
+    backToSearchButton.type = "button";
+    backToSearchButton.className = "settings-btn settings-btn-secondary";
+    backToSearchButton.textContent = "返回搜索";
+    backToSearchButton.addEventListener("click", () => {
+      backToSearch();
+    });
+
+    actions.append(lookupButton, copyButton, backToSearchButton);
+    form.append(statusRow, queryField, dictionaryCard, actions);
+    panel.append(title, description, form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
   },
 
   applyWebtoolsTranslatePanelPayload(panel: ActivePluginPanelState): void {
