@@ -14,8 +14,17 @@ export function isSingleEnglishWord(text: string): boolean {
   return /^[A-Za-z][A-Za-z'\-]*$/.test(text.trim());
 }
 
+/** English word or short phrase (letters, spaces, hyphens, apostrophes). */
+export function isEnglishWordOrPhrase(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 64) {
+    return false;
+  }
+  return /^[A-Za-z][A-Za-z' \-]*$/.test(trimmed);
+}
+
 export function normalizeDictionaryLookupWord(text: string): string {
-  return text.trim().toLowerCase();
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 /** ECDICT CSV stores line breaks as literal "\\n" sequences. */
@@ -40,6 +49,11 @@ export function stemDictionaryLookupCandidates(word: string): string[] {
       candidates.push(value);
     }
   };
+
+  // Phrases are matched verbatim; stemming only applies to single tokens.
+  if (normalized.includes(" ")) {
+    return candidates;
+  }
 
   if (normalized.endsWith("ies") && normalized.length > 4) {
     push(`${normalized.slice(0, -3)}y`);

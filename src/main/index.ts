@@ -48,7 +48,7 @@ import { DictionaryStore } from "./dictionary/store";
 import { captureSelectedText } from "./selection-translate/capture";
 import { showSelectionPopup } from "./selection-translate/popup-window";
 import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
-import { isSingleEnglishWord } from "../shared/dictionary";
+import { isEnglishWordOrPhrase, isSingleEnglishWord } from "../shared/dictionary";
 import {
   type SelectionTranslateSettings
 } from "../shared/selection-translate";
@@ -2287,13 +2287,22 @@ async function bootstrap(): Promise<void> {
       }
 
       const sourceText = captured.text.replace(/\r\n/g, "\n").trim();
-      if (isSingleEnglishWord(sourceText)) {
+      if (isEnglishWordOrPhrase(sourceText)) {
         const entry = dictionaryStore.lookup(sourceText);
         if (entry) {
           await showSelectionPopup({
             mode: "dictionary",
             sourceText,
             entry
+          });
+          return true;
+        }
+        // A single word that is not in the offline dictionary should not spend a
+        // Baidu request; longer phrases fall through to online translation.
+        if (isSingleEnglishWord(sourceText)) {
+          await showSelectionPopup({
+            mode: "empty",
+            message: "离线词典未收录该单词，不会请求百度翻译。"
           });
           return true;
         }

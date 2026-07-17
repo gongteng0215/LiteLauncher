@@ -14091,7 +14091,8 @@ async function runTranslateToolPanelTranslate(form: HTMLFormElement): Promise<vo
   try {
     const formData = new FormData(form);
     if (
-      /^[A-Za-z][A-Za-z'\-]*$/.test(text) &&
+      text.length <= 64 &&
+      /^[A-Za-z][A-Za-z' \-]*$/.test(text) &&
       launcher.lookupDictionaryWord
     ) {
       const entry = await launcher.lookupDictionaryWord(text);

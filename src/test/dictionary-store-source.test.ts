@@ -3,7 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { formatDictionaryMultilineText } from "../shared/dictionary";
+import {
+  formatDictionaryMultilineText,
+  isEnglishWordOrPhrase,
+  normalizeDictionaryLookupWord,
+  stemDictionaryLookupCandidates
+} from "../shared/dictionary";
 
 function readSource(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -18,6 +23,25 @@ test("formatDictionaryMultilineText converts ECDICT escaped newlines", () => {
     formatDictionaryMultilineText("n. one\\nn. two"),
     "n. one\nn. two"
   );
+});
+
+test("isEnglishWordOrPhrase accepts words and phrases, rejects other text", () => {
+  assert.equal(isEnglishWordOrPhrase("cup"), true);
+  assert.equal(isEnglishWordOrPhrase("give up"), true);
+  assert.equal(isEnglishWordOrPhrase("look forward to"), true);
+  assert.equal(isEnglishWordOrPhrase("你好"), false);
+  assert.equal(isEnglishWordOrPhrase("hello!"), false);
+  assert.equal(isEnglishWordOrPhrase("a ".repeat(40)), false);
+});
+
+test("normalizeDictionaryLookupWord collapses whitespace and lowercases", () => {
+  assert.equal(normalizeDictionaryLookupWord("  Give   Up "), "give up");
+  assert.equal(normalizeDictionaryLookupWord("New York"), "new york");
+});
+
+test("stemDictionaryLookupCandidates skips stemming for phrases", () => {
+  assert.deepEqual(stemDictionaryLookupCandidates("give up"), ["give up"]);
+  assert.ok(stemDictionaryLookupCandidates("stories").includes("story"));
 });
 
 test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {

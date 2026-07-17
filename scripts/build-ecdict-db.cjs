@@ -6,8 +6,9 @@
  *   node scripts/build-ecdict-db.cjs --csv path/to/ecdict.csv
  *
  * Place the full ECDICT CSV at scripts/vendor/ecdict.csv, then run this script.
- * Rows are filtered to a "mini common words" subset (exam tags, Collins/Oxford,
- * or top-frequency words) — not the official ecdict.mini.csv preview (~54 words).
+ * All single words and phrases that have a Chinese translation are imported
+ * (~760k rows). English definitions are kept only for common words (exam tags,
+ * Collins/Oxford, or high frequency) to keep the DB near ~86MB.
  * Without CSV, a compact seed covering common CET/日常词 is used so the feature
  * works offline out of the box.
  */
@@ -204,7 +205,11 @@ function parseCsvLine(line) {
   return cells;
 }
 
-function shouldKeepCsvRow(tag, collins, oxford, frq) {
+const SINGLE_WORD_RE = /^[a-z][a-z'-]*$/;
+const PHRASE_RE = /^[a-z][a-z' -]*$/;
+
+/** Keep English definition only for common words to control DB size. */
+function isCommonEnoughForDefinition(tag, collins, oxford, frq) {
   const tagText = String(tag || "").toLowerCase();
   if (/(zk|gk|cet4|cet6|ky|toefl|ielts|gre|oxford)/.test(tagText)) {
     return true;
@@ -212,7 +217,7 @@ function shouldKeepCsvRow(tag, collins, oxford, frq) {
   if (Number(collins) > 0 || Number(oxford) > 0) {
     return true;
   }
-  return Number(frq) > 0 && Number(frq) <= 15000;
+  return Number(frq) > 0 && Number(frq) <= 30000;
 }
 
 function loadRowsFromCsv(csvPath) {
@@ -243,27 +248,31 @@ function loadRowsFromCsv(csvPath) {
     ] = cells;
     const normalized = String(word || "")
       .trim()
-      .toLowerCase();
-    if (!/^[a-z][a-z'\-]*$/.test(normalized)) {
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const isSingle = SINGLE_WORD_RE.test(normalized);
+    const isPhrase = !isSingle && normalized.includes(" ") && PHRASE_RE.test(normalized);
+    if (!isSingle && !isPhrase) {
       continue;
     }
-    if (!shouldKeepCsvRow(tag, collins, oxford, frq)) {
+    const translationText = String(translation || "").trim();
+    if (!translationText) {
       continue;
     }
+    const definitionText = isCommonEnoughForDefinition(tag, collins, oxford, frq)
+      ? String(definition || "").trim()
+      : "";
     rows.push([
       normalized,
       String(phonetic || "").trim(),
-      String(definition || "").trim(),
-      String(translation || "").trim(),
+      definitionText,
+      translationText,
       String(pos || "").trim(),
       Number(collins) || 0,
       Number(oxford) || 0,
       String(tag || "").trim(),
       String(exchange || "").trim()
     ]);
-    if (rows.length >= 80000) {
-      break;
-    }
   }
   return rows;
 }
