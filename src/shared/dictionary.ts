@@ -14,6 +14,11 @@ export function isSingleEnglishWord(text: string): boolean {
   return /^[A-Za-z][A-Za-z'\-]*$/.test(text.trim());
 }
 
+/** Plain token without spaces/hyphens — safe to skip Baidu when offline miss. */
+export function isAtomicEnglishWord(text: string): boolean {
+  return /^[A-Za-z][A-Za-z']*$/.test(text.trim());
+}
+
 /** English word or short phrase (letters, spaces, hyphens, apostrophes). */
 export function isEnglishWordOrPhrase(text: string): boolean {
   const trimmed = text.trim();
@@ -37,41 +42,68 @@ export function formatDictionaryMultilineText(text: string): string {
     .trim();
 }
 
+function pushUnique(candidates: string[], value: string): void {
+  if (value && !candidates.includes(value)) {
+    candidates.push(value);
+  }
+}
+
+function pushStemVariants(candidates: string[], token: string): void {
+  if (!token || token.includes(" ") || token.includes("-")) {
+    return;
+  }
+  if (token.endsWith("ies") && token.length > 4) {
+    pushUnique(candidates, `${token.slice(0, -3)}y`);
+  }
+  if (token.endsWith("es") && token.length > 3) {
+    pushUnique(candidates, token.slice(0, -2));
+  }
+  if (token.endsWith("s") && token.length > 2) {
+    pushUnique(candidates, token.slice(0, -1));
+  }
+  if (token.endsWith("ing") && token.length > 4) {
+    pushUnique(candidates, token.slice(0, -3));
+    pushUnique(candidates, `${token.slice(0, -3)}e`);
+  }
+  if (token.endsWith("ed") && token.length > 3) {
+    pushUnique(candidates, token.slice(0, -2));
+    pushUnique(candidates, token.slice(0, -1));
+  }
+}
+
+/**
+ * Lookup keys for ECDICT: exact form, hyphen↔space/concat variants, then stems.
+ * Example: "user-agent" → ["user-agent", "user agent", "useragent"]
+ */
 export function stemDictionaryLookupCandidates(word: string): string[] {
   const normalized = normalizeDictionaryLookupWord(word);
   if (!normalized) {
     return [];
   }
 
-  const candidates = [normalized];
-  const push = (value: string): void => {
-    if (value && value !== normalized && !candidates.includes(value)) {
-      candidates.push(value);
+  const roots = [normalized];
+  if (normalized.includes("-") && !normalized.includes(" ")) {
+    pushUnique(roots, normalized.replace(/-/g, " "));
+    pushUnique(roots, normalized.replace(/-/g, ""));
+  }
+
+  const candidates: string[] = [];
+  for (const root of roots) {
+    pushUnique(candidates, root);
+    // Phrases / hyphenated forms are matched as-is; stem only plain tokens.
+    if (!root.includes(" ") && !root.includes("-")) {
+      pushStemVariants(candidates, root);
     }
-  };
-
-  // Phrases are matched verbatim; stemming only applies to single tokens.
-  if (normalized.includes(" ")) {
-    return candidates;
-  }
-
-  if (normalized.endsWith("ies") && normalized.length > 4) {
-    push(`${normalized.slice(0, -3)}y`);
-  }
-  if (normalized.endsWith("es") && normalized.length > 3) {
-    push(normalized.slice(0, -2));
-  }
-  if (normalized.endsWith("s") && normalized.length > 2) {
-    push(normalized.slice(0, -1));
-  }
-  if (normalized.endsWith("ing") && normalized.length > 4) {
-    push(normalized.slice(0, -3));
-    push(`${normalized.slice(0, -3)}e`);
-  }
-  if (normalized.endsWith("ed") && normalized.length > 3) {
-    push(normalized.slice(0, -2));
-    push(`${normalized.slice(0, -1)}`);
   }
 
   return candidates;
+}
+
+/** Split a hyphen compound into dictionary token parts. */
+export function splitHyphenCompoundParts(word: string): string[] {
+  const normalized = normalizeDictionaryLookupWord(word);
+  if (!normalized.includes("-") || normalized.includes(" ")) {
+    return [];
+  }
+  return normalized.split("-").filter((part) => /^[a-z][a-z']*$/.test(part));
 }

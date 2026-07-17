@@ -48,7 +48,7 @@ import { DictionaryStore } from "./dictionary/store";
 import { captureSelectedText } from "./selection-translate/capture";
 import { showSelectionPopup } from "./selection-translate/popup-window";
 import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
-import { isEnglishWordOrPhrase, isSingleEnglishWord } from "../shared/dictionary";
+import { isEnglishWordOrPhrase } from "../shared/dictionary";
 import {
   type SelectionTranslateSettings
 } from "../shared/selection-translate";
@@ -2297,17 +2297,9 @@ async function bootstrap(): Promise<void> {
           });
           return true;
         }
-        // A single word that is not in the offline dictionary should not spend a
-        // Baidu request; longer phrases fall through to online translation.
-        if (isSingleEnglishWord(sourceText)) {
-          await showSelectionPopup({
-            mode: "empty",
-            message: "离线词典未收录该单词，不会请求百度翻译。"
-          });
-          return true;
-        }
       }
 
+      // Offline miss (or non-English text): fall back to Baidu translate.
       const translated = await translateTextForTool({ text: sourceText });
       if (!translated.ok) {
         await showSelectionPopup({

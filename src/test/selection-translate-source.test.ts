@@ -19,11 +19,10 @@ test("selection-translate global shortcut and word/sentence routing exist", () =
   assert.match(mainSource, /registerSelectionTranslateShortcut/);
   assert.match(mainSource, /runSelectionTranslate/);
   assert.match(mainSource, /isEnglishWordOrPhrase/);
-  assert.match(mainSource, /isSingleEnglishWord/);
   assert.match(mainSource, /dictionaryStore\.lookup/);
-  assert.match(mainSource, /离线词典未收录该单词，不会请求百度翻译/);
   assert.match(mainSource, /translateTextForTool/);
   assert.match(mainSource, /showSelectionPopup/);
+  assert.doesNotMatch(mainSource, /不会请求百度翻译/);
 });
 
 test("selection-translate popup window and renderer assets exist", () => {

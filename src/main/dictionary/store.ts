@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   formatDictionaryMultilineText,
+  splitHyphenCompoundParts,
   stemDictionaryLookupCandidates,
   type DictionaryEntry,
   normalizeDictionaryLookupWord
@@ -95,20 +96,72 @@ export class DictionaryStore {
     }
 
     for (const candidate of stemDictionaryLookupCandidates(word)) {
-      const row = db
-        .prepare(
-          `SELECT word, phonetic, definition, translation, pos, collins, oxford, tag, exchange
-           FROM entries
-           WHERE word = ?
-           LIMIT 1`
-        )
-        .get(normalizeDictionaryLookupWord(candidate)) as DictionaryRow | undefined;
-      if (row) {
-        return mapRow(row);
+      const entry = this.lookupExact(db, candidate);
+      if (entry) {
+        return entry;
       }
     }
 
-    return undefined;
+    return this.lookupHyphenCompound(db, word);
+  }
+
+  private lookupExact(db: DatabaseSync, word: string): DictionaryEntry | undefined {
+    const row = db
+      .prepare(
+        `SELECT word, phonetic, definition, translation, pos, collins, oxford, tag, exchange
+         FROM entries
+         WHERE word = ?
+         LIMIT 1`
+      )
+      .get(normalizeDictionaryLookupWord(word)) as DictionaryRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
+  /**
+   * For compounds like "context-path" that are absent as a whole, compose
+   * per-segment dictionary cards when every hyphen part is known.
+   */
+  private lookupHyphenCompound(
+    db: DatabaseSync,
+    word: string
+  ): DictionaryEntry | undefined {
+    const parts = splitHyphenCompoundParts(word);
+    if (parts.length < 2 || parts.length > 6) {
+      return undefined;
+    }
+
+    const segments: DictionaryEntry[] = [];
+    for (const part of parts) {
+      let entry: DictionaryEntry | undefined;
+      for (const candidate of stemDictionaryLookupCandidates(part)) {
+        entry = this.lookupExact(db, candidate);
+        if (entry) {
+          break;
+        }
+      }
+      if (!entry) {
+        return undefined;
+      }
+      segments.push(entry);
+    }
+
+    const displayWord = normalizeDictionaryLookupWord(word);
+    return {
+      word: displayWord,
+      phonetic: "",
+      translation: segments
+        .map((segment) => `${segment.word}\n${segment.translation}`)
+        .join("\n\n"),
+      definition: segments
+        .filter((segment) => Boolean(segment.definition))
+        .map((segment) => `${segment.word}\n${segment.definition}`)
+        .join("\n\n"),
+      pos: "",
+      tags: "hyphen-compound",
+      collins: 0,
+      oxford: 0,
+      exchange: ""
+    };
   }
 
   public close(): void {

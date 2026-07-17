@@ -5,8 +5,10 @@ import test from "node:test";
 
 import {
   formatDictionaryMultilineText,
+  isAtomicEnglishWord,
   isEnglishWordOrPhrase,
   normalizeDictionaryLookupWord,
+  splitHyphenCompoundParts,
   stemDictionaryLookupCandidates
 } from "../shared/dictionary";
 
@@ -34,14 +36,24 @@ test("isEnglishWordOrPhrase accepts words and phrases, rejects other text", () =
   assert.equal(isEnglishWordOrPhrase("a ".repeat(40)), false);
 });
 
+test("isAtomicEnglishWord excludes hyphen compounds", () => {
+  assert.equal(isAtomicEnglishWord("cup"), true);
+  assert.equal(isAtomicEnglishWord("don't"), true);
+  assert.equal(isAtomicEnglishWord("context-path"), false);
+  assert.equal(isAtomicEnglishWord("give up"), false);
+});
+
 test("normalizeDictionaryLookupWord collapses whitespace and lowercases", () => {
   assert.equal(normalizeDictionaryLookupWord("  Give   Up "), "give up");
   assert.equal(normalizeDictionaryLookupWord("New York"), "new york");
 });
 
-test("stemDictionaryLookupCandidates skips stemming for phrases", () => {
+test("stemDictionaryLookupCandidates expands hyphen variants", () => {
   assert.deepEqual(stemDictionaryLookupCandidates("give up"), ["give up"]);
   assert.ok(stemDictionaryLookupCandidates("stories").includes("story"));
+  const hyphen = stemDictionaryLookupCandidates("user-agent");
+  assert.deepEqual(hyphen, ["user-agent", "user agent", "useragent"]);
+  assert.deepEqual(splitHyphenCompoundParts("context-path"), ["context", "path"]);
 });
 
 test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
@@ -54,10 +66,11 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
 
   assert.match(sharedSource, /export interface DictionaryEntry/);
   assert.match(sharedSource, /stemDictionaryLookupCandidates/);
+  assert.match(sharedSource, /splitHyphenCompoundParts/);
   assert.match(storeSource, /class DictionaryStore/);
   assert.match(storeSource, /readOnly:\s*true/);
   assert.match(storeSource, /formatDictionaryMultilineText/);
-  assert.match(storeSource, /stemDictionaryLookupCandidates/);
+  assert.match(storeSource, /lookupHyphenCompound/);
   assert.match(storeSource, /ecdict\.db/);
   assert.match(channelsSource, /lookupDictionaryWord:/);
   assert.match(ipcSource, /DictionaryProvider/);
@@ -65,6 +78,7 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
   assert.match(preloadSource, /lookupDictionaryWord\(/);
   assert.match(mainSource, /dictionaryStore/);
   assert.match(mainSource, /dictionaryProvider/);
+  assert.match(mainSource, /isEnglishWordOrPhrase/);
 });
 
 test("ecdict.db asset and build script exist", () => {
