@@ -467,6 +467,40 @@ interface LauncherApi {
       translationPreview: string;
       savedAt: number;
     }>;
+    ttsEnabled?: boolean;
+  }>;
+  exportDictionaryFavoritesCsv?(): Promise<{
+    ok: boolean;
+    message: string;
+    path?: string;
+  }>;
+  setDictionaryTtsEnabled?(
+    enabled: boolean
+  ): Promise<{
+    history: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    favorites: Array<{
+      word: string;
+      phonetic: string;
+      translationPreview: string;
+      savedAt: number;
+    }>;
+    ttsEnabled?: boolean;
+  }>;
+  getDictionaryPackStatus?(): Promise<{
+    hasFts: boolean;
+    usingUserPack: boolean;
+    packPath: string | null;
+    downloadAvailable: boolean;
+  }>;
+  downloadDictionaryPack?(): Promise<{
+    ok: boolean;
+    message: string;
+    packPath?: string;
   }>;
   recordDictionaryLookup?(input: {
     query: string;

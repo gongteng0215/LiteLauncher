@@ -14,6 +14,14 @@ export function resolveUserDictionaryPackPath(): string {
   return path.join(app.getPath("userData"), USER_PACK_RELATIVE);
 }
 
+export function clearDictionaryFtsProbeCache(dbPath?: string): void {
+  if (!dbPath) {
+    ftsProbeCache.clear();
+    return;
+  }
+  ftsProbeCache.delete(path.normalize(dbPath));
+}
+
 export function dictionaryFileHasFts(dbPath: string): boolean {
   const normalized = path.normalize(dbPath);
   const cached = ftsProbeCache.get(normalized);
@@ -133,6 +141,7 @@ export class DictionaryPackManager {
     try {
       await fsp.mkdir(path.dirname(targetPath), { recursive: true });
       await downloadToFile(url, targetPath);
+      clearDictionaryFtsProbeCache(targetPath);
       if (!dictionaryFileHasFts(targetPath)) {
         return {
           ok: false,

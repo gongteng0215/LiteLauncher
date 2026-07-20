@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildDictionaryFavoritesCsv,
   createDefaultDictionaryPanelState,
+  formatDictionaryExchangeText,
   isDictionaryWordFavorited
 } from "../shared/dictionary";
 import { DictionaryPanelStateStore } from "../main/dictionary/panel-state";
@@ -84,4 +86,31 @@ test("DictionaryPanelStateStore records history and toggles favorites", async ()
   assert.equal(withNote.favorites[0]?.note, "工作常用");
   const clearedNote = await store.updateFavoriteNote("apple", "  ");
   assert.equal(clearedNote.favorites[0]?.note, "");
+
+  const withTts = await store.setTtsEnabled(true);
+  assert.equal(withTts.ttsEnabled, true);
+  const csv = await store.buildFavoritesCsv();
+  assert.match(csv, /^word,phonetic,translation,note,savedAt\n/);
+  assert.match(csv, /apple/);
+  assert.match(csv, /苹果/);
+});
+
+test("buildDictionaryFavoritesCsv and formatDictionaryExchangeText helpers", () => {
+  assert.equal(
+    formatDictionaryExchangeText("p:ate/d:eaten/i:eating"),
+    "过去式: ate · 过去分词: eaten · 现在分词: eating"
+  );
+  assert.equal(formatDictionaryExchangeText(""), "");
+
+  const csv = buildDictionaryFavoritesCsv([
+    {
+      word: "cup",
+      phonetic: "kʌp",
+      translationPreview: "n. 杯子",
+      note: 'say "hi"',
+      savedAt: 100
+    }
+  ]);
+  assert.match(csv, /word,phonetic,translation,note,savedAt/);
+  assert.match(csv, /"say ""hi"""/);
 });

@@ -47,9 +47,14 @@ jobs:
           node scripts/clean-release.cjs
           pnpm exec tsc
           node scripts/copy-assets.cjs
-          # copy-assets patches dist/assets/ecdict.db with FTS; assert it exists for Chinese reverse lookup.
+          # Keep a full FTS pack for on-demand download, then ship slim db in the installer.
           if (-not (Test-Path "dist/assets/ecdict.db")) {
             throw "dist/assets/ecdict.db is missing after copy-assets"
+          }
+          node scripts/build-dictionary-pack.cjs
+          node scripts/prepare-slim-dictionary-dist.cjs
+          if (-not (Test-Path "release/ecdict-fts.db")) {
+            throw "release/ecdict-fts.db is missing after build-dictionary-pack"
           }
           if (-not (Test-Path "dist/native/litesnap-capture.node")) {
             throw "dist/native/litesnap-capture.node is missing after build"
@@ -68,6 +73,7 @@ jobs:
             release/*.zip
             release/*.blockmap
             release/latest.yml
+            release/ecdict-fts.db
 
   build-macos:
     name: macOS universal updater assets
@@ -162,6 +168,7 @@ jobs:
           cp -v artifacts/windows/*.zip artifacts/release/ || true
           cp -v artifacts/windows/*.blockmap artifacts/release/ || true
           cp -v artifacts/windows/latest.yml artifacts/release/ || true
+          cp -v artifacts/windows/ecdict-fts.db artifacts/release/ || true
 
           cp -v artifacts/macos/*.dmg artifacts/release/ || true
           cp -v artifacts/macos/*.zip artifacts/release/ || true

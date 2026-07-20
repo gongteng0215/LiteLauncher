@@ -111,8 +111,24 @@ test("ecdict.db asset and build script exist", () => {
   assert.match(patchScript, /dist[/\\]assets[/\\]ecdict\.db|DEFAULT_DB/);
   const copyAssets = readSource("scripts/copy-assets.cjs");
   assert.match(copyAssets, /patchDistEcdictFts|patch-ecdict-fts/);
+  assert.match(copyAssets, /LITELAUNCHER_SHIP_SLIM_DICTIONARY/);
+  const packBuild = readSource("scripts/build-dictionary-pack.cjs");
+  assert.match(packBuild, /ecdict-fts\.db/);
+  assert.match(packBuild, /patchEcdictFts/);
+  const slimPrepare = readSource("scripts/prepare-slim-dictionary-dist.cjs");
+  assert.match(slimPrepare, /"src",\s*"assets",\s*"ecdict\.db"/);
   assert.ok(
     fs.existsSync(path.join(process.cwd(), "src/assets/ecdict.db")),
     "src/assets/ecdict.db should be generated"
   );
+});
+
+test("dictionary pack manager prefers userData FTS pack", () => {
+  const packSource = readSource("src/main/dictionary/pack.ts");
+  const storeSource = readSource("src/main/dictionary/store.ts");
+  assert.match(packSource, /resolveUserDictionaryPackPath/);
+  assert.match(packSource, /clearDictionaryFtsProbeCache/);
+  assert.match(packSource, /ecdict-fts\.db/);
+  assert.match(storeSource, /resolveUserDictionaryPackPath/);
+  assert.match(storeSource, /reopen\(\)/);
 });

@@ -13982,6 +13982,12 @@ let dictionaryPanelCandidates: DictionaryPanelEntry[] = [];
 let dictionaryPanelStatusMessage = "输入英文单词或词组后查询。";
 let dictionaryPanelHistoryFilter: "all" | "en" | "zh" = "all";
 let dictionaryPanelTtsEnabled = false;
+let dictionaryPackStatus: {
+  hasFts: boolean;
+  usingUserPack: boolean;
+  packPath: string | null;
+  downloadAvailable: boolean;
+} | null = null;
 let dictionaryPanelHistory: Array<{
   word: string;
   phonetic: string;
@@ -14083,6 +14089,91 @@ async function hydrateDictionaryPanelState(): Promise<void> {
     applyDictionaryPanelState(state);
   } catch (error) {
     console.warn("[dictionary] load panel state failed", error);
+  }
+}
+
+async function exportDictionaryFavoritesFromPanel(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.exportDictionaryFavoritesCsv) {
+    setStatus("导出接口不可用，请重启应用后重试。");
+    return;
+  }
+  if (dictionaryPanelFavorites.length === 0) {
+    setStatus("当前没有收藏词条可导出。");
+    return;
+  }
+  setStatus("正在导出收藏 CSV…");
+  try {
+    const result = await launcher.exportDictionaryFavoritesCsv();
+    setStatus(result.message);
+  } catch (error) {
+    console.warn("[dictionary] export favorites failed", error);
+    setStatus("导出收藏失败，请稍后重试。");
+  }
+}
+
+async function setDictionaryPanelTtsEnabled(enabled: boolean): Promise<void> {
+  const launcher = getLauncherApi();
+  dictionaryPanelTtsEnabled = enabled;
+  if (!launcher?.setDictionaryTtsEnabled) {
+    return;
+  }
+  try {
+    const state = await launcher.setDictionaryTtsEnabled(enabled);
+    applyDictionaryPanelState(state);
+    setStatus(enabled ? "已开启查词后朗读。" : "已关闭查词后朗读。");
+  } catch (error) {
+    console.warn("[dictionary] set tts failed", error);
+    setStatus("更新朗读设置失败，请稍后重试。");
+  }
+}
+
+async function hydrateDictionaryPackStatus(): Promise<{
+  hasFts: boolean;
+  usingUserPack: boolean;
+  packPath: string | null;
+  downloadAvailable: boolean;
+} | null> {
+  const launcher = getLauncherApi();
+  if (!launcher?.getDictionaryPackStatus) {
+    return null;
+  }
+  try {
+    dictionaryPackStatus = await launcher.getDictionaryPackStatus();
+    return dictionaryPackStatus;
+  } catch (error) {
+    console.warn("[dictionary] pack status failed", error);
+    return null;
+  }
+}
+
+async function downloadDictionaryPackFromPanel(
+  downloadButton: HTMLButtonElement
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.downloadDictionaryPack) {
+    setStatus("词典下载接口不可用，请重启应用后重试。");
+    return;
+  }
+  const previous = downloadButton.textContent ?? "下载完整索引";
+  downloadButton.disabled = true;
+  downloadButton.textContent = "下载中…";
+  setStatus("正在下载完整词典索引，请稍候…");
+  try {
+    const result = await launcher.downloadDictionaryPack();
+    setStatus(result.message);
+    if (result.ok) {
+      await hydrateDictionaryPackStatus();
+      if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
+        renderList();
+      }
+    }
+  } catch (error) {
+    console.warn("[dictionary] download pack failed", error);
+    setStatus("下载词典索引失败，请稍后重试。");
+  } finally {
+    downloadButton.disabled = false;
+    downloadButton.textContent = previous;
   }
 }
 
@@ -14306,7 +14397,7 @@ function populateDictionaryEntryCard(
   if (entry.definition) {
     const definitionLabel = document.createElement("div");
     definitionLabel.className = "translate-dictionary-card__meta";
-    definitionLabel.textContent = "英文释义 / 例句片段";
+    definitionLabel.textContent = "英文释义";
     definitionLabel.style.marginTop = entry.translation ? "8px" : "";
     const definitionEl = document.createElement("div");
     definitionEl.className = "translate-dictionary-card__text";
@@ -14429,7 +14520,8 @@ async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
       translation: item.translation,
       definition: item.definition,
       pos: item.pos,
-      tags: item.tags
+      tags: item.tags,
+      exchange: item.exchange
     }));
     dictionaryPanelEntry = dictionaryPanelCandidates[0] ?? null;
     if (launcher.recordDictionaryLookup && dictionaryPanelEntry) {
@@ -14447,11 +14539,15 @@ async function runDictionaryPanelLookup(form: HTMLFormElement): Promise<void> {
       cardHost.hidden = false;
       populateDictionaryEntryCard(cardHost, dictionaryPanelEntry);
     }
-    setStatus(
-      dictionaryPanelCandidates.length > 1
-        ? `已找到「${entry.word}」，另有 ${dictionaryPanelCandidates.length - 1} 个相关词条。`
-        : `已找到「${entry.word}」。`
-    );
+    if (dictionaryPanelTtsEnabled && dictionaryPanelEntry) {
+      speakDictionaryEntry(dictionaryPanelEntry);
+    } else {
+      setStatus(
+        dictionaryPanelCandidates.length > 1
+          ? `已找到「${entry.word}」，另有 ${dictionaryPanelCandidates.length - 1} 个相关词条。`
+          : `已找到「${entry.word}」。`
+      );
+    }
     if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
       renderList();
     }
@@ -15107,7 +15203,10 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     },
     onOpen: (panel) => {
       getRegisteredPanelImpls().applyDictionaryPanelPayload(panel);
-      void hydrateDictionaryPanelState().then(async () => {
+      void Promise.all([
+        hydrateDictionaryPanelState(),
+        hydrateDictionaryPackStatus()
+      ]).then(async () => {
         if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
           renderList();
         }
@@ -24302,6 +24401,37 @@ window.__LL_PANEL_IMPLS__ = {
       "约 76 万词条，支持英译中与中译英；连字符词组会自动尝试多种写法"
     );
 
+    const packStatusText = dictionaryPackStatus
+      ? dictionaryPackStatus.hasFts
+        ? dictionaryPackStatus.usingUserPack
+          ? "已启用本机完整索引（中译英更快）"
+          : "安装包已含完整索引"
+        : "当前为精简词典：中译英可用，但较慢；可下载完整索引加速"
+      : "词典索引状态未知";
+    const packStatusRow = createLiteSnapInfoRow(
+      "词典索引",
+      packStatusText,
+      dictionaryPackStatus?.packPath
+        ? `路径：${dictionaryPackStatus.packPath}`
+        : "完整索引约 160MB，按需下载到本机用户目录"
+    );
+
+    const ttsField = document.createElement("div");
+    ttsField.className = "settings-field";
+    const ttsLabel = document.createElement("label");
+    ttsLabel.className = "settings-check";
+    const ttsInput = document.createElement("input");
+    ttsInput.type = "checkbox";
+    ttsInput.name = "dictionaryTtsEnabled";
+    ttsInput.checked = dictionaryPanelTtsEnabled;
+    ttsInput.addEventListener("change", () => {
+      void setDictionaryPanelTtsEnabled(ttsInput.checked);
+    });
+    const ttsText = document.createElement("span");
+    ttsText.textContent = "查词成功后朗读（系统 TTS，默认关闭）";
+    ttsLabel.append(ttsInput, ttsText);
+    ttsField.appendChild(ttsLabel);
+
     const queryField = document.createElement("div");
     queryField.className = "settings-field";
 
@@ -24541,16 +24671,59 @@ window.__LL_PANEL_IMPLS__ = {
         setStatus("没有可复制的释义。");
         return;
       }
+      const exchangeText = formatDictionaryExchangeForPanel(
+        dictionaryPanelEntry.exchange ?? ""
+      );
       const parts = [
         dictionaryPanelEntry.word,
         dictionaryPanelEntry.phonetic ? `/${dictionaryPanelEntry.phonetic}/` : "",
         dictionaryPanelEntry.translation,
-        dictionaryPanelEntry.definition
+        dictionaryPanelEntry.definition,
+        exchangeText ? `词形变化：${exchangeText}` : ""
       ].filter(Boolean);
       void navigator.clipboard
         .writeText(parts.join("\n"))
         .then(() => setStatus("已复制释义到剪贴板。"))
         .catch(() => setStatus("复制失败，请手动选择文字复制。"));
+    });
+
+    const speakButton = document.createElement("button");
+    speakButton.type = "button";
+    speakButton.className = "settings-btn settings-btn-secondary";
+    speakButton.textContent = "朗读";
+    speakButton.disabled = !dictionaryPanelEntry;
+    speakButton.setAttribute("data-action", "dictionary-speak");
+    speakButton.addEventListener("click", () => {
+      if (!dictionaryPanelEntry) {
+        setStatus("没有可朗读的词条。");
+        return;
+      }
+      speakDictionaryEntry(dictionaryPanelEntry);
+    });
+
+    const exportFavoritesButton = document.createElement("button");
+    exportFavoritesButton.type = "button";
+    exportFavoritesButton.className = "settings-btn settings-btn-secondary";
+    exportFavoritesButton.textContent = "导出收藏 CSV";
+    exportFavoritesButton.setAttribute("data-action", "dictionary-export-csv");
+    exportFavoritesButton.disabled = dictionaryPanelFavorites.length === 0;
+    exportFavoritesButton.addEventListener("click", () => {
+      void exportDictionaryFavoritesFromPanel();
+    });
+
+    const downloadPackButton = document.createElement("button");
+    downloadPackButton.type = "button";
+    downloadPackButton.className = "settings-btn settings-btn-secondary";
+    downloadPackButton.textContent = dictionaryPackStatus?.hasFts
+      ? "重新下载完整索引"
+      : "下载完整索引";
+    downloadPackButton.setAttribute("data-action", "dictionary-download-pack");
+    // Hide when the bundled installer already ships a full FTS index.
+    downloadPackButton.hidden = Boolean(
+      dictionaryPackStatus?.hasFts && !dictionaryPackStatus.usingUserPack
+    );
+    downloadPackButton.addEventListener("click", () => {
+      void downloadDictionaryPackFromPanel(downloadPackButton);
     });
 
     const backToSearchButton = document.createElement("button");
@@ -24564,11 +24737,16 @@ window.__LL_PANEL_IMPLS__ = {
     actions.append(
       lookupButton,
       favoriteButton,
+      speakButton,
       copyButton,
+      exportFavoritesButton,
+      downloadPackButton,
       backToSearchButton
     );
     form.append(
       statusRow,
+      packStatusRow,
+      ttsField,
       queryField,
       dictionaryCard,
       favoriteNoteField,

@@ -72,6 +72,12 @@ function copyAssetPath(relativePath) {
 }
 
 function patchDistEcdictFts() {
+  if (process.env.LITELAUNCHER_SHIP_SLIM_DICTIONARY === "1") {
+    console.info(
+      "[copy-assets] skipping FTS patch (LITELAUNCHER_SHIP_SLIM_DICTIONARY=1)"
+    );
+    return;
+  }
   const patchPath = path.join(__dirname, "patch-ecdict-fts.cjs");
   if (!fs.existsSync(patchPath)) {
     return;

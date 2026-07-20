@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.50",
+  "version": "1.0.51",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -31,10 +31,10 @@
     "dist:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --arm64 --publish never && node scripts/verify-release-output.cjs mac-release",
     "dist:mac:arm64": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --arm64 --publish never && node scripts/verify-release-output.cjs mac",
     "dist:mac:x64": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --publish never && node scripts/verify-release-output.cjs mac",
-    "dist:win": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win nsis zip --x64 --publish never --config.win.signAndEditExecutable=false && node scripts/verify-release-output.cjs win",
-    "dist:win:portable": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win portable --x64 --publish never",
+    "dist:win": "pnpm run build && node scripts/clean-release.cjs && node scripts/build-dictionary-pack.cjs && node scripts/prepare-slim-dictionary-dist.cjs && electron-builder --win nsis zip --x64 --publish never --config.win.signAndEditExecutable=false && node scripts/verify-release-output.cjs win",
+    "dist:win:portable": "pnpm run build && node scripts/clean-release.cjs && node scripts/build-dictionary-pack.cjs && node scripts/prepare-slim-dictionary-dist.cjs && electron-builder --win portable --x64 --publish never",
     "release:mac": "pnpm run build && node scripts/clean-release.cjs && electron-builder --mac dmg zip --x64 --arm64 -p always && node scripts/verify-release-output.cjs mac-release",
-    "release:win": "pnpm run build && node scripts/clean-release.cjs && electron-builder --win nsis zip --x64 -p always --config.win.signAndEditExecutable=false && node scripts/verify-release-output.cjs win"
+    "release:win": "pnpm run build && node scripts/clean-release.cjs && node scripts/build-dictionary-pack.cjs && node scripts/prepare-slim-dictionary-dist.cjs && electron-builder --win nsis zip --x64 -p always --config.win.signAndEditExecutable=false && node scripts/verify-release-output.cjs win"
   },
   "keywords": [],
   "author": "",

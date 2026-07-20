@@ -31,13 +31,17 @@ test("dictionary plugin is registered with IPC lookup and renderer panel", () =>
   assert.match(panelImplsSource, /其他释义/);
   assert.match(panelImplsSource, /收藏备注|updateDictionaryFavoriteNote/);
   assert.match(panelImplsSource, /dictionary-history-filters/);
-  assert.match(panelImplsSource, /getDictionaryPanelState/);
-  assert.match(panelImplsSource, /recordDictionaryLookup/);
-  assert.match(panelImplsSource, /toggleDictionaryFavorite/);
-  assert.match(
-    panelImplsSource,
-    /dictionary-side-section[\s\S]*最近查询[\s\S]*收藏/
-  );
+  assert.match(panelImplsSource, /exportDictionaryFavoritesCsv|导出收藏 CSV/);
+  assert.match(panelImplsSource, /setDictionaryTtsEnabled|dictionaryTtsEnabled/);
+  assert.match(panelImplsSource, /speakDictionaryEntry/);
+  assert.match(panelImplsSource, /downloadDictionaryPack|下载完整索引/);
+  assert.match(panelImplsSource, /exchange:\s*item\.exchange/);
+  assert.match(panelImplsSource, /词形变化/);
+  assert.match(sharedSource, /buildDictionaryFavoritesCsv/);
+  assert.match(sharedSource, /formatDictionaryExchangeText/);
+  assert.match(sharedSource, /ttsEnabled/);
+  assert.match(mainIndexSource, /dictionaryPackManager|dictionaryPackProvider/);
+
   assert.match(panelImplsSource, /applyDictionaryPanelPayload/);
   assert.match(handlerConfigSource, /dictionary-form/);
   assert.match(handlerConfigSource, /dictionary-lookup/);
