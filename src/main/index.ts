@@ -46,6 +46,7 @@ import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
 import { DictionaryStore } from "./dictionary/store";
 import { DictionaryPanelStateStore } from "./dictionary/panel-state";
+import { DictionaryPackManager } from "./dictionary/pack";
 import { captureSelectedText } from "./selection-translate/capture";
 import { showSelectionPopup } from "./selection-translate/popup-window";
 import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
@@ -90,7 +91,7 @@ import {
   showLauncherWindow,
   toggleLauncherWindow
 } from "./window";
-import { isWindowAutoHideSuspended } from "./window-auto-hide";
+import { isWindowAutoHideSuspended, setWindowAutoHideSuspended } from "./window-auto-hide";
 
 const DEFAULT_SHORTCUT = "Alt+Space";
 const FALLBACK_SHORTCUTS = ["Ctrl+Space", "Alt+Shift+Space", "Ctrl+Alt+Space"];
@@ -101,6 +102,7 @@ const E2E_REAL_BLUR_MODE = process.env.LITELAUNCHER_E2E_REAL_BLUR === "1";
 const E2E_USER_DATA_DIR = (process.env.LITELAUNCHER_E2E_USER_DATA_DIR ?? "").trim();
 const REPLACE_INSTANCE_FLAG = "--replace-instance";
 const LITESNAP_OVERLAY_PREWARM_DELAY_MS = 4000;
+const LITESNAP_CAPTURE_PREWARM_DELAY_MS = 12000;
 const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
@@ -1697,7 +1699,9 @@ function scheduleCatalogBackgroundRefresh(db: LiteDatabase): void {
   }
 
   catalogBackgroundRefreshScheduled = true;
-  setImmediate(() => {
+  // Defer filesystem catalog scan so the first Alt+Space / renderer load is not
+  // competing with a synchronous Start Menu walk on the Electron main thread.
+  const timer = setTimeout(() => {
     void rebuildCatalogIndex(db)
       .then(() => {
         catalogChangeWatcher?.markRebuilt();
@@ -1705,7 +1709,8 @@ function scheduleCatalogBackgroundRefresh(db: LiteDatabase): void {
       .catch((error) => {
         console.error("[catalog] background refresh failed", error);
       });
-  });
+  }, 8000);
+  timer.unref?.();
 }
 
 function startCatalogChangeWatcher(db: LiteDatabase): void {
@@ -2044,6 +2049,7 @@ async function bootstrap(): Promise<void> {
   );
   const dictionaryStore = new DictionaryStore();
   const dictionaryPanelStateStore = new DictionaryPanelStateStore(activeDatabase);
+  const dictionaryPackManager = new DictionaryPackManager();
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
@@ -2148,9 +2154,6 @@ async function bootstrap(): Promise<void> {
     liteSnapCaptureShortcutTriggeredAt = now;
 
     const started = await liteSnapCaptureSessionManager.startCapture();
-    if (started && !launcherWindow.isDestroyed() && !launcherWindow.isFocused()) {
-      liteSnapCaptureSessionManager.startFrameCacheRefresh();
-    }
     return started;
   };
   const startLiteSnapColorCapture = async (): Promise<boolean> => {
@@ -2161,9 +2164,6 @@ async function bootstrap(): Promise<void> {
     liteSnapCaptureShortcutTriggeredAt = now;
 
     const started = await liteSnapCaptureSessionManager.startColorCapture();
-    if (started && !launcherWindow.isDestroyed() && !launcherWindow.isFocused()) {
-      liteSnapCaptureSessionManager.startFrameCacheRefresh();
-    }
     return started;
   };
   const pinLiteSnapClipboardImage = async (): Promise<boolean> => {
@@ -2304,7 +2304,18 @@ async function bootstrap(): Promise<void> {
       }
 
       const popupOptions = {
-        dismissOnOutsideClick: settings.dismissOnOutsideClick
+        dismissOnOutsideClick: settings.dismissOnOutsideClick,
+        passthroughWindows: launcherWindow.isDestroyed() ? [] : [launcherWindow],
+        onOpen: () => {
+          if (!launcherWindow.isDestroyed()) {
+            setWindowAutoHideSuspended(launcherWindow, true);
+          }
+        },
+        onClose: () => {
+          if (!launcherWindow.isDestroyed()) {
+            setWindowAutoHideSuspended(launcherWindow, false);
+          }
+        }
       };
 
       const captured = await captureSelectedText({
@@ -2708,7 +2719,20 @@ async function bootstrap(): Promise<void> {
           clearHistory: () => dictionaryPanelStateStore.clearHistory(),
           removeFavorite: (word) => dictionaryPanelStateStore.removeFavorite(word),
           updateFavoriteNote: (word, note) =>
-            dictionaryPanelStateStore.updateFavoriteNote(word, note)
+            dictionaryPanelStateStore.updateFavoriteNote(word, note),
+          setTtsEnabled: (enabled) => dictionaryPanelStateStore.setTtsEnabled(enabled),
+          buildFavoritesCsv: () => dictionaryPanelStateStore.buildFavoritesCsv()
+        },
+        dictionaryPackProvider: {
+          getStatus: async () =>
+            dictionaryPackManager.getStatus(dictionaryStore.listDbCandidates()),
+          downloadPack: async () => {
+            const result = await dictionaryPackManager.downloadPack();
+            if (result.ok) {
+              dictionaryStore.reopen();
+            }
+            return result;
+          }
         },
         selectionTranslateProvider: {
           getSettings: () => selectionTranslateSettingsStore.getSettings(),
@@ -2792,6 +2816,16 @@ async function bootstrap(): Promise<void> {
       });
     }, LITESNAP_OVERLAY_PREWARM_DELAY_MS);
     overlayPrewarmTimer.unref();
+
+    // Warm the screenshot frame cache later so startup and first launcher open
+    // are not competing with a full-screen native capture.
+    const capturePrewarmTimer = setTimeout(() => {
+      if (launcherWindow.isDestroyed()) {
+        return;
+      }
+      liteSnapCaptureSessionManager.prewarmCaptureCache();
+    }, LITESNAP_CAPTURE_PREWARM_DELAY_MS);
+    capturePrewarmTimer.unref();
   }
 }
 

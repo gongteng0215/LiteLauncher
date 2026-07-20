@@ -1,4 +1,5 @@
 import {
+  buildDictionaryFavoritesCsv,
   createDefaultDictionaryPanelState,
   DICTIONARY_FAVORITES_MAX,
   DICTIONARY_HISTORY_MAX,
@@ -93,7 +94,9 @@ function normalizePanelState(value: unknown): DictionaryPanelState {
     : [];
   return {
     history: dedupeBookmarks(history).slice(0, DICTIONARY_HISTORY_MAX),
-    favorites: dedupeBookmarks(favorites).slice(0, DICTIONARY_FAVORITES_MAX)
+    favorites: dedupeBookmarks(favorites).slice(0, DICTIONARY_FAVORITES_MAX),
+    ttsEnabled:
+      typeof record.ttsEnabled === "boolean" ? record.ttsEnabled : fallback.ttsEnabled
   };
 }
 
@@ -111,6 +114,14 @@ function upsertHistory(
   return { ...state, history };
 }
 
+function cloneState(state: DictionaryPanelState): DictionaryPanelState {
+  return {
+    history: [...state.history],
+    favorites: [...state.favorites],
+    ttsEnabled: state.ttsEnabled
+  };
+}
+
 export class DictionaryPanelStateStore {
   private cachedState: DictionaryPanelState | null = null;
 
@@ -118,10 +129,7 @@ export class DictionaryPanelStateStore {
 
   public async getState(): Promise<DictionaryPanelState> {
     if (this.cachedState) {
-      return {
-        history: [...this.cachedState.history],
-        favorites: [...this.cachedState.favorites]
-      };
+      return cloneState(this.cachedState);
     }
 
     const fallback = createDefaultDictionaryPanelState();
@@ -132,10 +140,7 @@ export class DictionaryPanelStateStore {
         JSON.stringify(fallback)
       );
       this.cachedState = fallback;
-      return {
-        history: [...fallback.history],
-        favorites: [...fallback.favorites]
-      };
+      return cloneState(fallback);
     }
 
     try {
@@ -146,16 +151,10 @@ export class DictionaryPanelStateStore {
       } else {
         this.cachedState = normalized;
       }
-      return {
-        history: [...normalized.history],
-        favorites: [...normalized.favorites]
-      };
+      return cloneState(normalized);
     } catch {
       await this.persist(fallback);
-      return {
-        history: [...fallback.history],
-        favorites: [...fallback.favorites]
-      };
+      return cloneState(fallback);
     }
   }
 
@@ -172,10 +171,7 @@ export class DictionaryPanelStateStore {
     const bookmark = buildBookmarkFromEntry(input.entry, Date.now());
     const next = upsertHistory(current, bookmark);
     await this.persist(next);
-    return {
-      history: [...next.history],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
   }
 
   public async toggleFavorite(input: {
@@ -196,10 +192,7 @@ export class DictionaryPanelStateStore {
       const favorites = current.favorites.filter((_, index) => index !== existingIndex);
       const next = { ...current, favorites };
       await this.persist(next);
-      return {
-        history: [...next.history],
-        favorites: [...next.favorites]
-      };
+      return cloneState(next);
     }
 
     const bookmark = input.entry
@@ -217,10 +210,7 @@ export class DictionaryPanelStateStore {
     );
     const next = { ...current, favorites };
     await this.persist(next);
-    return {
-      history: [...next.history],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
   }
 
   public async removeHistoryItem(word: string): Promise<DictionaryPanelState> {
@@ -236,20 +226,14 @@ export class DictionaryPanelStateStore {
       )
     };
     await this.persist(next);
-    return {
-      history: [...next.history],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
   }
 
   public async clearHistory(): Promise<DictionaryPanelState> {
     const current = await this.getState();
     const next = { ...current, history: [] };
     await this.persist(next);
-    return {
-      history: [],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
   }
 
   public async removeFavorite(word: string): Promise<DictionaryPanelState> {
@@ -265,10 +249,7 @@ export class DictionaryPanelStateStore {
       )
     };
     await this.persist(next);
-    return {
-      history: [...next.history],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
   }
 
   public async updateFavoriteNote(
@@ -294,10 +275,19 @@ export class DictionaryPanelStateStore {
     }
     const next = { ...current, favorites };
     await this.persist(next);
-    return {
-      history: [...next.history],
-      favorites: [...next.favorites]
-    };
+    return cloneState(next);
+  }
+
+  public async setTtsEnabled(enabled: boolean): Promise<DictionaryPanelState> {
+    const current = await this.getState();
+    const next = { ...current, ttsEnabled: Boolean(enabled) };
+    await this.persist(next);
+    return cloneState(next);
+  }
+
+  public async buildFavoritesCsv(): Promise<string> {
+    const state = await this.getState();
+    return buildDictionaryFavoritesCsv(state.favorites);
   }
 
   private async persist(state: DictionaryPanelState): Promise<void> {

@@ -13,10 +13,12 @@ export interface DictionaryWordBookmark {
 export interface DictionaryPanelState {
   history: DictionaryWordBookmark[];
   favorites: DictionaryWordBookmark[];
+  /** Optional system TTS for the current entry (renderer speechSynthesis). */
+  ttsEnabled: boolean;
 }
 
 export function createDefaultDictionaryPanelState(): DictionaryPanelState {
-  return { history: [], favorites: [] };
+  return { history: [], favorites: [], ttsEnabled: false };
 }
 
 export function isDictionaryWordFavorited(
@@ -245,3 +247,63 @@ export function splitHyphenCompoundParts(word: string): string[] {
   }
   return normalized.split("-").filter((part) => /^[a-z][a-z']*$/.test(part));
 }
+
+function csvEscape(value: string): string {
+  const text = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+/** Export favorites as CSV: word,phonetic,translation,note,savedAt */
+export function buildDictionaryFavoritesCsv(
+  favorites: DictionaryWordBookmark[]
+): string {
+  const header = "word,phonetic,translation,note,savedAt";
+  const rows = favorites.map((item) =>
+    [
+      csvEscape(item.word),
+      csvEscape(item.phonetic),
+      csvEscape(item.translationPreview),
+      csvEscape(item.note ?? ""),
+      csvEscape(String(item.savedAt))
+    ].join(",")
+  );
+  return [header, ...rows].join("\n");
+}
+
+/** Human-readable ECDICT exchange / inflection fragment. */
+export function formatDictionaryExchangeText(exchange: string): string {
+  const trimmed = exchange.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const match = /^([a-z]):(.+)$/i.exec(part);
+      if (!match) {
+        return part;
+      }
+      const kind = match[1]?.toLowerCase() ?? "";
+      const value = match[2] ?? "";
+      const labels: Record<string, string> = {
+        p: "过去式",
+        d: "过去分词",
+        i: "现在分词",
+        3: "第三人称",
+        s: "复数",
+        r: "比较级",
+        t: "最高级",
+        0: "原型",
+        1: "原型"
+      };
+      const label = labels[kind];
+      return label ? `${label}: ${value}` : part;
+    })
+    .join(" · ");
+}
+

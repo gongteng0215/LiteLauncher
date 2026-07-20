@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.0.49",
+  "version": "1.0.50",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -18,7 +18,8 @@
     "test:e2e:windows-codex": "pnpm run build && node dist/test/e2e-windows-codex-regression.test.js",
     "test:e2e:litesnap": "pnpm run build && node dist/test/e2e-litesnap-overlay.test.js",
     "test:e2e:topmost": "pnpm run build && node dist/test/e2e-launcher-topmost-smoke.test.js",
-    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-launcher-topmost-smoke.test.js && node dist/test/e2e-litesnap-overlay.test.js && node dist/test/e2e-settings-error-log-smoke.test.js && node dist/test/e2e-search-layout-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js && node dist/test/e2e-plugin-panel-layout-smoke.test.js",
+    "test:e2e:dictionary": "pnpm run build && node dist/test/e2e-dictionary-selection-smoke.test.js",
+    "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-launcher-topmost-smoke.test.js && node dist/test/e2e-litesnap-overlay.test.js && node dist/test/e2e-settings-error-log-smoke.test.js && node dist/test/e2e-search-layout-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js && node dist/test/e2e-plugin-panel-layout-smoke.test.js && node dist/test/e2e-dictionary-selection-smoke.test.js",
     "test:regression:full": "pnpm run test:regression && pnpm run test:e2e:smoke",
     "test:path-rules": "pnpm run build && node dist/test/result-path-filter.test.js",
     "test:plugins-visible": "pnpm run build && node dist/test/visible-plugins-regression.test.js",

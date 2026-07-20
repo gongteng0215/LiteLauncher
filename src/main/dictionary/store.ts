@@ -14,6 +14,7 @@ import {
   type DictionaryEntry,
   normalizeDictionaryLookupWord
 } from "../../shared/dictionary";
+import { resolveUserDictionaryPackPath } from "./pack";
 
 type DictionaryRow = {
   word: string;
@@ -46,6 +47,13 @@ function isInsideAsarArchive(filePath: string): boolean {
 
 function resolveEcdictDbCandidates(): string[] {
   const candidates: string[] = [];
+
+  // Prefer an on-demand downloaded FTS pack in userData.
+  try {
+    pushCandidate(candidates, resolveUserDictionaryPackPath());
+  } catch {
+    // app may be unavailable in unit tests
+  }
 
   const resourcesPath = process.resourcesPath;
   if (typeof resourcesPath === "string" && resourcesPath.length > 0) {
@@ -106,6 +114,7 @@ export class DictionaryStore {
   private db: DatabaseSync | null = null;
   private openAttempted = false;
   private missingWarned = false;
+  private openedPath: string | null = null;
   private readonly dbPathOverride: string | null;
 
   private chineseLookupCache = new Map<string, DictionaryEntry[]>();
@@ -113,6 +122,32 @@ export class DictionaryStore {
 
   public constructor(dbPathOverride?: string) {
     this.dbPathOverride = dbPathOverride?.trim() ? path.normalize(dbPathOverride) : null;
+  }
+
+  public listDbCandidates(): string[] {
+    return this.dbPathOverride ? [this.dbPathOverride] : resolveEcdictDbCandidates();
+  }
+
+  public getOpenedPath(): string | null {
+    this.ensureOpen();
+    return this.openedPath;
+  }
+
+  public hasFtsIndex(): boolean {
+    const db = this.ensureOpen();
+    if (!db) {
+      return false;
+    }
+    return this.hasTranslationFts(db);
+  }
+
+  public reopen(): void {
+    this.close();
+    this.openAttempted = false;
+    this.missingWarned = false;
+    this.openedPath = null;
+    this.chineseLookupCache.clear();
+    this.ensureOpen();
   }
 
   public lookup(word: string): DictionaryEntry | undefined {
@@ -290,6 +325,7 @@ export class DictionaryStore {
       this.db.close();
       this.db = null;
     }
+    this.openedPath = null;
   }
 
   private ensureOpen(): DatabaseSync | null {
@@ -301,9 +337,7 @@ export class DictionaryStore {
     }
     this.openAttempted = true;
 
-    const candidates = this.dbPathOverride
-      ? [this.dbPathOverride]
-      : resolveEcdictDbCandidates();
+    const candidates = this.listDbCandidates();
     const existing = candidates.filter((candidate) => {
       try {
         return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
@@ -322,17 +356,45 @@ export class DictionaryStore {
       return null;
     }
 
+    // Prefer a candidate that already has FTS when multiple exist. Open each
+    // candidate at most once instead of probing FTS in a separate pass.
+    let fallbackDb: DatabaseSync | null = null;
+    let fallbackPath: string | null = null;
+
     for (const candidate of existing) {
       try {
-        this.db = new DatabaseSync(candidate, { readOnly: true });
-        console.info("[dictionary] opened ecdict.db from", candidate);
-        return this.db;
+        const opened = new DatabaseSync(candidate, { readOnly: true });
+        if (this.hasTranslationFts(opened)) {
+          if (fallbackDb) {
+            fallbackDb.close();
+          }
+          this.db = opened;
+          this.openedPath = candidate;
+          console.info("[dictionary] opened ecdict.db from", candidate);
+          return this.db;
+        }
+
+        if (!fallbackDb) {
+          fallbackDb = opened;
+          fallbackPath = candidate;
+          continue;
+        }
+
+        opened.close();
       } catch (error) {
         console.warn("[dictionary] failed to open ecdict.db", candidate, error);
       }
     }
 
+    if (fallbackDb && fallbackPath) {
+      this.db = fallbackDb;
+      this.openedPath = fallbackPath;
+      console.info("[dictionary] opened ecdict.db from", fallbackPath);
+      return this.db;
+    }
+
     this.db = null;
+    this.openedPath = null;
     return null;
   }
 }

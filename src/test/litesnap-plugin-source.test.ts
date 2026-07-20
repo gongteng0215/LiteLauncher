@@ -567,13 +567,18 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /public prewarmCaptureCache\(\): void[\s\S]*this\.startFrameCacheRefresh\(\)[\s\S]*this\.warmDisplayFrameCache\(/,
+    /public prewarmCaptureCache\(\): void[\s\S]*this\.warmDisplayFrameCache\(/,
     "LiteSnap should warm the screenshot frame cache without waiting for the overlay window"
   );
   assert.match(
     captureSource,
-    /async prewarmOverlay\(\): Promise<boolean>[\s\S]*this\.prewarmCaptureCache\(\)[\s\S]*await this\.waitForOverlayReady\(overlayWindow\)/,
-    "LiteSnap overlay prewarm should reuse the capture cache prewarm path"
+    /public prewarmCaptureCache\(\): void[\s\S]*One-shot warm only/,
+    "LiteSnap idle prewarm should stay one-shot and avoid periodic full-screen refresh"
+  );
+  assert.match(
+    captureSource,
+    /async prewarmOverlay\(\): Promise<boolean>[\s\S]*await this\.waitForOverlayReady\(overlayWindow\)/,
+    "LiteSnap overlay prewarm should load the reusable overlay window without blocking on capture"
   );
   assert.match(
     captureSource,
@@ -883,9 +888,14 @@ test("LiteSnap main process registers dedicated global shortcuts from stored set
     "LiteSnap should lazily prewarm the overlay on a delay after the launcher window is ready, without blocking bootstrap"
   );
   assert.match(
+    mainIndexSource.slice(launcherWindowCreationIndex),
+    /setTimeout\(\(\) => \{[\s\S]*liteSnapCaptureSessionManager\.prewarmCaptureCache\(\)[\s\S]*\}, LITESNAP_CAPTURE_PREWARM_DELAY_MS\)/,
+    "LiteSnap should defer screenshot frame-cache prewarm until after startup settles"
+  );
+  assert.match(
     mainIndexSource,
-    /const started = await liteSnapCaptureSessionManager\.startCapture[\s\S]*if \(started && !launcherWindow\.isDestroyed\(\) && !launcherWindow\.isFocused\(\)\) \{[\s\S]*liteSnapCaptureSessionManager\.startFrameCacheRefresh\(\);/,
-    "LiteSnap should start follow-up frame-cache refresh only after capture when the launcher is not focused"
+    /const started = await liteSnapCaptureSessionManager\.startCapture\(\);\s*return started;/,
+    "LiteSnap should not restart periodic frame-cache refresh after every capture start"
   );
   assert.match(
     mainIndexSource,

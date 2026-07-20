@@ -115,7 +115,8 @@ export class LiteSnapCaptureSessionManager {
       return;
     }
 
-    this.startFrameCacheRefresh();
+    // One-shot warm only. Periodic idle refresh used to steal main-process /
+    // GPU time every few seconds and made the whole launcher feel delayed.
     this.warmDisplayFrameCache(
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     );
@@ -137,17 +138,12 @@ export class LiteSnapCaptureSessionManager {
     }
 
     this.idleFrameCachePaused = false;
-    if (!this.session) {
-      this.startFrameCacheRefresh();
-    }
   }
 
   public async prewarmOverlay(): Promise<boolean> {
     if (process.platform !== "win32") {
       return false;
     }
-
-    this.prewarmCaptureCache();
 
     const overlayWindow = this.ensureOverlayWindow(
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
@@ -746,9 +742,6 @@ export class LiteSnapCaptureSessionManager {
       await this.emitOverlayStateChanged(null);
     }
     this.warmDisplayFrameCache(display);
-    if (!this.idleFrameCachePaused) {
-      this.startFrameCacheRefresh();
-    }
     return true;
   }
 

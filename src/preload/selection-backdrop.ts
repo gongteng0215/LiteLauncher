@@ -3,8 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/channels";
 
 const api = {
-  close(): Promise<boolean> {
-    return ipcRenderer.invoke(IPC_CHANNELS.selectionPopupClose);
+  close(point?: { x: number; y: number }): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.selectionPopupClose, point);
   }
 };
 

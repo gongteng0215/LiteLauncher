@@ -52,4 +52,20 @@ export function createDefaultSelectionTranslateSettings(): SelectionTranslateSet
 
 export type SelectionPopupShowOptions = {
   dismissOnOutsideClick?: boolean;
+  /** Windows that should stay clickable above the dismiss backdrop (e.g. launcher). */
+  passthroughWindows?: import("electron").BrowserWindow[];
+  onOpen?: () => void;
+  onClose?: () => void;
 };
+
+export function isPointInBounds(
+  point: { x: number; y: number },
+  bounds: { x: number; y: number; width: number; height: number }
+): boolean {
+  return (
+    point.x >= bounds.x &&
+    point.y >= bounds.y &&
+    point.x < bounds.x + bounds.width &&
+    point.y < bounds.y + bounds.height
+  );
+}

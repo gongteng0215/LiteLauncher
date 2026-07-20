@@ -21,7 +21,8 @@ import {
   ClipboardWorkbenchCollectorRuntime,
   ClipboardWorkbenchImageLike,
   collectClipboardWorkbenchSnapshot,
-  createEmptyClipboardWorkbenchImage
+  createEmptyClipboardWorkbenchImage,
+  probeClipboardFingerprint
 } from "./collector";
 import {
   ClipboardWorkbenchPasteRuntime,
@@ -286,6 +287,8 @@ export class ClipboardWorkbenchService {
 
   private lastAutoCaptureHash = "";
 
+  private lastClipboardFingerprint = "";
+
   private initialized = false;
 
   public constructor(options: ClipboardWorkbenchServiceOptions) {
@@ -411,6 +414,14 @@ export class ClipboardWorkbenchService {
 
     this.collecting = true;
     try {
+      const fingerprint = probeClipboardFingerprint(this.runtime, this.settings);
+      if (!fingerprint) {
+        return false;
+      }
+      if (fingerprint === this.lastClipboardFingerprint) {
+        return false;
+      }
+
       const snapshot = collectClipboardWorkbenchSnapshot(
         this.runtime,
         this.settings
@@ -419,6 +430,7 @@ export class ClipboardWorkbenchService {
         return false;
       }
       if (snapshot.hash === this.lastAutoCaptureHash) {
+        this.lastClipboardFingerprint = fingerprint;
         return false;
       }
 
@@ -427,6 +439,7 @@ export class ClipboardWorkbenchService {
         sensitive: this.settings.sensitiveMode ? 1 : 0
       });
       this.lastAutoCaptureHash = snapshot.hash;
+      this.lastClipboardFingerprint = fingerprint;
       if (snapshot.kind === "text" && snapshot.textContent) {
         await Promise.resolve(this.onAutoTextCollected?.(snapshot.textContent)).catch(
           () => undefined

@@ -90,6 +90,52 @@ test("sequential paste falls back to restore-only message when send shortcut fai
   );
 });
 
+test("auto image collection skips full encode when clipboard fingerprint is unchanged", async () => {
+  const pngPixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2NgYGD4DwABBAEAX+XDSQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  const thumbJpeg = Buffer.from("thumb-fingerprint");
+  let toPngCalls = 0;
+  let thumbCalls = 0;
+
+  await withTestService(
+    {
+      readImage: () => ({
+        isEmpty: () => false,
+        toPNG: () => {
+          toPngCalls += 1;
+          return pngPixel;
+        },
+        getSize: () => ({ width: 1920, height: 1080 }),
+        resize: () => ({
+          isEmpty: () => false,
+          toPNG: () => pngPixel,
+          getSize: () => ({ width: 48, height: 48 }),
+          toJPEG: () => {
+            thumbCalls += 1;
+            return thumbJpeg;
+          }
+        })
+      }),
+      readBuffer: () => Buffer.alloc(0),
+      readText: () => ""
+    },
+    async (service) => {
+      assert.equal(await service.collectNow(), true);
+      assert.equal(toPngCalls, 1);
+      assert.ok(thumbCalls >= 1);
+      const thumbsAfterSave = thumbCalls;
+
+      assert.equal(await service.collectNow(), false);
+      assert.equal(await service.collectNow(), false);
+      // Unchanged clipboard should probe via thumbnail only, never re-encode PNG.
+      assert.equal(toPngCalls, 1);
+      assert.ok(thumbCalls > thumbsAfterSave);
+    }
+  );
+});
+
 test("image items expose a preview file url in refreshed payloads", async () => {
   const pngPixel = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2NgYGD4DwABBAEAX+XDSQAAAABJRU5ErkJggg==",

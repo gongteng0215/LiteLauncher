@@ -168,6 +168,22 @@ type DictionaryProvider = {
     word: string,
     note: string
   ) => Promise<DictionaryPanelState>;
+  setTtsEnabled: (enabled: boolean) => Promise<DictionaryPanelState>;
+  buildFavoritesCsv: () => Promise<string>;
+};
+
+type DictionaryPackProvider = {
+  getStatus: () => Promise<{
+    hasFts: boolean;
+    usingUserPack: boolean;
+    packPath: string | null;
+    downloadAvailable: boolean;
+  }>;
+  downloadPack: () => Promise<{
+    ok: boolean;
+    message: string;
+    packPath?: string;
+  }>;
 };
 
 type SelectionTranslateProvider = {
@@ -209,6 +225,7 @@ type IpcOptions = {
   liteSnapProvider: LiteSnapProvider;
   translateToolProvider: TranslateToolProvider;
   dictionaryProvider: DictionaryProvider;
+  dictionaryPackProvider: DictionaryPackProvider;
   selectionTranslateProvider: SelectionTranslateProvider;
   catalogProvider: CatalogProvider;
   updaterProvider: UpdaterProvider;
@@ -1694,6 +1711,36 @@ export function registerIpcHandlers(
       return options.dictionaryProvider.updateFavoriteNote(word, note);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.exportDictionaryFavoritesCsv, async () => {
+    const csv = await options.dictionaryProvider.buildFavoritesCsv();
+    const result = await dialog.showSaveDialog(window, {
+      title: "导出词典收藏",
+      defaultPath: "litelauncher-dictionary-favorites.csv",
+      filters: [{ name: "CSV", extensions: ["csv"] }]
+    });
+    if (result.canceled || !result.filePath) {
+      return { ok: false, message: "已取消导出。" };
+    }
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(result.filePath, `\uFEFF${csv}`, "utf8");
+    return { ok: true, message: `已导出到 ${result.filePath}`, path: result.filePath };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.setDictionaryTtsEnabled,
+    async (_, enabledInput: unknown) => {
+      return options.dictionaryProvider.setTtsEnabled(Boolean(enabledInput));
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getDictionaryPackStatus, () => {
+    return options.dictionaryPackProvider.getStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.downloadDictionaryPack, () => {
+    return options.dictionaryPackProvider.downloadPack();
+  });
 
   ipcMain.handle(IPC_CHANNELS.getSelectionTranslateSettings, () => {
     return options.selectionTranslateProvider.getSettings();

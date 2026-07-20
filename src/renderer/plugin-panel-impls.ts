@@ -13974,12 +13974,14 @@ type DictionaryPanelEntry = {
   definition: string;
   pos: string;
   tags: string;
+  exchange?: string;
 };
 let dictionaryQueryText = "";
 let dictionaryPanelEntry: DictionaryPanelEntry | null = null;
 let dictionaryPanelCandidates: DictionaryPanelEntry[] = [];
 let dictionaryPanelStatusMessage = "输入英文单词或词组后查询。";
 let dictionaryPanelHistoryFilter: "all" | "en" | "zh" = "all";
+let dictionaryPanelTtsEnabled = false;
 let dictionaryPanelHistory: Array<{
   word: string;
   phonetic: string;
@@ -13998,9 +14000,58 @@ let dictionaryPanelFavorites: Array<{
 function applyDictionaryPanelState(state: {
   history: typeof dictionaryPanelHistory;
   favorites: typeof dictionaryPanelFavorites;
+  ttsEnabled?: boolean;
 }): void {
   dictionaryPanelHistory = [...state.history];
   dictionaryPanelFavorites = [...state.favorites];
+  if (typeof state.ttsEnabled === "boolean") {
+    dictionaryPanelTtsEnabled = state.ttsEnabled;
+  }
+}
+
+function formatDictionaryExchangeForPanel(exchange: string): string {
+  const trimmed = exchange.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const match = /^([a-z]):(.+)$/i.exec(part);
+      if (!match) {
+        return part;
+      }
+      const kind = match[1]?.toLowerCase() ?? "";
+      const value = match[2] ?? "";
+      const labels: Record<string, string> = {
+        p: "过去式",
+        d: "过去分词",
+        i: "现在分词",
+        3: "第三人称",
+        s: "复数",
+        r: "比较级",
+        t: "最高级",
+        0: "原型",
+        1: "原型"
+      };
+      const label = labels[kind];
+      return label ? `${label}: ${value}` : part;
+    })
+    .join(" · ");
+}
+
+function speakDictionaryEntry(entry: DictionaryPanelEntry): void {
+  if (typeof window.speechSynthesis === "undefined") {
+    setStatus("当前环境不支持系统朗读。");
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(entry.word);
+  utterance.lang = /[\u3400-\u9fff]/.test(entry.word) ? "zh-CN" : "en-US";
+  window.speechSynthesis.speak(utterance);
+  setStatus(`正在朗读「${entry.word}」。`);
 }
 
 function isCurrentDictionaryEntryFavorited(): boolean {
@@ -14244,17 +14295,34 @@ function populateDictionaryEntryCard(
     card.appendChild(metaEl);
   }
   if (entry.translation) {
+    const translationLabel = document.createElement("div");
+    translationLabel.className = "translate-dictionary-card__meta";
+    translationLabel.textContent = "中文释义";
     const translationEl = document.createElement("div");
     translationEl.className = "translate-dictionary-card__text";
     translationEl.textContent = entry.translation;
-    card.appendChild(translationEl);
+    card.append(translationLabel, translationEl);
   }
   if (entry.definition) {
+    const definitionLabel = document.createElement("div");
+    definitionLabel.className = "translate-dictionary-card__meta";
+    definitionLabel.textContent = "英文释义 / 例句片段";
+    definitionLabel.style.marginTop = entry.translation ? "8px" : "";
     const definitionEl = document.createElement("div");
     definitionEl.className = "translate-dictionary-card__text";
-    definitionEl.style.marginTop = entry.translation ? "8px" : "";
     definitionEl.textContent = entry.definition;
-    card.appendChild(definitionEl);
+    card.append(definitionLabel, definitionEl);
+  }
+  const exchangeText = formatDictionaryExchangeForPanel(entry.exchange ?? "");
+  if (exchangeText) {
+    const exchangeLabel = document.createElement("div");
+    exchangeLabel.className = "translate-dictionary-card__meta";
+    exchangeLabel.textContent = "词形变化";
+    exchangeLabel.style.marginTop = "8px";
+    const exchangeEl = document.createElement("div");
+    exchangeEl.className = "translate-dictionary-card__text";
+    exchangeEl.textContent = exchangeText;
+    card.append(exchangeLabel, exchangeEl);
   }
 }
 

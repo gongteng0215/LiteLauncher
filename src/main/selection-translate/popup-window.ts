@@ -2,7 +2,11 @@ import path from "node:path";
 import { BrowserWindow, clipboard, ipcMain, screen } from "electron";
 
 import { IPC_CHANNELS } from "../../shared/channels";
-import type { SelectionPopupPayload, SelectionPopupShowOptions } from "../../shared/selection-translate";
+import type {
+  SelectionPopupPayload,
+  SelectionPopupShowOptions
+} from "../../shared/selection-translate";
+import { isPointInBounds } from "../../shared/selection-translate";
 
 const POPUP_WIDTH = 360;
 const POPUP_HEIGHT = 280;
@@ -12,8 +16,45 @@ const CURSOR_OFFSET = 16;
 let popupWindow: BrowserWindow | null = null;
 let dismissBackdropWindow: BrowserWindow | null = null;
 let handlersRegistered = false;
+let displayListenerRegistered = false;
 let latestPayload: SelectionPopupPayload | null = null;
 let dismissOnOutsideClickEnabled = true;
+let passthroughWindows: BrowserWindow[] = [];
+let elevatedWindows: Array<{
+  window: BrowserWindow;
+  wasAlwaysOnTop: boolean;
+}> = [];
+let popupLifecycleHooks: {
+  onOpen?: () => void;
+  onClose?: () => void;
+} = {};
+
+export function getVirtualDesktopBounds(): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const display of screen.getAllDisplays()) {
+    const { x, y, width, height } = display.bounds;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + width);
+    maxY = Math.max(maxY, y + height);
+  }
+
+  return {
+    x: Number.isFinite(minX) ? minX : 0,
+    y: Number.isFinite(minY) ? minY : 0,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY)
+  };
+}
 
 function resolvePopupPreloadPath(): string {
   return path.join(__dirname, "../../preload/selection-popup.js");
@@ -29,28 +70,6 @@ function resolvePopupHtmlPath(): string {
 
 function resolveBackdropHtmlPath(): string {
   return path.join(__dirname, "../../renderer/selection-backdrop.html");
-}
-
-function getVirtualDesktopBounds(): { x: number; y: number; width: number; height: number } {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (const display of screen.getAllDisplays()) {
-    const { x, y, width, height } = display.bounds;
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + width);
-    maxY = Math.max(maxY, y + height);
-  }
-
-  return {
-    x: minX,
-    y: minY,
-    width: Math.max(1, maxX - minX),
-    height: Math.max(1, maxY - minY)
-  };
 }
 
 function resolvePopupSize(payload: SelectionPopupPayload): { width: number; height: number } {
@@ -88,14 +107,94 @@ function clampPopupBounds(
   return { x, y, width, height };
 }
 
+function restoreElevatedWindows(): void {
+  for (const entry of elevatedWindows) {
+    if (entry.window.isDestroyed()) {
+      continue;
+    }
+    entry.window.setAlwaysOnTop(entry.wasAlwaysOnTop);
+  }
+  elevatedWindows = [];
+}
+
+function elevatePassthroughWindows(windows: BrowserWindow[]): void {
+  restoreElevatedWindows();
+  for (const window of windows) {
+    if (window.isDestroyed() || !window.isVisible()) {
+      continue;
+    }
+    const wasAlwaysOnTop = window.isAlwaysOnTop();
+    // Keep launcher above floating backdrop but below screen-saver popup.
+    window.setAlwaysOnTop(true, "pop-up-menu");
+    elevatedWindows.push({ window, wasAlwaysOnTop });
+  }
+}
+
+function findPassthroughWindowAtPoint(point: {
+  x: number;
+  y: number;
+}): BrowserWindow | null {
+  for (const window of passthroughWindows) {
+    if (window.isDestroyed() || !window.isVisible()) {
+      continue;
+    }
+    if (isPointInBounds(point, window.getBounds())) {
+      return window;
+    }
+  }
+  return null;
+}
+
+function ensureDisplayMetricsListener(): void {
+  if (displayListenerRegistered) {
+    return;
+  }
+  displayListenerRegistered = true;
+  screen.on("display-metrics-changed", () => {
+    if (!dismissBackdropWindow || dismissBackdropWindow.isDestroyed()) {
+      return;
+    }
+    dismissBackdropWindow.setBounds(getVirtualDesktopBounds());
+  });
+  screen.on("display-added", () => {
+    if (!dismissBackdropWindow || dismissBackdropWindow.isDestroyed()) {
+      return;
+    }
+    dismissBackdropWindow.setBounds(getVirtualDesktopBounds());
+  });
+  screen.on("display-removed", () => {
+    if (!dismissBackdropWindow || dismissBackdropWindow.isDestroyed()) {
+      return;
+    }
+    dismissBackdropWindow.setBounds(getVirtualDesktopBounds());
+  });
+}
+
 function ensureHandlers(): void {
   if (handlersRegistered) {
     return;
   }
   handlersRegistered = true;
 
-  ipcMain.handle(IPC_CHANNELS.selectionPopupClose, () => {
+  ipcMain.handle(IPC_CHANNELS.selectionPopupClose, (_, pointInput?: unknown) => {
+    const record =
+      pointInput && typeof pointInput === "object"
+        ? (pointInput as { x?: unknown; y?: unknown })
+        : null;
+    const point =
+      record &&
+      typeof record.x === "number" &&
+      Number.isFinite(record.x) &&
+      typeof record.y === "number" &&
+      Number.isFinite(record.y)
+        ? { x: record.x, y: record.y }
+        : null;
+
+    const passthrough = point ? findPassthroughWindowAtPoint(point) : null;
     closeSelectionPopup();
+    if (passthrough && !passthrough.isDestroyed()) {
+      passthrough.focus();
+    }
     return true;
   });
 
@@ -148,6 +247,7 @@ function createDismissBackdropWindow(): BrowserWindow {
 }
 
 async function ensureDismissBackdropVisible(): Promise<void> {
+  ensureDisplayMetricsListener();
   const bounds = getVirtualDesktopBounds();
   if (!dismissBackdropWindow || dismissBackdropWindow.isDestroyed()) {
     dismissBackdropWindow = createDismissBackdropWindow();
@@ -165,7 +265,11 @@ async function ensureDismissBackdropVisible(): Promise<void> {
   await new Promise<void>((resolve) => {
     dismissBackdropWindow?.webContents.once("did-finish-load", () => resolve());
   });
-  if (dismissBackdropWindow && !dismissBackdropWindow.isDestroyed() && !dismissBackdropWindow.isVisible()) {
+  if (
+    dismissBackdropWindow &&
+    !dismissBackdropWindow.isDestroyed() &&
+    !dismissBackdropWindow.isVisible()
+  ) {
     dismissBackdropWindow.showInactive();
   }
 }
@@ -216,6 +320,16 @@ function createPopupWindow(bounds: {
         return;
       }
       if (!popupWindow.isFocused()) {
+        // Clicking an elevated passthrough window should close via backdrop
+        // or explicit focus change; avoid racing with intentional launcher focus.
+        const focused = BrowserWindow.getFocusedWindow();
+        if (
+          focused &&
+          passthroughWindows.some((item) => !item.isDestroyed() && item === focused)
+        ) {
+          closeSelectionPopup();
+          return;
+        }
         closeSelectionPopup();
       }
     }, 0);
@@ -225,6 +339,10 @@ function createPopupWindow(bounds: {
       popupWindow = null;
     }
     closeDismissBackdrop();
+    restoreElevatedWindows();
+    const onClose = popupLifecycleHooks.onClose;
+    popupLifecycleHooks = {};
+    onClose?.();
   });
 
   return window;
@@ -232,9 +350,13 @@ function createPopupWindow(bounds: {
 
 export function closeSelectionPopup(): void {
   closeDismissBackdrop();
+  restoreElevatedWindows();
 
   if (!popupWindow || popupWindow.isDestroyed()) {
     popupWindow = null;
+    const onClose = popupLifecycleHooks.onClose;
+    popupLifecycleHooks = {};
+    onClose?.();
     return;
   }
   popupWindow.close();
@@ -246,16 +368,26 @@ export async function showSelectionPopup(
   options: SelectionPopupShowOptions = {}
 ): Promise<void> {
   ensureHandlers();
+  ensureDisplayMetricsListener();
   latestPayload = payload;
   dismissOnOutsideClickEnabled = options.dismissOnOutsideClick !== false;
+  passthroughWindows = (options.passthroughWindows ?? []).filter(
+    (window) => !window.isDestroyed()
+  );
+  popupLifecycleHooks = {
+    onOpen: options.onOpen,
+    onClose: options.onClose
+  };
 
   const point = screen.getCursorScreenPoint();
   const bounds = clampPopupBounds(point, resolvePopupSize(payload));
 
   if (dismissOnOutsideClickEnabled) {
     await ensureDismissBackdropVisible();
+    elevatePassthroughWindows(passthroughWindows);
   } else {
     closeDismissBackdrop();
+    restoreElevatedWindows();
   }
 
   if (!popupWindow || popupWindow.isDestroyed()) {
@@ -281,4 +413,5 @@ export async function showSelectionPopup(
     popupWindow.showInactive();
   }
   popupWindow.focus();
+  options.onOpen?.();
 }

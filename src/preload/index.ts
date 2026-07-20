@@ -242,6 +242,33 @@ const api = {
   }): Promise<import("../shared/dictionary").DictionaryPanelState> {
     return ipcRenderer.invoke(IPC_CHANNELS.updateDictionaryFavoriteNote, input);
   },
+  exportDictionaryFavoritesCsv(): Promise<{
+    ok: boolean;
+    message: string;
+    path?: string;
+  }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.exportDictionaryFavoritesCsv);
+  },
+  setDictionaryTtsEnabled(
+    enabled: boolean
+  ): Promise<import("../shared/dictionary").DictionaryPanelState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setDictionaryTtsEnabled, enabled);
+  },
+  getDictionaryPackStatus(): Promise<{
+    hasFts: boolean;
+    usingUserPack: boolean;
+    packPath: string | null;
+    downloadAvailable: boolean;
+  }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getDictionaryPackStatus);
+  },
+  downloadDictionaryPack(): Promise<{
+    ok: boolean;
+    message: string;
+    packPath?: string;
+  }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.downloadDictionaryPack);
+  },
   getSelectionTranslateSettings(): Promise<
     import("../shared/selection-translate").SelectionTranslateSettings
   > {

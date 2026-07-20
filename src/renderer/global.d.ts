@@ -402,6 +402,25 @@ declare global {
         word: string;
         note: string;
       }): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      exportDictionaryFavoritesCsv(): Promise<{
+        ok: boolean;
+        message: string;
+        path?: string;
+      }>;
+      setDictionaryTtsEnabled(
+        enabled: boolean
+      ): Promise<import("../shared/dictionary").DictionaryPanelState>;
+      getDictionaryPackStatus(): Promise<{
+        hasFts: boolean;
+        usingUserPack: boolean;
+        packPath: string | null;
+        downloadAvailable: boolean;
+      }>;
+      downloadDictionaryPack(): Promise<{
+        ok: boolean;
+        message: string;
+        packPath?: string;
+      }>;
       getSelectionTranslateSettings(): Promise<
         import("../shared/selection-translate").SelectionTranslateSettings
       >;

@@ -66,16 +66,29 @@ test("selection-translate settings store is wired", () => {
 
   assert.match(sharedSource, /dismissOnOutsideClick/);
   assert.match(sharedSource, /hotkey:\s*"F4"/);
+  assert.match(sharedSource, /passthroughWindows/);
   assert.match(settingsSource, /dismissOnOutsideClick/);
   assert.match(settingsSource, /raw === "F2" \? "F4"/);
   assert.match(settingsSource, /selectionTranslateSettings/);
+  assert.match(popupSource, /getVirtualDesktopBounds/);
+  assert.match(popupSource, /display-metrics-changed/);
+  assert.match(popupSource, /passthroughWindows/);
+  assert.match(popupSource, /pop-up-menu/);
+  assert.match(popupSource, /elevatePassthroughWindows/);
+  assert.match(popupSource, /ensureDismissBackdropVisible/);
   assert.match(popupSource, /dismissOnOutsideClickEnabled/);
-  assert.match(popupSource, /selection-backdrop\.html/);
-  assert.match(popupSource, /resolveBackdropPreloadPath/);
+  assert.match(popupSource, /setAlwaysOnTop\(true, "floating"\)/);
+  assert.match(popupSource, /setAlwaysOnTop\(true, "screen-saver"\)/);
   assert.match(mainSource, /dismissOnOutsideClick:\s*settings\.dismissOnOutsideClick/);
+  assert.match(mainSource, /passthroughWindows:\s*launcherWindow/);
+  assert.match(mainSource, /setWindowAutoHideSuspended/);
   assert.match(panelImplsSource, /selectionTranslateDismissOutside/);
   assert.match(panelImplsSource, /默认 F4/);
   assert.doesNotMatch(panelImplsSource, /默认 F2/);
+  const backdropHtml = readSource("src/renderer/selection-backdrop.html");
+  assert.match(backdropHtml, /screenX/);
+  const backdropPreload = readSource("src/preload/selection-backdrop.ts");
+  assert.match(backdropPreload, /close\(point/);
   const copyAssets = readSource("scripts/copy-assets.cjs");
   assert.match(copyAssets, /selection-backdrop\.html/);
   assert.ok(

@@ -23,10 +23,15 @@
     <script>
       (() => {
         const api = window.selectionBackdrop;
-        const dismiss = () => {
-          if (api && typeof api.close === "function") {
-            void api.close();
+        const dismiss = (event) => {
+          if (!api || typeof api.close !== "function") {
+            return;
           }
+          const point =
+            event && typeof event.screenX === "number" && typeof event.screenY === "number"
+              ? { x: event.screenX, y: event.screenY }
+              : undefined;
+          void api.close(point);
         };
         window.addEventListener("mousedown", dismiss, true);
         window.addEventListener("pointerdown", dismiss, true);
