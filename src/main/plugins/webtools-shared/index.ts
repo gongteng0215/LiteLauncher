@@ -17,6 +17,8 @@ const ICON_COLOR_BY_PLUGIN_ID: Record<string, string> = {
   "webtools-password": "#6c5ce7",
   "webtools-cron": "#00b894",
   "webtools-json": "#3498db",
+  "webtools-json-schema": "#2563eb",
+  "webtools-data-mask": "#8b5cf6",
   "webtools-crypto": "#00cec9",
   "webtools-jwt": "#a29bfe",
   "webtools-timestamp": "#ff9f43",
@@ -57,6 +59,10 @@ function getIconSymbolSvg(pluginId: string): string {
       return '<circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="2"/><path d="M12 8v4l3 2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
     case "webtools-json":
       return '<path d="M8 7H7a2 2 0 0 0-2 2v1a2 2 0 0 1-1 2 2 2 0 0 1 1 2v1a2 2 0 0 0 2 2h1M16 7h1a2 2 0 0 1 2 2v1a2 2 0 0 0 1 2 2 2 0 0 0-1 2v1a2 2 0 0 1-2 2h-1" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
+    case "webtools-json-schema":
+      return '<rect x="5" y="5" width="14" height="14" rx="2" fill="none" stroke="#fff" stroke-width="2"/><path d="M8 9h8M8 12h5M8 15h6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M16 14l2 2-2 2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    case "webtools-data-mask":
+      return '<path d="M12 4a4 4 0 0 1 4 4v1h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1V8a4 4 0 0 1 4-4z" fill="none" stroke="#fff" stroke-width="2"/><path d="M9 13h6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
     case "webtools-crypto":
       return '<rect x="6" y="10" width="12" height="9" rx="2" fill="none" stroke="#fff" stroke-width="2"/><path d="M9 10V8a3 3 0 0 1 6 0v2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>';
     case "webtools-jwt":

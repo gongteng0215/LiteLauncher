@@ -43,6 +43,8 @@ interface RendererPluginConstants {
   LITESNAP_PLUGIN_ID: string;
   WEBTOOLS_PASSWORD_PLUGIN_ID: string;
   WEBTOOLS_JSON_PLUGIN_ID: string;
+  WEBTOOLS_JSON_SCHEMA_PLUGIN_ID: string;
+  WEBTOOLS_DATA_MASK_PLUGIN_ID: string;
   WEBTOOLS_URL_PLUGIN_ID: string;
   WEBTOOLS_DIFF_PLUGIN_ID: string;
   WEBTOOLS_TIMESTAMP_PLUGIN_ID: string;
@@ -211,6 +213,10 @@ interface RendererPanelImpls {
   renderWebtoolsPasswordPanel(): void;
   applyWebtoolsJsonPanelPayload(panel: unknown): void;
   renderWebtoolsJsonPanel(): void;
+  applyWebtoolsJsonSchemaPanelPayload(panel: unknown): void;
+  renderWebtoolsJsonSchemaPanel(): void;
+  applyWebtoolsDataMaskPanelPayload(panel: unknown): void;
+  renderWebtoolsDataMaskPanel(): void;
   applyWebtoolsUrlPanelPayload(panel: unknown): void;
   renderWebtoolsUrlPanel(): void;
   applyWebtoolsDiffPanelPayload(panel: unknown): void;

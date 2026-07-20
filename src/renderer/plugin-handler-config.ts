@@ -30,6 +30,16 @@ window.__LL_PLUGIN_HANDLER_CONFIGS__ = [
     enterActionKey: "json-convert"
   },
   {
+    pluginId: handlerConstants.WEBTOOLS_JSON_SCHEMA_PLUGIN_ID,
+    formSelector: "form.webtools-json-schema-form",
+    enterActionKey: "json-schema-validate"
+  },
+  {
+    pluginId: handlerConstants.WEBTOOLS_DATA_MASK_PLUGIN_ID,
+    formSelector: "form.webtools-data-mask-form",
+    enterActionKey: "data-mask-run"
+  },
+  {
     pluginId: handlerConstants.WEBTOOLS_URL_PLUGIN_ID,
     formSelector: "form.webtools-url-form",
     enterActionKey: "url-parse"

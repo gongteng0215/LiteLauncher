@@ -10,6 +10,8 @@ const {
   LITESNAP_PLUGIN_ID,
   WEBTOOLS_PASSWORD_PLUGIN_ID,
   WEBTOOLS_JSON_PLUGIN_ID,
+  WEBTOOLS_JSON_SCHEMA_PLUGIN_ID,
+  WEBTOOLS_DATA_MASK_PLUGIN_ID,
   WEBTOOLS_URL_PLUGIN_ID,
   WEBTOOLS_DIFF_PLUGIN_ID,
   WEBTOOLS_TIMESTAMP_PLUGIN_ID,
@@ -91,6 +93,40 @@ let webtoolsJsonState: WebtoolsJsonState = {
   errorPosition: null,
   selectedFields: []
 };
+type WebtoolsJsonSchemaValidationError = {
+  path: string;
+  message: string;
+};
+let webtoolsJsonSchemaText = JSON.stringify(
+  {
+    type: "object",
+    required: ["name", "age"],
+    properties: {
+      name: { type: "string", minLength: 1 },
+      age: { type: "integer", minimum: 0 }
+    },
+    additionalProperties: false
+  },
+  null,
+  2
+);
+let webtoolsJsonSchemaPayload = JSON.stringify({ name: "Alice", age: 28 }, null, 2);
+let webtoolsJsonSchemaValid: boolean | null = null;
+let webtoolsJsonSchemaInfo = "";
+let webtoolsJsonSchemaErrors: WebtoolsJsonSchemaValidationError[] = [];
+let webtoolsJsonSchemaAutoTimer: number | null = null;
+let webtoolsJsonSchemaRequestToken = 0;
+type WebtoolsDataMaskFakeKind = "name" | "email" | "phone" | "uuid" | "company";
+let webtoolsDataMaskInput =
+  "联系人：张三，手机 13812345678，邮箱 zhangsan@example.com，身份证 110101199001011234";
+let webtoolsDataMaskOutput = "";
+let webtoolsDataMaskInfo = "";
+let webtoolsDataMaskPhone = true;
+let webtoolsDataMaskEmail = true;
+let webtoolsDataMaskIdCard = true;
+let webtoolsDataMaskFakeKind: WebtoolsDataMaskFakeKind = "uuid";
+let webtoolsDataMaskFakeCount = 5;
+let webtoolsDataMaskMode: "mask" | "generate" = "mask";
 const DEFAULT_WEBTOOLS_URL_INPUT =
   "https://www.example.com:8080/path/to/page?name=test&id=123#section-1";
 function createEmptyWebtoolsUrlParts(): WebtoolsUrlParts {
@@ -264,6 +300,7 @@ let passwordPanelOptions: PasswordGeneratorOptions = {
 let passwordPanelGenerated: string[] = [];
 let cashflowState: CashflowState | null = null;
 let cashflowReports: CashflowReports | null = null;
+let cashflowReviewMode = false;
 let cashflowJobs: CashflowJobOption[] = [];
 
 function clampPasswordLength(value: number, fallback: number): number {
@@ -382,7 +419,8 @@ function parseCashflowPanelPayload(payload: unknown): CashflowPanelPayload | nul
   return {
     panel: "cashflow",
     reset: typeof record.reset === "boolean" ? record.reset : undefined,
-    role: typeof record.role === "string" ? record.role : undefined
+    role: typeof record.role === "string" ? record.role : undefined,
+    review: record.review === true
   };
 }
 
@@ -1140,6 +1178,154 @@ function createCashflowActionItem(
   };
 }
 
+function buildCashflowReviewScore(state: CashflowState, reports: CashflowReports | null): number {
+  const totalExpenses = state.expenses + state.debtPayment;
+  const freedomRatio =
+    totalExpenses > 0 ? Math.min(1, state.passiveIncome / totalExpenses) : state.passiveIncome > 0 ? 1 : 0;
+  const assetScore = Math.min(1, state.assets.length / 6);
+  const turnPenalty = Math.max(0, 1 - state.turn / 80);
+  let outcomeBonus = 0;
+  if (state.won) {
+    outcomeBonus = 0.25;
+  } else if (state.lost) {
+    outcomeBonus = -0.15;
+  }
+  const debtPenalty =
+    reports && reports.balanceSheet.debtsTotal > 0
+      ? Math.min(0.2, reports.metrics.debtRatio * 0.2)
+      : 0;
+  const raw =
+    freedomRatio * 55 + assetScore * 20 + turnPenalty * 10 + outcomeBonus * 100 - debtPenalty * 100;
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
+function buildCashflowReviewAdvice(state: CashflowState, score: number): string {
+  if (state.won) {
+    return "本局已达成财务自由，可复盘哪些资产组合最有效，并尝试更高难度职业或 AI 对战。";
+  }
+  if (state.lost) {
+    return state.lossReason
+      ? `失败主因：${state.lossReason}。下一局优先控制负债、保留现金储备，并避免连续大额贷款投资。`
+      : "本局已失败，下一局优先控制负债并提高被动收入覆盖总支出的比例。";
+  }
+  if (score >= 75) {
+    return "节奏良好，继续优先选择能显著提升被动收入的机会，并留意现金储备是否足够应对突发支出。";
+  }
+  if (score >= 45) {
+    return "已有积累但尚未脱离老鼠赛跑，建议减少无效跳过，聚焦现金流为正且回本周期短的机会。";
+  }
+  return "开局阶段建议先稳定现金流，避免过早加杠杆；每回合都记录机会成本，再决定是否买入。";
+}
+
+function renderCashflowReviewPanelView(state: CashflowState, reports: CashflowReports | null): void {
+  const panelItem = document.createElement("li");
+  panelItem.className = "settings-panel-item";
+
+  const panel = document.createElement("section");
+  panel.className = "settings-panel cashflow-panel cashflow-panel-review";
+
+  const title = document.createElement("h3");
+  title.className = "settings-title";
+  title.textContent = "现金流复盘";
+
+  const description = document.createElement("p");
+  description.className = "settings-description";
+  description.textContent = "按时间线回顾本局关键决策，并查看结算总结。";
+
+  const score = buildCashflowReviewScore(state, reports);
+  const summaryCard = document.createElement("section");
+  summaryCard.className = "cashflow-review-summary";
+  const summaryTitle = document.createElement("h4");
+  summaryTitle.className = "cashflow-block-title";
+  summaryTitle.textContent = "结算总结";
+  const scoreNode = document.createElement("div");
+  scoreNode.className = "cashflow-review-score";
+  scoreNode.textContent = `综合评分 ${score} / 100`;
+  const adviceNode = document.createElement("p");
+  adviceNode.className = "cashflow-review-advice";
+  adviceNode.textContent = buildCashflowReviewAdvice(state, score);
+  const metaNode = document.createElement("div");
+  metaNode.className = "cashflow-review-meta";
+  metaNode.textContent =
+    `${state.role} · 第 ${state.turn} 回合 · ${cashflowPhaseLabel(state.phase)} · ` +
+    `被动收入 ${formatMoney(state.passiveIncome)}/月 · 现金 ${formatMoney(state.cash)}`;
+  summaryCard.append(summaryTitle, scoreNode, adviceNode, metaNode);
+
+  const timelineBlock = document.createElement("section");
+  timelineBlock.className = "cashflow-block cashflow-block-review-timeline";
+  const timelineTitle = document.createElement("h4");
+  timelineTitle.className = "cashflow-block-title";
+  timelineTitle.textContent = "决策时间线";
+  timelineBlock.appendChild(timelineTitle);
+
+  const timelineList = document.createElement("ol");
+  timelineList.className = "cashflow-review-timeline";
+  const timelineEntries = [...state.logs].reverse();
+  for (const entry of timelineEntries) {
+    const item = document.createElement("li");
+    item.className = "cashflow-review-timeline-item";
+    item.textContent = entry;
+    timelineList.appendChild(item);
+  }
+  if (timelineEntries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "cashflow-empty";
+    empty.textContent = "暂无决策记录，先进行几回合游戏后再复盘。";
+    timelineBlock.appendChild(empty);
+  } else {
+    timelineBlock.appendChild(timelineList);
+  }
+
+  if (state.aiEnabled && state.aiPlayers.length > 0) {
+    const aiBlock = document.createElement("section");
+    aiBlock.className = "cashflow-block";
+    const aiTitle = document.createElement("h4");
+    aiTitle.className = "cashflow-block-title";
+    aiTitle.textContent = "AI 对手摘要";
+    aiBlock.appendChild(aiTitle);
+    const aiList = document.createElement("ul");
+    aiList.className = "cashflow-review-ai-list";
+    for (const aiPlayer of state.aiPlayers) {
+      const item = document.createElement("li");
+      item.textContent =
+        `${aiPlayer.name} · 现金 ${formatMoney(aiPlayer.cash)} · 被动收入 ${formatMoney(aiPlayer.passiveIncome)}/月 · ` +
+        `最近决策：${aiPlayer.lastDecision ?? "暂无"}`;
+      aiList.appendChild(item);
+    }
+    aiBlock.appendChild(aiList);
+    panel.append(title, description, summaryCard, timelineBlock, aiBlock);
+  } else {
+    panel.append(title, description, summaryCard, timelineBlock);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "settings-actions cashflow-actions";
+  const backButton = document.createElement("button");
+  backButton.type = "button";
+  backButton.className = "settings-btn settings-btn-primary";
+  backButton.textContent = "返回游戏面板";
+  backButton.addEventListener("click", () => {
+    cashflowReviewMode = false;
+    renderList();
+  });
+  const refreshButton = document.createElement("button");
+  refreshButton.type = "button";
+  refreshButton.className = "settings-btn settings-btn-secondary";
+  refreshButton.textContent = "刷新复盘";
+  refreshButton.addEventListener("click", () => {
+    void refreshStandaloneCashflowPanel().then((ok) => {
+      if (ok) {
+        renderList();
+      }
+    });
+  });
+  actions.append(backButton, refreshButton);
+  panel.appendChild(actions);
+
+  panelItem.appendChild(panel);
+  list.appendChild(panelItem);
+}
+
 function cashflowStatusSummary(state: CashflowState): string {
   const totalExpenses = state.expenses + state.debtPayment;
   if (state.lost) {
@@ -1325,6 +1511,11 @@ function createCashflowBadge(
 function renderStandaloneCashflowPanelView(): void {
   const state = cashflowState;
   const reports = cashflowReports;
+  if (state && cashflowReviewMode) {
+    renderCashflowReviewPanelView(state, reports);
+    return;
+  }
+
   const panelItem = document.createElement("li");
   panelItem.className = "settings-panel-item";
 
@@ -1858,7 +2049,11 @@ async function refreshStandaloneCashflowPanel(): Promise<boolean> {
   return Boolean(result || cashflowState);
 }
 
-async function openStandaloneCashflowPanel(reset = false): Promise<void> {
+async function openStandaloneCashflowPanel(
+  reset = false,
+  options?: { reviewMode?: boolean }
+): Promise<void> {
+  cashflowReviewMode = options?.reviewMode === true;
   setMode("cashflow");
   if (reset) {
     await executeCashflowAction("reset");
@@ -12227,6 +12422,211 @@ function scheduleWebtoolsJsonAutoConvert(
   }, immediate ? 0 : 220);
 }
 
+function buildWebtoolsJsonSchemaTarget(action: "validate" = "validate"): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("schema", webtoolsJsonSchemaText);
+  params.set("payload", webtoolsJsonSchemaPayload);
+  return `command:plugin:${WEBTOOLS_JSON_SCHEMA_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsJsonSchemaResultInForm(form: HTMLFormElement): void {
+  const infoNode = form.querySelector<HTMLDivElement>(".webtools-json-schema-info");
+  if (infoNode) {
+    infoNode.dataset.state =
+      webtoolsJsonSchemaValid === true
+        ? "ok"
+        : webtoolsJsonSchemaValid === false
+          ? "error"
+          : "idle";
+    infoNode.textContent =
+      webtoolsJsonSchemaInfo ||
+      (webtoolsJsonSchemaValid === true
+        ? "校验通过"
+        : "输入 Schema 与 Payload，结果会自动校验");
+  }
+
+  const errorsNode = form.querySelector<HTMLUListElement>(".webtools-json-schema-errors");
+  if (errorsNode) {
+    errorsNode.replaceChildren();
+    for (const error of webtoolsJsonSchemaErrors) {
+      const item = document.createElement("li");
+      item.className = "webtools-json-schema-error-item";
+      const pathNode = document.createElement("code");
+      pathNode.className = "webtools-json-schema-error-path";
+      pathNode.textContent = error.path || "/";
+      const messageNode = document.createElement("span");
+      messageNode.className = "webtools-json-schema-error-message";
+      messageNode.textContent = error.message;
+      item.append(pathNode, messageNode);
+      errorsNode.appendChild(item);
+    }
+    errorsNode.hidden = webtoolsJsonSchemaErrors.length === 0;
+  }
+}
+
+function scheduleWebtoolsJsonSchemaAutoValidate(
+  form: HTMLFormElement,
+  immediate = false
+): void {
+  if (webtoolsJsonSchemaAutoTimer !== null) {
+    window.clearTimeout(webtoolsJsonSchemaAutoTimer);
+  }
+
+  webtoolsJsonSchemaAutoTimer = window.setTimeout(() => {
+    webtoolsJsonSchemaAutoTimer = null;
+    if (!form.isConnected) {
+      return;
+    }
+    void executeWebtoolsJsonSchemaValidate(form, { render: false });
+  }, immediate ? 0 : 220);
+}
+
+async function executeWebtoolsJsonSchemaValidate(
+  form: HTMLFormElement,
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行 JSON Schema 校验");
+    return;
+  }
+
+  const shouldRender = options.render ?? true;
+  const schemaNode = form.elements.namedItem("webtoolsJsonSchemaText");
+  const payloadNode = form.elements.namedItem("webtoolsJsonSchemaPayload");
+  webtoolsJsonSchemaText =
+    schemaNode instanceof HTMLTextAreaElement ? schemaNode.value : webtoolsJsonSchemaText;
+  webtoolsJsonSchemaPayload =
+    payloadNode instanceof HTMLTextAreaElement ? payloadNode.value : webtoolsJsonSchemaPayload;
+
+  const requestToken = ++webtoolsJsonSchemaRequestToken;
+  const result = await launcher.execute({
+    id: `plugin:${WEBTOOLS_JSON_SCHEMA_PLUGIN_ID}:validate`,
+    type: "command",
+    title: "JSON Schema 校验",
+    subtitle: "",
+    target: buildWebtoolsJsonSchemaTarget(),
+    keywords: ["plugin", "json-schema"]
+  });
+
+  if (requestToken !== webtoolsJsonSchemaRequestToken) {
+    return;
+  }
+
+  const data = toRecord(result.data);
+  webtoolsJsonSchemaValid =
+    typeof data?.valid === "boolean" ? data.valid : result.ok ? true : false;
+  webtoolsJsonSchemaInfo =
+    typeof result.message === "string"
+      ? result.message
+      : typeof data?.schemaError === "string"
+        ? data.schemaError
+        : typeof data?.payloadError === "string"
+          ? data.payloadError
+          : "";
+  webtoolsJsonSchemaErrors = Array.isArray(data?.errors)
+    ? data.errors
+        .map((entry) => toRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+        .map((entry) => ({
+          path: typeof entry.path === "string" ? entry.path : "/",
+          message: typeof entry.message === "string" ? entry.message : "校验失败"
+        }))
+    : [];
+
+  refreshWebtoolsJsonSchemaResultInForm(form);
+  setStatus(webtoolsJsonSchemaInfo || (webtoolsJsonSchemaValid ? "校验通过" : "校验失败"));
+  if (shouldRender) {
+    renderList();
+  }
+}
+
+function buildWebtoolsDataMaskTarget(
+  action: "mask" | "generate" = webtoolsDataMaskMode
+): string {
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("input", webtoolsDataMaskInput);
+  params.set("maskPhone", webtoolsDataMaskPhone ? "1" : "0");
+  params.set("maskEmail", webtoolsDataMaskEmail ? "1" : "0");
+  params.set("maskIdCard", webtoolsDataMaskIdCard ? "1" : "0");
+  params.set("fakeKind", webtoolsDataMaskFakeKind);
+  params.set("fakeCount", String(webtoolsDataMaskFakeCount));
+  return `command:plugin:${WEBTOOLS_DATA_MASK_PLUGIN_ID}?${params.toString()}`;
+}
+
+function refreshWebtoolsDataMaskResultInForm(form: HTMLFormElement): void {
+  const outputNode = form.elements.namedItem("webtoolsDataMaskOutput");
+  if (outputNode instanceof HTMLTextAreaElement) {
+    outputNode.value = webtoolsDataMaskOutput;
+  }
+
+  const infoNode = form.querySelector<HTMLDivElement>(".webtools-data-mask-info");
+  if (infoNode) {
+    infoNode.textContent = webtoolsDataMaskInfo || "选择脱敏规则或假数据类型后执行";
+    infoNode.dataset.state = webtoolsDataMaskOutput.trim() ? "ok" : "idle";
+  }
+}
+
+async function executeWebtoolsDataMaskAction(
+  form: HTMLFormElement,
+  action: "mask" | "generate",
+  options: { render?: boolean } = {}
+): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行文本脱敏");
+    return;
+  }
+
+  const shouldRender = options.render ?? true;
+  const inputNode = form.elements.namedItem("webtoolsDataMaskInput");
+  webtoolsDataMaskInput =
+    inputNode instanceof HTMLTextAreaElement ? inputNode.value : webtoolsDataMaskInput;
+  webtoolsDataMaskMode = action;
+
+  const phoneNode = form.elements.namedItem("webtoolsDataMaskPhone");
+  const emailNode = form.elements.namedItem("webtoolsDataMaskEmail");
+  const idNode = form.elements.namedItem("webtoolsDataMaskIdCard");
+  if (phoneNode instanceof HTMLInputElement) {
+    webtoolsDataMaskPhone = phoneNode.checked;
+  }
+  if (emailNode instanceof HTMLInputElement) {
+    webtoolsDataMaskEmail = emailNode.checked;
+  }
+  if (idNode instanceof HTMLInputElement) {
+    webtoolsDataMaskIdCard = idNode.checked;
+  }
+
+  const kindNode = form.elements.namedItem("webtoolsDataMaskFakeKind");
+  if (kindNode instanceof HTMLSelectElement) {
+    webtoolsDataMaskFakeKind = kindNode.value as WebtoolsDataMaskFakeKind;
+  }
+  const countNode = form.elements.namedItem("webtoolsDataMaskFakeCount");
+  if (countNode instanceof HTMLInputElement) {
+    webtoolsDataMaskFakeCount = Math.max(1, Math.min(50, Number(countNode.value) || 5));
+  }
+
+  const result = await launcher.execute({
+    id: `plugin:${WEBTOOLS_DATA_MASK_PLUGIN_ID}:${action}`,
+    type: "command",
+    title: "文本脱敏 / 假数据",
+    subtitle: "",
+    target: buildWebtoolsDataMaskTarget(action),
+    keywords: ["plugin", "data-mask"]
+  });
+
+  const data = toRecord(result.data);
+  webtoolsDataMaskOutput = typeof data?.output === "string" ? data.output : "";
+  webtoolsDataMaskInfo = typeof result.message === "string" ? result.message : "";
+  refreshWebtoolsDataMaskResultInForm(form);
+  setStatus(webtoolsDataMaskInfo || (result.ok ? "处理完成" : "处理失败"));
+  if (shouldRender) {
+    renderList();
+  }
+}
+
 async function executeWebtoolsJsonConvert(
   form: HTMLFormElement,
   options: { render?: boolean; action?: "convert" | "validate" } = {}
@@ -15158,6 +15558,24 @@ const pluginPanelHandlers: Readonly<Record<string, PluginPanelHandler>> = {
     },
     "form.webtools-json-form"
   ),
+  [WEBTOOLS_JSON_SCHEMA_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsJsonSchemaPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsJsonSchemaPanelPayload(panel);
+    },
+    "form.webtools-json-schema-form"
+  ),
+  [WEBTOOLS_DATA_MASK_PLUGIN_ID]: createSubmitPluginPanelHandler(
+    () => {
+      getRegisteredPanelImpls().renderWebtoolsDataMaskPanel();
+    },
+    (panel) => {
+      getRegisteredPanelImpls().applyWebtoolsDataMaskPanelPayload(panel);
+    },
+    "form.webtools-data-mask-form"
+  ),
   [WEBTOOLS_URL_PLUGIN_ID]: createSubmitPluginPanelHandler(
     () => {
       getRegisteredPanelImpls().renderWebtoolsUrlPanel();
@@ -15423,7 +15841,9 @@ window.__LL_PANEL_IMPLS__ = {
 
     const cashflowPayload = parseCashflowPanelPayload(panelPayload);
     if (cashflowPayload) {
-      void openStandaloneCashflowPanel(Boolean(cashflowPayload.reset));
+      void openStandaloneCashflowPanel(Boolean(cashflowPayload.reset), {
+        reviewMode: cashflowPayload.review === true
+      });
       return "cashflow";
     }
 
@@ -15556,6 +15976,10 @@ window.__LL_PANEL_IMPLS__ = {
     if (activePluginId !== WEBTOOLS_JSON_PLUGIN_ID && webtoolsJsonAutoTimer !== null) {
       window.clearTimeout(webtoolsJsonAutoTimer);
       webtoolsJsonAutoTimer = null;
+    }
+    if (activePluginId !== WEBTOOLS_JSON_SCHEMA_PLUGIN_ID && webtoolsJsonSchemaAutoTimer !== null) {
+      window.clearTimeout(webtoolsJsonSchemaAutoTimer);
+      webtoolsJsonSchemaAutoTimer = null;
     }
     if (activePluginId !== WEBTOOLS_DIFF_PLUGIN_ID && webtoolsDiffAutoTimer !== null) {
       window.clearTimeout(webtoolsDiffAutoTimer);
@@ -25232,6 +25656,288 @@ window.__LL_PANEL_IMPLS__ = {
     list.appendChild(panelItem);
 
     scheduleWebtoolsCronAutoParse(form, true);
+  },
+
+  applyWebtoolsJsonSchemaPanelPayload(panel: ActivePluginPanelState): void {
+    const data = toRecord(panel.data);
+    webtoolsJsonSchemaText =
+      data && typeof data.schema === "string" ? data.schema : webtoolsJsonSchemaText;
+    webtoolsJsonSchemaPayload =
+      data && typeof data.payload === "string" ? data.payload : webtoolsJsonSchemaPayload;
+    webtoolsJsonSchemaValid = null;
+    webtoolsJsonSchemaInfo = "";
+    webtoolsJsonSchemaErrors = [];
+  },
+
+  renderWebtoolsJsonSchemaPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel webtools-json-schema-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form webtools-json-schema-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeWebtoolsJsonSchemaValidate(form, { render: false });
+    });
+
+    const header = document.createElement("div");
+    header.className = "webtools-json-schema-header";
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "JSON Schema 校验";
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "左侧 Schema，右侧 Payload，自动展示错误路径。";
+    header.append(title, description);
+
+    const editors = document.createElement("div");
+    editors.className = "webtools-json-schema-editors";
+
+    const schemaWrap = document.createElement("label");
+    schemaWrap.className = "webtools-json-schema-editor";
+    const schemaLabel = document.createElement("span");
+    schemaLabel.className = "settings-row-label";
+    schemaLabel.textContent = "Schema";
+    const schemaArea = document.createElement("textarea");
+    schemaArea.className = "settings-value webtools-textarea";
+    schemaArea.name = "webtoolsJsonSchemaText";
+    schemaArea.value = webtoolsJsonSchemaText;
+    schemaArea.placeholder = "输入 JSON Schema";
+    schemaWrap.append(schemaLabel, schemaArea);
+
+    const payloadWrap = document.createElement("label");
+    payloadWrap.className = "webtools-json-schema-editor";
+    const payloadLabel = document.createElement("span");
+    payloadLabel.className = "settings-row-label";
+    payloadLabel.textContent = "Payload";
+    const payloadArea = document.createElement("textarea");
+    payloadArea.className = "settings-value webtools-textarea";
+    payloadArea.name = "webtoolsJsonSchemaPayload";
+    payloadArea.value = webtoolsJsonSchemaPayload;
+    payloadArea.placeholder = "输入待校验 JSON";
+    payloadWrap.append(payloadLabel, payloadArea);
+
+    editors.append(schemaWrap, payloadWrap);
+
+    const info = document.createElement("div");
+    info.className = "webtools-json-schema-info";
+    info.dataset.state = "idle";
+
+    const errors = document.createElement("ul");
+    errors.className = "webtools-json-schema-errors";
+    errors.hidden = true;
+
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    const validateButton = document.createElement("button");
+    validateButton.type = "submit";
+    validateButton.className = "settings-btn settings-btn-primary";
+    validateButton.textContent = "立即校验";
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary";
+    copyButton.textContent = "复制结果";
+    copyButton.addEventListener("click", () => {
+      const lines =
+        webtoolsJsonSchemaValid === true
+          ? ["校验通过"]
+          : webtoolsJsonSchemaErrors.map((error) => `${error.path} ${error.message}`);
+      void copyTextToClipboard(lines.join("\n")).then((copied) => {
+        setStatus(copied ? "已复制校验结果" : "复制失败");
+      });
+    });
+    actions.append(validateButton, copyButton);
+
+    [schemaArea, payloadArea].forEach((node) => {
+      node.addEventListener("input", () => {
+        scheduleWebtoolsJsonSchemaAutoValidate(form);
+      });
+    });
+
+    form.append(header, editors, info, errors, actions);
+    panel.append(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+
+    refreshWebtoolsJsonSchemaResultInForm(form);
+    scheduleWebtoolsJsonSchemaAutoValidate(form, true);
+  },
+
+  applyWebtoolsDataMaskPanelPayload(panel: ActivePluginPanelState): void {
+    const data = toRecord(panel.data);
+    webtoolsDataMaskInput =
+      data && typeof data.input === "string" ? data.input : webtoolsDataMaskInput;
+    webtoolsDataMaskPhone =
+      data && typeof data.maskPhone === "boolean" ? data.maskPhone : webtoolsDataMaskPhone;
+    webtoolsDataMaskEmail =
+      data && typeof data.maskEmail === "boolean" ? data.maskEmail : webtoolsDataMaskEmail;
+    webtoolsDataMaskIdCard =
+      data && typeof data.maskIdCard === "boolean" ? data.maskIdCard : webtoolsDataMaskIdCard;
+    webtoolsDataMaskFakeKind =
+      data &&
+      (data.fakeKind === "name" ||
+        data.fakeKind === "email" ||
+        data.fakeKind === "phone" ||
+        data.fakeKind === "uuid" ||
+        data.fakeKind === "company")
+        ? data.fakeKind
+        : webtoolsDataMaskFakeKind;
+    webtoolsDataMaskFakeCount =
+      data && typeof data.fakeCount === "number"
+        ? Math.max(1, Math.min(50, Math.round(data.fakeCount)))
+        : webtoolsDataMaskFakeCount;
+    webtoolsDataMaskOutput = "";
+    webtoolsDataMaskInfo = "";
+  },
+
+  renderWebtoolsDataMaskPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+
+    const panel = document.createElement("section");
+    panel.className = "settings-panel webtools-data-mask-panel";
+
+    const form = document.createElement("form");
+    form.className = "settings-form webtools-data-mask-form";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeWebtoolsDataMaskAction(form, webtoolsDataMaskMode, { render: false });
+    });
+
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "文本脱敏 / 假数据";
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent =
+      activePluginPanel?.subtitle || "日志分享前脱敏，或一键生成测试数据。";
+
+    const inputWrap = document.createElement("label");
+    inputWrap.className = "settings-row webtools-row-full";
+    const inputLabel = document.createElement("span");
+    inputLabel.className = "settings-row-label";
+    inputLabel.textContent = "输入文本";
+    const inputArea = document.createElement("textarea");
+    inputArea.className = "settings-value webtools-textarea";
+    inputArea.name = "webtoolsDataMaskInput";
+    inputArea.value = webtoolsDataMaskInput;
+    inputWrap.append(inputLabel, inputArea);
+
+    const optionsRow = document.createElement("div");
+    optionsRow.className = "webtools-password-flags webtools-data-mask-options";
+    [
+      ["webtoolsDataMaskPhone", "脱敏手机号", webtoolsDataMaskPhone],
+      ["webtoolsDataMaskEmail", "脱敏邮箱", webtoolsDataMaskEmail],
+      ["webtoolsDataMaskIdCard", "脱敏身份证", webtoolsDataMaskIdCard]
+    ].forEach(([name, label, checked]) => {
+      const wrap = document.createElement("label");
+      wrap.className = "webtools-password-flag";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = String(name);
+      input.className = "password-checkbox";
+      input.checked = Boolean(checked);
+      const text = document.createElement("span");
+      text.textContent = String(label);
+      wrap.append(input, text);
+      optionsRow.appendChild(wrap);
+    });
+
+    const fakeRow = document.createElement("div");
+    fakeRow.className = "webtools-data-mask-fake-row";
+    const kindWrap = document.createElement("label");
+    kindWrap.className = "settings-row";
+    const kindLabel = document.createElement("span");
+    kindLabel.className = "settings-row-label";
+    kindLabel.textContent = "假数据类型";
+    const kindSelect = document.createElement("select");
+    kindSelect.className = "settings-value";
+    kindSelect.name = "webtoolsDataMaskFakeKind";
+    [
+      ["uuid", "UUID"],
+      ["name", "姓名"],
+      ["email", "邮箱"],
+      ["phone", "手机号"],
+      ["company", "公司名"]
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = webtoolsDataMaskFakeKind === value;
+      kindSelect.appendChild(option);
+    });
+    kindWrap.append(kindLabel, kindSelect);
+
+    const countWrap = document.createElement("label");
+    countWrap.className = "settings-row";
+    const countLabel = document.createElement("span");
+    countLabel.className = "settings-row-label";
+    countLabel.textContent = "生成条数";
+    const countInput = document.createElement("input");
+    countInput.className = "settings-value";
+    countInput.type = "number";
+    countInput.min = "1";
+    countInput.max = "50";
+    countInput.name = "webtoolsDataMaskFakeCount";
+    countInput.value = String(webtoolsDataMaskFakeCount);
+    countWrap.append(countLabel, countInput);
+    fakeRow.append(kindWrap, countWrap);
+
+    const outputWrap = document.createElement("label");
+    outputWrap.className = "settings-row webtools-row-full";
+    const outputLabel = document.createElement("span");
+    outputLabel.className = "settings-row-label";
+    outputLabel.textContent = "输出";
+    const outputArea = document.createElement("textarea");
+    outputArea.className = "settings-value webtools-textarea";
+    outputArea.name = "webtoolsDataMaskOutput";
+    outputArea.readOnly = true;
+    outputArea.value = webtoolsDataMaskOutput;
+    outputWrap.append(outputLabel, outputArea);
+
+    const info = document.createElement("div");
+    info.className = "webtools-data-mask-info";
+    info.dataset.state = "idle";
+
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    const maskButton = document.createElement("button");
+    maskButton.type = "button";
+    maskButton.className = "settings-btn settings-btn-primary";
+    maskButton.textContent = "执行脱敏";
+    maskButton.addEventListener("click", () => {
+      webtoolsDataMaskMode = "mask";
+      void executeWebtoolsDataMaskAction(form, "mask", { render: false });
+    });
+    const generateButton = document.createElement("button");
+    generateButton.type = "button";
+    generateButton.className = "settings-btn settings-btn-secondary";
+    generateButton.textContent = "生成假数据";
+    generateButton.addEventListener("click", () => {
+      webtoolsDataMaskMode = "generate";
+      void executeWebtoolsDataMaskAction(form, "generate", { render: false });
+    });
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary";
+    copyButton.textContent = "复制输出";
+    copyButton.addEventListener("click", () => {
+      void copyTextToClipboard(outputArea.value).then((copied) => {
+        setStatus(copied ? "已复制输出" : "复制失败");
+      });
+    });
+    actions.append(maskButton, generateButton, copyButton);
+
+    form.append(title, description, inputWrap, optionsRow, fakeRow, outputWrap, info, actions);
+    panel.append(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+
+    refreshWebtoolsDataMaskResultInForm(form);
   }
 };
 })();

@@ -2117,6 +2117,8 @@ test("lightweight webtools wrappers are removed from renderer handlers", () => {
   const directPanels = [
     ["Password", "WEBTOOLS_PASSWORD_PLUGIN_ID"],
     ["Json", "WEBTOOLS_JSON_PLUGIN_ID"],
+    ["JsonSchema", "WEBTOOLS_JSON_SCHEMA_PLUGIN_ID"],
+    ["DataMask", "WEBTOOLS_DATA_MASK_PLUGIN_ID"],
     ["Url", "WEBTOOLS_URL_PLUGIN_ID"],
     ["Timestamp", "WEBTOOLS_TIMESTAMP_PLUGIN_ID"],
     ["Cron", "WEBTOOLS_CRON_PLUGIN_ID"],
@@ -4883,6 +4885,27 @@ test("launch execution skips stale refresh after panel-opening commands", () => 
     /if\s*\(\s*mode !== modeBeforeExecute \|\| currentQuery !== queryBeforeExecute\s*\)\s*{\s*return;\s*}\s*await refreshEntries\(currentQuery\);/s,
     "keepOpen refresh should be skipped after async mode/query changes"
   );
+});
+
+test("json schema and data mask panels live in plugin-panel-impls", () => {
+  const panelImplsSource = readPanelImplsSource();
+  const stylesSource = readRendererStylesSource();
+
+  assert.match(panelImplsSource, /renderWebtoolsJsonSchemaPanel\(\): void/);
+  assert.match(
+    panelImplsSource,
+    /applyWebtoolsJsonSchemaPanelPayload\(panel: ActivePluginPanelState\)/
+  );
+  assert.match(panelImplsSource, /executeWebtoolsJsonSchemaValidate/);
+  assert.match(panelImplsSource, /renderWebtoolsDataMaskPanel\(\): void/);
+  assert.match(
+    panelImplsSource,
+    /applyWebtoolsDataMaskPanelPayload\(panel: ActivePluginPanelState\)/
+  );
+  assert.match(panelImplsSource, /renderCashflowReviewPanelView/);
+  assert.match(panelImplsSource, /cashflowReviewMode/);
+  assert.match(stylesSource, /\.webtools-json-schema-editors/);
+  assert.match(stylesSource, /\.cashflow-review-timeline/);
 });
 
 test("database layers use built-in node:sqlite instead of sqlite3 native addon", () => {

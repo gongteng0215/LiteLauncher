@@ -13,6 +13,7 @@
 
 | 计划 | 文件 | 说明 |
 |------|------|------|
+| v1.0.51 之后路线图 | [post-v1.0.51-roadmap.md](./post-v1.0.51-roadmap.md) | JSON Schema / Cashflow 复盘 / 脱敏假数据 / 文档同步 |
 | 划词翻译与离线词典 | [selection-translate-dictionary.md](./selection-translate-dictionary.md) | F2 划词 + ECDICT；设计稿另见 [selection-translate-dictionary-design](../superpowers/specs/2026-07-09-selection-translate-dictionary-design.md) |
 | LiteSnap 体验三件套 | [litesnap-experience-pack.md](./litesnap-experience-pack.md) | 已随 v1.0.43 发布 |
 | 拆分翻译为独立插件 | [split-translate-plugin.md](./split-translate-plugin.md) | `webtools-translate` |

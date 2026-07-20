@@ -459,6 +459,7 @@ interface CashflowPanelPayload {
   panel: "cashflow";
   reset?: boolean;
   role?: string;
+  review?: boolean;
 }
 
 interface GenericPluginPanelPayload {

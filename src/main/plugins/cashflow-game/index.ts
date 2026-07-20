@@ -409,8 +409,8 @@ function createQueryItems(query: string): LaunchItem[] {
       {
         id: `plugin:${PLUGIN_ID}:review`,
         type: "command",
-        title: "\u73b0\u91d1\u6d41\u590d\u76d8\uff08\u5f00\u53d1\u4e2d\uff09",
-        subtitle: "\u540e\u7eed\u5c06\u652f\u6301\u51b3\u7b56\u65f6\u95f4\u7ebf\u4e0e\u53cd\u4e8b\u5b9e\u590d\u76d8",
+        title: "\u73b0\u91d1\u6d41\u590d\u76d8",
+        subtitle: "\u67e5\u770b\u51b3\u7b56\u65f6\u95f4\u7ebf\u4e0e\u672c\u5c40\u603b\u7ed3",
         target: buildTarget(ACTION_REVIEW),
         iconPath: CASHFLOW_ICON_PATH,
         keywords: ["plugin", "cashflow", "cash", "review", "\u590d\u76d8"]
@@ -618,18 +618,21 @@ async function execute(
     const reportOutcome = stateMachine.getReports();
     context.window.webContents.send(IPC_CHANNELS.openPanel, {
       panel: "cashflow",
-      reset: false
+      reset: false,
+      review: true
     });
 
     return {
       ok: true,
       keepOpen: true,
-      message:
-        "\u590d\u76d8\u6a21\u5f0f\u5f00\u53d1\u4e2d\uff0c\u540e\u7eed\u4f1a\u63d0\u4f9b\u51b3\u7b56\u65f6\u95f4\u7ebf",
+      message: "\u5df2\u8fdb\u5165\u590d\u76d8\u6a21\u5f0f\uff0c\u53ef\u67e5\u770b\u51b3\u7b56\u65f6\u95f4\u7ebf",
       data: createResponseData(
         baseOutcome.state,
         reportOutcome.reports,
-        context.selectedItem.id
+        context.selectedItem.id,
+        {
+          cashflowReviewMode: true
+        }
       )
     };
   }

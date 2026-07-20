@@ -158,6 +158,26 @@ test(
 
       await openPluginFromSearch(
         page,
+        "plugin:json-schema",
+        "JSON Schema 校验",
+        "webtools-json-schema"
+      );
+      const jsonSchemaForm = page.locator("form.webtools-json-schema-form");
+      await assertFormFitsViewport("form.webtools-json-schema-form");
+      await assertPanelFitsNarrowViewport("form.webtools-json-schema-form");
+      await jsonSchemaForm.evaluate((form) => {
+        (form as HTMLFormElement).requestSubmit();
+      });
+      await page.waitForFunction(() => {
+        const node = document.querySelector(
+          ".webtools-json-schema-info"
+        ) as HTMLDivElement | null;
+        return Boolean(node && node.textContent && node.textContent.length > 0);
+      });
+      await returnToSearch(page);
+
+      await openPluginFromSearch(
+        page,
         "plugin:crypto",
         "加密工具",
         "webtools-crypto"

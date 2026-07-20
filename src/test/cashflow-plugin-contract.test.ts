@@ -201,3 +201,25 @@ test("cashflow ai action enables ai mode and returns ai players", async () => {
   assert.ok(Array.isArray(state?.aiPlayers));
   assert.ok((state?.aiPlayers?.length ?? 0) >= 1);
 });
+
+test("cashflow review action opens review mode with timeline flag", async () => {
+  setCashflowGamePersistence(null);
+  const selectedItem = createSelectedItem();
+  const { window, sent } = createMockWindow();
+  const result = await executePluginCommand(
+    "cashflow-game?action=review",
+    window as never,
+    selectedItem
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.keepOpen, true);
+  assert.match(result.message ?? "", /复盘/);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.channel, IPC_CHANNELS.openPanel);
+  assert.equal((sent[0]?.payload as { review?: boolean }).review, true);
+
+  const data = (result.data ?? {}) as Record<string, unknown>;
+  assert.equal(data.cashflowReviewMode, true);
+  assert.ok(data.cashflowState);
+});

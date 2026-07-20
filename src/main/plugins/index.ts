@@ -19,6 +19,8 @@ import { webtoolsHttpMockPlugin } from "./webtools-http-mock";
 import { webtoolsImageBase64Plugin } from "./webtools-image-base64";
 import { webtoolsImagePromptPlugin } from "./webtools-image-prompt";
 import { webtoolsJsonPlugin } from "./webtools-json";
+import { webtoolsJsonSchemaPlugin } from "./webtools-json-schema";
+import { webtoolsDataMaskPlugin } from "./webtools-data-mask";
 import { webtoolsJwtPlugin } from "./webtools-jwt";
 import { webtoolsMarkdownPlugin } from "./webtools-markdown";
 import { webtoolsPasswordPlugin } from "./webtools-password";
@@ -41,6 +43,8 @@ const ALL_PLUGINS: LauncherPlugin[] = [
   webtoolsPasswordPlugin,
   webtoolsCronPlugin,
   webtoolsJsonPlugin,
+  webtoolsJsonSchemaPlugin,
+  webtoolsDataMaskPlugin,
   webtoolsCryptoPlugin,
   webtoolsJwtPlugin,
   webtoolsTimestampPlugin,
@@ -74,6 +78,8 @@ const DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-password",
   "webtools-cron",
   "webtools-json",
+  "webtools-json-schema",
+  "webtools-data-mask",
   "webtools-crypto",
   "webtools-jwt",
   "webtools-timestamp",
