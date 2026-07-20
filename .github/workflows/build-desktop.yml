@@ -209,7 +209,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # Always publish this tag, but only mark it Latest when it is the
+          # highest semver among existing releases. This avoids a slower older
+          # CI run (e.g. v1.0.50 finishing after v1.0.51) stealing Latest.
+          newest="$(
+            {
+              gh release list --repo "${GITHUB_REPOSITORY}" --limit 50 --json tagName -q '.[].tagName'
+              printf '%s\n' "${tag}"
+            } | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | sort -V | tail -n 1
+          )"
+          newest_tag="v${newest}"
+          if [ "${newest_tag}" = "${tag}" ]; then
+            gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+            echo "Marked ${tag} as Latest."
+          else
+            gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false
+            echo "Published ${tag} without Latest (newer release is ${newest_tag})."
+          fi
 
       - name: Upload assets to GitHub Release
         env:
