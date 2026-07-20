@@ -15,3 +15,9 @@
 
 - When the user is actively reviewing UI changes, prefer `pnpm dev` and lightweight source checks over repeated Electron smoke runs.
 - Use PowerShell command chains in the form `cmd; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; next-cmd`.
+
+## Git commits
+
+- Do **not** add `Co-authored-by: Cursor`, `Co-authored-by: Claude`, or `Made-with: Cursor` to commit messages.
+- After clone, run once: `git config core.hooksPath githooks` so `githooks/prepare-commit-msg` strips any AI attribution trailers before commit.
+- In Cursor IDE, disable **Settings → Agent → Attribution → Commit Attribution** to reduce future trailers from local agents.

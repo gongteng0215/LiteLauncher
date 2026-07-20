@@ -1,0 +1,35 @@
+#!/bin/sh
+# Remove AI attribution trailers so they do not appear in GitHub Contributors.
+MSG_FILE="$1"
+[ -f "$MSG_FILE" ] || exit 0
+
+python - "$MSG_FILE" <<'PY'
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    lines = handle.readlines()
+
+def is_ai_trailer(line: str) -> bool:
+    text = line.strip()
+    if not text:
+        return False
+    lower = text.lower()
+    if lower.startswith("co-authored-by: cursor"):
+        return True
+    if lower.startswith("co-authored-by: claude"):
+        return True
+    if lower.startswith("made-with: cursor"):
+        return True
+    return False
+
+filtered = [line for line in lines if not is_ai_trailer(line)]
+while filtered and filtered[-1].strip() == "":
+    filtered.pop()
+
+with open(path, "w", encoding="utf-8", newline="") as handle:
+    if filtered:
+        handle.writelines(filtered)
+        if not filtered[-1].endswith("\n"):
+            handle.write("\n")
+PY
