@@ -46,7 +46,7 @@ import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
 import { DictionaryStore } from "./dictionary/store";
 import { DictionaryPanelStateStore } from "./dictionary/panel-state";
-import { DictionaryPackManager } from "./dictionary/pack";
+import { DictionaryPackManager, migrateBundledDictionaryIfNeeded, DICTIONARY_BUNDLED_MIGRATED_KEY } from "./dictionary/pack";
 import { captureSelectedText } from "./selection-translate/capture";
 import { showSelectionPopup } from "./selection-translate/popup-window";
 import { SelectionTranslateSettingsStore } from "./selection-translate/settings";
@@ -63,6 +63,12 @@ import {
 import { initWebtoolsCronStore } from "./plugins/webtools-cron/store";
 import { filterItemsByPathRules } from "./path-rule-filter";
 import { normalizePinnedItemIds, validatePinnedItemRequest } from "./pinning";
+import {
+  isCustomPinId,
+  parsePinnedCustomItems,
+  resolvePinItemForPath,
+  serializePinnedCustomItems
+} from "./custom-pins";
 import {
   ClipboardWorkbenchService,
   setClipboardWorkbenchService
@@ -298,6 +304,7 @@ const OLDER_DEFAULT_VISIBLE_PLUGIN_IDS = [
   "webtools-url-parse"
 ] as const;
 const PINNED_ITEMS_KEY = "pinnedItemIds";
+const PINNED_CUSTOM_ITEMS_KEY = "pinnedCustomItems";
 const PINNED_ITEMS_MAX = 200;
 const VISIBLE_PLUGIN_IDS_MAX = 50;
 
@@ -327,6 +334,7 @@ let catalogScanConfig: CatalogScanConfig = {
 };
 let visiblePluginIds: string[] = getDefaultVisiblePluginIds();
 let pinnedItemIds: string[] = [];
+let pinnedCustomItems = new Map<string, LaunchItem>();
 let processErrorHooksRegistered = false;
 let devRendererWatcher: fs.FSWatcher | null = null;
 let devAssetsWatcher: fs.FSWatcher | null = null;
@@ -1505,6 +1513,38 @@ function areStringArraysSetEqual(left: string[], right: string[]): boolean {
   return true;
 }
 
+async function loadPinnedCustomItemsMap(db: LiteDatabase): Promise<Map<string, LaunchItem>> {
+  const raw = await db.getSetting(PINNED_CUSTOM_ITEMS_KEY);
+  if (!raw) {
+    return new Map();
+  }
+
+  try {
+    return parsePinnedCustomItems(JSON.parse(raw));
+  } catch {
+    return new Map();
+  }
+}
+
+async function persistPinnedCustomItems(db: LiteDatabase): Promise<void> {
+  await db.setSetting(
+    PINNED_CUSTOM_ITEMS_KEY,
+    JSON.stringify(serializePinnedCustomItems(pinnedCustomItems))
+  );
+}
+
+function isResolvablePinnedItemId(
+  itemId: string,
+  catalogIds: ReadonlySet<string>,
+  dynamicIds: ReadonlySet<string>
+): boolean {
+  return (
+    catalogIds.has(itemId) ||
+    dynamicIds.has(itemId) ||
+    pinnedCustomItems.has(itemId)
+  );
+}
+
 async function loadPinnedItemIds(
   db: LiteDatabase,
   catalogIds: Set<string>
@@ -1528,7 +1568,7 @@ async function loadPinnedItemIds(
 
   return normalizePinnedItemIds(
     parsed,
-    (itemId) => catalogIds.has(itemId) || resolvableDynamicIds.has(itemId),
+    (itemId) => isResolvablePinnedItemId(itemId, catalogIds, resolvableDynamicIds),
     PINNED_ITEMS_MAX
   );
 }
@@ -1552,7 +1592,7 @@ async function persistCatalogSnapshot(
   );
   const normalizedPinned = normalizePinnedItemIds(
     pinnedItemIds,
-    (itemId) => catalogIdSet.has(itemId) || resolvableDynamicIds.has(itemId),
+    (itemId) => isResolvablePinnedItemId(itemId, catalogIdSet, resolvableDynamicIds),
     PINNED_ITEMS_MAX
   );
   const pinnedChanged = !areStringArraysEqual(normalizedPinned, pinnedItemIds);
@@ -1770,7 +1810,10 @@ async function getPinnedItemsFromCatalog(limit: number): Promise<LaunchItem[]> {
   const picked: LaunchItem[] = [];
 
   for (const itemId of pinnedItemIds) {
-    const item = byId.get(itemId) ?? (await findDynamicPinCandidate(itemId));
+    const item =
+      byId.get(itemId) ??
+      pinnedCustomItems.get(itemId) ??
+      (await findDynamicPinCandidate(itemId));
     if (!item) {
       continue;
     }
@@ -1943,6 +1986,7 @@ async function setItemPinned(
   const hydratedDynamicItem =
     hydratedRequestedItem ??
     stableRequestedItem ??
+    pinnedCustomItems.get(normalizedRequestedId) ??
     (normalizedRequestedId && !catalogIdSet.has(normalizedRequestedId)
       ? await findDynamicPinCandidate(normalizedRequestedId)
       : undefined);
@@ -1973,14 +2017,24 @@ async function setItemPinned(
     stableRequestedItem?.id ??
     persistedCatalogCandidate?.id ??
     validation.normalizedId;
+  const customHydratedItem =
+    validation.hydratedItem && isCustomPinId(validation.hydratedItem.id)
+      ? validation.hydratedItem
+      : undefined;
   try {
     const exists = pinnedItemIds.includes(normalizedId);
     if (pinned) {
+      if (customHydratedItem) {
+        pinnedCustomItems.set(customHydratedItem.id, customHydratedItem);
+      }
       if (!exists) {
         pinnedItemIds = [normalizedId, ...pinnedItemIds].slice(0, PINNED_ITEMS_MAX);
       }
     } else if (exists) {
       pinnedItemIds = pinnedItemIds.filter((id) => id !== normalizedId);
+      if (isCustomPinId(normalizedId)) {
+        pinnedCustomItems.delete(normalizedId);
+      }
     }
 
     const resolvableDynamicIds = await computeResolvableDynamicPinIds(
@@ -1989,11 +2043,14 @@ async function setItemPinned(
     );
     pinnedItemIds = normalizePinnedItemIds(
       pinnedItemIds,
-      (itemId) => catalogIdSet.has(itemId) || resolvableDynamicIds.has(itemId),
+      (itemId) => isResolvablePinnedItemId(itemId, catalogIdSet, resolvableDynamicIds),
       PINNED_ITEMS_MAX
     );
     const persisted = pinnedItemIds.includes(normalizedId);
     if (pinned && !persisted) {
+      if (customHydratedItem) {
+        await persistPinnedCustomItems(db);
+      }
       await persistPinnedItemIds(db);
       return {
         ok: false,
@@ -2002,6 +2059,9 @@ async function setItemPinned(
       };
     }
 
+    if (customHydratedItem) {
+      await persistPinnedCustomItems(db);
+    }
     await persistPinnedItemIds(db);
     return {
       ok: true,
@@ -2021,6 +2081,22 @@ async function setItemPinned(
       reason: "persist-failed"
     };
   }
+}
+
+async function addCustomPinnedPath(
+  db: LiteDatabase,
+  rawPath: string
+): Promise<PinToggleResult> {
+  const resolved = resolvePinItemForPath(rawPath, catalog);
+  if (!resolved) {
+    return {
+      ok: false,
+      pinned: false,
+      reason: "invalid-pin-path"
+    };
+  }
+
+  return setItemPinned(db, resolved.id, true, resolved);
 }
 
 async function bootstrap(): Promise<void> {
@@ -2053,6 +2129,22 @@ async function bootstrap(): Promise<void> {
   const dictionaryStore = new DictionaryStore();
   const dictionaryPanelStateStore = new DictionaryPanelStateStore(activeDatabase);
   const dictionaryPackManager = new DictionaryPackManager();
+  const dictionaryMigration = await migrateBundledDictionaryIfNeeded(
+    dictionaryStore.listDbCandidates(),
+    {
+      readBundledMigrated: async () => {
+        const raw = await activeDatabase.getSetting(DICTIONARY_BUNDLED_MIGRATED_KEY);
+        return raw === "1" || raw === "true";
+      },
+      markBundledMigrated: async () => {
+        await activeDatabase.setSetting(DICTIONARY_BUNDLED_MIGRATED_KEY, "1");
+      }
+    }
+  );
+  if (dictionaryMigration.migrated) {
+    dictionaryStore.reopen();
+    console.info("[dictionary]", dictionaryMigration.message ?? "bundled dictionary migrated");
+  }
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
@@ -2082,6 +2174,7 @@ async function bootstrap(): Promise<void> {
   setCashflowGamePersistence(new CashflowDatabasePersistence(activeDatabase));
   const liteSnapSettings = await liteSnapSettingsStore.getSettings();
   const catalogIdSet = new Set(catalog.map((item) => item.id));
+  pinnedCustomItems = await loadPinnedCustomItemsMap(activeDatabase);
   pinnedItemIds = await loadPinnedItemIds(activeDatabase, catalogIdSet);
   if (pinnedItemIds.length > 0) {
     await persistPinnedItemIds(activeDatabase);
@@ -2360,10 +2453,13 @@ async function bootstrap(): Promise<void> {
       const translated = await translateTextForTool({ text: sourceText });
       if (!translated.ok) {
         const dictionaryReady = dictionaryStore.isReady();
+        const packStatus = dictionaryPackManager.getStatus(dictionaryStore.listDbCandidates());
         const offlineHint = !dictionaryReady
           ? "（离线词典未加载，请确认安装包完整）"
           : isDictionaryLookupText(sourceText)
-            ? "（离线词典未收录该词）"
+            ? packStatus.tier === "seed"
+              ? "（离线词典未收录该词，当前为种子词库，可在词典面板下载完整词库）"
+              : "（离线词典未收录该词）"
             : "";
         await showSelectionPopup(
           {
@@ -2729,8 +2825,8 @@ async function bootstrap(): Promise<void> {
         dictionaryPackProvider: {
           getStatus: async () =>
             dictionaryPackManager.getStatus(dictionaryStore.listDbCandidates()),
-          downloadPack: async () => {
-            const result = await dictionaryPackManager.downloadPack();
+          downloadPack: async (onProgress) => {
+            const result = await dictionaryPackManager.downloadPack(onProgress);
             if (result.ok) {
               dictionaryStore.reopen();
             }
@@ -2753,7 +2849,8 @@ async function bootstrap(): Promise<void> {
     },
     pinProvider: {
       setItemPinned: (itemId, pinned, item) =>
-        setItemPinned(activeDatabase, itemId, pinned, item)
+        setItemPinned(activeDatabase, itemId, pinned, item),
+      addCustomPinnedPath: (rawPath) => addCustomPinnedPath(activeDatabase, rawPath)
     },
     onItemUsed: async (itemId) => {
       await database?.recordUsage(itemId);

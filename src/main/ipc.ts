@@ -173,13 +173,10 @@ type DictionaryProvider = {
 };
 
 type DictionaryPackProvider = {
-  getStatus: () => Promise<{
-    hasFts: boolean;
-    usingUserPack: boolean;
-    packPath: string | null;
-    downloadAvailable: boolean;
-  }>;
-  downloadPack: () => Promise<{
+  getStatus: () => Promise<import("../shared/dictionary").DictionaryPackStatus>;
+  downloadPack: (
+    onProgress?: (progress: import("../shared/dictionary").DictionaryPackDownloadProgress) => void
+  ) => Promise<{
     ok: boolean;
     message: string;
     packPath?: string;
@@ -216,6 +213,7 @@ type PinProvider = {
     pinned: boolean,
     item?: LaunchItem
   ) => Promise<PinToggleResult>;
+  addCustomPinnedPath: (rawPath: string) => Promise<PinToggleResult>;
 };
 
 type IpcOptions = {
@@ -289,6 +287,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.checkForAppUpdates,
   IPC_CHANNELS.installAppUpdateNow,
   IPC_CHANNELS.setItemPinned,
+  IPC_CHANNELS.addCustomPinnedPath,
   IPC_CHANNELS.search,
   IPC_CHANNELS.resolveCommandQuery,
   IPC_CHANNELS.execute,
@@ -1748,7 +1747,11 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.downloadDictionaryPack, () => {
-    return options.dictionaryPackProvider.downloadPack();
+    return options.dictionaryPackProvider.downloadPack((progress) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.dictionaryPackDownloadProgress, progress);
+      }
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.getSelectionTranslateSettings, () => {
@@ -1896,6 +1899,11 @@ export function registerIpcHandlers(
       return options.pinProvider.setItemPinned(itemId, pinned, item);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.addCustomPinnedPath, async (_, rawPathInput: unknown) => {
+    const rawPath = typeof rawPathInput === "string" ? rawPathInput : "";
+    return options.pinProvider.addCustomPinnedPath(rawPath);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.search,

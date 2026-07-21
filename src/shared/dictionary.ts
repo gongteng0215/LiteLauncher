@@ -307,3 +307,33 @@ export function formatDictionaryExchangeText(exchange: string): string {
     .join(" · ");
 }
 
+export type DictionaryPackTier = "seed" | "full" | "unknown";
+
+export const DICTIONARY_SEED_ENTRY_MAX = 10_000;
+export const DICTIONARY_FULL_ENTRY_MIN = 100_000;
+export const DICTIONARY_BUNDLED_MIGRATION_MIN = 50_000;
+
+export interface DictionaryPackStatus {
+  hasFts: boolean;
+  usingUserPack: boolean;
+  packPath: string | null;
+  downloadAvailable: boolean;
+  entryCount: number;
+  tier: DictionaryPackTier;
+}
+
+export interface DictionaryPackDownloadProgress {
+  received: number;
+  total: number | null;
+}
+
+export function resolveDictionaryPackTier(entryCount: number): DictionaryPackTier {
+  if (entryCount >= DICTIONARY_FULL_ENTRY_MIN) {
+    return "full";
+  }
+  if (entryCount > 0 && entryCount < DICTIONARY_SEED_ENTRY_MAX) {
+    return "seed";
+  }
+  return "unknown";
+}
+

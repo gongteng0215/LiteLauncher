@@ -34,7 +34,9 @@ test("dictionary plugin is registered with IPC lookup and renderer panel", () =>
   assert.match(panelImplsSource, /exportDictionaryFavoritesCsv|导出收藏 CSV/);
   assert.match(panelImplsSource, /setDictionaryTtsEnabled|dictionaryTtsEnabled/);
   assert.match(panelImplsSource, /speakDictionaryEntry/);
-  assert.match(panelImplsSource, /downloadDictionaryPack|下载完整索引/);
+  assert.match(panelImplsSource, /downloadDictionaryPack|下载完整词库/);
+  assert.match(panelImplsSource, /dictionary-pack-progress/);
+  assert.match(panelImplsSource, /buildDictionaryPackStatusText/);
   assert.match(panelImplsSource, /exchange:\s*item\.exchange/);
   assert.match(panelImplsSource, /词形变化/);
   assert.match(sharedSource, /buildDictionaryFavoritesCsv/);

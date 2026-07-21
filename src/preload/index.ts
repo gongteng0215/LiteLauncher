@@ -254,12 +254,7 @@ const api = {
   ): Promise<import("../shared/dictionary").DictionaryPanelState> {
     return ipcRenderer.invoke(IPC_CHANNELS.setDictionaryTtsEnabled, enabled);
   },
-  getDictionaryPackStatus(): Promise<{
-    hasFts: boolean;
-    usingUserPack: boolean;
-    packPath: string | null;
-    downloadAvailable: boolean;
-  }> {
+  getDictionaryPackStatus(): Promise<import("../shared/dictionary").DictionaryPackStatus> {
     return ipcRenderer.invoke(IPC_CHANNELS.getDictionaryPackStatus);
   },
   downloadDictionaryPack(): Promise<{
@@ -268,6 +263,26 @@ const api = {
     packPath?: string;
   }> {
     return ipcRenderer.invoke(IPC_CHANNELS.downloadDictionaryPack);
+  },
+  onDictionaryPackDownloadProgress(
+    handler: (progress: import("../shared/dictionary").DictionaryPackDownloadProgress) => void
+  ): Cleanup {
+    return on(IPC_CHANNELS.dictionaryPackDownloadProgress, (progress) => {
+      if (
+        progress &&
+        typeof progress === "object" &&
+        typeof (progress as { received?: unknown }).received === "number"
+      ) {
+        const record = progress as { received: number; total?: unknown };
+        handler({
+          received: record.received,
+          total:
+            typeof record.total === "number" && Number.isFinite(record.total)
+              ? record.total
+              : null
+        });
+      }
+    });
   },
   getSelectionTranslateSettings(): Promise<
     import("../shared/selection-translate").SelectionTranslateSettings
@@ -336,6 +351,9 @@ const api = {
     item?: LaunchItem
   ): Promise<PinToggleResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.setItemPinned, itemId, pinned, item);
+  },
+  addCustomPinnedPath(rawPath: string): Promise<PinToggleResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.addCustomPinnedPath, rawPath);
   },
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.search, query, options);

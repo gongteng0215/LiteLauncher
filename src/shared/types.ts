@@ -124,6 +124,7 @@ export interface AppUpdaterStatus {
 export type PinToggleFailureReason =
   | "empty-item-id"
   | "missing-catalog-item"
+  | "invalid-pin-path"
   | "persist-failed";
 
 export interface PinToggleSuccessResult {

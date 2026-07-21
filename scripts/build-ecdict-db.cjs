@@ -14,10 +14,14 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { DatabaseSync } = require("node:sqlite");
+
+const {
+  loadRowsFromCsv,
+  writeDatabase,
+  resolveDefaultCsvPath
+} = require("./ecdict-build-lib.cjs");
 
 const OUT_DB = path.join("src", "assets", "ecdict.db");
-const DEFAULT_CSV = path.join("scripts", "vendor", "ecdict.csv");
 
 /** @type {Array<[string, string, string, string, string, number, number, string, string]>} */
 const SEED_ROWS = [
@@ -173,148 +177,8 @@ function parseArgs(argv) {
     csvPath:
       csvIndex >= 0 && argv[csvIndex + 1]
         ? path.resolve(argv[csvIndex + 1])
-        : fs.existsSync(DEFAULT_CSV)
-          ? path.resolve(DEFAULT_CSV)
-          : null
+        : resolveDefaultCsvPath()
   };
-}
-
-function parseCsvLine(line) {
-  const cells = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === "," && !inQuotes) {
-      cells.push(current);
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  cells.push(current);
-  return cells;
-}
-
-const SINGLE_WORD_RE = /^[a-z][a-z'-]*$/;
-const PHRASE_RE = /^[a-z][a-z' -]*$/;
-
-/** Keep English definition only for common words to control DB size. */
-function isCommonEnoughForDefinition(tag, collins, oxford, frq) {
-  const tagText = String(tag || "").toLowerCase();
-  if (/(zk|gk|cet4|cet6|ky|toefl|ielts|gre|oxford)/.test(tagText)) {
-    return true;
-  }
-  if (Number(collins) > 0 || Number(oxford) > 0) {
-    return true;
-  }
-  return Number(frq) > 0 && Number(frq) <= 30000;
-}
-
-function loadRowsFromCsv(csvPath) {
-  const text = fs.readFileSync(csvPath, "utf8");
-  const lines = text.split(/\r?\n/);
-  const rows = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!line || i === 0 && line.toLowerCase().startsWith("word,")) {
-      continue;
-    }
-    const cells = parseCsvLine(line);
-    if (cells.length < 10) {
-      continue;
-    }
-    const [
-      word,
-      phonetic,
-      definition,
-      translation,
-      pos,
-      collins,
-      oxford,
-      tag,
-      bnc,
-      frq,
-      exchange
-    ] = cells;
-    const normalized = String(word || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ");
-    const isSingle = SINGLE_WORD_RE.test(normalized);
-    const isPhrase = !isSingle && normalized.includes(" ") && PHRASE_RE.test(normalized);
-    if (!isSingle && !isPhrase) {
-      continue;
-    }
-    const translationText = String(translation || "").trim();
-    if (!translationText) {
-      continue;
-    }
-    const definitionText = isCommonEnoughForDefinition(tag, collins, oxford, frq)
-      ? String(definition || "").trim()
-      : "";
-    rows.push([
-      normalized,
-      String(phonetic || "").trim(),
-      definitionText,
-      translationText,
-      String(pos || "").trim(),
-      Number(collins) || 0,
-      Number(oxford) || 0,
-      String(tag || "").trim(),
-      String(exchange || "").trim()
-    ]);
-  }
-  return rows;
-}
-
-function writeDatabase(rows) {
-  fs.mkdirSync(path.dirname(OUT_DB), { recursive: true });
-  if (fs.existsSync(OUT_DB)) {
-    fs.unlinkSync(OUT_DB);
-  }
-
-  const db = new DatabaseSync(OUT_DB);
-  db.exec(`
-    PRAGMA journal_mode = OFF;
-    CREATE TABLE entries (
-      word TEXT PRIMARY KEY,
-      phonetic TEXT,
-      definition TEXT,
-      translation TEXT,
-      pos TEXT,
-      collins INTEGER,
-      oxford INTEGER,
-      tag TEXT,
-      exchange TEXT
-    );
-    CREATE INDEX idx_entries_word ON entries(word);
-  `);
-
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO entries
-      (word, phonetic, definition, translation, pos, collins, oxford, tag, exchange)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  db.exec("BEGIN");
-  for (const row of rows) {
-    insert.run(...row);
-  }
-  db.exec("COMMIT");
-  // FTS reverse-lookup index is applied at package/build time via
-  // scripts/patch-ecdict-fts.cjs so the committed src/assets/ecdict.db
-  // stays under GitHub's 100MB limit (~88MB).
-  db.close();
 }
 
 function main() {
@@ -343,7 +207,7 @@ function main() {
     source = "embedded-seed";
   }
 
-  writeDatabase(rows);
+  writeDatabase(OUT_DB, rows);
   const sizeKb = Math.round(fs.statSync(OUT_DB).size / 1024);
   console.log(
     `[build-ecdict-db] wrote ${OUT_DB} (${rows.length} entries, ${sizeKb} KB) from ${source}`

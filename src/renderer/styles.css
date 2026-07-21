@@ -289,6 +289,70 @@ body {
   cursor: default;
 }
 
+.section-add-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.section-add-btn {
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(233, 242, 255, 0.92);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.section-add-btn:hover {
+  background: rgba(125, 211, 252, 0.22);
+}
+
+.custom-pinned-settings-list {
+  margin-top: 10px;
+}
+
+.custom-pinned-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-pinned-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.custom-pinned-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.custom-pinned-title {
+  font-size: 13px;
+  color: rgba(233, 242, 255, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-pinned-subtitle {
+  margin-top: 2px;
+  font-size: 11px;
+  color: rgba(233, 242, 255, 0.62);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .section-page-info {
   font-size: 11px;
   color: rgba(233, 242, 255, 0.75);
@@ -969,6 +1033,22 @@ body {
   border: 1px dashed rgba(125, 211, 252, 0.18);
   color: rgba(233, 242, 255, 0.55);
   font-size: 12px;
+}
+
+.dictionary-pack-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.dictionary-pack-progress__bar {
+  width: 100%;
+  height: 8px;
+}
+
+.dictionary-pack-progress__text {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.72);
 }
 
 .dictionary-word-row {

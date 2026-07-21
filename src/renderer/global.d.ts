@@ -416,17 +416,15 @@ declare global {
       setDictionaryTtsEnabled(
         enabled: boolean
       ): Promise<import("../shared/dictionary").DictionaryPanelState>;
-      getDictionaryPackStatus(): Promise<{
-        hasFts: boolean;
-        usingUserPack: boolean;
-        packPath: string | null;
-        downloadAvailable: boolean;
-      }>;
+      getDictionaryPackStatus(): Promise<import("../shared/dictionary").DictionaryPackStatus>;
       downloadDictionaryPack(): Promise<{
         ok: boolean;
         message: string;
         packPath?: string;
       }>;
+      onDictionaryPackDownloadProgress(
+        handler: (progress: import("../shared/dictionary").DictionaryPackDownloadProgress) => void
+      ): () => void;
       getSelectionTranslateSettings(): Promise<
         import("../shared/selection-translate").SelectionTranslateSettings
       >;
@@ -459,6 +457,7 @@ declare global {
         pinned: boolean,
         item?: LaunchItem
       ): Promise<PinToggleResult>;
+      addCustomPinnedPath(rawPath: string): Promise<PinToggleResult>;
       search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
       resolveCommandQuery(query: string): Promise<LaunchItem[]>;
       execute(item: LaunchItem): Promise<ExecuteResult>;

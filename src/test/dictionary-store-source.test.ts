@@ -99,12 +99,15 @@ test("DictionaryStore supports lazy open, lookup, and stem fallback", () => {
 
 test("ecdict.db asset and build script exist", () => {
   const buildScript = readSource("scripts/build-ecdict-db.cjs");
-  assert.match(buildScript, /CREATE TABLE entries/);
+  const seedScript = readSource("scripts/build-ecdict-seed.cjs");
+  assert.match(buildScript, /CREATE TABLE entries|ecdict-build-lib/);
   assert.match(buildScript, /src[/\\]assets[/\\]ecdict\.db|OUT_DB/);
+  assert.match(seedScript, /seedOnly:\s*true/);
+  assert.match(seedScript, /build-ecdict-seed/);
   assert.doesNotMatch(
     buildScript,
     /entries_translation_fts/,
-    "committed ecdict.db build should stay under GitHub 100MB without FTS"
+    "committed ecdict.db build should stay without FTS"
   );
   const patchScript = readSource("scripts/patch-ecdict-fts.cjs");
   assert.match(patchScript, /entries_translation_fts/);
@@ -115,20 +118,43 @@ test("ecdict.db asset and build script exist", () => {
   const packBuild = readSource("scripts/build-dictionary-pack.cjs");
   assert.match(packBuild, /ecdict-fts\.db/);
   assert.match(packBuild, /patchEcdictFts/);
+  assert.match(packBuild, /\.sha256/);
   const slimPrepare = readSource("scripts/prepare-slim-dictionary-dist.cjs");
   assert.match(slimPrepare, /"src",\s*"assets",\s*"ecdict\.db"/);
+  assert.match(slimPrepare, /MAX_SEED_DB_BYTES|seed/);
+  const dbPath = path.join(process.cwd(), "src/assets/ecdict.db");
+  assert.ok(fs.existsSync(dbPath), "src/assets/ecdict.db should be generated");
+  const dbSize = fs.statSync(dbPath).size;
   assert.ok(
-    fs.existsSync(path.join(process.cwd(), "src/assets/ecdict.db")),
-    "src/assets/ecdict.db should be generated"
+    dbSize < 5 * 1024 * 1024,
+    `seed ecdict.db should stay under 5MB (got ${Math.round(dbSize / 1024)} KB)`
   );
 });
 
-test("dictionary pack manager prefers userData FTS pack", () => {
+test("dictionary pack manager supports tiered download and migration", () => {
   const packSource = readSource("src/main/dictionary/pack.ts");
   const storeSource = readSource("src/main/dictionary/store.ts");
+  const channelsSource = readSource("src/shared/channels.ts");
+  const preloadSource = readSource("src/preload/index.ts");
+  const ipcSource = readSource("src/main/ipc.ts");
+  const mainSource = readSource("src/main/index.ts");
+  const sharedSource = readSource("src/shared/dictionary.ts");
+
   assert.match(packSource, /resolveUserDictionaryPackPath/);
   assert.match(packSource, /clearDictionaryFtsProbeCache/);
   assert.match(packSource, /ecdict-fts\.db/);
+  assert.match(packSource, /countDictionaryEntries/);
+  assert.match(packSource, /migrateBundledDictionaryIfNeeded/);
+  assert.match(packSource, /verifyDictionaryPackSha256|sha256/);
+  assert.match(packSource, /entryCount/);
+  assert.match(packSource, /tier:/);
   assert.match(storeSource, /resolveUserDictionaryPackPath/);
   assert.match(storeSource, /reopen\(\)/);
+  assert.match(channelsSource, /dictionaryPackDownloadProgress/);
+  assert.match(preloadSource, /onDictionaryPackDownloadProgress/);
+  assert.match(ipcSource, /dictionaryPackDownloadProgress/);
+  assert.match(mainSource, /migrateBundledDictionaryIfNeeded/);
+  assert.match(mainSource, /种子词库/);
+  assert.match(sharedSource, /resolveDictionaryPackTier/);
+  assert.match(sharedSource, /DictionaryPackStatus/);
 });

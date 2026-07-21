@@ -375,6 +375,7 @@ interface LauncherApi {
     pinned: boolean,
     item?: LaunchItem
   ): Promise<PinToggleResult>;
+  addCustomPinnedPath(rawPath: string): Promise<PinToggleResult>;
   search(query: string, options?: SearchRequestOptions): Promise<LaunchItem[]>;
   resolveCommandQuery(query: string): Promise<LaunchItem[]>;
   execute(item: LaunchItem): Promise<ExecuteResult>;
@@ -491,17 +492,15 @@ interface LauncherApi {
     }>;
     ttsEnabled?: boolean;
   }>;
-  getDictionaryPackStatus?(): Promise<{
-    hasFts: boolean;
-    usingUserPack: boolean;
-    packPath: string | null;
-    downloadAvailable: boolean;
-  }>;
+  getDictionaryPackStatus?(): Promise<import("../shared/dictionary").DictionaryPackStatus>;
   downloadDictionaryPack?(): Promise<{
     ok: boolean;
     message: string;
     packPath?: string;
   }>;
+  onDictionaryPackDownloadProgress?(
+    handler: (progress: import("../shared/dictionary").DictionaryPackDownloadProgress) => void
+  ): () => void;
   recordDictionaryLookup?(input: {
     query: string;
     entry?: {
@@ -1258,6 +1257,8 @@ function formatPinErrorReasonText(reason: string | undefined): string {
       return "\u65e0\u6548\u9879\u76ee";
     case "missing-catalog-item":
       return "\u5f53\u524d\u7ed3\u679c\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u641c\u7d22";
+    case "invalid-pin-path":
+      return "\u8def\u5f84\u65e0\u6548\u6216\u4e0d\u5b58\u5728";
     case "persist-failed":
       return "\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5";
     default:
@@ -1607,6 +1608,8 @@ function formatPinnedToggleStatus(
       return `${prefix}失败：无效项目`;
     case "missing-catalog-item":
       return `${prefix}失败：当前结果已过期，请重新搜索`;
+    case "invalid-pin-path":
+      return `${prefix}失败：路径无效或不存在`;
     case "persist-failed":
       return `${prefix}失败：保存失败，请重试`;
     default:
@@ -2579,6 +2582,115 @@ function isLaunchEntryPinned(index: number, item: LaunchItem): boolean {
   return Boolean(pinnedSection?.indexes.includes(index));
 }
 
+function getPathBaseName(filePath: string): string {
+  const normalized = filePath.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+async function addCustomPinnedFromPicker(kind: "file" | "folder"): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法添加置顶");
+    return;
+  }
+
+  const selected =
+    kind === "file" ? await launcher.pickFilePath() : await launcher.pickDirectoryPath();
+  if (!selected) {
+    return;
+  }
+
+  const result = await launcher.addCustomPinnedPath(selected);
+  const title = getPathBaseName(selected);
+  if (!result.ok) {
+    setStatus(formatPinnedToggleStatus(title, result));
+    return;
+  }
+
+  setStatus(`已添加置顶：${title}`);
+  await refreshEntries(currentQuery);
+}
+
+async function removeCustomPinnedItem(item: LaunchItem): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法取消置顶");
+    return;
+  }
+
+  const result = await launcher.setItemPinned(item.id, false, item);
+  if (!result.ok) {
+    setStatus(formatPinnedToggleStatus(item.title, result));
+    return;
+  }
+
+  setStatus(`已取消置顶：${item.title}`);
+  await refreshEntries(currentQuery);
+}
+
+function createCustomPinnedSettingsList(container: HTMLElement): void {
+  container.replaceChildren();
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    const hint = document.createElement("p");
+    hint.className = "settings-row-hint";
+    hint.textContent = "桥接层未加载，无法读取自定义置顶。";
+    container.appendChild(hint);
+    return;
+  }
+
+  void launcher.getPinnedItems().then((items) => {
+    const customItems = items.filter((item) => item.id.startsWith("pin:custom:"));
+    container.replaceChildren();
+
+    if (customItems.length === 0) {
+      const hint = document.createElement("p");
+      hint.className = "settings-row-hint";
+      hint.textContent = "暂无自定义置顶。可添加不在扫描目录内的程序、文件或文件夹。";
+      container.appendChild(hint);
+      return;
+    }
+
+    const list = document.createElement("div");
+    list.className = "custom-pinned-list";
+
+    for (const item of customItems) {
+      const row = document.createElement("div");
+      row.className = "custom-pinned-item";
+
+      const meta = document.createElement("div");
+      meta.className = "custom-pinned-meta";
+
+      const title = document.createElement("div");
+      title.className = "custom-pinned-title";
+      title.textContent = item.title;
+
+      const subtitle = document.createElement("div");
+      subtitle.className = "custom-pinned-subtitle";
+      subtitle.textContent = item.subtitle;
+
+      meta.append(title, subtitle);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "settings-btn settings-btn-secondary";
+      removeButton.textContent = "移除";
+      removeButton.addEventListener("click", () => {
+        void removeCustomPinnedItem(item).then(() => {
+          createCustomPinnedSettingsList(container);
+        });
+      });
+
+      row.append(meta, removeButton);
+      list.appendChild(row);
+    }
+
+    container.appendChild(list);
+  });
+}
+
 async function togglePinned(index: number, expectedItemId?: string): Promise<void> {
   if (mode !== "search") {
     return;
@@ -2985,6 +3097,36 @@ function renderSearchSections(): void {
       title.textContent = `${section.title} (${section.indexes.length}/${total})`;
     }
     heading.appendChild(title);
+
+    if (section.id === "pinned" && currentQuery.trim().length === 0) {
+      const addActions = document.createElement("div");
+      addActions.className = "section-add-actions";
+
+      const addFileButton = document.createElement("button");
+      addFileButton.type = "button";
+      addFileButton.className = "section-add-btn";
+      addFileButton.textContent = "添加文件";
+      addFileButton.title = "选择文件并加入置顶";
+      addFileButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void addCustomPinnedFromPicker("file");
+      });
+
+      const addFolderButton = document.createElement("button");
+      addFolderButton.type = "button";
+      addFolderButton.className = "section-add-btn";
+      addFolderButton.textContent = "添加文件夹";
+      addFolderButton.title = "选择文件夹并加入置顶";
+      addFolderButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void addCustomPinnedFromPicker("folder");
+      });
+
+      addActions.append(addFileButton, addFolderButton);
+      heading.appendChild(addActions);
+    }
 
     if ((section.id === "search" || section.id === "plugin") && section.pageCount > 1) {
       const pager = document.createElement("div");
@@ -3495,6 +3637,42 @@ function renderSettingsPanel(): void {
   scanActions.appendChild(rebuildButton);
   scanGroup.section.appendChild(scanActions);
   form.appendChild(scanGroup.section);
+
+  const pinnedGroup = createGroup(
+    "自定义置顶",
+    "手动选择文件或文件夹加入首页置顶区，适合不在扫描目录内的程序与工具。"
+  );
+  const pinnedActions = document.createElement("div");
+  pinnedActions.className = "settings-inline-actions";
+
+  const addPinnedFileButton = document.createElement("button");
+  addPinnedFileButton.type = "button";
+  addPinnedFileButton.className = "settings-btn settings-btn-secondary";
+  addPinnedFileButton.textContent = "添加文件";
+  addPinnedFileButton.addEventListener("click", () => {
+    void addCustomPinnedFromPicker("file").then(() => {
+      createCustomPinnedSettingsList(customPinnedList);
+    });
+  });
+
+  const addPinnedFolderButton = document.createElement("button");
+  addPinnedFolderButton.type = "button";
+  addPinnedFolderButton.className = "settings-btn settings-btn-secondary";
+  addPinnedFolderButton.textContent = "添加文件夹";
+  addPinnedFolderButton.addEventListener("click", () => {
+    void addCustomPinnedFromPicker("folder").then(() => {
+      createCustomPinnedSettingsList(customPinnedList);
+    });
+  });
+
+  pinnedActions.append(addPinnedFileButton, addPinnedFolderButton);
+  pinnedGroup.body.appendChild(pinnedActions);
+
+  const customPinnedList = document.createElement("div");
+  customPinnedList.className = "custom-pinned-settings-list";
+  pinnedGroup.body.appendChild(customPinnedList);
+  createCustomPinnedSettingsList(customPinnedList);
+  form.appendChild(pinnedGroup.section);
 
   const pluginGroup = createGroup(
     "插件可见性",
@@ -4155,7 +4333,7 @@ async function refreshEntries(query: string): Promise<void> {
             "\u7f6e\u9876",
             pinnedItems,
             getAdaptiveSectionDisplayLimit(pinnedItems),
-            "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
+            "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u70b9\u300c\u6dfb\u52a0\u6587\u4ef6/\u6587\u4ef6\u5939\u300d\u6216\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
           );
           addSearchSection(
             "plugin",
@@ -4219,7 +4397,7 @@ async function refreshEntries(query: string): Promise<void> {
         "\u7f6e\u9876",
         pinnedItems,
         pinnedDisplayLimit,
-        "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
+        "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u70b9\u300c\u6dfb\u52a0\u6587\u4ef6/\u6587\u4ef6\u5939\u300d\u6216\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
       );
       addSearchSection(
         "plugin",

@@ -14382,12 +14382,9 @@ let dictionaryPanelCandidates: DictionaryPanelEntry[] = [];
 let dictionaryPanelStatusMessage = "输入英文单词或词组后查询。";
 let dictionaryPanelHistoryFilter: "all" | "en" | "zh" = "all";
 let dictionaryPanelTtsEnabled = false;
-let dictionaryPackStatus: {
-  hasFts: boolean;
-  usingUserPack: boolean;
-  packPath: string | null;
-  downloadAvailable: boolean;
-} | null = null;
+let dictionaryPackStatus: import("../shared/dictionary").DictionaryPackStatus | null = null;
+let dictionaryPackDownloadProgress: import("../shared/dictionary").DictionaryPackDownloadProgress | null =
+  null;
 let dictionaryPanelHistory: Array<{
   word: string;
   phonetic: string;
@@ -14528,12 +14525,53 @@ async function setDictionaryPanelTtsEnabled(enabled: boolean): Promise<void> {
   }
 }
 
-async function hydrateDictionaryPackStatus(): Promise<{
-  hasFts: boolean;
-  usingUserPack: boolean;
-  packPath: string | null;
-  downloadAvailable: boolean;
-} | null> {
+function formatDictionaryPackDownloadProgress(
+  progress: import("../shared/dictionary").DictionaryPackDownloadProgress
+): string {
+  const receivedMb = (progress.received / (1024 * 1024)).toFixed(1);
+  if (progress.total && progress.total > 0) {
+    const totalMb = (progress.total / (1024 * 1024)).toFixed(1);
+    const percent = Math.min(100, Math.round((progress.received / progress.total) * 100));
+    return `已下载 ${receivedMb} / ${totalMb} MB（${percent}%）`;
+  }
+  return `已下载 ${receivedMb} MB`;
+}
+
+function buildDictionaryPackStatusText(
+  status: import("../shared/dictionary").DictionaryPackStatus | null
+): string {
+  if (!status) {
+    return "词典词库状态未知";
+  }
+  if (status.tier === "full") {
+    return status.usingUserPack
+      ? `完整词库（约 ${Math.round(status.entryCount / 1000)}k 词，含 FTS 中译英加速）`
+      : "安装包已含完整词库";
+  }
+  if (status.tier === "seed") {
+    return "种子词库（约 7k 词，覆盖中考/四六级常用词）";
+  }
+  return `当前词库约 ${status.entryCount} 词`;
+}
+
+function buildDictionaryPackStatusHint(
+  status: import("../shared/dictionary").DictionaryPackStatus | null
+): string {
+  if (!status) {
+    return "完整词库约 160MB，按需下载到本机用户目录";
+  }
+  if (status.packPath) {
+    return `路径：${status.packPath}`;
+  }
+  if (status.tier === "seed") {
+    return "可在下方下载完整词库（约 160MB，含全量词条和 FTS 索引）";
+  }
+  return "完整词库约 160MB，按需下载到本机用户目录";
+}
+
+async function hydrateDictionaryPackStatus(): Promise<
+  import("../shared/dictionary").DictionaryPackStatus | null
+> {
   const launcher = getLauncherApi();
   if (!launcher?.getDictionaryPackStatus) {
     return null;
@@ -14548,21 +14586,49 @@ async function hydrateDictionaryPackStatus(): Promise<{
 }
 
 async function downloadDictionaryPackFromPanel(
-  downloadButton: HTMLButtonElement
+  downloadButton: HTMLButtonElement,
+  progressWrap?: HTMLElement,
+  progressBar?: HTMLProgressElement,
+  progressText?: HTMLElement
 ): Promise<void> {
   const launcher = getLauncherApi();
   if (!launcher?.downloadDictionaryPack) {
     setStatus("词典下载接口不可用，请重启应用后重试。");
     return;
   }
-  const previous = downloadButton.textContent ?? "下载完整索引";
+  const previous = downloadButton.textContent ?? "下载完整词库";
+  const stopProgress =
+    launcher.onDictionaryPackDownloadProgress?.((progress) => {
+      dictionaryPackDownloadProgress = progress;
+      if (progressBar) {
+        if (progress.total && progress.total > 0) {
+          progressBar.max = progress.total;
+          progressBar.value = progress.received;
+        } else {
+          progressBar.removeAttribute("value");
+        }
+      }
+      if (progressText) {
+        progressText.textContent = formatDictionaryPackDownloadProgress(progress);
+      }
+      if (progressWrap) {
+        progressWrap.hidden = false;
+      }
+    }) ?? (() => undefined);
   downloadButton.disabled = true;
   downloadButton.textContent = "下载中…";
-  setStatus("正在下载完整词典索引，请稍候…");
+  if (progressWrap) {
+    progressWrap.hidden = false;
+  }
+  if (progressText) {
+    progressText.textContent = "正在连接…";
+  }
+  setStatus("正在下载完整词库，请稍候…");
   try {
     const result = await launcher.downloadDictionaryPack();
     setStatus(result.message);
     if (result.ok) {
+      dictionaryPackDownloadProgress = null;
       await hydrateDictionaryPackStatus();
       if (activePluginPanel?.pluginId === DICTIONARY_PLUGIN_ID) {
         renderList();
@@ -14570,10 +14636,15 @@ async function downloadDictionaryPackFromPanel(
     }
   } catch (error) {
     console.warn("[dictionary] download pack failed", error);
-    setStatus("下载词典索引失败，请稍后重试。");
+    setStatus("下载完整词库失败，请稍后重试。");
   } finally {
+    stopProgress();
     downloadButton.disabled = false;
     downloadButton.textContent = previous;
+    if (progressWrap) {
+      progressWrap.hidden = true;
+    }
+    dictionaryPackDownloadProgress = null;
   }
 }
 
@@ -24825,20 +24896,23 @@ window.__LL_PANEL_IMPLS__ = {
       "约 76 万词条，支持英译中与中译英；连字符词组会自动尝试多种写法"
     );
 
-    const packStatusText = dictionaryPackStatus
-      ? dictionaryPackStatus.hasFts
-        ? dictionaryPackStatus.usingUserPack
-          ? "已启用本机完整索引（中译英更快）"
-          : "安装包已含完整索引"
-        : "当前为精简词典：中译英可用，但较慢；可下载完整索引加速"
-      : "词典索引状态未知";
+    const packStatusText = buildDictionaryPackStatusText(dictionaryPackStatus);
     const packStatusRow = createLiteSnapInfoRow(
-      "词典索引",
+      "词典词库",
       packStatusText,
-      dictionaryPackStatus?.packPath
-        ? `路径：${dictionaryPackStatus.packPath}`
-        : "完整索引约 160MB，按需下载到本机用户目录"
+      buildDictionaryPackStatusHint(dictionaryPackStatus)
     );
+
+    const packProgressWrap = document.createElement("div");
+    packProgressWrap.className = "dictionary-pack-progress";
+    packProgressWrap.hidden = true;
+    const packProgressBar = document.createElement("progress");
+    packProgressBar.className = "dictionary-pack-progress__bar";
+    packProgressBar.max = 100;
+    packProgressBar.value = 0;
+    const packProgressText = document.createElement("span");
+    packProgressText.className = "dictionary-pack-progress__text";
+    packProgressWrap.append(packProgressBar, packProgressText);
 
     const ttsField = document.createElement("div");
     ttsField.className = "settings-field";
@@ -25138,16 +25212,21 @@ window.__LL_PANEL_IMPLS__ = {
     const downloadPackButton = document.createElement("button");
     downloadPackButton.type = "button";
     downloadPackButton.className = "settings-btn settings-btn-secondary";
-    downloadPackButton.textContent = dictionaryPackStatus?.hasFts
-      ? "重新下载完整索引"
-      : "下载完整索引";
+    downloadPackButton.textContent =
+      dictionaryPackStatus?.tier === "full" && dictionaryPackStatus.usingUserPack
+        ? "重新下载完整词库"
+        : "下载完整词库（约 160MB）";
     downloadPackButton.setAttribute("data-action", "dictionary-download-pack");
-    // Hide when the bundled installer already ships a full FTS index.
     downloadPackButton.hidden = Boolean(
-      dictionaryPackStatus?.hasFts && !dictionaryPackStatus.usingUserPack
+      dictionaryPackStatus?.tier === "full" && !dictionaryPackStatus.usingUserPack
     );
     downloadPackButton.addEventListener("click", () => {
-      void downloadDictionaryPackFromPanel(downloadPackButton);
+      void downloadDictionaryPackFromPanel(
+        downloadPackButton,
+        packProgressWrap,
+        packProgressBar,
+        packProgressText
+      );
     });
 
     const backToSearchButton = document.createElement("button");
@@ -25170,6 +25249,7 @@ window.__LL_PANEL_IMPLS__ = {
     form.append(
       statusRow,
       packStatusRow,
+      packProgressWrap,
       ttsField,
       queryField,
       dictionaryCard,
