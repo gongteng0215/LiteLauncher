@@ -38,6 +38,7 @@ import {
   SearchRequestOptions,
   SearchDisplayConfig
 } from "../shared/types";
+import { UiThemeConfig } from "../shared/ui-theme";
 
 type Cleanup = () => void;
 
@@ -84,6 +85,12 @@ const api = {
     config: Partial<SearchDisplayConfig>
   ): Promise<SearchDisplayConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.setSearchDisplayConfig, config);
+  },
+  getUiThemeConfig(): Promise<UiThemeConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getUiThemeConfig);
+  },
+  setUiThemeConfig(config: Partial<UiThemeConfig>): Promise<UiThemeConfig> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setUiThemeConfig, config);
   },
   getCatalogScanConfig(): Promise<CatalogScanConfig> {
     return ipcRenderer.invoke(IPC_CHANNELS.getCatalogScanConfig);

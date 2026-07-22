@@ -46,6 +46,10 @@ import {
   normalizeSearchDisplayConfig,
   SEARCH_DISPLAY_LIMIT_MAX
 } from "../shared/settings";
+import {
+  normalizeUiThemeConfig,
+  type UiThemeConfig
+} from "../shared/ui-theme";
 import { executeItem } from "./actions";
 import { getDynamicSearchItems } from "./search";
 import { UsageStore } from "./usage-store";
@@ -75,6 +79,10 @@ type SettingsProvider = {
   setSearchDisplayConfig: (
     config: Partial<SearchDisplayConfig>
   ) => Promise<SearchDisplayConfig>;
+  getUiThemeConfig: () => UiThemeConfig;
+  setUiThemeConfig: (
+    config: Partial<UiThemeConfig>
+  ) => Promise<UiThemeConfig>;
   getCatalogScanConfig: () => CatalogScanConfig;
   setCatalogScanConfig: (
     config: Partial<CatalogScanConfig>
@@ -241,6 +249,8 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getAppVersion,
   IPC_CHANNELS.getSearchDisplayConfig,
   IPC_CHANNELS.setSearchDisplayConfig,
+  IPC_CHANNELS.getUiThemeConfig,
+  IPC_CHANNELS.setUiThemeConfig,
   IPC_CHANNELS.getCatalogScanConfig,
   IPC_CHANNELS.setCatalogScanConfig,
   IPC_CHANNELS.getVisiblePluginIds,
@@ -1394,6 +1404,10 @@ export function registerIpcHandlers(
     return options.settingsProvider.getSearchDisplayConfig();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getUiThemeConfig, () => {
+    return options.settingsProvider.getUiThemeConfig();
+  });
+
   ipcMain.handle(IPC_CHANNELS.getCatalogScanConfig, () => {
     return options.settingsProvider.getCatalogScanConfig();
   });
@@ -1444,6 +1458,14 @@ export function registerIpcHandlers(
     async (_, configInput: Partial<SearchDisplayConfig> | null) => {
       const normalized = normalizeSearchDisplayConfig(configInput);
       return options.settingsProvider.setSearchDisplayConfig(normalized);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.setUiThemeConfig,
+    async (_, configInput: Partial<UiThemeConfig> | null) => {
+      const normalized = normalizeUiThemeConfig(configInput);
+      return options.settingsProvider.setUiThemeConfig(normalized);
     }
   );
 
