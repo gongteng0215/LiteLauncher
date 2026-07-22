@@ -5,6 +5,9 @@ type SearchInputKeyLike = {
   metaKey?: boolean;
 };
 
+/** Temporary: keep home open while tuning Command Center UI. Set false when done. */
+const UI_TUNING_KEEP_OPEN = false;
+
 const NON_TYPING_SEARCH_INPUT_KEYS = new Set<string>([
   "ArrowLeft",
   "ArrowRight",
@@ -222,6 +225,9 @@ interface SearchDisplayConfig {
   searchLimit: number;
 }
 
+type UiThemeConfig = import("../shared/ui-theme").UiThemeConfig;
+type UiThemePresetId = import("../shared/ui-theme").UiThemePresetId;
+
 type SearchScope =
   | "all"
   | "application"
@@ -329,6 +335,8 @@ interface LauncherApi {
   setSearchDisplayConfig(
     config: Partial<SearchDisplayConfig>
   ): Promise<SearchDisplayConfig>;
+  getUiThemeConfig(): Promise<UiThemeConfig>;
+  setUiThemeConfig(config: Partial<UiThemeConfig>): Promise<UiThemeConfig>;
   getCatalogScanConfig(): Promise<CatalogScanConfig>;
   setCatalogScanConfig(
     config: Partial<CatalogScanConfig>
@@ -728,7 +736,7 @@ const SECTION_GRID_GAP = 3;
 const inputElement = document.getElementById(
   "search-input"
 ) as HTMLInputElement | null;
-const resultsElement = document.querySelector(".results") as HTMLElement | null;
+const resultsElement = document.querySelector(".panel-section") as HTMLElement | null;
 const listElement = document.getElementById(
   "result-list"
 ) as HTMLUListElement | null;
@@ -757,6 +765,14 @@ if (
   !settingsShortcutButtonElement
 ) {
   throw new Error("\u6e32\u67d3\u5c42\u521d\u59cb\u5316\u5931\u8d25\uff1a\u7f3a\u5c11\u5fc5\u8981 DOM \u8282\u70b9");
+}
+
+const commandCenterUi = window.__LL_COMMAND_CENTER_UI__ as NonNullable<
+  typeof window.__LL_COMMAND_CENTER_UI__
+>;
+const commandCenterIcons = window.__LL_COMMAND_CENTER_ICONS__;
+if (!window.__LL_COMMAND_CENTER_UI__) {
+  throw new Error("command center ui not initialized");
 }
 
 const input = inputElement;
@@ -908,6 +924,15 @@ let searchDisplayConfig: SearchDisplayConfig = {
   pluginLimit: 20,
   searchLimit: 50
 };
+let uiThemeConfig: UiThemeConfig = {
+  presetId: "violet",
+  accent: "#9d63ff",
+  accentStrong: "#6f3bc2",
+  accentSoft: "#c4a0ff",
+  bg: "#070612",
+  surface: "#0d0b1d",
+  text: "#f1edff"
+};
 let catalogScanConfig: CatalogScanConfig = {
   scanProgramFiles: false,
   customScanDirs: [],
@@ -917,6 +942,7 @@ let catalogScanConfig: CatalogScanConfig = {
 };
 let visiblePluginIds: string[] = [...DEFAULT_VISIBLE_PLUGIN_IDS];
 let allPluginCatalogItems: LaunchItem[] = [];
+let settingsFocusHint: "plugins" | "errors" | "updates" | "pinned" | undefined;
 let requiredVisiblePluginIdSet = new Set<string>();
 let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
@@ -936,10 +962,41 @@ let errorLogEntries: AppErrorLogEntry[] = [];
 let activeSearchContextMenu: HTMLDivElement | null = null;
 let pluginNativeInteractionLocked = false;
 let pluginNativeInteractionReleaseTimer: number | null = null;
+let pinnedManageMode = false;
+const pinnedManageSelectedIds = new Set<string>();
 
 function getLauncherApi(): LauncherApi | null {
   return ((window as Window & { launcher?: LauncherApi }).launcher ??
     null) as LauncherApi | null;
+}
+
+function getUiThemeApi(): NonNullable<Window["__LL_UI_THEME__"]> | null {
+  return window.__LL_UI_THEME__ ?? null;
+}
+
+function applyUiThemeConfig(theme: UiThemeConfig): void {
+  const api = getUiThemeApi();
+  uiThemeConfig = api ? api.normalize(theme) : theme;
+  api?.apply(uiThemeConfig);
+}
+
+async function persistUiThemeConfig(
+  theme: Partial<UiThemeConfig>
+): Promise<UiThemeConfig | null> {
+  const launcher = getLauncherApi();
+  const api = getUiThemeApi();
+  const next = api ? api.normalize(theme) : { ...uiThemeConfig, ...theme };
+  applyUiThemeConfig(next as UiThemeConfig);
+  if (!launcher?.setUiThemeConfig) {
+    return uiThemeConfig;
+  }
+  try {
+    const saved = await launcher.setUiThemeConfig(next);
+    applyUiThemeConfig(saved);
+    return saved;
+  } catch {
+    return null;
+  }
 }
 
 function clearPluginNativeInteractionReleaseTimer(): void {
@@ -961,12 +1018,19 @@ function setAutoHideSuspended(suspended: boolean): void {
 }
 
 function shouldSuspendAutoHideForMode(nextMode: PanelMode): boolean {
-  return nextMode === "cashflow" || nextMode === "plugin" || nextMode === "settings";
+  return (
+    nextMode === "cashflow" ||
+    nextMode === "plugin" ||
+    nextMode === "settings" ||
+    commandCenterUi.isSettingsOverlayOpen()
+  );
 }
 
 function syncAutoHideSuspension(nextMode: PanelMode = mode): void {
   setAutoHideSuspended(
-    shouldSuspendAutoHideForMode(nextMode) || pluginNativeInteractionLocked
+    UI_TUNING_KEEP_OPEN ||
+      shouldSuspendAutoHideForMode(nextMode) ||
+      pluginNativeInteractionLocked
   );
 }
 
@@ -1105,6 +1169,15 @@ function setResultsLoading(active: boolean, message = "正在加载..."): void {
   results.toggleAttribute("data-loading", active);
   resultsLoading.hidden = !active;
   resultsLoadingText.textContent = message;
+
+  if (mode === "search") {
+    const hasQuery = Boolean(currentQuery.trim());
+    if (active && hasQuery) {
+      commandCenterUi.setCommandSearchStatus(message);
+    } else if (!active && !hasQuery) {
+      commandCenterUi.setCommandSearchStatus(null);
+    }
+  }
 }
 
 function scheduleResultsLoading(message: string, delayMs = 120): void {
@@ -1141,6 +1214,19 @@ function scheduleSearchRefreshFromInput(
 ): void {
   closeSearchContextMenu();
   currentQuery = nextQuery;
+
+  const trimmed = nextQuery.trim();
+  if (mode === "search") {
+    if (trimmed && pinnedManageMode) {
+      setPinnedManageMode(false);
+    }
+    commandCenterUi.updateCommandCenterQueryState(Boolean(trimmed));
+    if (trimmed) {
+      commandCenterUi.setCommandSearchStatus("输入中，准备检索...");
+    } else {
+      commandCenterUi.setCommandSearchStatus(null);
+    }
+  }
 
   const shouldDebounce = shouldDebounceSearchRefresh(
     nextQuery,
@@ -1741,6 +1827,7 @@ function setMode(nextMode: PanelMode): void {
   syncAutoHideSuspension(nextMode);
   syncWindowSizePreset(nextMode);
   applyModeClass(nextMode);
+  commandCenterUi.syncHomeChromeVisibility(nextMode);
   if (nextMode !== "search" && nextMode !== "clip") {
     setResultsLoading(false);
   }
@@ -1753,10 +1840,9 @@ function setMode(nextMode: PanelMode): void {
     mode === "plugin";
 
   if (mode === "search") {
-    input.placeholder =
-      "搜索应用，支持 app:/cmd:/web:/plugin: 范围前缀";
+    input.placeholder = "输入命令、搜索应用或插件…";
     setHint(
-      "输入停顿约 1 秒后检索 - Enter 执行 - Esc 清空/隐藏 - 方向键移动 - PageUp/PageDown 翻页 - 支持 app:/cmd:/web:/plugin:"
+      "输入停顿约 1 秒后检索 - Enter 执行 - Esc 清空/隐藏 - 方向键移动 - 支持 app:/cmd:/web:/plugin:"
     );
   } else if (mode === "clip") {
     input.placeholder = "\u641c\u7d22\u526a\u8d34\u677f\u5386\u53f2";
@@ -1920,7 +2006,7 @@ function parseVisiblePluginIdsText(value: string): string[] {
 }
 
 function pluginIdFromCatalogItem(item: LaunchItem): string {
-  const id = item.id.trim();
+  const id = item.id.trim().toLowerCase();
   return id.startsWith("plugin:") ? id.slice("plugin:".length) : id;
 }
 
@@ -2399,7 +2485,166 @@ function createResultIcon(entry: ResultEntry): HTMLDivElement {
   return icon;
 }
 
+async function ensurePluginCatalogLoaded(): Promise<void> {
+  if (allPluginCatalogItems.length > 0) {
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    return;
+  }
+
+  try {
+    const items = await launcher.getAllPluginItems();
+    allPluginCatalogItems = Array.isArray(items) ? items : [];
+  } catch {
+    allPluginCatalogItems = [];
+  }
+}
+
+function resolvePluginLaunchItem(pluginId: string, actionName?: string): LaunchItem | null {
+  const normalized = pluginId.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const catalogMatches = allPluginCatalogItems.filter(
+    (item) => pluginIdFromCatalogItem(item) === normalized
+  );
+  const defaultItem =
+    catalogMatches.find((item) => {
+      const target = item.target.trim().toLowerCase();
+      return (
+        target === `command:plugin:${normalized}` ||
+        target.startsWith(`command:plugin:${normalized}?`)
+      );
+    }) ??
+    catalogMatches[0] ??
+    null;
+
+  if (actionName) {
+    const encodedAction = encodeURIComponent(actionName);
+    const actionItem =
+      catalogMatches.find((item) =>
+        item.target.toLowerCase().includes(`action=${encodedAction.toLowerCase()}`)
+      ) ??
+      catalogMatches.find((item) =>
+        item.target.toLowerCase().includes(`action=${actionName.toLowerCase()}`)
+      );
+    if (actionItem) {
+      return actionItem;
+    }
+
+    return {
+      id: `plugin:${normalized}:${actionName}`,
+      type: "command",
+      title: defaultItem?.title ?? normalized,
+      subtitle: actionName,
+      target: `command:plugin:${normalized}?action=${encodeURIComponent(actionName)}`,
+      keywords: ["plugin", normalized, actionName]
+    };
+  }
+
+  if (defaultItem) {
+    return defaultItem;
+  }
+
+  return {
+    id: `plugin:${normalized}`,
+    type: "command",
+    title: normalized,
+    subtitle: "打开插件",
+    target: `command:plugin:${normalized}`,
+    keywords: ["plugin", normalized]
+  };
+}
+
+async function handleSidebarAction(action: {
+  type: "plugin" | "settings" | "target";
+  pluginId?: string;
+  action?: string;
+  focus?: "plugins" | "errors" | "updates" | "pinned";
+  target?: string;
+  title?: string;
+}): Promise<void> {
+  if (action.type === "settings") {
+    settingsFocusHint = action.focus;
+    openSettingsPanel();
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法执行");
+    return;
+  }
+
+  if (action.type === "target") {
+    const target = action.target?.trim() ?? "";
+    if (!target) {
+      return;
+    }
+    const commandItem: LaunchItem = {
+      id: `sidebar:${target}`,
+      type: "command",
+      title: action.title ?? target,
+      subtitle: target,
+      target,
+      keywords: ["sidebar"]
+    };
+    const result = await launcher.execute(commandItem);
+    if (result.ok) {
+      commandCenterUi.showToast(`已打开：${commandItem.title}`);
+    } else {
+      setStatus(result.message ?? "执行失败");
+    }
+    return;
+  }
+
+  const pluginId = action.pluginId?.trim() ?? "";
+  if (!pluginId) {
+    return;
+  }
+
+  await ensurePluginCatalogLoaded();
+  const item = resolvePluginLaunchItem(pluginId, action.action);
+  if (!item) {
+    commandCenterUi.showToast(`未找到插件：${pluginId}`);
+    return;
+  }
+
+  const result = await launcher.execute(item);
+  if (!result.ok) {
+    setStatus(result.message ?? "执行失败");
+    return;
+  }
+  commandCenterUi.showToast(`已打开：${item.title}`);
+}
+
+function wrapResultIcon(entry: ResultEntry, pluginId?: string): HTMLElement {
+  const badge = document.createElement("span");
+  badge.className = "icon-badge";
+  const color =
+    (pluginId && commandCenterIcons?.pluginColors[pluginId]) || "#8e6dff";
+  badge.style.setProperty("--icon-color", color);
+  badge.style.setProperty("--icon-foreground", "#ffffff");
+  const icon = createResultIcon(entry);
+  icon.classList.remove("result-icon");
+  badge.appendChild(icon);
+  return badge;
+}
+
 function clearList(): void {
+  if (mode === "search") {
+    if (!currentQuery.trim()) {
+      commandCenterUi.clearHomeSections();
+    } else {
+      commandCenterUi.getCommandResultsHost()?.replaceChildren();
+    }
+    return;
+  }
+
   while (list.firstChild) {
     list.removeChild(list.firstChild);
   }
@@ -2627,6 +2872,154 @@ async function removeCustomPinnedItem(item: LaunchItem): Promise<void> {
 
   setStatus(`已取消置顶：${item.title}`);
   await refreshEntries(currentQuery);
+}
+
+function syncPinnedManageButton(): void {
+  const pinnedSection = document.getElementById("cc-pinned");
+  pinnedSection?.classList.toggle("is-managing", pinnedManageMode);
+  const manageButton = document.getElementById("cc-manage-pinned");
+  if (!manageButton) {
+    return;
+  }
+  manageButton.classList.toggle("is-active", pinnedManageMode);
+  manageButton.title = pinnedManageMode ? "完成管理" : "管理置顶";
+  manageButton.setAttribute("aria-label", manageButton.title);
+  manageButton.setAttribute("aria-pressed", pinnedManageMode ? "true" : "false");
+}
+
+function setPinnedManageMode(next: boolean): void {
+  if (pinnedManageMode === next) {
+    syncPinnedManageButton();
+    renderPinnedSectionActions();
+    return;
+  }
+  pinnedManageMode = next;
+  if (!pinnedManageMode) {
+    pinnedManageSelectedIds.clear();
+  }
+  syncPinnedManageButton();
+  renderPinnedSectionActions();
+  if (mode === "search" && !currentQuery.trim()) {
+    renderList();
+  }
+}
+
+function togglePinnedManageMode(): void {
+  if (currentQuery.trim()) {
+    commandCenterUi.showToast("请先清空搜索再管理置顶");
+    return;
+  }
+  setPinnedManageMode(!pinnedManageMode);
+}
+
+function getPinnedSectionEntries(): Array<{ index: number; item: LaunchItem }> {
+  const section = searchSections.find((item) => item.id === "pinned");
+  if (!section) {
+    return [];
+  }
+  const result: Array<{ index: number; item: LaunchItem }> = [];
+  for (const index of section.indexes) {
+    const entry = entries[index];
+    if (entry?.kind === "launch") {
+      result.push({ index, item: entry.item });
+    }
+  }
+  return result;
+}
+
+function togglePinnedManageSelection(itemId: string): void {
+  if (pinnedManageSelectedIds.has(itemId)) {
+    pinnedManageSelectedIds.delete(itemId);
+  } else {
+    pinnedManageSelectedIds.add(itemId);
+  }
+  renderPinnedSectionActions();
+  document
+    .querySelectorAll<HTMLElement>("#cc-pinned-list .pinned-chip[data-item-id]")
+    .forEach((tile) => {
+      const id = tile.dataset.itemId ?? "";
+      tile.classList.toggle("is-manage-selected", pinnedManageSelectedIds.has(id));
+    });
+}
+
+function selectAllPinnedForManage(): void {
+  for (const entry of getPinnedSectionEntries()) {
+    pinnedManageSelectedIds.add(entry.item.id);
+  }
+  renderPinnedSectionActions();
+  document
+    .querySelectorAll<HTMLElement>("#cc-pinned-list .pinned-chip[data-item-id]")
+    .forEach((tile) => {
+      tile.classList.add("is-manage-selected");
+    });
+}
+
+function clearPinnedManageSelection(): void {
+  pinnedManageSelectedIds.clear();
+  renderPinnedSectionActions();
+  document
+    .querySelectorAll<HTMLElement>("#cc-pinned-list .pinned-chip.is-manage-selected")
+    .forEach((tile) => tile.classList.remove("is-manage-selected"));
+}
+
+async function unpinSelectedPinnedItems(): Promise<void> {
+  if (pinnedManageSelectedIds.size === 0) {
+    commandCenterUi.showToast("请先选择要取消置顶的项");
+    return;
+  }
+
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    setStatus("桥接层未加载，无法取消置顶");
+    return;
+  }
+
+  const selected = getPinnedSectionEntries().filter((entry) =>
+    pinnedManageSelectedIds.has(entry.item.id)
+  );
+  let successCount = 0;
+  for (const entry of selected) {
+    const result = await launcher.setItemPinned(entry.item.id, false, entry.item);
+    if (result.ok) {
+      successCount += 1;
+    }
+  }
+
+  pinnedManageSelectedIds.clear();
+  setPinnedManageMode(false);
+  setStatus(`已取消置顶 ${successCount} 项`);
+  commandCenterUi.showToast(`已取消置顶 ${successCount} 项`);
+  await refreshEntries("");
+}
+
+function createPinnedIconActionButton(
+  iconName: string,
+  label: string,
+  onClick: () => void,
+  options?: { danger?: boolean; active?: boolean }
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-action-btn";
+  if (options?.danger) {
+    button.classList.add("icon-action-btn--danger");
+  }
+  if (options?.active) {
+    button.classList.add("is-active");
+  }
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  if (commandCenterIcons) {
+    button.appendChild(commandCenterIcons.createIconElement(iconName, true));
+  } else {
+    button.textContent = label;
+  }
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onClick();
+  });
+  return button;
 }
 
 function createCustomPinnedSettingsList(container: HTMLElement): void {
@@ -2916,6 +3309,9 @@ function bindResultInteractions(
   entry: ResultEntry
 ): void {
   element.addEventListener("mouseenter", () => {
+    if (pinnedManageMode) {
+      return;
+    }
     const previousIndex = selectedIndex;
     selectedIndex = index;
     if (canUpdateSelectionHighlightInPlace()) {
@@ -2925,6 +3321,15 @@ function bindResultInteractions(
 
   element.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (
+      pinnedManageMode &&
+      entry.kind === "launch" &&
+      element.classList.contains("pinned-chip")
+    ) {
+      event.preventDefault();
+      togglePinnedManageSelection(entry.item.id);
+      return;
+    }
     selectedIndex = index;
     renderList();
     void executeSelected(index);
@@ -2932,6 +3337,12 @@ function bindResultInteractions(
 
   element.addEventListener("contextmenu", (event) => {
     if (mode !== "search" || entry.kind !== "launch") {
+      return;
+    }
+    if (pinnedManageMode) {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePinnedManageSelection(entry.item.id);
       return;
     }
     event.preventDefault();
@@ -2997,9 +3408,20 @@ function changePluginResultPage(delta: number): void {
   void refreshEntries(currentQuery);
 }
 
-function createSearchTile(entry: ResultEntry, index: number): HTMLLIElement {
+function createSearchTile(
+  entry: ResultEntry,
+  index: number,
+  sectionId: SectionId
+): HTMLLIElement {
   const tile = document.createElement("li");
   tile.className = "result-item result-tile";
+  if (sectionId === "recent") {
+    tile.classList.add("recent-tile");
+  } else if (sectionId === "pinned") {
+    tile.classList.add("pinned-chip");
+  } else if (sectionId === "plugin") {
+    tile.classList.add("plugin-chip");
+  }
   if (index === selectedIndex) {
     tile.classList.add("active");
   }
@@ -3008,20 +3430,39 @@ function createSearchTile(entry: ResultEntry, index: number): HTMLLIElement {
   }
   tile.dataset.index = String(index);
 
-  const icon = createResultIcon(entry);
-  const title = document.createElement("div");
+  const pluginId =
+    entry.kind === "launch" ? pluginIdFromCatalogItem(entry.item) : undefined;
+  const icon = wrapResultIcon(entry, pluginId);
+  const title = document.createElement("span");
   title.className = "tile-title";
   title.textContent =
     entry.kind === "launch" ? entry.item.title : clipTitle(entry.item.content);
 
   tile.title = title.textContent;
+  if (entry.kind === "launch") {
+    tile.dataset.itemId = entry.item.id;
+  }
   tile.append(icon, title);
 
-  if (entry.kind === "launch" && entry.item.pinned) {
+  if (sectionId === "pinned" && pinnedManageMode && entry.kind === "launch") {
+    tile.classList.add("is-manageable");
+    if (pinnedManageSelectedIds.has(entry.item.id)) {
+      tile.classList.add("is-manage-selected");
+    }
+    const mark = document.createElement("span");
+    mark.className = "pinned-manage-check";
+    mark.setAttribute("aria-hidden", "true");
+    if (commandCenterIcons) {
+      mark.appendChild(commandCenterIcons.createIconElement("check", true));
+    }
+    tile.appendChild(mark);
+  }
+
+  if (entry.kind === "launch" && entry.item.pinned && sectionId !== "pinned") {
     const pinBadge = document.createElement("span");
     pinBadge.className = "tile-pin";
-    pinBadge.title = "\u7f6e\u9876";
-    pinBadge.setAttribute("aria-label", "\u7f6e\u9876");
+    pinBadge.title = "置顶";
+    pinBadge.setAttribute("aria-label", "置顶");
     tile.appendChild(pinBadge);
   }
 
@@ -3052,8 +3493,8 @@ function applyAdaptiveSectionGridColumns(grid: HTMLUListElement): void {
 }
 
 function refreshAdaptiveSectionGrids(): void {
-  list
-    .querySelectorAll<HTMLUListElement>(".section-grid")
+  document
+    .querySelectorAll<HTMLUListElement>(".result-list .section-grid")
     .forEach((grid) => applyAdaptiveSectionGridColumns(grid));
 }
 
@@ -3068,133 +3509,218 @@ function scheduleAdaptiveSectionGridRefresh(): void {
   });
 }
 
-function renderSearchSections(): void {
-  list.classList.add("search-sections");
+function renderPinnedSectionActions(): void {
+  const host = commandCenterUi.getPinnedActionsHost();
+  if (!host) {
+    return;
+  }
+  if (currentQuery.trim().length > 0) {
+    // Keep home chrome intact behind the search overlay.
+    return;
+  }
 
-  for (const section of searchSections) {
-    const block = document.createElement("li");
-    block.className = "section-block";
-    block.dataset.sectionId = section.id;
+  host.replaceChildren();
 
-    const heading = document.createElement("div");
-    heading.className = "section-title-row";
+  if (pinnedManageMode) {
+    const selectedCount = pinnedManageSelectedIds.size;
+    const countLabel = document.createElement("span");
+    countLabel.className = "pinned-manage-count";
+    countLabel.textContent = `已选 ${selectedCount}`;
+    host.append(
+      countLabel,
+      createPinnedIconActionButton("check", "全选", () => selectAllPinnedForManage()),
+      createPinnedIconActionButton("close", "清空选择", () => clearPinnedManageSelection()),
+      createPinnedIconActionButton(
+        "trash",
+        selectedCount > 0 ? `取消置顶(${selectedCount})` : "取消置顶",
+        () => {
+          void unpinSelectedPinnedItems();
+        },
+        { danger: true }
+      ),
+      createPinnedIconActionButton("close", "完成", () => setPinnedManageMode(false), {
+        active: true
+      })
+    );
+    return;
+  }
 
-    const title = document.createElement("div");
-    title.className = "section-title";
-    if ((section.id === "search" || section.id === "plugin") && section.pageCount > 1) {
-      const start =
-        section.totalCount === 0 ? 0 : section.page * section.displayLimit + 1;
-      const end =
-        section.totalCount === 0
-          ? 0
-          : Math.min(
-              section.totalCount,
-              section.page * section.displayLimit + section.indexes.length
-            );
-      title.textContent = `${section.title} (${start}-${end}/${section.totalCount})`;
-    } else {
-      const total = section.totalCount > 0 ? section.totalCount : section.displayLimit;
-      title.textContent = `${section.title} (${section.indexes.length}/${total})`;
+  host.append(
+    createPinnedIconActionButton("file", "添加文件", () => {
+      void addCustomPinnedFromPicker("file");
+    }),
+    createPinnedIconActionButton("folder", "添加文件夹", () => {
+      void addCustomPinnedFromPicker("folder");
+    })
+  );
+}
+
+function renderSectionPager(section: SearchSection): void {
+  const host =
+    section.id === "plugin"
+      ? commandCenterUi.getPluginPagerHost()
+      : commandCenterUi.getCommandResultsHost();
+  if (!host || section.pageCount <= 1) {
+    if (section.id === "plugin") {
+      commandCenterUi.getPluginPagerHost()?.replaceChildren();
     }
-    heading.appendChild(title);
+    return;
+  }
 
-    if (section.id === "pinned" && currentQuery.trim().length === 0) {
-      const addActions = document.createElement("div");
-      addActions.className = "section-add-actions";
+  const pagerHost = commandCenterUi.getPluginPagerHost();
+  if (!pagerHost) {
+    return;
+  }
 
-      const addFileButton = document.createElement("button");
-      addFileButton.type = "button";
-      addFileButton.className = "section-add-btn";
-      addFileButton.textContent = "添加文件";
-      addFileButton.title = "选择文件并加入置顶";
-      addFileButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void addCustomPinnedFromPicker("file");
-      });
+  pagerHost.replaceChildren();
+  const pager = document.createElement("div");
+  pager.className = "section-pager";
 
-      const addFolderButton = document.createElement("button");
-      addFolderButton.type = "button";
-      addFolderButton.className = "section-add-btn";
-      addFolderButton.textContent = "添加文件夹";
-      addFolderButton.title = "选择文件夹并加入置顶";
-      addFolderButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void addCustomPinnedFromPicker("folder");
-      });
-
-      addActions.append(addFileButton, addFolderButton);
-      heading.appendChild(addActions);
+  const prevButton = document.createElement("button");
+  prevButton.type = "button";
+  prevButton.className = "section-page-btn";
+  prevButton.textContent = "上一页";
+  prevButton.disabled = section.page <= 0;
+  prevButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (section.id === "search") {
+      changeSearchResultPage(-1);
+      return;
     }
+    changePluginResultPage(-1);
+  });
 
-    if ((section.id === "search" || section.id === "plugin") && section.pageCount > 1) {
-      const pager = document.createElement("div");
-      pager.className = "section-pager";
+  const pageInfo = document.createElement("span");
+  pageInfo.className = "section-page-info";
+  pageInfo.textContent = `${section.page + 1}/${section.pageCount}`;
 
-      const prevButton = document.createElement("button");
-      prevButton.type = "button";
-      prevButton.className = "section-page-btn";
-      prevButton.textContent = "上一页";
-      prevButton.disabled = section.page <= 0;
-      prevButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (section.id === "search") {
-          changeSearchResultPage(-1);
-          return;
-        }
-        changePluginResultPage(-1);
-      });
-
-      const pageInfo = document.createElement("span");
-      pageInfo.className = "section-page-info";
-      pageInfo.textContent = `${section.page + 1}/${section.pageCount}`;
-
-      const nextButton = document.createElement("button");
-      nextButton.type = "button";
-      nextButton.className = "section-page-btn";
-      nextButton.textContent = "下一页";
-      nextButton.disabled = section.page >= section.pageCount - 1;
-      nextButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (section.id === "search") {
-          changeSearchResultPage(1);
-          return;
-        }
-        changePluginResultPage(1);
-      });
-
-      pager.append(prevButton, pageInfo, nextButton);
-      heading.appendChild(pager);
+  const nextButton = document.createElement("button");
+  nextButton.type = "button";
+  nextButton.className = "section-page-btn";
+  nextButton.textContent = "下一页";
+  nextButton.disabled = section.page >= section.pageCount - 1;
+  nextButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (section.id === "search") {
+      changeSearchResultPage(1);
+      return;
     }
+    changePluginResultPage(1);
+  });
 
-    block.appendChild(heading);
+  pager.append(prevButton, pageInfo, nextButton);
+  pagerHost.appendChild(pager);
+}
 
-    if (section.indexes.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "section-empty";
-      empty.textContent = section.emptyText;
-      block.appendChild(empty);
-      list.appendChild(block);
+function renderCommandResults(section: SearchSection): void {
+  const host = commandCenterUi.getCommandResultsHost();
+  if (!host) {
+    return;
+  }
+
+  host.replaceChildren();
+  host.hidden = false;
+
+  const summary = document.createElement("div");
+  summary.className = "result-summary";
+  summary.innerHTML = `<span>搜索结果</span><span>${section.totalCount}</span>`;
+  host.appendChild(summary);
+
+  if (section.indexes.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "no-results";
+    empty.textContent = "没有找到匹配项，试试 app:、cmd:、web: 或 plugin:";
+    host.appendChild(empty);
+    return;
+  }
+
+  for (const index of section.indexes) {
+    const entry = entries[index];
+    if (!entry) {
       continue;
     }
 
-    const grid = document.createElement("ul");
-    grid.className = "section-grid";
-    grid.dataset.sectionId = section.id;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "command-result";
+    if (index === selectedIndex) {
+      row.classList.add("active");
+    }
+    row.dataset.index = String(index);
+
+    const pluginId =
+      entry.kind === "launch" ? pluginIdFromCatalogItem(entry.item) : undefined;
+    row.appendChild(wrapResultIcon(entry, pluginId));
+
+    const title = document.createElement("span");
+    title.className = "command-result__title";
+    title.textContent =
+      entry.kind === "launch" ? entry.item.title : clipTitle(entry.item.content);
+
+    const kind = document.createElement("span");
+    kind.className = "command-result__kind";
+    kind.textContent =
+      entry.kind === "launch" ? normalizeLaunchType(entry.item.type) : "Clip";
+
+    row.append(title, kind);
+    if (commandCenterIcons) {
+      const openIcon = commandCenterIcons.createIconElement("open", true);
+      row.appendChild(openIcon);
+    }
+
+    bindResultInteractions(row, index, entry);
+    host.appendChild(row);
+  }
+}
+
+function renderSearchSections(): void {
+  const hasQuery = currentQuery.trim().length > 0;
+  commandCenterUi.updateCommandCenterQueryState(hasQuery);
+  renderPinnedSectionActions();
+
+  for (const section of searchSections) {
+    if (section.id === "search") {
+      if (hasQuery) {
+        renderCommandResults(section);
+      }
+      continue;
+    }
+
+    if (hasQuery) {
+      // Preserve recent / pinned / plugins behind the blurred overlay.
+      continue;
+    }
+
+    const grid = commandCenterUi.getSectionGrid(section.id);
+    if (!grid) {
+      continue;
+    }
+
+    grid.replaceChildren();
+    const total = section.totalCount > 0 ? section.totalCount : section.displayLimit;
+    commandCenterUi.updateSectionCount(section.id, section.indexes.length, total);
+
+    if (section.indexes.length === 0) {
+      continue;
+    }
 
     for (const index of section.indexes) {
       const entry = entries[index];
       if (!entry) {
         continue;
       }
-      grid.appendChild(createSearchTile(entry, index));
+      grid.appendChild(createSearchTile(entry, index, section.id));
     }
 
-    block.appendChild(grid);
-    list.appendChild(block);
+    if (section.id === "plugin") {
+      renderSectionPager(section);
+      commandCenterUi.appendPluginAddChip(() => {
+        settingsFocusHint = "plugins";
+        openSettingsPanel();
+      });
+    }
   }
 
   refreshAdaptiveSectionGrids();
@@ -3205,14 +3731,14 @@ function getVisibleGridColumnCount(selected = selectedIndex): number {
     return 1;
   }
 
-  const tile = list.querySelector<HTMLElement>(
-    `.result-item.result-tile[data-index="${selected}"]`
+  const tile = document.querySelector<HTMLElement>(
+    `.result-item.result-tile[data-index="${selected}"], .command-result[data-index="${selected}"]`
   );
   if (!tile) {
     return 1;
   }
 
-  const grid = tile.closest(".section-grid");
+  const grid = tile.closest(".section-grid, .recent-grid, .pinned-grid, .plugin-grid");
   if (!(grid instanceof HTMLElement)) {
     return 1;
   }
@@ -3342,6 +3868,23 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
   const previousVisiblePluginIds = visiblePluginIds;
   let visiblePluginsChanged = false;
 
+  const themeApi = getUiThemeApi();
+  const presetNode = form.elements.namedItem("uiThemePresetId");
+  const accentNode = form.elements.namedItem("uiThemeAccent");
+  const nextThemeInput: Partial<UiThemeConfig> = {
+    ...uiThemeConfig
+  };
+  if (presetNode instanceof HTMLInputElement && presetNode.value) {
+    nextThemeInput.presetId = presetNode.value as UiThemePresetId;
+  }
+  if (accentNode instanceof HTMLInputElement && accentNode.value) {
+    if (nextThemeInput.presetId === "custom" && themeApi) {
+      Object.assign(nextThemeInput, themeApi.fromAccent(accentNode.value, uiThemeConfig));
+    } else if (nextThemeInput.presetId === "custom") {
+      nextThemeInput.accent = accentNode.value;
+    }
+  }
+
   try {
     const normalized = normalizeSettingsInput(inputConfig);
     const normalizedCatalog = normalizeCatalogScanConfigInput(catalogInputConfig);
@@ -3349,17 +3892,20 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
       nextSearchDisplayConfig,
       nextCatalogScanConfig,
       nextAppliedVisiblePluginIds,
-      nextLaunchAtLoginStatus
+      nextLaunchAtLoginStatus,
+      nextUiThemeConfig
     ] = await Promise.all([
       launcher.setSearchDisplayConfig(normalized),
       launcher.setCatalogScanConfig(normalizedCatalog),
       launcher.setVisiblePluginIds(nextVisiblePluginIds),
-      launcher.setLaunchAtLoginEnabled(nextLaunchAtLoginEnabled)
+      launcher.setLaunchAtLoginEnabled(nextLaunchAtLoginEnabled),
+      launcher.setUiThemeConfig(nextThemeInput)
     ]);
     searchDisplayConfig = nextSearchDisplayConfig;
     catalogScanConfig = nextCatalogScanConfig;
     visiblePluginIds = nextAppliedVisiblePluginIds;
     launchAtLoginStatus = nextLaunchAtLoginStatus;
+    applyUiThemeConfig(nextUiThemeConfig);
     visiblePluginsChanged =
       previousVisiblePluginIds.length !== visiblePluginIds.length ||
       previousVisiblePluginIds.some((id, index) => id !== visiblePluginIds[index]);
@@ -3397,21 +3943,37 @@ async function rebuildCatalogFromSettings(): Promise<void> {
   }
 }
 
-function renderSettingsPanel(): void {
+function renderSettingsPanel(
+  target: HTMLElement = list,
+  options?: { listItemWrap?: boolean }
+): void {
+  const wrapInListItem = options?.listItemWrap ?? target === list;
   const panelItem = document.createElement("li");
   panelItem.className = "settings-panel-item";
 
   const panel = document.createElement("section");
-  panel.className = "settings-panel settings-panel-structured";
+  panel.className = "settings-panel settings-panel-structured cc-settings-shell";
 
-  const title = document.createElement("h3");
-  title.className = "settings-title";
-  title.textContent = "LiteLauncher 设置";
+  const header = document.createElement("header");
+  header.className = "cc-settings-header";
 
-  const description = document.createElement("p");
-  description.className = "settings-description";
-  description.textContent =
-    "统一管理搜索展示、索引扫描、系统行为和错误日志。开始菜单变更会自动刷新；扫描目录改动后仍可手动重建索引。";
+  const headerCopy = document.createElement("div");
+  const eyebrow = document.createElement("div");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "LiteLauncher";
+  const title = document.createElement("h2");
+  title.textContent = "设置中心";
+  headerCopy.append(eyebrow, title);
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "cc-settings-close icon-only";
+  closeButton.setAttribute("aria-label", "关闭设置");
+  closeButton.textContent = "×";
+  closeButton.addEventListener("click", () => {
+    dismissSettingsOverlay();
+  });
+  header.append(headerCopy, closeButton);
 
   const form = document.createElement("form");
   form.className = "settings-form settings-form-grouped";
@@ -3419,6 +3981,71 @@ function renderSettingsPanel(): void {
     event.preventDefault();
     void saveSettingsFromForm(form);
   });
+
+  const settingsBody = document.createElement("div");
+  settingsBody.className = "settings-body";
+
+  const settingsNav = document.createElement("nav");
+  settingsNav.setAttribute("aria-label", "设置分组");
+
+  const settingsContent = document.createElement("div");
+  settingsContent.className = "settings-content";
+
+  type SettingsTabId =
+    | "appearance"
+    | "display"
+    | "scan"
+    | "pinned"
+    | "plugins"
+    | "updates"
+    | "errors";
+
+  const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
+    { id: "appearance", label: "外观主题" },
+    { id: "display", label: "搜索展示" },
+    { id: "scan", label: "索引扫描" },
+    { id: "pinned", label: "自定义置顶" },
+    { id: "plugins", label: "插件可见性" },
+    { id: "updates", label: "系统与更新" },
+    { id: "errors", label: "错误日志" }
+  ];
+
+  const initialTab: SettingsTabId =
+    settingsFocusHint === "errors"
+      ? "errors"
+      : settingsFocusHint === "plugins"
+        ? "plugins"
+        : settingsFocusHint === "pinned"
+          ? "pinned"
+          : settingsFocusHint === "updates"
+            ? "updates"
+            : "appearance";
+
+  const navButtons = new Map<SettingsTabId, HTMLButtonElement>();
+  const groupSections = new Map<SettingsTabId, HTMLElement>();
+
+  const showSettingsTab = (tabId: SettingsTabId): void => {
+    for (const [id, section] of groupSections) {
+      section.hidden = id !== tabId;
+    }
+    for (const [id, button] of navButtons) {
+      button.classList.toggle("is-active", id === tabId);
+    }
+  };
+
+  for (const tab of settingsTabs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tab.label;
+    button.dataset.settingsTab = tab.id;
+    button.addEventListener("click", () => {
+      showSettingsTab(tab.id);
+    });
+    navButtons.set(tab.id, button);
+    settingsNav.appendChild(button);
+  }
+
+  settingsBody.append(settingsNav, settingsContent);
 
   const createGroup = (
     groupTitle: string,
@@ -3492,10 +4119,151 @@ function renderSettingsPanel(): void {
     }
   ];
 
+  const themeApi = getUiThemeApi();
+  const appearanceGroup = createGroup(
+    "外观主题",
+    "切换预设或自定义主色；改动会立即预览，点保存后持久生效。"
+  );
+  appearanceGroup.section.dataset.settingsGroup = "appearance";
+  groupSections.set("appearance", appearanceGroup.section);
+
+  const presetRow = createRow("主题预设", "一键切换整套配色");
+  const presetGrid = document.createElement("div");
+  presetGrid.className = "settings-theme-presets";
+
+  const presetHidden = document.createElement("input");
+  presetHidden.type = "hidden";
+  presetHidden.name = "uiThemePresetId";
+  presetHidden.value = uiThemeConfig.presetId;
+
+  const accentRow = createRow("自定义主色", "选色后自动生成强调色");
+  const accentControl = document.createElement("div");
+  accentControl.className = "settings-theme-accent";
+
+  const accentInput = document.createElement("input");
+  accentInput.className = "settings-theme-accent-input";
+  accentInput.type = "color";
+  accentInput.name = "uiThemeAccent";
+  accentInput.value = uiThemeConfig.accent;
+
+  const accentHex = document.createElement("span");
+  accentHex.className = "settings-theme-accent-hex";
+  accentHex.textContent = uiThemeConfig.accent;
+
+  const syncThemeControls = (theme: UiThemeConfig): void => {
+    presetHidden.value = theme.presetId;
+    accentInput.value = theme.accent;
+    accentHex.textContent = theme.accent;
+    presetGrid
+      .querySelectorAll<HTMLButtonElement>("[data-theme-preset]")
+      .forEach((button) => {
+        button.classList.toggle(
+          "is-active",
+          button.dataset.themePreset === theme.presetId
+        );
+      });
+  };
+
+  const presets = themeApi?.PRESETS ?? [
+    {
+      id: "violet" as const,
+      label: "暗紫",
+      theme: {
+        accent: "#9d63ff",
+        accentStrong: "#6f3bc2",
+        accentSoft: "#c4a0ff",
+        bg: "#070612",
+        surface: "#0d0b1d",
+        text: "#f1edff"
+      }
+    }
+  ];
+
+  for (const preset of presets) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "settings-theme-preset";
+    button.dataset.themePreset = preset.id;
+    button.title = preset.label;
+    button.setAttribute("aria-label", preset.label);
+
+    const swatch = document.createElement("span");
+    swatch.className = "settings-theme-preset-swatch";
+    swatch.style.setProperty("--theme-swatch", preset.theme.accent);
+    swatch.style.setProperty("--theme-swatch-bg", preset.theme.surface);
+
+    const label = document.createElement("span");
+    label.className = "settings-theme-preset-label";
+    label.textContent = preset.label;
+
+    button.append(swatch, label);
+    button.addEventListener("click", () => {
+      const next = themeApi
+        ? themeApi.fromPreset(preset.id)
+        : { presetId: preset.id, ...preset.theme };
+      applyUiThemeConfig(next);
+      syncThemeControls(uiThemeConfig);
+      void persistUiThemeConfig(uiThemeConfig).then((saved) => {
+        if (saved) {
+          setStatus(`已切换主题：${preset.label}`);
+        } else {
+          setStatus("主题已预览，保存设置后持久生效");
+        }
+      });
+    });
+    presetGrid.appendChild(button);
+  }
+
+  const customButton = document.createElement("button");
+  customButton.type = "button";
+  customButton.className = "settings-theme-preset";
+  customButton.dataset.themePreset = "custom";
+  customButton.title = "自定义";
+  customButton.setAttribute("aria-label", "自定义");
+  const customSwatch = document.createElement("span");
+  customSwatch.className = "settings-theme-preset-swatch is-custom";
+  customSwatch.style.setProperty("--theme-swatch", uiThemeConfig.accent);
+  customSwatch.style.setProperty("--theme-swatch-bg", uiThemeConfig.surface);
+  const customLabel = document.createElement("span");
+  customLabel.className = "settings-theme-preset-label";
+  customLabel.textContent = "自定义";
+  customButton.append(customSwatch, customLabel);
+  customButton.addEventListener("click", () => {
+    accentInput.click();
+  });
+  presetGrid.appendChild(customButton);
+
+  accentInput.addEventListener("input", () => {
+    const next = themeApi
+      ? themeApi.fromAccent(accentInput.value, uiThemeConfig)
+      : {
+          ...uiThemeConfig,
+          presetId: "custom" as const,
+          accent: accentInput.value
+        };
+    applyUiThemeConfig(next);
+    customSwatch.style.setProperty("--theme-swatch", uiThemeConfig.accent);
+    syncThemeControls(uiThemeConfig);
+  });
+  accentInput.addEventListener("change", () => {
+    void persistUiThemeConfig(uiThemeConfig).then((saved) => {
+      setStatus(saved ? "自定义主色已保存" : "主色已预览，保存设置后持久生效");
+    });
+  });
+
+  presetRow.control.append(presetHidden, presetGrid);
+  accentControl.append(accentInput, accentHex);
+  accentRow.control.appendChild(accentControl);
+  appearanceGroup.body.append(presetRow.row, accentRow.row);
+  settingsContent.appendChild(appearanceGroup.section);
+  syncThemeControls(uiThemeConfig);
+
   const displayGroup = createGroup(
     "搜索展示",
     "控制输入关键词后的搜索结果数量；首页分区已按实际内容和宽度自适应。"
   );
+  displayGroup.section.dataset.settingsGroup = "display";
+  groupSections.set("display", displayGroup.section);
   for (const field of fields) {
     const { row, control, hint } = createRow(
       field.label,
@@ -3515,12 +4283,14 @@ function renderSettingsPanel(): void {
     hint.dataset.compact = "true";
     displayGroup.body.appendChild(row);
   }
-  form.appendChild(displayGroup.section);
+  settingsContent.appendChild(displayGroup.section);
 
   const scanGroup = createGroup(
     "索引扫描",
     "配置扫描目录与结果过滤规则。开始菜单安装/卸载一般会自动更新；改扫描源后也可立即重建。"
   );
+  scanGroup.section.dataset.settingsGroup = "scan";
+  groupSections.set("scan", scanGroup.section);
   const {
     row: scanProgramRow,
     control: scanProgramControl,
@@ -3636,12 +4406,14 @@ function renderSettingsPanel(): void {
   });
   scanActions.appendChild(rebuildButton);
   scanGroup.section.appendChild(scanActions);
-  form.appendChild(scanGroup.section);
+  settingsContent.appendChild(scanGroup.section);
 
   const pinnedGroup = createGroup(
     "自定义置顶",
     "手动选择文件或文件夹加入首页置顶区，适合不在扫描目录内的程序与工具。"
   );
+  pinnedGroup.section.dataset.settingsGroup = "pinned";
+  groupSections.set("pinned", pinnedGroup.section);
   const pinnedActions = document.createElement("div");
   pinnedActions.className = "settings-inline-actions";
 
@@ -3672,12 +4444,14 @@ function renderSettingsPanel(): void {
   customPinnedList.className = "custom-pinned-settings-list";
   pinnedGroup.body.appendChild(customPinnedList);
   createCustomPinnedSettingsList(customPinnedList);
-  form.appendChild(pinnedGroup.section);
+  settingsContent.appendChild(pinnedGroup.section);
 
   const pluginGroup = createGroup(
     "插件可见性",
     "可搜索、按分类浏览；点击图标选择显示，★ 置顶常用插件。"
   );
+  pluginGroup.section.dataset.settingsGroup = "plugins";
+  groupSections.set("plugins", pluginGroup.section);
   const pickerRow = document.createElement("div");
   pickerRow.className = "settings-row settings-row-plugin-picker";
   const pickerControl = document.createElement("div");
@@ -3685,12 +4459,14 @@ function renderSettingsPanel(): void {
   pickerControl.appendChild(createVisiblePluginPicker(visiblePluginIds));
   pickerRow.appendChild(pickerControl);
   pluginGroup.body.appendChild(pickerRow);
-  form.appendChild(pluginGroup.section);
+  settingsContent.appendChild(pluginGroup.section);
 
   const systemGroup = createGroup(
     "系统",
     "管理应用的启动行为、自动更新与当前版本信息。"
   );
+  systemGroup.section.dataset.settingsGroup = "updates";
+  groupSections.set("updates", systemGroup.section);
   systemGroup.section.classList.add("settings-system-group");
   const {
     row: launchAtLoginRow,
@@ -3828,12 +4604,14 @@ function renderSettingsPanel(): void {
   updaterControl.appendChild(updaterCard);
   updaterHint.dataset.compact = "true";
   systemGroup.body.appendChild(updaterRow);
-  form.appendChild(systemGroup.section);
+  settingsContent.appendChild(systemGroup.section);
 
   const logGroup = createGroup(
     "错误日志",
     "显示最近 40 条运行异常记录，便于定位使用中的问题。"
   );
+  logGroup.section.dataset.settingsGroup = "errors";
+  groupSections.set("errors", logGroup.section);
 
   const errorLogContainer = document.createElement("div");
   errorLogContainer.className = "settings-error-log";
@@ -3941,7 +4719,7 @@ function renderSettingsPanel(): void {
 
   errorLogContainer.append(errorLogActions, errorLogOutput, errorLogHint);
   logGroup.body.appendChild(errorLogContainer);
-  form.appendChild(logGroup.section);
+  settingsContent.appendChild(logGroup.section);
 
   const footer = document.createElement("div");
   footer.className = "settings-panel-footer";
@@ -3979,20 +4757,33 @@ function renderSettingsPanel(): void {
       resultExcludeDirs: []
     };
     visiblePluginIds = [...DEFAULT_VISIBLE_PLUGIN_IDS];
+    const defaultTheme = getUiThemeApi()?.DEFAULT ?? {
+      presetId: "violet" as const,
+      accent: "#9d63ff",
+      accentStrong: "#6f3bc2",
+      accentSoft: "#c4a0ff",
+      bg: "#070612",
+      surface: "#0d0b1d",
+      text: "#f1edff"
+    };
+    applyUiThemeConfig(defaultTheme);
     void Promise.all([
       launcher.setSearchDisplayConfig(searchDisplayConfig),
       launcher.setCatalogScanConfig(catalogScanConfig),
-      launcher.setVisiblePluginIds(visiblePluginIds)
+      launcher.setVisiblePluginIds(visiblePluginIds),
+      launcher.setUiThemeConfig(defaultTheme)
     ])
       .then(
         ([
           savedSearchConfig,
           savedCatalogScanConfig,
-          savedVisiblePluginIds
+          savedVisiblePluginIds,
+          savedUiThemeConfig
         ]) => {
         searchDisplayConfig = savedSearchConfig;
         catalogScanConfig = savedCatalogScanConfig;
         visiblePluginIds = savedVisiblePluginIds;
+        applyUiThemeConfig(savedUiThemeConfig);
         setStatus(
           `\u5df2\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e（可见插件 ${visiblePluginIds.length} 个）`
         );
@@ -4011,16 +4802,100 @@ function renderSettingsPanel(): void {
 
   actions.append(resetButton, saveButton);
   footer.append(footerMeta, actions);
-  form.appendChild(footer);
+  form.append(settingsBody, footer);
 
-  panel.append(title, description, form);
-  panelItem.appendChild(panel);
-  list.appendChild(panelItem);
+  panel.append(header, form);
+  if (wrapInListItem) {
+    panelItem.appendChild(panel);
+    target.appendChild(panelItem);
+  } else {
+    target.appendChild(panel);
+  }
+
+  showSettingsTab(initialTab);
+  settingsFocusHint = undefined;
 }
 
-function openSettingsPanel(): void {
-  setMode("settings");
-  void refreshEntries("");
+function dismissSettingsOverlay(): void {
+  commandCenterUi.closeSettingsOverlay();
+  settingsFocusHint = undefined;
+  syncAutoHideSuspension();
+}
+
+async function loadSettingsPanelData(): Promise<boolean> {
+  const launcher = getLauncherApi();
+  if (!launcher) {
+    return false;
+  }
+
+  try {
+    const [
+      nextSearchConfig,
+      nextUiThemeConfig,
+      nextCatalogScanConfig,
+      nextVisiblePluginIds,
+      nextAllPluginItems,
+      nextRequiredVisiblePluginIds,
+      nextLaunchAtLoginStatus,
+      nextAppUpdaterStatus,
+      nextAppVersion,
+      nextErrorLogs
+    ] = await Promise.all([
+      launcher.getSearchDisplayConfig(),
+      launcher.getUiThemeConfig().catch(() => uiThemeConfig),
+      launcher.getCatalogScanConfig(),
+      launcher.getVisiblePluginIds(),
+      launcher.getAllPluginItems(),
+      launcher.getRequiredVisiblePluginIds(),
+      launcher.getLaunchAtLoginStatus(),
+      launcher.getAppUpdaterStatus().catch(() => appUpdaterStatus),
+      launcher.getAppVersion().catch(() => ""),
+      launcher.getErrorLogs(40).catch(() => [])
+    ]);
+
+    searchDisplayConfig = nextSearchConfig;
+    applyUiThemeConfig(nextUiThemeConfig);
+    catalogScanConfig = nextCatalogScanConfig;
+    visiblePluginIds = Array.isArray(nextVisiblePluginIds)
+      ? parseVisiblePluginIdsText(nextVisiblePluginIds.join("\n"))
+      : [];
+    allPluginCatalogItems = Array.isArray(nextAllPluginItems)
+      ? nextAllPluginItems
+      : [];
+    requiredVisiblePluginIdSet = new Set(
+      Array.isArray(nextRequiredVisiblePluginIds)
+        ? nextRequiredVisiblePluginIds.map((id) => id.trim().toLowerCase())
+        : []
+    );
+    launchAtLoginStatus = nextLaunchAtLoginStatus;
+    appUpdaterStatus = nextAppUpdaterStatus;
+    errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];
+    appVersion =
+      typeof nextAppVersion === "string" && nextAppVersion.trim()
+        ? nextAppVersion.trim()
+        : "未知版本";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function openSettingsPanel(): Promise<void> {
+  if (commandCenterUi.isSettingsOverlayOpen()) {
+    return;
+  }
+  setAutoHideSuspended(true);
+  const loaded = await loadSettingsPanelData();
+  if (!loaded) {
+    setStatus(
+      "桥接层未加载，请先彻底退出 LiteLauncher 后再执行 pnpm start"
+    );
+    syncAutoHideSuspension();
+    return;
+  }
+  commandCenterUi.openSettingsOverlay((container) => {
+    renderSettingsPanel(container, { listItemWrap: false });
+  });
 }
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -4115,7 +4990,10 @@ function canUpdateSelectionHighlightInPlace(): boolean {
     return false;
   }
 
-  return list.querySelector('.result-item[data-index="0"]') !== null;
+  return (
+    document.querySelector('.result-item[data-index="0"]') !== null ||
+    document.querySelector('.command-result[data-index="0"]') !== null
+  );
 }
 
 function updateSelectionHighlight(previousIndex: number, nextIndex: number): void {
@@ -4123,11 +5001,11 @@ function updateSelectionHighlight(previousIndex: number, nextIndex: number): voi
     return;
   }
 
-  const previousItem = list.querySelector<HTMLElement>(
-    `.result-item[data-index="${previousIndex}"]`
+  const previousItem = document.querySelector<HTMLElement>(
+    `.result-item[data-index="${previousIndex}"], .command-result[data-index="${previousIndex}"]`
   );
-  const nextItem = list.querySelector<HTMLElement>(
-    `.result-item[data-index="${nextIndex}"]`
+  const nextItem = document.querySelector<HTMLElement>(
+    `.result-item[data-index="${nextIndex}"], .command-result[data-index="${nextIndex}"]`
   );
 
   previousItem?.classList.remove("active");
@@ -4173,48 +5051,13 @@ async function refreshEntries(query: string): Promise<void> {
     }
 
     if (mode === "settings") {
-      const [
-        nextSearchConfig,
-        nextCatalogScanConfig,
-        nextVisiblePluginIds,
-        nextAllPluginItems,
-        nextRequiredVisiblePluginIds,
-        nextLaunchAtLoginStatus,
-        nextAppUpdaterStatus,
-        nextAppVersion,
-        nextErrorLogs
-      ] =
-        await Promise.all([
-          launcher.getSearchDisplayConfig(),
-          launcher.getCatalogScanConfig(),
-          launcher.getVisiblePluginIds(),
-          launcher.getAllPluginItems(),
-          launcher.getRequiredVisiblePluginIds(),
-          launcher.getLaunchAtLoginStatus(),
-          launcher.getAppUpdaterStatus().catch(() => appUpdaterStatus),
-          launcher.getAppVersion().catch(() => ""),
-          launcher.getErrorLogs(40).catch(() => [])
-        ]);
-      searchDisplayConfig = nextSearchConfig;
-      catalogScanConfig = nextCatalogScanConfig;
-      visiblePluginIds = Array.isArray(nextVisiblePluginIds)
-        ? parseVisiblePluginIdsText(nextVisiblePluginIds.join("\n"))
-        : [];
-      allPluginCatalogItems = Array.isArray(nextAllPluginItems)
-        ? nextAllPluginItems
-        : [];
-      requiredVisiblePluginIdSet = new Set(
-        Array.isArray(nextRequiredVisiblePluginIds)
-          ? nextRequiredVisiblePluginIds.map((id) => id.trim().toLowerCase())
-          : []
-      );
-      launchAtLoginStatus = nextLaunchAtLoginStatus;
-      appUpdaterStatus = nextAppUpdaterStatus;
-      errorLogEntries = Array.isArray(nextErrorLogs) ? nextErrorLogs : [];
-      appVersion =
-        typeof nextAppVersion === "string" && nextAppVersion.trim()
-          ? nextAppVersion.trim()
-          : "未知版本";
+      const loaded = await loadSettingsPanelData();
+      if (!loaded) {
+        setStatus(
+          "\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u8bf7\u5148\u5f7b\u5e95\u9000\u51fa LiteLauncher \u540e\u518d\u6267\u884c pnpm start"
+        );
+        return;
+      }
       if (token !== latestSearchToken) {
         return;
       }
@@ -4278,16 +5121,14 @@ async function refreshEntries(query: string): Promise<void> {
           searchResultPage = 0;
         }
 
-        const [searchItems, commandFallbackItems, pinnedItems, pluginItems] = await Promise.all([
+        const [searchItems, commandFallbackItems] = await Promise.all([
           launcher.search(parsedQuery.query, {
             limit: fetchLimit,
             scope: parsedQuery.scope
           }),
           parsedQuery.scope === "all" || parsedQuery.scope === "command"
             ? launcher.resolveCommandQuery(parsedQuery.query)
-            : Promise.resolve([]),
-          parsedQuery.explicitScope ? Promise.resolve([]) : launcher.getPinnedItems(),
-          parsedQuery.explicitScope ? Promise.resolve([]) : launcher.getPluginItems()
+            : Promise.resolve([])
         ]);
         if (token !== latestSearchToken) {
           return;
@@ -4322,32 +5163,6 @@ async function refreshEntries(query: string): Promise<void> {
             pageCount: searchPageCount
           }
         );
-        if (!parsedQuery.explicitScope) {
-          const pluginTotalCount = pluginItems.length;
-          const pluginPageSize = getAdaptiveSectionDisplayLimit(pluginItems);
-          const pluginPageCount = 1;
-          pluginResultPage = 0;
-
-          addSearchSection(
-            "pinned",
-            "\u7f6e\u9876",
-            pinnedItems,
-            getAdaptiveSectionDisplayLimit(pinnedItems),
-            "\u6682\u65e0\u7f6e\u9876\u9879\uff08\u53ef\u70b9\u300c\u6dfb\u52a0\u6587\u4ef6/\u6587\u4ef6\u5939\u300d\u6216\u5728\u641c\u7d22\u7ed3\u679c\u53f3\u952e\u7f6e\u9876\uff09"
-          );
-          addSearchSection(
-            "plugin",
-            "\u63d2\u4ef6",
-            pluginItems,
-            pluginPageSize,
-            "\u6682\u65e0\u63d2\u4ef6",
-            {
-              totalCount: pluginTotalCount,
-              page: pluginResultPage,
-              pageCount: pluginPageCount
-            }
-          );
-        }
         selectedIndex = entries.length ? 0 : 0;
         renderList();
         const shownStart = totalSearchCount === 0 ? 0 : searchStart + 1;
@@ -4359,9 +5174,7 @@ async function refreshEntries(query: string): Promise<void> {
             `${parsedQuery.scopeLabel}搜索 ${shownStart}-${shownEnd}/${totalSearchText}`
           );
         } else {
-          setStatus(
-            `\u641c\u7d22 ${shownStart}-${shownEnd}/${totalSearchText} \u00b7 \u7f6e\u9876 ${pinnedItems.length} \u00b7 \u63d2\u4ef6 ${pluginItems.length}`
-          );
+          setStatus(`\u641c\u7d22 ${shownStart}-${shownEnd}/${totalSearchText}`);
         }
         return;
       }
@@ -4370,6 +5183,7 @@ async function refreshEntries(query: string): Promise<void> {
       searchResultPage = 0;
 
       const homeSections = await launcher.getHomeSections();
+      void ensurePluginCatalogLoaded();
       if (token !== latestSearchToken) {
         return;
       }
@@ -4464,7 +5278,10 @@ async function executeSelected(index = selectedIndex): Promise<void> {
       return;
     }
 
-    setStatus(result.message ?? "\u6267\u884c\u5b8c\u6210");
+    setStatus(result.message ?? "执行完成");
+    if (selected.kind === "launch") {
+      commandCenterUi.showToast(`已打开：${selected.item.title}`);
+    }
     if (!result.keepOpen) {
       return;
     }
@@ -4523,10 +5340,19 @@ async function clearAllClipItems(): Promise<void> {
 
 function backToSearch(): void {
   clearSearchInputDebounceTimer();
+  if (commandCenterUi.isSettingsOverlayOpen()) {
+    dismissSettingsOverlay();
+    return;
+  }
   if (mode !== "search") {
     setMode("search");
     syncWindowSizePreset("search", true);
     void refreshEntries("");
+    return;
+  }
+
+  if (UI_TUNING_KEEP_OPEN) {
+    setStatus("调 UI 中：主页保持打开（Esc / 失焦不关闭）");
     return;
   }
 
@@ -4691,6 +5517,13 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
 
+  if (commandCenterUi.isSettingsOverlayOpen() && !isEscape) {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest(".cc-settings-overlay-dialog")) {
+      return;
+    }
+  }
+
   const handledPanelMode = handlePanelModeKeydown(event, {
     isEnter,
     isEscape,
@@ -4779,6 +5612,14 @@ function handleKeydown(event: KeyboardEvent): void {
   if (isEscape) {
     event.preventDefault();
     pushDebugLog("renderer action: escape pressed");
+    if (pinnedManageMode) {
+      setPinnedManageMode(false);
+      return;
+    }
+    if (commandCenterUi.isSettingsOverlayOpen()) {
+      dismissSettingsOverlay();
+      return;
+    }
     if (mode === "settings") {
       pushDebugLog("renderer action: settings -> backToSearch");
       backToSearch();
@@ -4923,9 +5764,49 @@ function bootstrap(): void {
   });
 
   setMode("search");
+  commandCenterUi.initCommandCenterUi({
+    onSidebarAction: (action) => {
+      void handleSidebarAction(action);
+    },
+    onTogglePinnedManage: () => {
+      togglePinnedManageMode();
+    }
+  });
+  if (commandCenterIcons) {
+    const headingMap: Record<string, string> = {
+      ".cc-heading-icon--clock": "clock",
+      ".cc-heading-icon--flash": "flash",
+      ".cc-heading-icon--arrow": "arrow",
+      ".cc-heading-icon--settings": "settings",
+      ".cc-heading-icon--pin": "pin",
+      ".cc-heading-icon--plugin": "plugin"
+    };
+    for (const [selector, iconName] of Object.entries(headingMap)) {
+      document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
+        element.innerHTML = commandCenterIcons.icons[iconName] ?? "";
+      });
+    }
+  }
   registerEvents();
-  setStatus("\u53ef\u4ee5\u5f00\u59cb\u641c\u7d22");
+  syncAutoHideSuspension();
+  setStatus(
+    UI_TUNING_KEEP_OPEN
+      ? "调 UI 中：主页保持打开（Esc / 失焦不关闭）"
+      : "\u53ef\u4ee5\u5f00\u59cb\u641c\u7d22"
+  );
   focusInput(false);
+  if (launcher?.getUiThemeConfig) {
+    void launcher
+      .getUiThemeConfig()
+      .then((theme) => {
+        applyUiThemeConfig(theme);
+      })
+      .catch(() => {
+        applyUiThemeConfig(uiThemeConfig);
+      });
+  } else {
+    applyUiThemeConfig(uiThemeConfig);
+  }
   void refreshEntries("");
 }
 

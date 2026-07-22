@@ -35,6 +35,10 @@ import {
   TranslateSettings,
   TranslateTextInput
 } from "../shared/translate";
+import {
+  UiThemeConfig,
+  UiThemePresetId
+} from "../shared/ui-theme";
 
 interface RendererPluginConstants {
   CASHFLOW_PLUGIN_ID: string;
@@ -268,9 +272,65 @@ interface RendererPanelImpls {
 }
 
 
+interface RendererCommandCenterConfig {
+  quickEntries: Array<{
+    label: string;
+    icon: string;
+    action: {
+      type: "plugin" | "settings" | "target";
+      pluginId?: string;
+      action?: string;
+      focus?: "plugins" | "errors" | "updates" | "pinned";
+      target?: string;
+      title?: string;
+    };
+    danger?: boolean;
+  }>;
+  systemEntries: RendererCommandCenterConfig["quickEntries"];
+  footerEntries: RendererCommandCenterConfig["quickEntries"];
+  suggestions: string[];
+}
+
+interface RendererCommandCenterIcons {
+  createIconElement: (name: string, compact?: boolean) => HTMLSpanElement;
+  pluginColors: Record<string, string>;
+  icons: Record<string, string>;
+}
+
+interface RendererCommandCenterUi {
+  initCommandCenterUi: (hooks: {
+    onSidebarAction: (action: RendererCommandCenterConfig["quickEntries"][number]["action"]) => void;
+    onTogglePinnedManage?: () => void;
+  }) => void;
+  syncHomeChromeVisibility: (
+    mode: "search" | "clip" | "settings" | "password" | "cashflow" | "plugin"
+  ) => void;
+  clearHomeSections: () => void;
+  updateCommandCenterQueryState: (hasQuery: boolean) => void;
+  setCommandSearchStatus: (message: string | null) => void;
+  showToast: (message: string) => void;
+  getSectionGrid: (sectionId: "recent" | "pinned" | "plugin") => HTMLUListElement | null;
+  updateSectionCount: (
+    sectionId: "recent" | "pinned" | "plugin",
+    visible: number,
+    total: number
+  ) => void;
+  appendPluginAddChip: (onClick: () => void) => void;
+  scrollToPlugins: () => void;
+  openSettingsOverlay: (render: (container: HTMLElement) => void) => void;
+  closeSettingsOverlay: () => void;
+  isSettingsOverlayOpen: () => boolean;
+  getPinnedActionsHost: () => HTMLElement | null;
+  getPluginPagerHost: () => HTMLElement | null;
+  getCommandResultsHost: () => HTMLElement | null;
+}
+
 declare global {
   interface Window {
     __LL_PLUGIN_CONSTANTS__?: RendererPluginConstants;
+    __LL_COMMAND_CENTER_CONFIG__?: RendererCommandCenterConfig;
+    __LL_COMMAND_CENTER_ICONS__?: RendererCommandCenterIcons;
+    __LL_COMMAND_CENTER_UI__?: RendererCommandCenterUi;
     __LL_PLUGIN_STATIC_DATA__?: RendererPluginStaticData;
     __LL_IMAGE_PROMPT_DATA__?: RendererImagePromptData;
     __LL_PLUGIN_HANDLER_CONFIGS__?: RendererPluginHandlerConfigItem[];
@@ -316,6 +376,18 @@ declare global {
       }>;
     };
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
+    __LL_UI_THEME__?: {
+      DEFAULT: UiThemeConfig;
+      PRESETS: Array<{
+        id: Exclude<UiThemePresetId, "custom">;
+        label: string;
+        theme: Omit<UiThemeConfig, "presetId">;
+      }>;
+      normalize(input: Partial<UiThemeConfig> | null | undefined): UiThemeConfig;
+      fromPreset(id: Exclude<UiThemePresetId, "custom">): UiThemeConfig;
+      fromAccent(accent: string, base?: UiThemeConfig): UiThemeConfig;
+      apply(theme: UiThemeConfig): void;
+    };
     launcher: {
       isDebugKeysEnabled(): boolean;
       getInitialItems(): Promise<LaunchItem[]>;
@@ -329,6 +401,10 @@ declare global {
       setSearchDisplayConfig(
         config: Partial<SearchDisplayConfig>
       ): Promise<SearchDisplayConfig>;
+      getUiThemeConfig(): Promise<UiThemeConfig>;
+      setUiThemeConfig(
+        config: Partial<UiThemeConfig>
+      ): Promise<UiThemeConfig>;
       getCatalogScanConfig(): Promise<CatalogScanConfig>;
       setCatalogScanConfig(
         config: Partial<CatalogScanConfig>

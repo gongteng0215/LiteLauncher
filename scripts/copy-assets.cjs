@@ -5,6 +5,9 @@ const WATCH_MODE = process.argv.includes("--watch");
 const WATCHED_RENDERER_FILES = new Set([
   "index.html",
   "styles.css",
+  "styles-theme.css",
+  "styles-command-center.css",
+  "styles-plugin-theme-remaps.css",
   "litesnap-overlay.html",
   "litesnap-overlay.css",
   "selection-popup.html",
@@ -90,9 +93,14 @@ function patchDistEcdictFts() {
 }
 
 function copyAllAssets() {
+  require("./generate-plugin-theme-remaps.cjs");
+
   const filesToCopy = [
     ["src/renderer/index.html", "dist/renderer/index.html"],
     ["src/renderer/styles.css", "dist/renderer/styles.css"],
+    ["src/renderer/styles-theme.css", "dist/renderer/styles-theme.css"],
+    ["src/renderer/styles-command-center.css", "dist/renderer/styles-command-center.css"],
+    ["src/renderer/styles-plugin-theme-remaps.css", "dist/renderer/styles-plugin-theme-remaps.css"],
     ["src/renderer/litesnap-overlay.html", "dist/renderer/litesnap-overlay.html"],
     ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"],
     ["src/renderer/selection-popup.html", "dist/renderer/selection-popup.html"],

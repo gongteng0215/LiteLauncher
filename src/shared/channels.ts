@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
     "launcher:set-e2e-app-updater-check-failure",
   getSearchDisplayConfig: "launcher:get-search-display-config",
   setSearchDisplayConfig: "launcher:set-search-display-config",
+  getUiThemeConfig: "launcher:get-ui-theme-config",
+  setUiThemeConfig: "launcher:set-ui-theme-config",
   getCatalogScanConfig: "launcher:get-catalog-scan-config",
   setCatalogScanConfig: "launcher:set-catalog-scan-config",
   getVisiblePluginIds: "launcher:get-visible-plugin-ids",

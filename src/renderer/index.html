@@ -9,41 +9,128 @@
     />
     <title>LiteLauncher</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles-theme.css" />
+    <link rel="stylesheet" href="./styles-plugin-theme-remaps.css" />
+    <link rel="stylesheet" href="./styles-command-center.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="header">
-        <div class="header-row">
-          <input
-            id="search-input"
-            class="search-input"
-            type="text"
-            placeholder="搜索应用，支持 app:/cmd:/web:/plugin: 范围前缀"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button
-            id="settings-shortcut-btn"
-            class="header-toolbar-btn"
-            type="button"
-            aria-label="打开设置"
-            title="设置"
-          >
-            设置
+    <main class="shell launcher-shell" id="launcher-shell">
+      <div id="search-backdrop" class="search-backdrop" hidden></div>
+      <section id="cc-recent" class="recent-section home-section">
+        <div class="section-heading">
+          <div class="section-heading__title">
+            <span class="cc-heading-icon cc-heading-icon--clock" aria-hidden="true"></span>
+            <span>最近访问</span>
+            <span id="cc-recent-count" class="count">0/0</span>
+          </div>
+          <button id="cc-recent-toggle" class="heading-action" type="button">
+            收起
           </button>
         </div>
-      </header>
-      <section class="results">
+        <ul id="cc-recent-list" class="recent-grid"></ul>
+      </section>
+
+      <section class="workspace-row home-section">
+        <aside class="quick-panel">
+          <div class="section-heading">
+            <div class="section-heading__title">
+              <span class="cc-heading-icon cc-heading-icon--flash" aria-hidden="true"></span>
+              <span>快捷能力</span>
+            </div>
+          </div>
+          <div id="cc-quick-grid" class="tool-grid"></div>
+          <button id="cc-more-tools" class="more-tools" type="button">
+            <span>更多能力</span>
+            <span class="cc-heading-icon cc-heading-icon--arrow" aria-hidden="true"></span>
+          </button>
+        </aside>
+
+        <section id="cc-command" class="command-zone">
+          <div class="command-surface" id="command-surface">
+            <div class="command-input-row">
+              <span class="command-search-icon" aria-hidden="true"></span>
+              <input
+                id="search-input"
+                class="search-input"
+                type="text"
+                placeholder="输入命令、搜索应用或插件…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button
+                id="settings-shortcut-btn"
+                class="command-settings"
+                type="button"
+                aria-label="打开设置"
+                title="设置"
+              >
+                设置
+              </button>
+            </div>
+            <div id="command-help" class="command-help"></div>
+            <div id="command-results" class="command-results" hidden></div>
+          </div>
+          <div id="command-suggestions" class="suggestion-row"></div>
+        </section>
+
+        <aside class="system-panel">
+          <div class="section-heading">
+            <div class="section-heading__title">
+              <span class="cc-heading-icon cc-heading-icon--settings" aria-hidden="true"></span>
+              <span>系统与设置</span>
+            </div>
+          </div>
+          <div id="cc-system-grid" class="system-grid"></div>
+        </aside>
+      </section>
+
+      <section id="cc-pinned" class="pinned-section home-section">
+        <div class="pinned-header">
+          <div class="section-heading__title">
+            <span class="cc-heading-icon cc-heading-icon--pin" aria-hidden="true"></span>
+            <span>置顶</span>
+            <span id="cc-pinned-count" class="count">0/0</span>
+          </div>
+          <div id="cc-pinned-actions" class="pinned-actions-host"></div>
+          <button
+            id="cc-manage-pinned"
+            class="manage-pinned icon-action-btn"
+            type="button"
+            aria-label="管理置顶"
+            title="管理置顶"
+          ></button>
+        </div>
+        <div class="pinned-row">
+          <ul id="cc-pinned-list" class="pinned-grid"></ul>
+        </div>
+      </section>
+
+      <section id="cc-plugins" class="plugins-section home-section">
+        <div class="section-heading">
+          <div class="section-heading__title">
+            <span class="cc-heading-icon cc-heading-icon--plugin" aria-hidden="true"></span>
+            <span>插件</span>
+            <span id="cc-plugin-count" class="count">0</span>
+          </div>
+          <div id="cc-plugin-pager" class="plugin-pager-host"></div>
+        </div>
+        <ul id="cc-plugins-list" class="plugin-grid"></ul>
+      </section>
+
+      <footer id="cc-footer" class="footer-actions home-section"></footer>
+
+      <section class="panel-section results" hidden>
         <div id="results-loading" class="results-loading" hidden>
           <span class="results-loading-spinner" aria-hidden="true"></span>
           <span id="results-loading-text" class="results-loading-text">正在检索...</span>
         </div>
         <ul id="result-list" class="result-list"></ul>
       </section>
-      <footer class="footer">
-        <div id="status-text" class="status-text">启动中...</div>
-        <div id="hint-text" class="hint-text">Enter 执行 - Esc 清空/隐藏 - 方向键移动 - 支持 app:/cmd:/web:/plugin:</div>
-      </footer>
+
+      <div id="settings-overlay-root" hidden></div>
+      <div id="toast-root" class="toast" hidden role="status"></div>
+      <div id="status-text" class="status-text" hidden aria-hidden="true">启动中...</div>
+      <div id="hint-text" class="hint-text" hidden aria-hidden="true"></div>
     </main>
     <script nonce="litelauncher-probe">
       window.__LL_RENDERER_BOOTSTRAPPED__ = false;
@@ -59,6 +146,7 @@
 
         status.textContent =
           "渲染脚本未启动，请先彻底退出 LiteLauncher 后再执行 pnpm start";
+        status.hidden = false;
       }, 1500);
     </script>
     <script src="./plugin-constants.js"></script>
@@ -67,6 +155,10 @@
     <script src="./image-prompt-data.js"></script>
     <script src="./plugin-handler-config.js"></script>
     <script src="./plugin-panel-impls.js"></script>
+    <script src="./command-center-config.js"></script>
+    <script src="./command-center-icons.js"></script>
+    <script src="./command-center-ui.js"></script>
+    <script src="./ui-theme.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

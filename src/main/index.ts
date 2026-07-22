@@ -33,6 +33,12 @@ import {
   normalizeCatalogScanConfig,
   normalizeSearchDisplayConfig
 } from "../shared/settings";
+import {
+  DEFAULT_UI_THEME_CONFIG,
+  normalizeUiThemeConfig,
+  UI_THEME_CONFIG_KEY,
+  type UiThemeConfig
+} from "../shared/ui-theme";
 import { createAppUpdater } from "./app-updater";
 import { buildCatalogWithOptions } from "./catalog";
 import { CatalogChangeWatcher } from "./catalog-watcher";
@@ -113,6 +119,7 @@ const APP_USER_MODEL_ID = "LiteLauncher";
 const SEARCH_DISPLAY_CONFIG_KEY = "searchDisplayConfig";
 const CATALOG_SCAN_CONFIG_KEY = "catalogScanConfig";
 const VISIBLE_PLUGIN_IDS_KEY = "visiblePluginIds";
+const UI_THEME_SETTING_KEY = UI_THEME_CONFIG_KEY;
 const REQUIRED_VISIBLE_PLUGIN_IDS = [
   "hardware-inspector",
   "clipboard-workbench",
@@ -328,6 +335,9 @@ let clipboardWorkbenchService: ClipboardWorkbenchService | null = null;
 let appQuitting = false;
 let searchDisplayConfig: SearchDisplayConfig = {
   ...DEFAULT_SEARCH_DISPLAY_CONFIG
+};
+let uiThemeConfig: UiThemeConfig = {
+  ...DEFAULT_UI_THEME_CONFIG
 };
 let catalogScanConfig: CatalogScanConfig = {
   ...DEFAULT_CATALOG_SCAN_CONFIG
@@ -1431,6 +1441,29 @@ async function saveSearchDisplayConfig(
   return next;
 }
 
+async function loadUiThemeConfig(db: LiteDatabase): Promise<UiThemeConfig> {
+  const raw = await db.getSetting(UI_THEME_SETTING_KEY);
+  if (!raw) {
+    return { ...DEFAULT_UI_THEME_CONFIG };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<UiThemeConfig>;
+    return normalizeUiThemeConfig(parsed);
+  } catch {
+    return { ...DEFAULT_UI_THEME_CONFIG };
+  }
+}
+
+async function saveUiThemeConfig(
+  db: LiteDatabase,
+  config: Partial<UiThemeConfig>
+): Promise<UiThemeConfig> {
+  const next = normalizeUiThemeConfig(config, uiThemeConfig);
+  await db.setSetting(UI_THEME_SETTING_KEY, JSON.stringify(next));
+  uiThemeConfig = next;
+  return next;
+}
+
 async function loadCatalogScanConfig(
   db: LiteDatabase
 ): Promise<CatalogScanConfig> {
@@ -2165,6 +2198,7 @@ async function bootstrap(): Promise<void> {
     liteSnapHistoryStore
   );
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
+  uiThemeConfig = await loadUiThemeConfig(activeDatabase);
   catalogScanConfig = await loadCatalogScanConfig(activeDatabase);
   visiblePluginIds = await loadVisiblePluginIds(activeDatabase);
   catalog = replaceCatalogPluginItems(catalog);
@@ -2714,6 +2748,8 @@ async function bootstrap(): Promise<void> {
       getSearchDisplayConfig: () => ({ ...searchDisplayConfig }),
       setSearchDisplayConfig: (config) =>
         saveSearchDisplayConfig(activeDatabase, config),
+      getUiThemeConfig: () => ({ ...uiThemeConfig }),
+      setUiThemeConfig: (config) => saveUiThemeConfig(activeDatabase, config),
       getCatalogScanConfig: () => ({ ...catalogScanConfig }),
       setCatalogScanConfig: (config) =>
         saveCatalogScanConfig(activeDatabase, config),

@@ -1,0 +1,85 @@
+/**
+ * LiteLauncher global theme tokens.
+ *
+ * Defaults live here. Prefer changing theme from Settings → 外观主题
+ * (preset / accent color); runtime values are written to :root as --ll-*
+ * and override these. Keep --ll-*-rgb in sync with the matching hex when
+ * editing this file manually (R, G, B only).
+ */
+:root {
+  color-scheme: dark;
+
+  /* ========== Primary accent (edit these) ========== */
+  --ll-accent: #9d63ff;
+  --ll-accent-rgb: 157, 99, 255;
+  --ll-accent-hover: #b88cff;
+  --ll-accent-hover-rgb: 184, 140, 255;
+  --ll-accent-soft: #c4a0ff;
+  --ll-accent-soft-rgb: 196, 160, 255;
+  --ll-accent-strong: #6f3bc2;
+  --ll-accent-strong-rgb: 111, 59, 194;
+  --ll-accent-deep: #4c1d95;
+  --ll-accent-deep-rgb: 76, 29, 149;
+  --ll-accent-ink: #2e1065;
+  --ll-accent-ink-rgb: 46, 16, 101;
+  --ll-on-accent: #ffffff;
+
+  /* ========== Surfaces ========== */
+  --ll-bg: #070612;
+  --ll-bg-rgb: 7, 6, 18;
+  --ll-surface: #0d0b1d;
+  --ll-surface-rgb: 13, 11, 29;
+  --ll-surface-raised: #121027;
+  --ll-surface-raised-rgb: 18, 16, 39;
+  --ll-surface-input: #151127;
+  --ll-surface-input-rgb: 21, 17, 39;
+
+  /* ========== Text & lines ========== */
+  --ll-text: #f1edff;
+  --ll-text-muted: #aaa1c4;
+  --ll-text-accent: #eadfff;
+  --ll-line: rgba(181, 166, 224, 0.18);
+  --ll-line-strong: rgba(175, 143, 255, 0.34);
+
+  /* ========== Semantic ========== */
+  --ll-danger: #ff7088;
+  --ll-warning: #fbbf24;
+  --ll-success: #86efac;
+
+  /* ========== Derived (usually leave alone) ========== */
+  --ll-accent-fade-06: rgba(var(--ll-accent-rgb), 0.06);
+  --ll-accent-fade-10: rgba(var(--ll-accent-rgb), 0.1);
+  --ll-accent-fade-14: rgba(var(--ll-accent-rgb), 0.14);
+  --ll-accent-fade-18: rgba(var(--ll-accent-rgb), 0.18);
+  --ll-accent-fade-22: rgba(var(--ll-accent-rgb), 0.22);
+  --ll-accent-fade-28: rgba(var(--ll-accent-rgb), 0.28);
+  --ll-accent-fade-34: rgba(var(--ll-accent-rgb), 0.34);
+  --ll-accent-fade-45: rgba(var(--ll-accent-rgb), 0.45);
+  --ll-accent-fade-55: rgba(var(--ll-accent-rgb), 0.55);
+  --ll-accent-fade-65: rgba(var(--ll-accent-rgb), 0.65);
+  --ll-accent-fade-75: rgba(var(--ll-accent-rgb), 0.75);
+  --ll-accent-fade-85: rgba(var(--ll-accent-rgb), 0.85);
+  --ll-strong-fade-18: rgba(var(--ll-accent-strong-rgb), 0.18);
+  --ll-strong-fade-22: rgba(var(--ll-accent-strong-rgb), 0.22);
+  --ll-strong-fade-28: rgba(var(--ll-accent-strong-rgb), 0.28);
+  --ll-strong-fade-38: rgba(var(--ll-accent-strong-rgb), 0.38);
+  --ll-strong-fade-42: rgba(var(--ll-accent-strong-rgb), 0.42);
+  --ll-scroll-thumb: rgba(var(--ll-accent-rgb), 0.45);
+  --ll-scroll-thumb-hover: rgba(var(--ll-accent-rgb), 0.62);
+  --ll-focus-ring: 0 0 0 2px rgba(var(--ll-accent-rgb), 0.22);
+  --ll-glow: 0 0 18px rgba(var(--ll-accent-strong-rgb), 0.24);
+  --ll-btn-primary-bg: var(--ll-accent-strong);
+  --ll-btn-primary-border: var(--ll-accent-hover);
+  --ll-btn-primary-fg: var(--ll-on-accent);
+
+  /* Compat aliases used by existing Command Center / plugin CSS */
+  --bg: var(--ll-bg);
+  --surface: var(--ll-surface);
+  --surface-raised: var(--ll-surface-raised);
+  --line: var(--ll-line);
+  --line-strong: var(--ll-line-strong);
+  --text: var(--ll-text);
+  --text-muted: var(--ll-text-muted);
+  --violet: var(--ll-accent);
+  --danger: var(--ll-danger);
+}
