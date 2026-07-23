@@ -376,6 +376,7 @@ declare global {
       }>;
     };
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
+    __LL_PREPARE_HIDE__?: () => void;
     __LL_UI_THEME__?: {
       DEFAULT: UiThemeConfig;
       PRESETS: Array<{
@@ -552,6 +553,8 @@ declare global {
       clearErrorLogs(): Promise<number>;
       onFocusInput(handler: () => void): () => void;
       onClearInput(handler: () => void): () => void;
+      onPrepareHide?(handler: (requestId: number) => void): () => void;
+      ackPrepareHide?(requestId: number): void;
       onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
       onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
     };

@@ -56,4 +56,9 @@ test("renderer pin toggle treats pinned-section membership as pinned", () => {
     /const nextPinned = !isLaunchEntryPinned\(index, item\);/,
     "pin toggle should unpin items shown in the pinned section even if pinned flag was lost"
   );
+  assert.match(
+    rendererSource,
+    /async function addCustomPinnedFromPicker[\s\S]*markHomeSectionsDirty\(\);[\s\S]*addCustomPinnedPath/,
+    "adding a custom pin must invalidate home cache before refresh"
+  );
 });

@@ -98,12 +98,16 @@ import { UsageStore } from "./usage-store";
 import {
   applyLauncherWindowSizePreset,
   createLauncherWindow,
+  hideLauncherWindow,
   LauncherWindowDiagnosticEvent,
   LauncherWindowShowTrigger,
-  showLauncherWindow,
+  showLauncherWindowAsync,
   toggleLauncherWindow
 } from "./window";
 import { isWindowAutoHideSuspended, setWindowAutoHideSuspended } from "./window-auto-hide";
+
+// Avoid Windows DWM show/hide animation replaying a stale window bitmap.
+app.commandLine.appendSwitch("wm-window-animations-disabled");
 
 const DEFAULT_SHORTCUT = "Alt+Space";
 const FALLBACK_SHORTCUTS = ["Ctrl+Space", "Alt+Shift+Space", "Ctrl+Alt+Space"];
@@ -441,7 +445,7 @@ function showLauncherWindowWithTrigger(
     at: Date.now()
   };
   catalogChangeWatcher?.maybeRefreshIfStale();
-  showLauncherWindow(window, {
+  void showLauncherWindowAsync(window, {
     trigger,
     reportDiagnostic: (event: LauncherWindowDiagnosticEvent) => {
       recordLauncherWindowDiagnostic(window, {
@@ -1851,12 +1855,17 @@ async function getPinnedItemsFromCatalog(limit: number): Promise<LaunchItem[]> {
       continue;
     }
 
-    const filtered = filterItemsByResultPathRules([item]);
-    if (filtered.length === 0) {
-      continue;
+    // Explicit custom pins must always surface; do not apply catalog result
+    // include/exclude path filters that are meant for scanned items only.
+    if (isCustomPinId(item.id) || pinnedCustomItems.has(item.id)) {
+      picked.push({ ...item, pinned: true });
+    } else {
+      const filtered = filterItemsByResultPathRules([item]);
+      if (filtered.length === 0) {
+        continue;
+      }
+      picked.push({ ...filtered[0], pinned: true });
     }
-
-    picked.push({ ...filtered[0], pinned: true });
     if (picked.length >= limit) {
       break;
     }
@@ -2220,8 +2229,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
     event.preventDefault();
-    applyLauncherWindowSizePreset(launcherWindow, "compact");
-    launcherWindow.hide();
+    void hideLauncherWindow(launcherWindow);
   });
   launcherWindow.on("blur", () => {
     if (
@@ -2233,8 +2241,7 @@ async function bootstrap(): Promise<void> {
     ) {
       return;
     }
-    applyLauncherWindowSizePreset(launcherWindow, "compact");
-    launcherWindow.hide();
+    void hideLauncherWindow(launcherWindow);
   });
   launcherWindow.on("hide", () => {
     if (
@@ -2244,6 +2251,7 @@ async function bootstrap(): Promise<void> {
     ) {
       return;
     }
+    // Safety net: ensure home data is fully refreshed while hidden.
     launcherWindow.webContents.send(IPC_CHANNELS.clearInput);
   });
   launcherWindow.on("focus", () => {

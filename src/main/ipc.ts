@@ -54,7 +54,7 @@ import { executeItem } from "./actions";
 import { getDynamicSearchItems } from "./search";
 import { UsageStore } from "./usage-store";
 import { setWindowAutoHideSuspended } from "./window-auto-hide";
-import { applyLauncherWindowSizePreset } from "./window";
+import { applyLauncherWindowSizePreset, hideLauncherWindow } from "./window";
 
 type SearchProvider = {
   getInitialItems: (limit: number) => Promise<LaunchItem[]>;
@@ -2038,7 +2038,7 @@ export function registerIpcHandlers(
           await options.onItemUsed(selected.id);
         }
         if (!result.keepOpen) {
-          window.hide();
+          void hideLauncherWindow(window);
         }
       } else {
         await persistErrorLog({
@@ -2086,6 +2086,9 @@ export function registerIpcHandlers(
       return null;
     }
 
+    // Suspend auto-hide for the dialog. Callers must restore via
+    // syncAutoHideSuspension / plugin native-interaction release — unsuspending
+    // here races with blur and can clear plugin/settings suspension.
     setWindowAutoHideSuspended(window, true);
     try {
       const result = await dialog.showOpenDialog(window, {
@@ -2097,8 +2100,8 @@ export function registerIpcHandlers(
       }
       const selected = result.filePaths[0];
       return typeof selected === "string" && selected.trim() ? selected : null;
-    } finally {
-      setWindowAutoHideSuspended(window, false);
+    } catch {
+      return null;
     }
   });
 
@@ -2118,14 +2121,13 @@ export function registerIpcHandlers(
       }
       const selected = result.filePaths[0];
       return typeof selected === "string" && selected.trim() ? selected : null;
-    } finally {
-      setWindowAutoHideSuspended(window, false);
+    } catch {
+      return null;
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.hide, () => {
-    applyLauncherWindowSizePreset(window, "compact");
-    window.hide();
+  ipcMain.handle(IPC_CHANNELS.hide, async () => {
+    await hideLauncherWindow(window);
     return true;
   });
 

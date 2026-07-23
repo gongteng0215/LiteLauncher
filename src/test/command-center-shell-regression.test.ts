@@ -16,6 +16,9 @@ const configSource = fs.readFileSync(
 );
 const uiSource = fs.readFileSync(path.join(root, "src/renderer/command-center-ui.ts"), "utf8");
 const rendererSource = fs.readFileSync(path.join(root, "src/renderer/renderer.ts"), "utf8");
+const windowSource = fs.readFileSync(path.join(root, "src/main/window.ts"), "utf8");
+const mainIndexSource = fs.readFileSync(path.join(root, "src/main/index.ts"), "utf8");
+const ipcSource = fs.readFileSync(path.join(root, "src/main/ipc.ts"), "utf8");
 
 assert(indexHtml.includes('class="shell launcher-shell"'), "index.html must use launcher-shell");
 assert(!indexHtml.includes('recent-grid section-grid'), "command center grids must not use legacy section-grid class");
@@ -60,6 +63,53 @@ assert(rendererSource.includes("renderCommandResults"), "renderer must render in
 assert(rendererSource.includes("cc-settings-shell"), "settings panel must use command-center shell");
 assert(rendererSource.includes("settings-body"), "settings panel must include body/nav shell");
 assert(rendererSource.includes("showSettingsTab"), "settings panel must switch single group tabs");
+assert(rendererSource.includes("resetLauncherToHomeState"), "renderer must reset to home on hide");
+assert(rendererSource.includes("__LL_PREPARE_HIDE__"), "renderer must expose prepare-hide hook for main");
+assert(
+  /onClearInput\([\s\S]*resetLauncherToHomeState/.test(rendererSource),
+  "clearInput on hide must synchronously restore home state"
+);
+assert(
+  /resetLauncherToHomeState\(\{\s*refreshHome:\s*false\s*\}\)[\s\S]*launcher\.hide\(/.test(
+    rendererSource
+  ),
+  "Esc hide must paint home chrome before window.hide"
+);
+assert(
+  windowSource.includes("hideLauncherWindow") &&
+    windowSource.includes("__LL_PREPARE_HIDE__") &&
+    windowSource.includes("prepareLauncherHomeBeforeHide") &&
+    windowSource.includes("setOpacity") &&
+    windowSource.includes("showLauncherWindowAsync"),
+  "main hide/show paths must reset home, wait for paint, and gate opacity"
+);
+assert(
+  /void hideLauncherWindow\(launcherWindow\)/.test(mainIndexSource) &&
+    /await hideLauncherWindow\(window\)/.test(ipcSource),
+  "blur/close/ipc hide must use hideLauncherWindow"
+);
+assert(
+  mainIndexSource.includes("wm-window-animations-disabled"),
+  "main must disable Windows window show/hide animations that replay stale frames"
+);
+assert(
+  rendererSource.includes("onPrepareHide") && rendererSource.includes("ackPrepareHide"),
+  "renderer must ack prepare-hide after painting home"
+);
+assert(
+  rendererSource.includes("tryRestoreCachedHomeSections") &&
+    rendererSource.includes("markHomeSectionsDirty") &&
+    rendererSource.includes("cachedSearchLaunchItems"),
+  "renderer must cache home sections and search pages for faster restore"
+);
+assert(
+  /SEARCH_INPUT_DEBOUNCE_MS\s*=\s*320/.test(rendererSource),
+  "search debounce should stay snappy (~320ms)"
+);
+assert(
+  !/resolveCommandQuery\(parsedQuery\.query\)/.test(rendererSource),
+  "search hot path must not double-fetch dynamic commands via resolveCommandQuery"
+);
 assert(rendererSource.includes("设置中心"), "settings panel title must be 设置中心");
 assert(rendererSource.includes("外观主题"), "settings panel must include appearance theme tab");
 assert(

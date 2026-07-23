@@ -258,10 +258,25 @@ function setCommandSearchStatus(message: string | null): void {
   updateCommandCenterQueryState(hasQuery);
 
   if (!hasQuery || !message) {
+    if (!hasQuery && commandResults.childElementCount === 0 && commandResults.hidden) {
+      return;
+    }
+    if (!hasQuery) {
+      commandResults.replaceChildren();
+      commandResults.hidden = true;
+    }
     return;
   }
 
   commandResults.hidden = false;
+  const existingText = commandResults.querySelector<HTMLElement>(
+    ".command-results-status__text"
+  );
+  if (existingText && commandResults.querySelector(".command-results-status")) {
+    existingText.textContent = message;
+    return;
+  }
+
   commandResults.replaceChildren();
 
   const status = document.createElement("div");

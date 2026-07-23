@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, ipcMain, screen } from "electron";
 import path from "node:path";
 
 import { IPC_CHANNELS } from "../shared/channels";
@@ -278,7 +278,7 @@ export function createLauncherWindow(): BrowserWindow {
     maximizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    backgroundColor: "#10161f",
+    backgroundColor: "#100d22",
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -296,6 +296,122 @@ export function showLauncherWindow(
   window: BrowserWindow,
   options: ShowLauncherWindowOptions = {}
 ): void {
+  void showLauncherWindowAsync(window, options);
+}
+
+/**
+ * Ask the renderer to paint Command Center home and wait for a committed frame
+ * so hide()/show() never freeze or flash the previous search/plugin surface.
+ */
+export async function prepareLauncherHomeBeforeHide(
+  window: BrowserWindow
+): Promise<void> {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) {
+    return;
+  }
+
+  const requestId = Date.now() + Math.floor(Math.random() * 1000);
+  const ackPromise = new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      ipcMain.removeListener(IPC_CHANNELS.prepareHideAck, onAck);
+      resolve();
+    }, 160);
+
+    const onAck = (
+      event: Electron.IpcMainEvent,
+      ackId: unknown
+    ): void => {
+      if (event.sender !== window.webContents || ackId !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      ipcMain.removeListener(IPC_CHANNELS.prepareHideAck, onAck);
+      resolve();
+    };
+
+    ipcMain.on(IPC_CHANNELS.prepareHideAck, onAck);
+    try {
+      window.webContents.send(IPC_CHANNELS.prepareHide, requestId);
+    } catch {
+      clearTimeout(timer);
+      ipcMain.removeListener(IPC_CHANNELS.prepareHideAck, onAck);
+      resolve();
+    }
+  });
+
+  try {
+    await window.webContents.executeJavaScript(
+      `(() => new Promise((resolve) => {
+        try {
+          if (typeof window.__LL_PREPARE_HIDE__ === "function") {
+            window.__LL_PREPARE_HIDE__();
+          }
+        } catch (_) {}
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve(true));
+        });
+      }))()`,
+      true
+    );
+  } catch {
+    // IPC ack / clearInput remain the fallback reset path.
+  }
+
+  await ackPromise;
+}
+
+function setWindowOpacitySafe(window: BrowserWindow, opacity: number): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+  try {
+    window.setOpacity(opacity);
+  } catch {
+    // Older platforms may reject opacity changes; ignore.
+  }
+}
+
+/**
+ * Reset renderer to home, paint it, then hide under opacity 0 so Windows does
+ * not replay a stale search/plugin bitmap on the next show().
+ */
+export async function hideLauncherWindow(window: BrowserWindow): Promise<void> {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  await prepareLauncherHomeBeforeHide(window);
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  applyLauncherWindowSizePreset(window, "compact");
+  setWindowOpacitySafe(window, 0);
+  if (!window.isDestroyed() && window.isVisible()) {
+    window.hide();
+  }
+}
+
+/**
+ * Ensure home is painted while still hidden/opaque-0, then reveal.
+ * Prevents the classic Windows "flash last frame" on BrowserWindow.show().
+ */
+export async function showLauncherWindowAsync(
+  window: BrowserWindow,
+  options: ShowLauncherWindowOptions = {}
+): Promise<void> {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  await prepareLauncherHomeBeforeHide(window);
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  applyLauncherWindowSizePreset(window, "compact");
+  setWindowOpacitySafe(window, 0);
+
   centerWindow(window);
   window.setAlwaysOnTop(true);
   window.show();
@@ -304,8 +420,13 @@ export function showLauncherWindow(
   window.focus();
   window.webContents.focus();
 
-  // Focus can be dropped by OS focus-stealing prevention.
-  // Retry a few times to make the input reliably active.
+  // Let the compositor present the current (home) frame before becoming visible.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 32);
+  });
+
+  setWindowOpacitySafe(window, 1);
+
   window.webContents.send(IPC_CHANNELS.focusInput);
   reportIfTopmostStateLooksWrong(
     window,
@@ -313,8 +434,7 @@ export function showLauncherWindow(
     "show-immediate-state",
     "launcher show completed without visible topmost state"
   );
-  scheduleTopmostRecovery(window, options, 40);
-  scheduleTopmostRecovery(window, options, 120);
+  scheduleTopmostRecovery(window, options, 80);
 }
 
 export function toggleLauncherWindow(
@@ -322,11 +442,10 @@ export function toggleLauncherWindow(
   options: ShowLauncherWindowOptions = {}
 ): void {
   if (window.isVisible()) {
-    applyLauncherWindowSizePreset(window, "compact");
-    window.hide();
+    void hideLauncherWindow(window);
     return;
   }
 
   applyLauncherWindowSizePreset(window, "compact");
-  showLauncherWindow(window, options);
+  void showLauncherWindowAsync(window, options);
 }

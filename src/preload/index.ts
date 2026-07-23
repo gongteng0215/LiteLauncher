@@ -416,6 +416,14 @@ const api = {
   onClearInput(handler: () => void): Cleanup {
     return on(IPC_CHANNELS.clearInput, handler);
   },
+  onPrepareHide(handler: (requestId: number) => void): Cleanup {
+    return on(IPC_CHANNELS.prepareHide, (requestId) => {
+      handler(typeof requestId === "number" ? requestId : Number(requestId));
+    });
+  },
+  ackPrepareHide(requestId: number): void {
+    ipcRenderer.send(IPC_CHANNELS.prepareHideAck, requestId);
+  },
   onOpenPanel(handler: (panelPayload: unknown) => void): Cleanup {
     return on(IPC_CHANNELS.openPanel, (panelPayload) => handler(panelPayload));
   },

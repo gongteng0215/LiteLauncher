@@ -336,13 +336,17 @@ button { color: inherit; }
 }
 
 .recent-grid {
+  --recent-tile-height: 60px;
+  --recent-row-gap: 8px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
   align-content: start;
-  gap: 8px 7px;
+  gap: var(--recent-row-gap) 7px;
   min-height: 0;
   flex: 0 0 auto;
   overflow: hidden;
+  /* Hard cap: at most two tile rows. */
+  max-height: calc(var(--recent-tile-height) * 2 + var(--recent-row-gap));
 }
 
 .recent-section.is-collapsed .recent-grid { display: none; }
@@ -421,9 +425,9 @@ button { color: inherit; }
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  color: var(--icon-foreground, #fff);
-  background: var(--icon-color);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 5px 12px rgba(0, 0, 0, 0.24);
+  color: var(--icon-foreground, var(--ll-text-muted));
+  background: transparent;
+  box-shadow: none;
 }
 
 .icon-badge--compact {
@@ -970,6 +974,7 @@ button { color: inherit; }
     grid-template-rows: auto minmax(180px, 1fr) auto minmax(110px, 0.8fr) auto;
   }
   .recent-section .section-heading { margin-bottom: 6px; }
+  .recent-grid { --recent-tile-height: 56px; }
   .recent-tile {
     min-height: 56px;
     height: 56px;
@@ -1017,6 +1022,8 @@ button { color: inherit; }
   .recent-section .section-heading { margin-bottom: 4px; }
 
   .recent-grid {
+    --recent-tile-height: 52px;
+    --recent-row-gap: 5px;
     grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
     gap: 5px;
   }
@@ -1240,7 +1247,7 @@ button { color: inherit; }
   width: 100%;
   height: 100%;
   border-radius: inherit;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .icon-badge .result-icon.fallback {

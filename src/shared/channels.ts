@@ -92,6 +92,8 @@ export const IPC_CHANNELS = {
   clearClipItems: "launcher:clear-clip-items",
   focusInput: "launcher:focus-input",
   clearInput: "launcher:clear-input",
+  prepareHide: "launcher:prepare-hide",
+  prepareHideAck: "launcher:prepare-hide-ack",
   openPanel: "launcher:open-panel",
   relaunchApp: "launcher:relaunch-app",
   debugKey: "launcher:debug-key"

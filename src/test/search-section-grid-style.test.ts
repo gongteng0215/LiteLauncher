@@ -218,8 +218,13 @@ test("home search sections are not capped by the legacy display limit of 20", ()
   );
   assert.match(
     rendererSource,
-    /getAdaptiveSectionDisplayLimit\(recentItems\)/,
-    "recent section should size itself from the returned items"
+    /getRecentHomeDisplayLimit\(recentItems\.length\)/,
+    "recent section should cap itself to about two home rows"
+  );
+  assert.match(
+    rendererSource,
+    /RECENT_HOME_MAX_ROWS\s*=\s*2/,
+    "recent home section must stay at most two rows"
   );
   assert.match(
     rendererSource,

@@ -402,6 +402,8 @@ interface LauncherApi {
   clearErrorLogs(): Promise<number>;
   onFocusInput(handler: () => void): () => void;
   onClearInput(handler: () => void): () => void;
+  onPrepareHide(handler: (requestId: number) => void): () => void;
+  ackPrepareHide(requestId: number): void;
   onOpenPanel(handler: (panelPayload: unknown) => void): () => void;
   onDebugKey(handler: (event: DebugKeyEvent) => void): () => void;
   getTranslateToolSettings?(): Promise<{
@@ -792,6 +794,11 @@ let pagedSearchQueryKey = "";
 let searchResultPage = 0;
 let pluginResultPage = 0;
 let latestSearchToken = 0;
+let cachedSearchLaunchItems: LaunchItem[] = [];
+let homeSectionsDirty = true;
+let cachedHomeEntries: ResultEntry[] | null = null;
+let cachedHomeSections: SearchSection[] | null = null;
+let cachedHomeStatus = "";
 let mode: PanelMode = "search";
 let debugMode = false;
 let isResultsLoading = false;
@@ -809,9 +816,9 @@ const CATALOG_SCAN_EXCLUDE_DIRS_MAX = 50;
 const CATALOG_RESULT_INCLUDE_DIRS_MAX = 50;
 const CATALOG_RESULT_EXCLUDE_DIRS_MAX = 50;
 const VISIBLE_PLUGIN_IDS_MAX = 50;
-const SEARCH_PAGE_FETCH_MULTIPLIER = 5;
-const SEARCH_PAGE_FETCH_MAX = 500;
-const SEARCH_INPUT_DEBOUNCE_MS = 1200;
+const SEARCH_PAGE_FETCH_MULTIPLIER = 3;
+const SEARCH_PAGE_FETCH_MAX = 180;
+const SEARCH_INPUT_DEBOUNCE_MS = 320;
 const PASSWORD_LENGTH_MIN = 4;
 const PASSWORD_LENGTH_MAX = 64;
 const PASSWORD_COUNT_MIN = 1;
@@ -1195,6 +1202,153 @@ function clearSearchInputDebounceTimer(): void {
   }
 }
 
+function markHomeSectionsDirty(): void {
+  homeSectionsDirty = true;
+  cachedHomeEntries = null;
+  cachedHomeSections = null;
+  cachedHomeStatus = "";
+}
+
+function cacheHomeSectionsSnapshot(statusText: string): void {
+  cachedHomeEntries = entries.slice();
+  cachedHomeSections = searchSections.map((section) => ({
+    ...section,
+    indexes: section.indexes.slice()
+  }));
+  cachedHomeStatus = statusText;
+  homeSectionsDirty = false;
+}
+
+function tryRestoreCachedHomeSections(): boolean {
+  if (
+    homeSectionsDirty ||
+    !cachedHomeEntries ||
+    !cachedHomeSections ||
+    mode !== "search"
+  ) {
+    return false;
+  }
+
+  const recentGrid = commandCenterUi.getSectionGrid("recent");
+  const hasHomeDom = Boolean(recentGrid && recentGrid.children.length > 0);
+  entries = cachedHomeEntries;
+  searchSections = cachedHomeSections;
+  selectedIndex = 0;
+  pagedSearchQueryKey = "";
+  searchResultPage = 0;
+  cachedSearchLaunchItems = [];
+  commandCenterUi.updateCommandCenterQueryState(false);
+  const resultsHost = commandCenterUi.getCommandResultsHost();
+  if (resultsHost) {
+    resultsHost.replaceChildren();
+    resultsHost.hidden = true;
+  }
+  commandCenterUi.setCommandSearchStatus(null);
+
+  if (hasHomeDom) {
+    renderPinnedSectionActions();
+    setStatus(cachedHomeStatus || "可以开始搜索");
+    return true;
+  }
+
+  renderList();
+  setStatus(cachedHomeStatus || "可以开始搜索");
+  return true;
+}
+
+/**
+ * Synchronously restore Command Center home chrome, then optionally refresh
+ * home data. Used on window hide / Esc so reopen never flashes the last search.
+ */
+function resetLauncherToHomeState(options?: { refreshHome?: boolean }): void {
+  const hadNonHomeSurface =
+    mode !== "search" ||
+    Boolean(input.value.trim()) ||
+    Boolean(currentQuery.trim()) ||
+    commandCenterUi.isSettingsOverlayOpen() ||
+    Boolean(document.querySelector(".launcher-shell.is-searching"));
+
+  clearSearchInputDebounceTimer();
+  clearResultsLoadingTimer();
+  latestSearchToken += 1;
+  setResultsLoading(false);
+  closeSearchContextMenu();
+
+  if (pinnedManageMode) {
+    setPinnedManageMode(false);
+  }
+  if (commandCenterUi.isSettingsOverlayOpen()) {
+    dismissSettingsOverlay();
+  }
+
+  input.value = "";
+  currentQuery = "";
+  pagedSearchQueryKey = "";
+  searchResultPage = 0;
+  pluginResultPage = 0;
+  selectedIndex = 0;
+  cachedSearchLaunchItems = [];
+
+  if (mode !== "search") {
+    setMode("search");
+  } else {
+    input.readOnly = false;
+    input.placeholder = "输入命令、搜索应用或插件…";
+    commandCenterUi.syncHomeChromeVisibility("search");
+  }
+
+  // Drop plugin / panel DOM so the frozen hide frame is home, not the last tool.
+  if (listElement) {
+    listElement.replaceChildren();
+  }
+  if (resultsElement) {
+    resultsElement.hidden = true;
+  }
+
+  commandCenterUi.updateCommandCenterQueryState(false);
+  const resultsHost = commandCenterUi.getCommandResultsHost();
+  if (resultsHost) {
+    resultsHost.replaceChildren();
+    resultsHost.hidden = true;
+  }
+  commandCenterUi.setCommandSearchStatus(null);
+  syncWindowSizePreset("search", true);
+
+  // Always try a sync home restore so hide freezes on initialized home tiles.
+  const restored = tryRestoreCachedHomeSections();
+
+  if (options?.refreshHome === false) {
+    return;
+  }
+
+  if (!hadNonHomeSurface || restored) {
+    return;
+  }
+
+  void refreshEntries("");
+}
+
+/** Called from main via executeJavaScript / prepareHide IPC before hide/show. */
+function prepareLauncherHide(): void {
+  resetLauncherToHomeState({ refreshHome: false });
+}
+
+function ackPrepareHideAfterPaint(requestId: number): void {
+  const launcher = getLauncherApi();
+  const ack = () => {
+    launcher?.ackPrepareHide?.(requestId);
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(ack);
+  });
+}
+
+(
+  window as Window & {
+    __LL_PREPARE_HIDE__?: () => void;
+  }
+).__LL_PREPARE_HIDE__ = prepareLauncherHide;
+
 function hasPendingSearchInputDebounce(): boolean {
   return searchInputDebounceTimer !== null;
 }
@@ -1240,8 +1394,12 @@ function scheduleSearchRefreshFromInput(
   }
 
   clearSearchInputDebounceTimer();
-  setResultsLoading(true, "输入中，暂停检索...");
-  setStatus("输入中，暂停检索...");
+  if (!isResultsLoading) {
+    setResultsLoading(true, "输入中，准备检索...");
+  } else if (mode === "search" && trimmed) {
+    commandCenterUi.setCommandSearchStatus("输入中，准备检索...");
+  }
+  setStatus("输入中，准备检索...");
   searchInputDebounceTimer = window.setTimeout(() => {
     searchInputDebounceTimer = null;
     void refreshEntries(currentQuery);
@@ -1842,7 +2000,7 @@ function setMode(nextMode: PanelMode): void {
   if (mode === "search") {
     input.placeholder = "输入命令、搜索应用或插件…";
     setHint(
-      "输入停顿约 1 秒后检索 - Enter 执行 - Esc 清空/隐藏 - 方向键移动 - 支持 app:/cmd:/web:/plugin:"
+      "输入停顿约 0.3 秒后检索 - Enter 执行 - Esc 清空/隐藏 - 方向键移动 - 支持 app:/cmd:/web:/plugin:"
     );
   } else if (mode === "clip") {
     input.placeholder = "\u641c\u7d22\u526a\u8d34\u677f\u5386\u53f2";
@@ -2622,13 +2780,9 @@ async function handleSidebarAction(action: {
   commandCenterUi.showToast(`已打开：${item.title}`);
 }
 
-function wrapResultIcon(entry: ResultEntry, pluginId?: string): HTMLElement {
+function wrapResultIcon(entry: ResultEntry, _pluginId?: string): HTMLElement {
   const badge = document.createElement("span");
   badge.className = "icon-badge";
-  const color =
-    (pluginId && commandCenterIcons?.pluginColors[pluginId]) || "#8e6dff";
-  badge.style.setProperty("--icon-color", color);
-  badge.style.setProperty("--icon-foreground", "#ffffff");
   const icon = createResultIcon(entry);
   icon.classList.remove("result-icon");
   badge.appendChild(icon);
@@ -2689,6 +2843,31 @@ function isPanelOpeningLaunchItem(item: LaunchItem): boolean {
 
 function getAdaptiveSectionDisplayLimit(items: LaunchItem[]): number {
   return items.length;
+}
+
+/** Home "最近访问" stays at most 2 rows so the panels below are not crushed. */
+const RECENT_HOME_MAX_ROWS = 2;
+const RECENT_GRID_MIN_TILE_WIDTH = 58;
+const RECENT_GRID_COLUMN_GAP = 7;
+
+function getRecentHomeDisplayLimit(itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  const grid = commandCenterUi.getSectionGrid("recent");
+  const width =
+    grid?.clientWidth ||
+    grid?.getBoundingClientRect().width ||
+    Math.max(320, Math.floor(window.innerWidth * 0.72));
+  const columns = Math.max(
+    1,
+    Math.floor(
+      (width + RECENT_GRID_COLUMN_GAP) /
+        (RECENT_GRID_MIN_TILE_WIDTH + RECENT_GRID_COLUMN_GAP)
+    )
+  );
+  return Math.min(itemCount, columns * RECENT_HOME_MAX_ROWS);
 }
 
 function addSearchSection(
@@ -2840,21 +3019,32 @@ async function addCustomPinnedFromPicker(kind: "file" | "folder"): Promise<void>
     return;
   }
 
-  const selected =
-    kind === "file" ? await launcher.pickFilePath() : await launcher.pickDirectoryPath();
-  if (!selected) {
-    return;
-  }
+  beginPluginNativeInteraction(20000);
+  try {
+    const selected =
+      kind === "file" ? await launcher.pickFilePath() : await launcher.pickDirectoryPath();
+    if (!selected) {
+      return;
+    }
 
-  const result = await launcher.addCustomPinnedPath(selected);
-  const title = getPathBaseName(selected);
-  if (!result.ok) {
-    setStatus(formatPinnedToggleStatus(title, result));
-    return;
-  }
+    // Invalidate home cache first — otherwise refreshEntries("") restores the
+    // pre-add pinned tiles and looks like the pin never landed.
+    markHomeSectionsDirty();
+    const result = await launcher.addCustomPinnedPath(selected);
+    const title = getPathBaseName(selected);
+    if (!result.ok) {
+      setStatus(formatPinnedToggleStatus(title, result));
+      commandCenterUi.showToast(formatPinnedToggleStatus(title, result));
+      return;
+    }
 
-  setStatus(`已添加置顶：${title}`);
-  await refreshEntries(currentQuery);
+    markHomeSectionsDirty();
+    setStatus(`已添加置顶：${title}`);
+    commandCenterUi.showToast(`已添加置顶：${title}`);
+    await refreshEntries(currentQuery);
+  } finally {
+    schedulePluginNativeInteractionRelease(260);
+  }
 }
 
 async function removeCustomPinnedItem(item: LaunchItem): Promise<void> {
@@ -2871,6 +3061,7 @@ async function removeCustomPinnedItem(item: LaunchItem): Promise<void> {
   }
 
   setStatus(`已取消置顶：${item.title}`);
+  markHomeSectionsDirty();
   await refreshEntries(currentQuery);
 }
 
@@ -2989,6 +3180,7 @@ async function unpinSelectedPinnedItems(): Promise<void> {
   setPinnedManageMode(false);
   setStatus(`已取消置顶 ${successCount} 项`);
   commandCenterUi.showToast(`已取消置顶 ${successCount} 项`);
+  markHomeSectionsDirty();
   await refreshEntries("");
 }
 
@@ -3127,6 +3319,7 @@ async function togglePinned(index: number, expectedItemId?: string): Promise<voi
 
   updatePinnedState(item.id, pinResult.pinned);
   setStatus(formatPinnedToggleStatus(item.title, pinResult));
+  markHomeSectionsDirty();
   await refreshEntries(currentQuery);
 }
 
@@ -3330,8 +3523,11 @@ function bindResultInteractions(
       togglePinnedManageSelection(entry.item.id);
       return;
     }
+    const previousIndex = selectedIndex;
     selectedIndex = index;
-    renderList();
+    if (canUpdateSelectionHighlightInPlace()) {
+      updateSelectionHighlight(previousIndex, selectedIndex);
+    }
     void executeSelected(index);
   });
 
@@ -3383,7 +3579,63 @@ function changeSearchResultPage(delta: number): void {
   }
 
   searchResultPage = nextPage;
+  if (cachedSearchLaunchItems.length > 0 && pagedSearchQueryKey) {
+    applyCachedSearchPage();
+    return;
+  }
   void refreshEntries(currentQuery);
+}
+
+function applyCachedSearchPage(): void {
+  const parsedQuery = parseSearchQuery(currentQuery);
+  const pageSize = Math.max(1, searchDisplayConfig.searchLimit);
+  const totalSearchCount = cachedSearchLaunchItems.length;
+  const searchPageCount = Math.max(
+    1,
+    Math.ceil(Math.max(1, totalSearchCount) / pageSize)
+  );
+  if (searchResultPage >= searchPageCount) {
+    searchResultPage = searchPageCount - 1;
+  }
+  const searchStart = searchResultPage * pageSize;
+  const pagedSearchItems = cachedSearchLaunchItems.slice(
+    searchStart,
+    searchStart + pageSize
+  );
+
+  resetSearchSections();
+  addSearchSection(
+    "search",
+    parsedQuery.explicitScope ? `${parsedQuery.scopeLabel}结果` : "搜索结果",
+    pagedSearchItems,
+    pageSize,
+    parsedQuery.explicitScope
+      ? `没有匹配的${parsedQuery.scopeLabel}结果`
+      : "没有匹配结果",
+    {
+      totalCount: totalSearchCount,
+      page: searchResultPage,
+      pageCount: searchPageCount
+    }
+  );
+  selectedIndex = entries.length ? 0 : 0;
+  renderList();
+  const shownStart = totalSearchCount === 0 ? 0 : searchStart + 1;
+  const shownEnd =
+    totalSearchCount === 0 ? 0 : searchStart + pagedSearchItems.length;
+  const fetchLimit = Math.min(
+    SEARCH_PAGE_FETCH_MAX,
+    Math.max(pageSize, pageSize * SEARCH_PAGE_FETCH_MULTIPLIER)
+  );
+  const totalSearchText =
+    totalSearchCount >= fetchLimit ? `${totalSearchCount}+` : `${totalSearchCount}`;
+  if (parsedQuery.explicitScope) {
+    setStatus(
+      `${parsedQuery.scopeLabel}搜索 ${shownStart}-${shownEnd}/${totalSearchText}`
+    );
+  } else {
+    setStatus(`搜索 ${shownStart}-${shownEnd}/${totalSearchText}`);
+  }
 }
 
 function changePluginResultPage(delta: number): void {
@@ -3909,6 +4161,9 @@ async function saveSettingsFromForm(form: HTMLFormElement): Promise<void> {
     visiblePluginsChanged =
       previousVisiblePluginIds.length !== visiblePluginIds.length ||
       previousVisiblePluginIds.some((id, index) => id !== visiblePluginIds[index]);
+    if (visiblePluginsChanged) {
+      markHomeSectionsDirty();
+    }
     setStatus(
       `\u8bbe\u7f6e\u5df2\u4fdd\u5b58（可见插件 ${visiblePluginIds.length} 个；索引源改动需重建索引后生效）`
     );
@@ -3937,6 +4192,7 @@ async function rebuildCatalogFromSettings(): Promise<void> {
     const result = await launcher.rebuildCatalog();
     const durationText = `${Math.max(0, Math.round(result.durationMs))}ms`;
     setStatus(`${result.message}（${durationText}）`);
+    markHomeSectionsDirty();
     await refreshEntries(currentQuery);
   } catch {
     setStatus("\u91cd\u5efa\u7d22\u5f15\u5931\u8d25");
@@ -5119,22 +5375,21 @@ async function refreshEntries(query: string): Promise<void> {
         if (queryKey !== pagedSearchQueryKey) {
           pagedSearchQueryKey = queryKey;
           searchResultPage = 0;
+          cachedSearchLaunchItems = [];
         }
 
-        const [searchItems, commandFallbackItems] = await Promise.all([
-          launcher.search(parsedQuery.query, {
+        let launchItems = cachedSearchLaunchItems;
+        if (launchItems.length === 0) {
+          // search() already includes dynamic PATH / alias / WindowsApps hits.
+          launchItems = await launcher.search(parsedQuery.query, {
             limit: fetchLimit,
             scope: parsedQuery.scope
-          }),
-          parsedQuery.scope === "all" || parsedQuery.scope === "command"
-            ? launcher.resolveCommandQuery(parsedQuery.query)
-            : Promise.resolve([])
-        ]);
-        if (token !== latestSearchToken) {
-          return;
+          });
+          if (token !== latestSearchToken) {
+            return;
+          }
+          cachedSearchLaunchItems = launchItems;
         }
-
-        const launchItems = mergeUniqueLaunchItems(searchItems, commandFallbackItems);
 
         const totalSearchCount = launchItems.length;
         const searchPageCount = Math.max(
@@ -5181,6 +5436,11 @@ async function refreshEntries(query: string): Promise<void> {
 
       pagedSearchQueryKey = "";
       searchResultPage = 0;
+      cachedSearchLaunchItems = [];
+
+      if (tryRestoreCachedHomeSections()) {
+        return;
+      }
 
       const homeSections = await launcher.getHomeSections();
       void ensurePluginCatalogLoaded();
@@ -5192,7 +5452,7 @@ async function refreshEntries(query: string): Promise<void> {
       const pinnedItems = homeSections.pinned;
       const pluginItems = homeSections.plugin;
 
-      const recentDisplayLimit = getAdaptiveSectionDisplayLimit(recentItems);
+      const recentDisplayLimit = getRecentHomeDisplayLimit(recentItems.length);
       const pinnedDisplayLimit = getAdaptiveSectionDisplayLimit(pinnedItems);
       const pluginPageSize = getAdaptiveSectionDisplayLimit(pluginItems);
       const pluginPageCount = 1;
@@ -5227,9 +5487,9 @@ async function refreshEntries(query: string): Promise<void> {
       );
       selectedIndex = entries.length ? 0 : 0;
       renderList();
-      setStatus(
-        `\u6700\u8fd1 ${recentItems.length} \u00b7 \u7f6e\u9876 ${pinnedItems.length} \u00b7 \u63d2\u4ef6 ${pluginItems.length}`
-      );
+      const homeStatus = `\u6700\u8fd1 ${recentItems.length} \u00b7 \u7f6e\u9876 ${pinnedItems.length} \u00b7 \u63d2\u4ef6 ${pluginItems.length}`;
+      setStatus(homeStatus);
+      cacheHomeSectionsSnapshot(homeStatus);
       return;
     }
 
@@ -5282,6 +5542,7 @@ async function executeSelected(index = selectedIndex): Promise<void> {
     if (selected.kind === "launch") {
       commandCenterUi.showToast(`已打开：${selected.item.title}`);
     }
+    markHomeSectionsDirty();
     if (!result.keepOpen) {
       return;
     }
@@ -5345,9 +5606,7 @@ function backToSearch(): void {
     return;
   }
   if (mode !== "search") {
-    setMode("search");
-    syncWindowSizePreset("search", true);
-    void refreshEntries("");
+    resetLauncherToHomeState();
     return;
   }
 
@@ -5361,7 +5620,9 @@ function backToSearch(): void {
     setStatus("\u6865\u63a5\u5c42\u672a\u52a0\u8f7d\uff0c\u65e0\u6cd5\u9690\u85cf\u7a97\u53e3");
     return;
   }
-  syncWindowSizePreset("search", true);
+  // Paint + initialize home first so the frozen hide frame is never search/plugin.
+  // Full home data refresh still runs via clearInput after hide.
+  resetLauncherToHomeState({ refreshHome: false });
   void launcher.hide();
 }
 
@@ -5630,7 +5891,14 @@ function handleKeydown(event: KeyboardEvent): void {
       input.value = "";
       currentQuery = "";
       pushDebugLog("renderer action: clear query");
-      void refreshEntries("");
+      // Sync chrome immediately; do not wait for home refresh.
+      commandCenterUi.updateCommandCenterQueryState(false);
+      commandCenterUi.setCommandSearchStatus(null);
+      latestSearchToken += 1;
+      setResultsLoading(false);
+      if (!tryRestoreCachedHomeSections()) {
+        void refreshEntries("");
+      }
       return;
     }
     pushDebugLog("renderer action: backToSearch/hide");
@@ -5683,26 +5951,28 @@ function registerEvents(): void {
   const launcher = getLauncherApi();
   if (launcher?.onFocusInput) {
     launcher.onFocusInput(() => {
+      if (document.activeElement === input) {
+        return;
+      }
       focusInput(true);
       pushDebugLog("renderer onFocusInput received");
-      setTimeout(() => focusInput(true), 30);
     });
   }
 
   if (launcher?.onClearInput) {
     launcher.onClearInput(() => {
-      if (!input.value && !currentQuery) {
-        return;
-      }
-
-      input.value = "";
-      currentQuery = "";
       pushDebugLog("renderer clearInput received");
-      clearSearchInputDebounceTimer();
+      // Always restore home on hide (search / plugin / settings), sync first
+      // so the next show never paints the previous query chrome.
+      resetLauncherToHomeState();
+    });
+  }
 
-      if (mode === "search" || mode === "clip") {
-        void refreshEntries("");
-      }
+  if (launcher?.onPrepareHide) {
+    launcher.onPrepareHide((requestId) => {
+      pushDebugLog("renderer prepareHide received");
+      prepareLauncherHide();
+      ackPrepareHideAfterPaint(requestId);
     });
   }
 
@@ -5712,7 +5982,7 @@ function registerEvents(): void {
 
   window.addEventListener("focus", () => {
     pushDebugLog("renderer window focus");
-    syncWindowSizePreset(mode, true);
+    syncWindowSizePreset(mode, false);
     if (pluginNativeInteractionLocked) {
       schedulePluginNativeInteractionRelease();
     }
