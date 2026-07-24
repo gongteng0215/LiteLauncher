@@ -6,7 +6,7 @@ on:
       tag:
         description: Release tag to mark as GitHub Latest
         required: true
-        default: v1.1.1
+        default: v1.1.2
   push:
     branches:
       - main
@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${INPUT_TAG:-v1.1.1}"
+          tag="${INPUT_TAG:-v1.1.2}"
           gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
           echo "Marked ${tag} as Latest."
           gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json tagName,isLatest,isDraft

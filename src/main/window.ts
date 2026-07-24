@@ -300,8 +300,9 @@ export function showLauncherWindow(
 }
 
 /**
- * Ask the renderer to paint Command Center home and wait for a committed frame
- * so hide()/show() never freeze or flash the previous search/plugin surface.
+ * Ask the renderer to restore Command Center home synchronously.
+ * Must NOT wait on requestAnimationFrame — rAF often never fires while the
+ * BrowserWindow is hidden, which would permanently block the next show().
  */
 export async function prepareLauncherHomeBeforeHide(
   window: BrowserWindow
@@ -315,7 +316,7 @@ export async function prepareLauncherHomeBeforeHide(
     const timer = setTimeout(() => {
       ipcMain.removeListener(IPC_CHANNELS.prepareHideAck, onAck);
       resolve();
-    }, 160);
+    }, 80);
 
     const onAck = (
       event: Electron.IpcMainEvent,
@@ -341,16 +342,14 @@ export async function prepareLauncherHomeBeforeHide(
 
   try {
     await window.webContents.executeJavaScript(
-      `(() => new Promise((resolve) => {
+      `(() => {
         try {
           if (typeof window.__LL_PREPARE_HIDE__ === "function") {
             window.__LL_PREPARE_HIDE__();
           }
         } catch (_) {}
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => resolve(true));
-        });
-      }))()`,
+        return true;
+      })()`,
       true
     );
   } catch {
@@ -371,30 +370,48 @@ function setWindowOpacitySafe(window: BrowserWindow, opacity: number): void {
   }
 }
 
+let hideLauncherWindowInFlight: Promise<void> | null = null;
+
 /**
- * Reset renderer to home, paint it, then hide under opacity 0 so Windows does
- * not replay a stale search/plugin bitmap on the next show().
+ * Reset renderer to home, then hide. Always restore opacity to 1 before hide —
+ * on Windows, a window hidden at opacity 0 often cannot be shown again.
  */
 export async function hideLauncherWindow(window: BrowserWindow): Promise<void> {
   if (window.isDestroyed()) {
     return;
   }
-
-  await prepareLauncherHomeBeforeHide(window);
-  if (window.isDestroyed()) {
+  if (hideLauncherWindowInFlight) {
+    await hideLauncherWindowInFlight;
+    if (!window.isDestroyed() && window.isVisible()) {
+      setWindowOpacitySafe(window, 1);
+      window.hide();
+    }
     return;
   }
 
-  applyLauncherWindowSizePreset(window, "compact");
-  setWindowOpacitySafe(window, 0);
-  if (!window.isDestroyed() && window.isVisible()) {
-    window.hide();
-  }
+  hideLauncherWindowInFlight = (async () => {
+    try {
+      await prepareLauncherHomeBeforeHide(window);
+      if (window.isDestroyed()) {
+        return;
+      }
+
+      applyLauncherWindowSizePreset(window, "compact");
+      setWindowOpacitySafe(window, 1);
+      if (!window.isDestroyed() && window.isVisible()) {
+        window.hide();
+      }
+    } finally {
+      hideLauncherWindowInFlight = null;
+    }
+  })();
+
+  await hideLauncherWindowInFlight;
 }
 
 /**
- * Ensure home is painted while still hidden/opaque-0, then reveal.
- * Prevents the classic Windows "flash last frame" on BrowserWindow.show().
+ * Show the launcher immediately. Do not await hidden-window paint work before
+ * show() — that previously hung Alt+Space on the second invoke.
  */
 export async function showLauncherWindowAsync(
   window: BrowserWindow,
@@ -404,13 +421,16 @@ export async function showLauncherWindowAsync(
     return;
   }
 
-  await prepareLauncherHomeBeforeHide(window);
+  if (hideLauncherWindowInFlight) {
+    await hideLauncherWindowInFlight;
+  }
   if (window.isDestroyed()) {
     return;
   }
 
   applyLauncherWindowSizePreset(window, "compact");
-  setWindowOpacitySafe(window, 0);
+  // Critical on Windows: never show while opacity is still 0 from a prior hide.
+  setWindowOpacitySafe(window, 1);
 
   centerWindow(window);
   window.setAlwaysOnTop(true);
@@ -420,12 +440,8 @@ export async function showLauncherWindowAsync(
   window.focus();
   window.webContents.focus();
 
-  // Let the compositor present the current (home) frame before becoming visible.
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 32);
-  });
-
-  setWindowOpacitySafe(window, 1);
+  // Best-effort home sync after the window is visible again (rAF-safe).
+  void prepareLauncherHomeBeforeHide(window);
 
   window.webContents.send(IPC_CHANNELS.focusInput);
   reportIfTopmostStateLooksWrong(

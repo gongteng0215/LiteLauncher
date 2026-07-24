@@ -1335,12 +1335,11 @@ function prepareLauncherHide(): void {
 
 function ackPrepareHideAfterPaint(requestId: number): void {
   const launcher = getLauncherApi();
-  const ack = () => {
+  // Prefer setTimeout over rAF: rAF may never run while the BrowserWindow is
+  // hidden, which would block the main-process prepare/show handshake.
+  window.setTimeout(() => {
     launcher?.ackPrepareHide?.(requestId);
-  };
-  requestAnimationFrame(() => {
-    requestAnimationFrame(ack);
-  });
+  }, 0);
 }
 
 (

@@ -79,10 +79,24 @@ assert(
   windowSource.includes("hideLauncherWindow") &&
     windowSource.includes("__LL_PREPARE_HIDE__") &&
     windowSource.includes("prepareLauncherHomeBeforeHide") &&
-    windowSource.includes("setOpacity") &&
-    windowSource.includes("showLauncherWindowAsync"),
-  "main hide/show paths must reset home, wait for paint, and gate opacity"
+    windowSource.includes("showLauncherWindowAsync") &&
+    /setWindowOpacitySafe\(\s*window,\s*1\s*\)/.test(windowSource) &&
+    !/setWindowOpacitySafe\(\s*window,\s*0\s*\)/.test(windowSource) &&
+    !/requestAnimationFrame\(\s*\(\)\s*=>\s*\{\s*requestAnimationFrame/.test(
+      windowSource
+    ),
+  "main hide/show must reset home, never leave opacity 0, and must not await hidden-window rAF"
 );
+{
+  const ackFn = rendererSource.match(
+    /function ackPrepareHideAfterPaint\([\s\S]*?\n\}/
+  )?.[0];
+  assert(Boolean(ackFn), "renderer must define ackPrepareHideAfterPaint");
+  assert(
+    ackFn!.includes("setTimeout") && !ackFn!.includes("requestAnimationFrame"),
+    "prepare-hide ack must not depend on rAF while the window may be hidden"
+  );
+}
 assert(
   /void hideLauncherWindow\(launcherWindow\)/.test(mainIndexSource) &&
     /await hideLauncherWindow\(window\)/.test(ipcSource),
