@@ -35,8 +35,13 @@ test("LiteSnap pin preload exposes visual state bridge", () => {
   );
   assert.match(
     source,
-    /moveBy\(deltaX: number, deltaY: number\)[\s\S]*ipcRenderer\.send\(PIN_MOVE_CHANNEL, deltaX, deltaY\)/,
-    "LiteSnap pin preload should move frameless pin windows without using a CSS drag region"
+    /beginDrag\(screenX: number, screenY: number\)[\s\S]*ipcRenderer\.send\(PIN_DRAG_BEGIN_CHANNEL, screenX, screenY\)/,
+    "LiteSnap pin preload should begin absolute pin drags from the pointer screen position"
+  );
+  assert.match(
+    source,
+    /moveTo\(screenX: number, screenY: number\)[\s\S]*ipcRenderer\.send\(PIN_MOVE_CHANNEL, screenX, screenY\)/,
+    "LiteSnap pin preload should move frameless pin windows with absolute screen coordinates"
   );
   assert.match(
     source,

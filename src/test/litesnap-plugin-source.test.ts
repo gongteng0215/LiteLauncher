@@ -366,8 +366,18 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /PIN_MOVE_CHANNEL[\s\S]*resolvePinWindowSize[\s\S]*window\.setBounds\(/,
+    /PIN_MOVE_CHANNEL[\s\S]*dragOrigin[\s\S]*applyPinnedWindowBounds|applyPinnedWindowBounds[\s\S]*dragOrigin/,
+    "LiteSnap pin windows should move through absolute drag origins instead of delta+getBounds"
+  );
+  assert.match(
+    pinSource,
+    /PIN_MOVE_CHANNEL[\s\S]*resolvePinWindowSize[\s\S]*window\.setBounds\(|applyPinnedWindowBounds[\s\S]*resolvePinWindowSize[\s\S]*setBounds/,
     "LiteSnap pin windows should move through IPC with size locked to avoid HiDPI growth"
+  );
+  assert.match(
+    pinSource,
+    /beginDrag[\s\S]*requestAnimationFrame[\s\S]*moveTo/,
+    "LiteSnap pin drag should coalesce pointer moves onto animation frames"
   );
   assert.match(
     pinSource,
@@ -1013,6 +1023,51 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     overlayRendererSource,
+    /WeChat-style arrow: one filled polygon/,
+    "LiteSnap arrows should draw as a WeChat-style filled shaft+head polygon"
+  );
+  assert.match(
+    overlayRendererSource,
+    /headHalf|halfShaft/,
+    "LiteSnap arrows should use a triangular head wider than the shaft"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function getEdgeHandleAtPoint\(/,
+    "LiteSnap selection should support edge drag resizing, not only tiny corner handles"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function wrapCanvasText\(/,
+    "LiteSnap text annotations should wrap long strings instead of clipping"
+  );
+  assert.match(
+    overlayRendererSource,
+    /toolbarAnchorPoint/,
+    "LiteSnap toolbar placement should follow the selection release point"
+  );
+  assert.match(
+    overlayRendererSource,
+    /placement = "below"|placement = "above"/,
+    "LiteSnap toolbar should prefer below the selection and flip above when space is tight"
+  );
+  assert.match(
+    overlayRendererSource,
+    /WeChat-style: prefer below the selection/,
+    "LiteSnap toolbar placement should use WeChat-style below-first logic"
+  );
+  assert.match(
+    overlayRendererSource,
+    /syncToolbarStyleRow/,
+    "LiteSnap toolbar should sync a contextual style row when tools change"
+  );
+  assert.match(
+    fs.readFileSync(overlayHtmlPath, "utf8"),
+    /<textarea[\s\S]*id="litesnap-text-input"/,
+    "LiteSnap text editor should be a multiline textarea"
+  );
+  assert.match(
+    overlayRendererSource,
     /function isNearFullscreenWindowRect\(/,
     "LiteSnap overlay should suppress full-screen window hints that cover the whole monitor"
   );
@@ -1187,9 +1242,19 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     "LiteSnap overlay toolbar should expose a shape fill toggle"
   );
   assert.match(
+    overlayHtmlSource,
+    /litesnap-toolbar-style/,
+    "LiteSnap overlay toolbar should expose a contextual style row"
+  );
+  assert.match(
     overlayCssSource,
-    /\.litesnap-overlay__toolbar[\s\S]*flex-direction:\s*column[\s\S]*\.litesnap-overlay__toolbar-row/,
-    "LiteSnap overlay toolbar should use explicit rows when annotation tools exceed one row"
+    /\.litesnap-overlay__toolbar[\s\S]*flex-direction:\s*column[\s\S]*\.litesnap-overlay__toolbar-row--main/,
+    "LiteSnap overlay toolbar should use a WeChat-like main row plus style row"
+  );
+  assert.match(
+    overlayCssSource,
+    /#9d63ff/,
+    "LiteSnap overlay should use the app violet accent for selection and active tools"
   );
   assert.match(overlayHtmlSource, /litesnap-overlay/);
   assert.match(overlayCssSource, /\.litesnap-overlay/);

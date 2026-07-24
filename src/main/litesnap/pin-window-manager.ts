@@ -8,13 +8,21 @@ import { type LiteSnapWindowRect } from "../../shared/litesnap";
 const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
 const PIN_SAVE_CHANNEL = "litesnap-pin:save";
-const PIN_MOVE_CHANNEL = "litesnap-pin:move-by";
+const PIN_DRAG_BEGIN_CHANNEL = "litesnap-pin:drag-begin";
+const PIN_MOVE_CHANNEL = "litesnap-pin:move-to";
 const PIN_DRAG_END_CHANNEL = "litesnap-pin:drag-end";
 const PIN_SET_CLICK_THROUGH_CHANNEL = "litesnap-pin:set-click-through";
 const PIN_CLOSE_ALL_CHANNEL = "litesnap-pin:close-all";
 const PIN_IMAGE_UPDATED_CHANNEL = "litesnap-pin:image-updated";
 const PIN_CLICK_THROUGH_CHANGED_CHANNEL = "litesnap-pin:click-through-changed";
 const PIN_CLICK_THROUGH_ESCAPE_ACCELERATOR = "Escape";
+
+type PinDragOrigin = {
+  startScreenX: number;
+  startScreenY: number;
+  originX: number;
+  originY: number;
+};
 
 type PinWindowMeta = {
   baseWidth: number;
@@ -26,6 +34,7 @@ type PinWindowMeta = {
   bakedScaleFactor: number;
   usePng: boolean;
   clickThrough: boolean;
+  dragOrigin: PinDragOrigin | null;
 };
 
 type PinSaveImageProvider = (image: NativeImage) => Promise<string>;
@@ -33,6 +42,7 @@ type PinSaveImageProvider = (image: NativeImage) => Promise<string>;
 let pinVisualHandlersRegistered = false;
 let pinCopyHandlerRegistered = false;
 let pinSaveHandlerRegistered = false;
+let pinDragBeginHandlerRegistered = false;
 let pinMoveHandlerRegistered = false;
 let pinDragEndHandlerRegistered = false;
 let pinClickThroughHandlerRegistered = false;
@@ -99,14 +109,35 @@ function resolvePinWindowSize(meta: PinWindowMeta): { width: number; height: num
   };
 }
 
-function ensurePinMoveHandler(): void {
-  if (pinMoveHandlerRegistered) {
+function applyPinnedWindowBounds(
+  window: BrowserWindow,
+  meta: PinWindowMeta | undefined,
+  x: number,
+  y: number
+): void {
+  const bounds = window.getBounds();
+  const size = meta ? resolvePinWindowSize(meta) : { width: bounds.width, height: bounds.height };
+  // Lock size every move to avoid Windows HiDPI frameless growth, but position
+  // must be absolute (not delta+getBounds) or IPC backlog drops motion and leaves ghosts.
+  window.setBounds(
+    {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: size.width,
+      height: size.height
+    },
+    false
+  );
+}
+
+function ensurePinDragBeginHandler(): void {
+  if (pinDragBeginHandlerRegistered) {
     return;
   }
 
-  pinMoveHandlerRegistered = true;
-  ipcMain.on(PIN_MOVE_CHANNEL, (event, deltaX: number, deltaY: number) => {
-    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+  pinDragBeginHandlerRegistered = true;
+  ipcMain.on(PIN_DRAG_BEGIN_CHANNEL, (event, screenX: number, screenY: number) => {
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
       return;
     }
 
@@ -115,19 +146,58 @@ function ensurePinMoveHandler(): void {
       return;
     }
 
-    // Keep width/height locked from meta. On Windows HiDPI, repeated
-    // setPosition() can let the OS/Electron grow the frameless window.
-    const bounds = window.getBounds();
     const meta = pinWindowMeta.get(window.id);
-    const size = meta ? resolvePinWindowSize(meta) : { width: bounds.width, height: bounds.height };
-    window.setBounds(
-      {
-        x: Math.round(bounds.x + deltaX),
-        y: Math.round(bounds.y + deltaY),
-        width: size.width,
-        height: size.height
-      },
-      false
+    if (!meta) {
+      return;
+    }
+
+    const bounds = window.getBounds();
+    meta.dragOrigin = {
+      startScreenX: screenX,
+      startScreenY: screenY,
+      originX: bounds.x,
+      originY: bounds.y
+    };
+  });
+}
+
+function ensurePinMoveHandler(): void {
+  if (pinMoveHandlerRegistered) {
+    return;
+  }
+
+  pinMoveHandlerRegistered = true;
+  ipcMain.on(PIN_MOVE_CHANNEL, (event, screenX: number, screenY: number) => {
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+      return;
+    }
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    const meta = pinWindowMeta.get(window.id);
+    if (!meta) {
+      return;
+    }
+
+    if (!meta.dragOrigin) {
+      const bounds = window.getBounds();
+      meta.dragOrigin = {
+        startScreenX: screenX,
+        startScreenY: screenY,
+        originX: bounds.x,
+        originY: bounds.y
+      };
+    }
+
+    const origin = meta.dragOrigin;
+    applyPinnedWindowBounds(
+      window,
+      meta,
+      origin.originX + (screenX - origin.startScreenX),
+      origin.originY + (screenY - origin.startScreenY)
     );
   });
 }
@@ -183,6 +253,8 @@ function ensurePinDragEndHandler(): void {
     if (!meta?.sourceImage || meta.sourceImage.isEmpty()) {
       return;
     }
+
+    meta.dragOrigin = null;
 
     const bounds = window.getBounds();
     const display = screen.getDisplayMatching(bounds);
@@ -580,8 +652,10 @@ function buildPinWindowHtml(
       let opacity = 1;
       let visualFrame = 0;
       let dragging = false;
-      let dragScreenX = 0;
-      let dragScreenY = 0;
+      let dragMoveFrame = 0;
+      let pendingScreenX = 0;
+      let pendingScreenY = 0;
+      let hasPendingMove = false;
       let clickThrough = false;
 
       function syncClickThroughLabel() {
@@ -750,10 +824,14 @@ function buildPinWindowHtml(
           }
 
           dragging = true;
-          dragScreenX = event.screenX;
-          dragScreenY = event.screenY;
+          hasPendingMove = false;
+          if (dragMoveFrame) {
+            cancelAnimationFrame(dragMoveFrame);
+            dragMoveFrame = 0;
+          }
           shell?.classList.add("is-dragging");
           shell?.setPointerCapture?.(event.pointerId);
+          pinApi?.beginDrag?.(event.screenX, event.screenY);
         },
         true
       );
@@ -761,20 +839,34 @@ function buildPinWindowHtml(
         if (!dragging) {
           return;
         }
-        const deltaX = event.screenX - dragScreenX;
-        const deltaY = event.screenY - dragScreenY;
-        if (deltaX === 0 && deltaY === 0) {
+        pendingScreenX = event.screenX;
+        pendingScreenY = event.screenY;
+        hasPendingMove = true;
+        if (dragMoveFrame) {
           return;
         }
-        dragScreenX = event.screenX;
-        dragScreenY = event.screenY;
-        pinApi?.moveBy?.(deltaX, deltaY);
+        dragMoveFrame = requestAnimationFrame(function () {
+          dragMoveFrame = 0;
+          if (!dragging || !hasPendingMove) {
+            return;
+          }
+          hasPendingMove = false;
+          pinApi?.moveTo?.(pendingScreenX, pendingScreenY);
+        });
       });
       function endDrag(event) {
         if (!dragging) {
           return;
         }
         dragging = false;
+        if (dragMoveFrame) {
+          cancelAnimationFrame(dragMoveFrame);
+          dragMoveFrame = 0;
+        }
+        if (hasPendingMove) {
+          hasPendingMove = false;
+          pinApi?.moveTo?.(pendingScreenX, pendingScreenY);
+        }
         shell?.classList.remove("is-dragging");
         shell?.releasePointerCapture?.(event.pointerId);
         pinApi?.notifyDragEnd?.();
@@ -1055,6 +1147,7 @@ export class LiteSnapPinWindowManager {
     ensurePinVisualHandlers();
     ensurePinCopyHandler();
     ensurePinSaveHandler();
+    ensurePinDragBeginHandler();
     ensurePinMoveHandler();
     ensurePinDragEndHandler();
     ensurePinClickThroughHandler();
@@ -1074,7 +1167,8 @@ export class LiteSnapPinWindowManager {
       sourceImage: image,
       bakedScaleFactor: display.scaleFactor,
       usePng: assets.usePng,
-      clickThrough: false
+      clickThrough: false,
+      dragOrigin: null
     });
 
     window.setAlwaysOnTop(true, "screen-saver");

@@ -76,6 +76,7 @@
     fontSize: number;
     position: Point;
     text: string;
+    maxWidth?: number;
   };
 
   type NumberAnnotation = {
@@ -155,11 +156,16 @@
   const selectionNode = document.getElementById("litesnap-selection");
   const sizeNode = document.getElementById("litesnap-size");
   const toolbarNode = document.getElementById("litesnap-toolbar");
+  const toolbarStyleNode = document.getElementById("litesnap-toolbar-style");
   const statusNode = document.getElementById("litesnap-status");
   const colorsNode = document.getElementById("litesnap-colors");
   const widthsNode = document.getElementById("litesnap-widths");
-  const textInput = document.getElementById("litesnap-text-input") as HTMLInputElement | null;
+  const textInput = document.getElementById(
+    "litesnap-text-input"
+  ) as HTMLTextAreaElement | null;
   const fillToggleNode = document.getElementById("litesnap-fill-toggle");
+  const fillGroupNode = document.getElementById("litesnap-fill-group");
+  const fillDividerNode = document.getElementById("litesnap-fill-divider");
 
   let overlayState: OverlayState | null = null;
   let activeCaptureId = "";
@@ -188,6 +194,7 @@
   let persistSettingsTimer: number | null = null;
   let lastSelection: SelectionRect | null = null;
   let selectionCommitted = false;
+  let toolbarAnchorPoint: Point | null = null;
   let allowWindowHintAfterReady = false;
   let hoverWindowRect: SelectionRect | null = null;
   let windowQueryTimer: number | null = null;
@@ -810,6 +817,28 @@
       return bounds ? expandRect(bounds, Math.max(6, annotation.brushSize / 2 + 2)) : null;
     }
     if (annotation.type === "text") {
+      const probe = document.createElement("canvas").getContext("2d");
+      if (probe) {
+        probe.font = `600 ${annotation.fontSize}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+        const maxWidth = resolveTextMaxWidth(annotation);
+        const lines = wrapCanvasText(probe, annotation.text, maxWidth);
+        const width = lines.reduce(
+          (max, line) => Math.max(max, probe.measureText(line).width),
+          0
+        );
+        return expandRect(
+          {
+            x: annotation.position.x,
+            y: annotation.position.y,
+            width: Math.max(12, width),
+            height: Math.max(
+              annotation.fontSize,
+              lines.length * annotation.fontSize * 1.25
+            )
+          },
+          6
+        );
+      }
       const lines = annotation.text.split("\n");
       const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
       return expandRect(
@@ -817,7 +846,7 @@
           x: annotation.position.x,
           y: annotation.position.y,
           width: Math.max(12, longest * annotation.fontSize * 0.62),
-          height: Math.max(annotation.fontSize, lines.length * annotation.fontSize * 1.2)
+          height: Math.max(annotation.fontSize, lines.length * annotation.fontSize * 1.25)
         },
         6
       );
@@ -833,7 +862,14 @@
     }
     if ("start" in annotation && "end" in annotation) {
       const bounds = boundsFromPoints(annotation.start, annotation.end);
-      return expandRect(bounds, Math.max(6, "lineWidth" in annotation ? annotation.lineWidth + 4 : 6));
+      if (!bounds) {
+        return null;
+      }
+      const pad =
+        annotation.type === "arrow"
+          ? Math.max(10, annotation.lineWidth * 2.2)
+          : Math.max(6, "lineWidth" in annotation ? annotation.lineWidth + 4 : 6);
+      return expandRect(bounds, pad);
     }
     return null;
   }
@@ -1011,8 +1047,27 @@
     } else {
       preloadSourceImageForRegionTools();
     }
+    syncToolbarStyleRow();
     if (persist) {
       schedulePersistAnnotationSettings();
+    }
+  }
+
+  function syncToolbarStyleRow(): void {
+    const showStyle = activeTool !== "select";
+    if (toolbarStyleNode) {
+      toolbarStyleNode.hidden = !showStyle;
+    }
+    const showFill = activeTool === "rect" || activeTool === "ellipse";
+    if (fillGroupNode) {
+      fillGroupNode.hidden = !showFill;
+    }
+    if (fillDividerNode) {
+      fillDividerNode.hidden = !showFill;
+    }
+    toolbarSize = { width: 0, height: 0 };
+    if (toolbarNode && !toolbarNode.hidden && selection) {
+      updateToolbarPosition();
     }
   }
 
@@ -1027,6 +1082,7 @@
     selection = null;
     lastSelection = null;
     selectionCommitted = false;
+    toolbarAnchorPoint = null;
     allowWindowHintAfterReady = false;
     pointerStart = null;
     dragMode = "idle";
@@ -1099,8 +1155,11 @@
     showStatus("Preparing screenshot...", true);
   }
 
-  function measureToolbar(): void {
-    if (!toolbarNode || toolbarSize.width > 0 || toolbarNode.hidden) {
+  function measureToolbar(force = false): void {
+    if (!toolbarNode || toolbarNode.hidden) {
+      return;
+    }
+    if (!force && toolbarSize.width > 0) {
       return;
     }
     const rect = toolbarNode.getBoundingClientRect();
@@ -1114,28 +1173,56 @@
       return;
     }
 
-    measureToolbar();
-    const toolbarWidth = toolbarSize.width || 420;
+    // WeChat-style: prefer below the selection, flip above when space is tight.
+    measureToolbar(true);
+    const toolbarWidth = toolbarSize.width || 520;
     const toolbarHeight = toolbarSize.height || 48;
     const viewportWidth = getViewportWidth();
     const viewportHeight = getViewportHeight();
-    const desiredLeft = selection.x + selection.width - toolbarWidth;
-    const desiredTop = selection.y + selection.height + 12;
-    const top =
-      desiredTop + toolbarHeight <= viewportHeight
-        ? desiredTop
-        : Math.max(12, selection.y - toolbarHeight - 12);
+    const margin = 12;
+    const gap = 8;
+    const s = selection;
+    const need = toolbarHeight + gap;
+    const spaceBelow = viewportHeight - (s.y + s.height) - margin;
+    const spaceAbove = s.y - margin;
 
-    toolbarNode.style.left = `${clamp(
-      desiredLeft,
-      12,
-      Math.max(12, viewportWidth - toolbarWidth - 12)
-    )}px`;
-    toolbarNode.style.top = `${clamp(
-      top,
-      12,
-      Math.max(12, viewportHeight - toolbarHeight - 12)
-    )}px`;
+    let preferredLeft = s.x;
+    if (toolbarAnchorPoint && toolbarAnchorPoint.x >= s.x + s.width / 2) {
+      preferredLeft = s.x + s.width - toolbarWidth;
+    }
+    const left = clamp(
+      preferredLeft,
+      margin,
+      Math.max(margin, viewportWidth - toolbarWidth - margin)
+    );
+
+    let top: number;
+    let placement: string;
+    if (spaceBelow >= need) {
+      top = s.y + s.height + gap;
+      placement = "below";
+    } else if (spaceAbove >= need) {
+      top = s.y - toolbarHeight - gap;
+      placement = "above";
+    } else if (spaceBelow >= spaceAbove) {
+      top = clamp(
+        s.y + s.height + gap,
+        margin,
+        Math.max(margin, viewportHeight - toolbarHeight - margin)
+      );
+      placement = "below-clamped";
+    } else {
+      top = clamp(
+        s.y - toolbarHeight - gap,
+        margin,
+        Math.max(margin, viewportHeight - toolbarHeight - margin)
+      );
+      placement = "above-clamped";
+    }
+
+    toolbarNode.dataset.placement = placement;
+    toolbarNode.style.left = `${left}px`;
+    toolbarNode.style.top = `${top}px`;
   }
 
   function shouldShowToolbar(): boolean {
@@ -1190,7 +1277,7 @@
     }
     if (shouldShowToolbar()) {
       toolbarNode.hidden = false;
-      updateToolbarPosition();
+      syncToolbarStyleRow();
       return;
     }
     toolbarNode.hidden = true;
@@ -1451,25 +1538,52 @@
       return;
     }
 
-    // arrow
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
+    // WeChat-style arrow: one filled polygon (rectangular shaft + triangular head).
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const shaftLen = Math.hypot(dx, dy);
+    if (shaftLen < 1) {
+      return;
+    }
 
-    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-    const headLength = Math.max(10, annotation.lineWidth * 3.2);
-    const headAngle = Math.PI / 7;
+    const angle = Math.atan2(dy, dx);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const px = -sin;
+    const py = cos;
+    const lineWidth = Math.max(2, annotation.lineWidth);
+    const halfShaft = lineWidth / 2;
+
+    // Proportions match WeChat: compact sharp head, base clearly wider than shaft.
+    let headLength = Math.min(
+      Math.max(lineWidth * 3.6, 16),
+      shaftLen * 0.42
+    );
+    let headHalf = Math.max(lineWidth * 1.55, headLength * 0.42);
+    if (shaftLen < headLength + lineWidth * 2) {
+      headLength = Math.max(shaftLen * 0.55, 8);
+      headHalf = Math.max(lineWidth * 1.2, headLength * 0.4);
+    }
+
+    const tipX = end.x;
+    const tipY = end.y;
+    const baseX = tipX - cos * headLength;
+    const baseY = tipY - sin * headLength;
+    // Pull shaft slightly into the head so the join stays solid with no gap.
+    const neckInset = Math.min(headLength * 0.22, Math.max(0, shaftLen - headLength));
+    const neckX = tipX - cos * (headLength - neckInset);
+    const neckY = tipY - sin * (headLength - neckInset);
+
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
     ctx.beginPath();
-    ctx.moveTo(end.x, end.y);
-    ctx.lineTo(
-      end.x - headLength * Math.cos(angle - headAngle),
-      end.y - headLength * Math.sin(angle - headAngle)
-    );
-    ctx.lineTo(
-      end.x - headLength * Math.cos(angle + headAngle),
-      end.y - headLength * Math.sin(angle + headAngle)
-    );
+    ctx.moveTo(start.x + px * halfShaft, start.y + py * halfShaft);
+    ctx.lineTo(neckX + px * halfShaft, neckY + py * halfShaft);
+    ctx.lineTo(baseX + px * headHalf, baseY + py * headHalf);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(baseX - px * headHalf, baseY - py * headHalf);
+    ctx.lineTo(neckX - px * halfShaft, neckY - py * halfShaft);
+    ctx.lineTo(start.x - px * halfShaft, start.y - py * halfShaft);
     ctx.closePath();
     ctx.fill();
   }
@@ -1506,13 +1620,58 @@
     ctx.restore();
   }
 
+  function wrapCanvasText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number
+  ): string[] {
+    const paragraphs = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const lines: string[] = [];
+    const widthLimit = Math.max(12, maxWidth);
+
+    for (const paragraph of paragraphs) {
+      if (!paragraph) {
+        lines.push("");
+        continue;
+      }
+
+      let current = "";
+      for (const char of paragraph) {
+        const next = current + char;
+        if (current && ctx.measureText(next).width > widthLimit) {
+          lines.push(current);
+          current = char;
+        } else {
+          current = next;
+        }
+      }
+      if (current) {
+        lines.push(current);
+      }
+    }
+
+    return lines.length > 0 ? lines : [""];
+  }
+
+  function resolveTextMaxWidth(annotation: TextAnnotation): number {
+    if (typeof annotation.maxWidth === "number" && annotation.maxWidth > 0) {
+      return annotation.maxWidth;
+    }
+    const rightEdge = selection
+      ? selection.x + selection.width
+      : getViewportWidth();
+    return Math.max(40, rightEdge - annotation.position.x - 8);
+  }
+
   function drawText(ctx: CanvasRenderingContext2D, annotation: TextAnnotation): void {
     ctx.fillStyle = annotation.color;
     ctx.textBaseline = "top";
     ctx.font = `600 ${annotation.fontSize}px "Segoe UI", "Microsoft YaHei", sans-serif`;
-    const lines = annotation.text.split("\n");
+    const maxWidth = resolveTextMaxWidth(annotation);
+    const lines = wrapCanvasText(ctx, annotation.text, maxWidth);
+    const lineHeight = annotation.fontSize * 1.25;
     lines.forEach((line, index) => {
-      ctx.fillText(line, annotation.position.x, annotation.position.y + index * annotation.fontSize * 1.2);
+      ctx.fillText(line, annotation.position.x, annotation.position.y + index * lineHeight);
     });
   }
 
@@ -1747,6 +1906,69 @@
       return value;
     }
     return null;
+  }
+
+  function getEdgeHandleAtPoint(x: number, y: number): ResizeHandle | null {
+    if (!selection || !isValidSelection(selection)) {
+      return null;
+    }
+
+    const slop = 10;
+    const left = selection.x;
+    const top = selection.y;
+    const right = selection.x + selection.width;
+    const bottom = selection.y + selection.height;
+    const nearLeft = Math.abs(x - left) <= slop;
+    const nearRight = Math.abs(x - right) <= slop;
+    const nearTop = Math.abs(y - top) <= slop;
+    const nearBottom = Math.abs(y - bottom) <= slop;
+    const insideX = x >= left - slop && x <= right + slop;
+    const insideY = y >= top - slop && y <= bottom + slop;
+
+    if (!insideX || !insideY) {
+      return null;
+    }
+    if (nearTop && nearLeft) {
+      return "nw";
+    }
+    if (nearTop && nearRight) {
+      return "ne";
+    }
+    if (nearBottom && nearLeft) {
+      return "sw";
+    }
+    if (nearBottom && nearRight) {
+      return "se";
+    }
+    if (nearTop) {
+      return "n";
+    }
+    if (nearBottom) {
+      return "s";
+    }
+    if (nearLeft) {
+      return "w";
+    }
+    if (nearRight) {
+      return "e";
+    }
+    return null;
+  }
+
+  function beginSelectionResize(handle: ResizeHandle, pointerId: number, x: number, y: number): void {
+    hideBrushPreview();
+    dragMode = "resizing";
+    selectedAnnotationIndex = null;
+    pointerStart = {
+      pointerId,
+      x,
+      y,
+      selection: selection ? { ...selection } : null,
+      handle
+    };
+    if (toolbarNode) {
+      toolbarNode.hidden = true;
+    }
   }
 
   async function ensureCompositeImage(fullResolution = false): Promise<HTMLImageElement | null> {
@@ -2232,6 +2454,14 @@
     renderAnnotations();
   }
 
+  function syncTextInputLayout(): void {
+    if (!textInput || textInput.hidden) {
+      return;
+    }
+    textInput.style.height = "auto";
+    textInput.style.height = `${Math.max(textSize * 1.35, textInput.scrollHeight)}px`;
+  }
+
   function openTextInput(point: Point): void {
     if (!textInput) {
       return;
@@ -2239,17 +2469,24 @@
     finishTextInput(true);
     pendingTextPosition = point;
     editingText = true;
+    const maxWidth = Math.max(
+      80,
+      (selection ? selection.x + selection.width : getViewportWidth()) - point.x - 8
+    );
     textInput.hidden = false;
     textInput.value = "";
     textInput.style.left = `${point.x}px`;
     textInput.style.top = `${point.y}px`;
     textInput.style.color = activeColor;
     textInput.style.fontSize = `${textSize}px`;
-    textInput.style.maxWidth = `${Math.max(
-      40,
-      (selection ? selection.x + selection.width : getViewportWidth()) - point.x
-    )}px`;
-    window.setTimeout(() => textInput.focus(), 0);
+    textInput.style.lineHeight = "1.25";
+    textInput.style.width = `${maxWidth}px`;
+    textInput.style.maxWidth = `${maxWidth}px`;
+    textInput.style.height = `${textSize * 1.35}px`;
+    window.setTimeout(() => {
+      textInput.focus();
+      syncTextInputLayout();
+    }, 0);
   }
 
   function finishTextInput(commit: boolean): void {
@@ -2262,14 +2499,22 @@
       return;
     }
 
-    const value = textInput.value.trim();
+    const value = textInput.value.replace(/\s+$/g, "");
     if (commit && value && pendingTextPosition) {
+      const maxWidth = Math.max(
+        40,
+        Number.parseFloat(textInput.style.maxWidth || "") ||
+          (selection
+            ? selection.x + selection.width - pendingTextPosition.x - 8
+            : getViewportWidth() - pendingTextPosition.x - 8)
+      );
       addAnnotation({
         type: "text",
         color: activeColor,
         fontSize: textSize,
         position: pendingTextPosition,
-        text: value
+        text: value,
+        maxWidth
       });
     }
 
@@ -2369,6 +2614,17 @@
     const pointY = event.clientY;
     updateBrushPreview(pointX, pointY, event.target);
 
+    // Allow resizing the crop frame from handles/edges even while an annotation
+    // tool is active (WeChat-style).
+    const handle =
+      getHandleFromTarget(event.target) ?? getEdgeHandleAtPoint(pointX, pointY);
+    if (handle && selection && isValidSelection(selection)) {
+      beginSelectionResize(handle, event.pointerId, pointX, pointY);
+      renderSelection();
+      syncDisplayFollowLock();
+      return;
+    }
+
     if (activeTool !== "select") {
       if (!isValidSelection(selection) || !containsPoint(selection, pointX, pointY)) {
         hideBrushPreview();
@@ -2406,22 +2662,7 @@
       return;
     }
 
-    const handle = getHandleFromTarget(event.target);
-    if (handle && selection) {
-      hideBrushPreview();
-      dragMode = "resizing";
-      selectedAnnotationIndex = null;
-      pointerStart = {
-        pointerId: event.pointerId,
-        x: pointX,
-        y: pointY,
-        selection: { ...selection },
-        handle
-      };
-      if (toolbarNode) {
-        toolbarNode.hidden = true;
-      }
-    } else if (selection && containsPoint(selection, pointX, pointY)) {
+    if (selection && containsPoint(selection, pointX, pointY)) {
       hideBrushPreview();
       const annotationIndex = hitTestAnnotation({ x: pointX, y: pointY });
       if (annotationIndex !== null) {
@@ -2529,8 +2770,11 @@
 
     const wasDrawing = dragMode === "drawing";
     const wasSelecting = dragMode === "selecting";
+    const wasMoving = dragMode === "moving";
+    const wasResizing = dragMode === "resizing";
     const wasMovingAnnotation = dragMode === "annotation-moving";
     const priorSelection = pointerStart.selection;
+    const releasePoint: Point = { x: event.clientX, y: event.clientY };
     pointerStart = null;
     dragMode = "idle";
 
@@ -2548,6 +2792,10 @@
       return;
     }
 
+    if (wasSelecting || wasMoving || wasResizing) {
+      toolbarAnchorPoint = releasePoint;
+    }
+
     if (wasSelecting && !isValidSelection(selection)) {
       // A stray click that did not produce a real drag: keep the previous
       // selection if there was one, instead of discarding it.
@@ -2563,6 +2811,10 @@
       // adopts that window, matching Snipaste's click-to-grab-window flow.
       if (hoverWindowRect && !isNearFullscreenWindowRect(hoverWindowRect)) {
         selection = { ...hoverWindowRect };
+        toolbarAnchorPoint = {
+          x: selection.x + selection.width,
+          y: selection.y + selection.height
+        };
         clearWindowHint();
         markSelectionCommittedIfValid();
         renderSelection();
@@ -2744,14 +2996,20 @@
     if (!textInput) {
       return;
     }
+    textInput.addEventListener("input", () => {
+      syncTextInputLayout();
+    });
     textInput.addEventListener("keydown", (event) => {
       event.stopPropagation();
-      if (event.key === "Enter") {
-        event.preventDefault();
-        finishTextInput(true);
-      } else if (event.key === "Escape") {
+      if (event.key === "Escape") {
         event.preventDefault();
         finishTextInput(false);
+        return;
+      }
+      // Enter inserts a newline; Ctrl/Cmd+Enter commits (WeChat-like).
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        finishTextInput(true);
       }
     });
     textInput.addEventListener("blur", () => finishTextInput(true));

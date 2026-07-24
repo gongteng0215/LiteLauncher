@@ -3,7 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
 const PIN_SAVE_CHANNEL = "litesnap-pin:save";
-const PIN_MOVE_CHANNEL = "litesnap-pin:move-by";
+const PIN_DRAG_BEGIN_CHANNEL = "litesnap-pin:drag-begin";
+const PIN_MOVE_CHANNEL = "litesnap-pin:move-to";
 const PIN_DRAG_END_CHANNEL = "litesnap-pin:drag-end";
 const PIN_SET_CLICK_THROUGH_CHANNEL = "litesnap-pin:set-click-through";
 const PIN_CLOSE_ALL_CHANNEL = "litesnap-pin:close-all";
@@ -24,12 +25,19 @@ contextBridge.exposeInMainWorld("liteSnapPin", {
   saveToFile(): void {
     ipcRenderer.send(PIN_SAVE_CHANNEL);
   },
-  moveBy(deltaX: number, deltaY: number): void {
-    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+  beginDrag(screenX: number, screenY: number): void {
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
       return;
     }
 
-    ipcRenderer.send(PIN_MOVE_CHANNEL, deltaX, deltaY);
+    ipcRenderer.send(PIN_DRAG_BEGIN_CHANNEL, screenX, screenY);
+  },
+  moveTo(screenX: number, screenY: number): void {
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+      return;
+    }
+
+    ipcRenderer.send(PIN_MOVE_CHANNEL, screenX, screenY);
   },
   notifyDragEnd(): void {
     ipcRenderer.send(PIN_DRAG_END_CHANNEL);
