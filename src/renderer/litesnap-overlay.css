@@ -214,6 +214,44 @@
   cursor: move;
 }
 
+.litesnap-overlay__annotation-frame {
+  position: absolute;
+  border: 1.5px dashed rgba(157, 99, 255, 0.92);
+  background: transparent;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.litesnap-overlay__annotation-frame[hidden] {
+  display: none !important;
+}
+
+.litesnap-overlay__annotation-frame .litesnap-overlay__handle {
+  pointer-events: auto;
+}
+
+.litesnap-overlay__width-slider-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.litesnap-overlay__width-slider {
+  width: 88px;
+  height: 4px;
+  margin: 0;
+  accent-color: #9d63ff;
+  cursor: pointer;
+}
+
+.litesnap-overlay__width-value {
+  min-width: 18px;
+  color: #e2e8f0;
+  font-size: 11px;
+  text-align: right;
+}
+
 .litesnap-overlay__size {
   position: absolute;
   top: -30px;

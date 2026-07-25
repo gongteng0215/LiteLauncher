@@ -1022,14 +1022,19 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     "LiteSnap overlay should only show the toolbar after the user confirms a selection"
   );
   assert.match(
-    overlayRendererSource,
-    /WeChat-style arrow: one filled polygon/,
-    "LiteSnap arrows should draw as a WeChat-style filled shaft+head polygon"
+    overlayHtmlSource,
+    /litesnap-annotation-frame/,
+    "LiteSnap overlay should expose resize handles for selected annotations"
   );
   assert.match(
     overlayRendererSource,
-    /headHalf|halfShaft/,
-    "LiteSnap arrows should use a triangular head wider than the shaft"
+    /annotation-resizing|applyAnnotationResize/,
+    "LiteSnap overlay should let users drag annotation handles to scale objects"
+  );
+  assert.match(
+    overlayRendererSource,
+    /litesnap-width-slider|width-slider/,
+    "LiteSnap overlay should expose a draggable width slider instead of fixed presets"
   );
   assert.match(
     overlayRendererSource,

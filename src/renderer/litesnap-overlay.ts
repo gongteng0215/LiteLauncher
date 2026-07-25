@@ -7,7 +7,8 @@
     | "moving"
     | "resizing"
     | "drawing"
-    | "annotation-moving";
+    | "annotation-moving"
+    | "annotation-resizing";
   type AnnotationTool =
     | "select"
     | "rect"
@@ -110,6 +111,7 @@
     handle: ResizeHandle | null;
     annotationIndex?: number;
     annotationSnapshot?: Annotation;
+    annotationBoundsSnapshot?: SelectionRect;
   };
 
   type LiteSnapOverlayWindow = Window & {
@@ -125,7 +127,8 @@
     "#ffffff",
     "#1c1c1e"
   ];
-  const PRESET_WIDTHS = [2, 4, 7];
+  const MIN_ANNOTATION_LINE_WIDTH = 2;
+  const MAX_ANNOTATION_LINE_WIDTH = 24;
   const VALID_TOOLS = new Set<AnnotationTool>([
     "select",
     "rect",
@@ -154,6 +157,7 @@
   const dimBottomNode = document.getElementById("litesnap-dim-bottom");
   const dimLeftNode = document.getElementById("litesnap-dim-left");
   const selectionNode = document.getElementById("litesnap-selection");
+  const annotationFrameNode = document.getElementById("litesnap-annotation-frame");
   const sizeNode = document.getElementById("litesnap-size");
   const toolbarNode = document.getElementById("litesnap-toolbar");
   const toolbarStyleNode = document.getElementById("litesnap-toolbar-style");
@@ -178,7 +182,7 @@
 
   let activeTool: AnnotationTool = "select";
   let activeColor = "#ff3b30";
-  let activeLineWidth = 3;
+  let activeLineWidth = 8;
   let textSize = 16;
   let annotations: Annotation[] = [];
   let redoAnnotations: Annotation[] = [];
@@ -207,6 +211,8 @@
   let loupeFrame: number | null = null;
   let pendingLoupePoint: { x: number; y: number } | null = null;
   let lastLoupeSampleCell: { x: number; y: number } | null = null;
+  let widthSliderNode: HTMLInputElement | null = null;
+  let widthValueNode: HTMLElement | null = null;
   let overlayRenderFrame: number | null = null;
   let overlayRenderMode: "selection" | "annotations" | null = null;
   let annotationCanvasCtx: CanvasRenderingContext2D | null = null;
@@ -781,6 +787,96 @@
     return JSON.parse(JSON.stringify(annotation)) as Annotation;
   }
 
+  function scaleAnnotationToBounds(
+    annotation: Annotation,
+    oldBounds: SelectionRect,
+    newBounds: SelectionRect
+  ): Annotation {
+    const scaleX = newBounds.width / Math.max(1, oldBounds.width);
+    const scaleY = newBounds.height / Math.max(1, oldBounds.height);
+    const strokeScale = Math.min(scaleX, scaleY);
+    const result = cloneAnnotation(annotation);
+
+    if (result.type === "pen" && annotation.type === "pen") {
+      result.points = annotation.points.map((point: Point) => ({
+        x: newBounds.x + (point.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (point.y - oldBounds.y) * scaleY
+      }));
+      result.lineWidth = clamp(
+        annotation.lineWidth * strokeScale,
+        MIN_ANNOTATION_LINE_WIDTH,
+        MAX_ANNOTATION_LINE_WIDTH
+      );
+      return result;
+    }
+
+    if (result.type === "text" && annotation.type === "text") {
+      result.position = {
+        x: newBounds.x + (annotation.position.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.position.y - oldBounds.y) * scaleY
+      };
+      result.fontSize = Math.max(10, annotation.fontSize * strokeScale);
+      if (annotation.maxWidth) {
+        result.maxWidth = Math.max(20, annotation.maxWidth * scaleX);
+      }
+      return result;
+    }
+
+    if (result.type === "number" && annotation.type === "number") {
+      result.position = {
+        x: newBounds.x + (annotation.position.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.position.y - oldBounds.y) * scaleY
+      };
+      result.fontSize = Math.max(10, annotation.fontSize * strokeScale);
+      return result;
+    }
+
+    if (
+      (result.type === "rect" ||
+        result.type === "ellipse" ||
+        result.type === "line" ||
+        result.type === "arrow") &&
+      (annotation.type === "rect" ||
+        annotation.type === "ellipse" ||
+        annotation.type === "line" ||
+        annotation.type === "arrow")
+    ) {
+      result.start = {
+        x: newBounds.x + (annotation.start.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.start.y - oldBounds.y) * scaleY
+      };
+      result.end = {
+        x: newBounds.x + (annotation.end.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.end.y - oldBounds.y) * scaleY
+      };
+      result.lineWidth = clamp(
+        annotation.lineWidth * strokeScale,
+        MIN_ANNOTATION_LINE_WIDTH,
+        MAX_ANNOTATION_LINE_WIDTH
+      );
+      return result;
+    }
+
+    if (result.type === "highlight" && annotation.type === "highlight") {
+      result.start = {
+        x: newBounds.x + (annotation.start.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.start.y - oldBounds.y) * scaleY
+      };
+      result.end = {
+        x: newBounds.x + (annotation.end.x - oldBounds.x) * scaleX,
+        y: newBounds.y + (annotation.end.y - oldBounds.y) * scaleY
+      };
+      result.lineWidth = clamp(
+        annotation.lineWidth * strokeScale,
+        MIN_ANNOTATION_LINE_WIDTH,
+        MAX_ANNOTATION_LINE_WIDTH
+      );
+      return result;
+    }
+
+    return result;
+  }
+
   function expandRect(rect: SelectionRect, padding: number): SelectionRect {
     const left = Math.max(0, rect.x - padding);
     const top = Math.max(0, rect.y - padding);
@@ -867,7 +963,7 @@
       }
       const pad =
         annotation.type === "arrow"
-          ? Math.max(10, annotation.lineWidth * 2.2)
+          ? Math.max(14, annotation.lineWidth * 3)
           : Math.max(6, "lineWidth" in annotation ? annotation.lineWidth + 4 : 6);
       return expandRect(bounds, pad);
     }
@@ -1122,6 +1218,7 @@
       selectionNode.hidden = true;
       selectionNode.dataset.moving = "false";
     }
+    hideAnnotationFrame();
     if (toolbarNode) {
       toolbarNode.hidden = true;
       toolbarNode.style.left = "";
@@ -1256,6 +1353,7 @@
       dragMode === "resizing" ||
       dragMode === "drawing" ||
       dragMode === "annotation-moving" ||
+      dragMode === "annotation-resizing" ||
       Boolean(draftAnnotation) ||
       annotations.length > 0;
     void window.launcher.liteSnapSetDisplayFollowLocked?.(locked);
@@ -1538,7 +1636,9 @@
       return;
     }
 
-    // WeChat-style arrow: one filled polygon (rectangular shaft + triangular head).
+    // Radiating WeChat arrow: the whole body is a wedge that starts as a point
+    // at `start`, widens toward the tip, then flares into a triangular head.
+    // `lineWidth` is the user-picked size (细/中/粗) and scales the whole shape.
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const shaftLen = Math.hypot(dx, dy);
@@ -1551,39 +1651,31 @@
     const sin = Math.sin(angle);
     const px = -sin;
     const py = cos;
-    const lineWidth = Math.max(2, annotation.lineWidth);
-    const halfShaft = lineWidth / 2;
+    const size = Math.max(2, annotation.lineWidth);
 
-    // Proportions match WeChat: compact sharp head, base clearly wider than shaft.
-    let headLength = Math.min(
-      Math.max(lineWidth * 3.6, 16),
-      shaftLen * 0.42
-    );
-    let headHalf = Math.max(lineWidth * 1.55, headLength * 0.42);
-    if (shaftLen < headLength + lineWidth * 2) {
-      headLength = Math.max(shaftLen * 0.55, 8);
-      headHalf = Math.max(lineWidth * 1.2, headLength * 0.4);
+    let headLength = Math.min(size * 3.4, shaftLen * 0.42);
+    let headHalf = size * 2.35;
+    let neckHalf = size * 0.78;
+    if (shaftLen < headLength + size * 1.5) {
+      headLength = Math.max(shaftLen * 0.5, size * 2);
+      headHalf = size * 2.1;
+      neckHalf = size * 0.7;
     }
 
     const tipX = end.x;
     const tipY = end.y;
     const baseX = tipX - cos * headLength;
     const baseY = tipY - sin * headLength;
-    // Pull shaft slightly into the head so the join stays solid with no gap.
-    const neckInset = Math.min(headLength * 0.22, Math.max(0, shaftLen - headLength));
-    const neckX = tipX - cos * (headLength - neckInset);
-    const neckY = tipY - sin * (headLength - neckInset);
 
-    ctx.lineCap = "butt";
-    ctx.lineJoin = "miter";
     ctx.beginPath();
-    ctx.moveTo(start.x + px * halfShaft, start.y + py * halfShaft);
-    ctx.lineTo(neckX + px * halfShaft, neckY + py * halfShaft);
+    ctx.moveTo(tipX, tipY);
+    // Left wing of the radiating head.
     ctx.lineTo(baseX + px * headHalf, baseY + py * headHalf);
-    ctx.lineTo(tipX, tipY);
+    // Step in to the wedge neck, then taper all the way to a point at start.
+    ctx.lineTo(baseX + px * neckHalf, baseY + py * neckHalf);
+    ctx.lineTo(start.x, start.y);
+    ctx.lineTo(baseX - px * neckHalf, baseY - py * neckHalf);
     ctx.lineTo(baseX - px * headHalf, baseY - py * headHalf);
-    ctx.lineTo(neckX - px * halfShaft, neckY - py * halfShaft);
-    ctx.lineTo(start.x - px * halfShaft, start.y - py * halfShaft);
     ctx.closePath();
     ctx.fill();
   }
@@ -1800,6 +1892,38 @@
     }
 
     drawSelectedAnnotationBounds(ctx);
+    updateAnnotationFrame();
+  }
+
+  function updateAnnotationFrame(): void {
+    if (!annotationFrameNode) {
+      return;
+    }
+    if (selectedAnnotationIndex === null || activeTool !== "select") {
+      annotationFrameNode.hidden = true;
+      return;
+    }
+    const annotation = annotations[selectedAnnotationIndex];
+    if (!annotation || annotation.type === "mosaic" || annotation.type === "blur") {
+      annotationFrameNode.hidden = true;
+      return;
+    }
+    const bounds = getAnnotationBounds(annotation);
+    if (!bounds || bounds.width < 1 || bounds.height < 1) {
+      annotationFrameNode.hidden = true;
+      return;
+    }
+    annotationFrameNode.hidden = false;
+    annotationFrameNode.style.left = `${bounds.x}px`;
+    annotationFrameNode.style.top = `${bounds.y}px`;
+    annotationFrameNode.style.width = `${bounds.width}px`;
+    annotationFrameNode.style.height = `${bounds.height}px`;
+  }
+
+  function hideAnnotationFrame(): void {
+    if (annotationFrameNode) {
+      annotationFrameNode.hidden = true;
+    }
   }
 
   function applyMove(nextX: number, nextY: number): void {
@@ -1852,6 +1976,53 @@
       dx,
       dy
     );
+    updateAnnotationFrame();
+  }
+
+  function applyAnnotationResize(nextX: number, nextY: number): void {
+    if (
+      !pointerStart ||
+      pointerStart.annotationIndex === undefined ||
+      !pointerStart.annotationSnapshot ||
+      !pointerStart.annotationBoundsSnapshot ||
+      !pointerStart.handle
+    ) {
+      return;
+    }
+
+    const minSize = 12;
+    const base = pointerStart.annotationBoundsSnapshot;
+    let left = base.x;
+    let top = base.y;
+    let right = base.x + base.width;
+    let bottom = base.y + base.height;
+
+    if (pointerStart.handle.includes("n")) {
+      top = clamp(nextY, 0, bottom - minSize);
+    }
+    if (pointerStart.handle.includes("s")) {
+      bottom = clamp(nextY, top + minSize, getViewportHeight());
+    }
+    if (pointerStart.handle.includes("w")) {
+      left = clamp(nextX, 0, right - minSize);
+    }
+    if (pointerStart.handle.includes("e")) {
+      right = clamp(nextX, left + minSize, getViewportWidth());
+    }
+
+    const newBounds: SelectionRect = {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top
+    };
+
+    annotations[pointerStart.annotationIndex] = scaleAnnotationToBounds(
+      pointerStart.annotationSnapshot,
+      base,
+      newBounds
+    );
+    updateAnnotationFrame();
   }
 
   function applyResize(nextX: number, nextY: number): void {
@@ -1892,7 +2063,7 @@
       return null;
     }
 
-    const value = target.dataset.handle;
+    const value = target.dataset.handle ?? target.dataset.annotationHandle;
     if (
       value === "n" ||
       value === "s" ||
@@ -1908,16 +2079,16 @@
     return null;
   }
 
-  function getEdgeHandleAtPoint(x: number, y: number): ResizeHandle | null {
-    if (!selection || !isValidSelection(selection)) {
-      return null;
-    }
-
+  function getEdgeHandleAtPoint(
+    x: number,
+    y: number,
+    rect: SelectionRect
+  ): ResizeHandle | null {
     const slop = 10;
-    const left = selection.x;
-    const top = selection.y;
-    const right = selection.x + selection.width;
-    const bottom = selection.y + selection.height;
+    const left = rect.x;
+    const top = rect.y;
+    const right = rect.x + rect.width;
+    const bottom = rect.y + rect.height;
     const nearLeft = Math.abs(x - left) <= slop;
     const nearRight = Math.abs(x - right) <= slop;
     const nearTop = Math.abs(y - top) <= slop;
@@ -1953,6 +2124,53 @@
       return "e";
     }
     return null;
+  }
+
+  function getSelectionEdgeHandleAtPoint(x: number, y: number): ResizeHandle | null {
+    if (!selection || !isValidSelection(selection)) {
+      return null;
+    }
+    return getEdgeHandleAtPoint(x, y, selection);
+  }
+
+  function getAnnotationEdgeHandleAtPoint(x: number, y: number): ResizeHandle | null {
+    if (selectedAnnotationIndex === null || activeTool !== "select") {
+      return null;
+    }
+    const annotation = annotations[selectedAnnotationIndex];
+    if (!annotation || annotation.type === "mosaic" || annotation.type === "blur") {
+      return null;
+    }
+    const bounds = getAnnotationBounds(annotation);
+    if (!bounds) {
+      return null;
+    }
+    return getEdgeHandleAtPoint(x, y, bounds);
+  }
+
+  function beginAnnotationResize(
+    handle: ResizeHandle,
+    pointerId: number,
+    x: number,
+    y: number,
+    annotationIndex: number
+  ): void {
+    const annotation = annotations[annotationIndex];
+    const bounds = annotation ? getAnnotationBounds(annotation) : null;
+    if (!annotation || !bounds) {
+      return;
+    }
+    dragMode = "annotation-resizing";
+    pointerStart = {
+      pointerId,
+      x,
+      y,
+      selection: null,
+      handle,
+      annotationIndex,
+      annotationSnapshot: cloneAnnotation(annotation),
+      annotationBoundsSnapshot: bounds
+    };
   }
 
   function beginSelectionResize(handle: ResizeHandle, pointerId: number, x: number, y: number): void {
@@ -2617,12 +2835,38 @@
     // Allow resizing the crop frame from handles/edges even while an annotation
     // tool is active (WeChat-style).
     const handle =
-      getHandleFromTarget(event.target) ?? getEdgeHandleAtPoint(pointX, pointY);
+      getHandleFromTarget(event.target) ??
+      getSelectionEdgeHandleAtPoint(pointX, pointY);
     if (handle && selection && isValidSelection(selection)) {
       beginSelectionResize(handle, event.pointerId, pointX, pointY);
       renderSelection();
       syncDisplayFollowLock();
       return;
+    }
+
+    if (activeTool === "select") {
+      const annotationHandle =
+        (event.target instanceof HTMLElement &&
+        event.target.closest("#litesnap-annotation-frame")
+          ? getHandleFromTarget(event.target)
+          : null) ?? getAnnotationEdgeHandleAtPoint(pointX, pointY);
+      if (
+        annotationHandle &&
+        selectedAnnotationIndex !== null &&
+        selection &&
+        containsPoint(selection, pointX, pointY)
+      ) {
+        beginAnnotationResize(
+          annotationHandle,
+          event.pointerId,
+          pointX,
+          pointY,
+          selectedAnnotationIndex
+        );
+        renderAnnotations();
+        syncDisplayFollowLock();
+        return;
+      }
     }
 
     if (activeTool !== "select") {
@@ -2667,6 +2911,10 @@
       const annotationIndex = hitTestAnnotation({ x: pointX, y: pointY });
       if (annotationIndex !== null) {
         selectedAnnotationIndex = annotationIndex;
+        const picked = annotations[annotationIndex];
+        if (picked && "lineWidth" in picked) {
+          setActiveLineWidth(picked.lineWidth, false);
+        }
         dragMode = "annotation-moving";
         pointerStart = {
           pointerId: event.pointerId,
@@ -2758,6 +3006,10 @@
       applyAnnotationMove(event.clientX, event.clientY);
       scheduleOverlayRender("annotations");
       return;
+    } else if (dragMode === "annotation-resizing") {
+      applyAnnotationResize(event.clientX, event.clientY);
+      scheduleOverlayRender("annotations");
+      return;
     }
 
     scheduleOverlayRender("selection");
@@ -2773,6 +3025,7 @@
     const wasMoving = dragMode === "moving";
     const wasResizing = dragMode === "resizing";
     const wasMovingAnnotation = dragMode === "annotation-moving";
+    const wasResizingAnnotation = dragMode === "annotation-resizing";
     const priorSelection = pointerStart.selection;
     const releasePoint: Point = { x: event.clientX, y: event.clientY };
     pointerStart = null;
@@ -2785,7 +3038,7 @@
       return;
     }
 
-    if (wasMovingAnnotation) {
+    if (wasMovingAnnotation || wasResizingAnnotation) {
       rebuildVectorLayer();
       renderAnnotations();
       syncDisplayFollowLock();
@@ -2898,22 +3151,35 @@
       return;
     }
     widthsNode.innerHTML = "";
-    for (const width of PRESET_WIDTHS) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "litesnap-overlay__width";
-      button.dataset.width = String(width);
-      button.title = `粗细/强度 ${width}`;
-      button.setAttribute("aria-label", `粗细或马赛克模糊强度 ${width}`);
-      const dot = document.createElement("span");
-      dot.className = "litesnap-overlay__width-dot";
-      const dotSize = Math.min(16, 4 + width * 1.4);
-      dot.style.width = `${dotSize}px`;
-      dot.style.height = `${dotSize}px`;
-      button.appendChild(dot);
-      button.addEventListener("click", () => setActiveLineWidth(width));
-      widthsNode.appendChild(button);
-    }
+    const wrap = document.createElement("div");
+    wrap.className = "litesnap-overlay__width-slider-wrap";
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "litesnap-overlay__width-slider";
+    slider.id = "litesnap-width-slider";
+    slider.min = String(MIN_ANNOTATION_LINE_WIDTH);
+    slider.max = String(MAX_ANNOTATION_LINE_WIDTH);
+    slider.step = "1";
+    slider.value = String(activeLineWidth);
+    slider.title = "拖动调整粗细";
+    slider.setAttribute("aria-label", "拖动调整标注粗细");
+
+    const value = document.createElement("span");
+    value.className = "litesnap-overlay__width-value";
+    value.textContent = String(activeLineWidth);
+
+    slider.addEventListener("input", () => {
+      const next = Number(slider.value);
+      value.textContent = String(next);
+      setActiveLineWidth(next);
+    });
+
+    wrap.appendChild(slider);
+    wrap.appendChild(value);
+    widthsNode.appendChild(wrap);
+    widthSliderNode = slider;
+    widthValueNode = value;
   }
 
   function setActiveColor(color: string, persist = true): void {
@@ -2930,10 +3196,20 @@
   }
 
   function setActiveLineWidth(width: number, persist = true): void {
-    activeLineWidth = width;
-    widthsNode?.querySelectorAll<HTMLElement>("[data-width]").forEach((button) => {
-      button.classList.toggle("is-active", Number(button.dataset.width) === width);
-    });
+    activeLineWidth = clamp(width, MIN_ANNOTATION_LINE_WIDTH, MAX_ANNOTATION_LINE_WIDTH);
+    if (widthSliderNode) {
+      widthSliderNode.value = String(activeLineWidth);
+    }
+    if (widthValueNode) {
+      widthValueNode.textContent = String(activeLineWidth);
+    }
+    const selected =
+      selectedAnnotationIndex !== null ? annotations[selectedAnnotationIndex] : null;
+    if (selected && "lineWidth" in selected) {
+      selected.lineWidth = activeLineWidth;
+      rebuildVectorLayer();
+      renderAnnotations();
+    }
     if (persist) {
       schedulePersistAnnotationSettings();
     }
