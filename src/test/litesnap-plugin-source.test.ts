@@ -774,6 +774,12 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
 
 test("LiteSnap renderer panel actions call the preload bridge for capture and pin flows", () => {
   const panelImplsSource = fs.readFileSync(panelImplsPath, "utf8");
+  const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
+  const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
+  const stylesSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "renderer", "styles.css"),
+    "utf8"
+  );
 
   assert.match(
     panelImplsSource,
@@ -854,6 +860,31 @@ test("LiteSnap renderer panel actions call the preload bridge for capture and pi
     panelImplsSource,
     /annotationColor[\s\S]*annotationLineWidth[\s\S]*annotationTextSize[\s\S]*annotationFillShapes/,
     "LiteSnap settings page should expose editable annotation defaults"
+  );
+  assert.match(
+    settingsSource,
+    /annotationLineWidth:[\s\S]*base\.annotationLineWidth,[\s\S]*1,[\s\S]*60/,
+    "LiteSnap settings should allow a 1–60 px default annotation line width"
+  );
+  assert.match(
+    panelImplsSource,
+    /"annotationLineWidth",[\s\S]*annotationLineWidth,[\s\S]*1,[\s\S]*60/,
+    "LiteSnap settings panel should allow a 1–60 px default annotation line width"
+  );
+  assert.match(
+    overlayRendererSource,
+    /MIN_ANNOTATION_LINE_WIDTH = 1;[\s\S]*MAX_ANNOTATION_LINE_WIDTH = 60;[\s\S]*activeLineWidth = 3;/,
+    "LiteSnap overlay should start at 3 px and support the configured 1–60 px range"
+  );
+  assert.match(
+    panelImplsSource,
+    /row\.className = "litesnap-settings-field"/,
+    "LiteSnap settings fields should use a dedicated layout class rather than the global settings grid"
+  );
+  assert.match(
+    stylesSource,
+    /\.litesnap-fields-grid \.litesnap-settings-field \{[\s\S]*display: flex;[\s\S]*flex-direction: column;/,
+    "LiteSnap settings fields should stack labels, controls, and hints within each grid card"
   );
 });
 

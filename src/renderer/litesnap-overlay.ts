@@ -127,8 +127,8 @@
     "#ffffff",
     "#1c1c1e"
   ];
-  const MIN_ANNOTATION_LINE_WIDTH = 2;
-  const MAX_ANNOTATION_LINE_WIDTH = 24;
+  const MIN_ANNOTATION_LINE_WIDTH = 1;
+  const MAX_ANNOTATION_LINE_WIDTH = 60;
   const VALID_TOOLS = new Set<AnnotationTool>([
     "select",
     "rect",
@@ -182,7 +182,7 @@
 
   let activeTool: AnnotationTool = "select";
   let activeColor = "#ff3b30";
-  let activeLineWidth = 8;
+  let activeLineWidth = 3;
   let textSize = 16;
   let annotations: Annotation[] = [];
   let redoAnnotations: Annotation[] = [];

@@ -86,7 +86,7 @@ export function normalizeLiteSnapSettings(
       value?.annotationLineWidth,
       base.annotationLineWidth,
       1,
-      24
+      60
     ),
     annotationTextSize: clampNumber(
       value?.annotationTextSize,

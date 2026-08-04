@@ -894,10 +894,11 @@ body {
   grid-column: 1 / -1;
 }
 
-.litesnap-fields-grid .settings-row {
-  grid-template-columns: minmax(0, 1fr);
+.litesnap-fields-grid .litesnap-settings-field {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
   padding: 10px 12px;
   border-radius: 8px;
@@ -905,13 +906,12 @@ body {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.litesnap-fields-grid .settings-row-label {
+.litesnap-fields-grid .litesnap-settings-field .settings-row-label {
   font-weight: 600;
   line-height: 1.4;
 }
 
-.litesnap-fields-grid .settings-row-hint {
-  grid-column: 1;
+.litesnap-fields-grid .litesnap-settings-field .settings-row-hint {
   margin-top: 0;
   line-height: 1.45;
 }

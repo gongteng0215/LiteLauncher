@@ -13830,9 +13830,7 @@ function createLiteSnapFieldRow(
   hintText?: string
 ): HTMLDivElement {
   const row = document.createElement("div");
-  // Use the wide two-column layout so shortcut/directory controls are not
-  // clipped by the default 120px control column.
-  row.className = "settings-row settings-row-textarea";
+  row.className = "litesnap-settings-field";
 
   const label = document.createElement("label");
   label.className = "settings-row-label";
@@ -17631,14 +17629,15 @@ window.__LL_PANEL_IMPLS__ = {
           "点击色块选择默认标注颜色"
         ),
         createLiteSnapFieldRow(
-          "线宽/强度",
+          "默认线宽",
           createLiteSnapNumberInput(
             "litesnap-annotation-line-width",
             "annotationLineWidth",
             liteSnapPanelData.settings.annotationLineWidth,
             1,
-            24
-          )
+            60
+          ),
+          "范围 1–60 px；截图标注将使用此值"
         ),
         createLiteSnapFieldRow(
           "文字大小",
