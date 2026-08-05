@@ -188,7 +188,7 @@ export async function openPluginFromSearch(
   await searchInput.fill(query);
 
   const result = page
-    .locator(".result-item.result-tile")
+    .locator(".result-item.result-tile, .command-result")
     .filter({ hasText: title })
     .first();
   await result.waitFor({ state: "visible", timeout: 10000 });

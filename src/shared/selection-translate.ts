@@ -51,6 +51,8 @@ export function createDefaultSelectionTranslateSettings(): SelectionTranslateSet
 }
 
 export type SelectionPopupShowOptions = {
+  /** Cursor position captured when the selection hotkey was pressed. */
+  anchorPoint?: { x: number; y: number };
   dismissOnOutsideClick?: boolean;
   /** Windows that should stay clickable above the dismiss backdrop (e.g. launcher). */
   passthroughWindows?: import("electron").BrowserWindow[];

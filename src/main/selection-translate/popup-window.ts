@@ -237,6 +237,19 @@ function createDismissBackdropWindow(): BrowserWindow {
   window.setAlwaysOnTop(true, "floating");
   window.setIgnoreMouseEvents(false);
   void window.loadFile(resolveBackdropHtmlPath());
+  window.on("focus", () => {
+    // The transparent backdrop normally reports the click through its renderer.
+    // Focus is a second, native-level signal for clicks that do not arrive as a
+    // DOM pointer event (for example after a focus transition on Windows).
+    if (
+      dismissOnOutsideClickEnabled &&
+      popupWindow &&
+      !popupWindow.isDestroyed() &&
+      popupWindow.isVisible()
+    ) {
+      closeSelectionPopup();
+    }
+  });
   window.on("closed", () => {
     if (dismissBackdropWindow === window) {
       dismissBackdropWindow = null;
@@ -379,7 +392,7 @@ export async function showSelectionPopup(
     onClose: options.onClose
   };
 
-  const point = screen.getCursorScreenPoint();
+  const point = options.anchorPoint ?? screen.getCursorScreenPoint();
   const bounds = clampPopupBounds(point, resolvePopupSize(payload));
 
   if (dismissOnOutsideClickEnabled) {

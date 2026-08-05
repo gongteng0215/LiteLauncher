@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app, BrowserWindow, clipboard, globalShortcut, nativeImage, shell, type Event, type Input } from "electron";
+import { app, BrowserWindow, clipboard, globalShortcut, nativeImage, screen, shell, type Event, type Input } from "electron";
 
 import { IPC_CHANNELS } from "../shared/channels";
 import {
@@ -2435,13 +2435,18 @@ async function bootstrap(): Promise<void> {
       return false;
     }
     selectionTranslateRunning = true;
+    let popupAnchorPoint: { x: number; y: number } | undefined;
     try {
       const settings = await selectionTranslateSettingsStore.getSettings();
       if (!settings.enabled) {
         return false;
       }
 
+      // Capture this before SendKeys/translation work begins. Those async steps
+      // can take long enough for the user to move the pointer elsewhere.
+      popupAnchorPoint = screen.getCursorScreenPoint();
       const popupOptions = {
+        anchorPoint: popupAnchorPoint,
         dismissOnOutsideClick: settings.dismissOnOutsideClick,
         passthroughWindows: launcherWindow.isDestroyed() ? [] : [launcherWindow],
         onOpen: () => {
@@ -2530,7 +2535,10 @@ async function bootstrap(): Promise<void> {
           mode: "error",
           message: "划词翻译失败，请重试。"
         },
-        { dismissOnOutsideClick: settings.dismissOnOutsideClick }
+        {
+          anchorPoint: popupAnchorPoint,
+          dismissOnOutsideClick: settings.dismissOnOutsideClick
+        }
       );
       return false;
     } finally {

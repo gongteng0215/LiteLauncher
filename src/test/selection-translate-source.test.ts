@@ -65,6 +65,7 @@ test("selection-translate settings store is wired", () => {
   const preloadSource = readSource("src/preload/index.ts");
 
   assert.match(sharedSource, /dismissOnOutsideClick/);
+  assert.match(sharedSource, /anchorPoint\?: \{ x: number; y: number \}/);
   assert.match(sharedSource, /hotkey:\s*"F4"/);
   assert.match(sharedSource, /passthroughWindows/);
   assert.match(settingsSource, /dismissOnOutsideClick/);
@@ -80,6 +81,21 @@ test("selection-translate settings store is wired", () => {
   assert.match(popupSource, /setAlwaysOnTop\(true, "floating"\)/);
   assert.match(popupSource, /setAlwaysOnTop\(true, "screen-saver"\)/);
   assert.match(mainSource, /dismissOnOutsideClick:\s*settings\.dismissOnOutsideClick/);
+  assert.match(
+    mainSource,
+    /popupAnchorPoint = screen\.getCursorScreenPoint\(\);[\s\S]*anchorPoint: popupAnchorPoint/,
+    "selection translation should capture the cursor before async copy/translation work"
+  );
+  assert.match(
+    popupSource,
+    /const point = options\.anchorPoint \?\? screen\.getCursorScreenPoint\(\);/,
+    "selection popup should use the cursor position captured when the hotkey was pressed"
+  );
+  assert.match(
+    popupSource,
+    /window\.on\("focus", \(\) => \{[\s\S]*popupWindow\.isVisible\(\)[\s\S]*closeSelectionPopup\(\);/,
+    "dismiss backdrop focus should close a visible popup when an outside click bypasses DOM pointer events"
+  );
   assert.match(mainSource, /passthroughWindows:\s*launcherWindow/);
   assert.match(mainSource, /setWindowAutoHideSuspended/);
   assert.match(panelImplsSource, /selectionTranslateDismissOutside/);

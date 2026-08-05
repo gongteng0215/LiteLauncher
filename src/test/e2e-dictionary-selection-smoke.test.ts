@@ -68,7 +68,7 @@ test(
 );
 
 test(
-  "electron smoke: selection popup shows dictionary payload and closes",
+  "electron smoke: selection popup anchors to the trigger point and closes on outside focus",
   { timeout: 180000 },
   async () => {
     const testName =
@@ -78,14 +78,16 @@ test(
       session = await launchE2ESession();
       const { electronApp } = session;
 
-      await electronApp.evaluate(async () => {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const path = require("node:path") as typeof import("node:path");
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { showSelectionPopup, closeSelectionPopup } = require(
+      const popupLaunch = await electronApp.evaluate(async ({ BrowserWindow, screen }) => {
+        const moduleApi = process.getBuiltinModule("module") as typeof import("node:module");
+        const appRequire = moduleApi.createRequire(`${process.cwd()}\\package.json`);
+        const path = appRequire("node:path") as typeof import("node:path");
+        const { showSelectionPopup, closeSelectionPopup } = appRequire(
           path.join(process.cwd(), "dist/main/selection-translate/popup-window.js")
         ) as typeof import("../main/selection-translate/popup-window");
         closeSelectionPopup();
+        const { workArea } = screen.getPrimaryDisplay();
+        const anchorPoint = { x: workArea.x + 48, y: workArea.y + 48 };
         await showSelectionPopup(
           {
             mode: "dictionary",
@@ -102,10 +104,26 @@ test(
               exchange: ""
             }
           },
-          { dismissOnOutsideClick: true }
+          { dismissOnOutsideClick: true, anchorPoint }
         );
-        return true;
+        const popup = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().includes("selection-popup.html")
+        );
+        if (!popup) {
+          throw new Error("selection popup should exist after showSelectionPopup resolves");
+        }
+        return { anchorPoint, bounds: popup.getBounds() };
       });
+      assert.equal(
+        popupLaunch.bounds.x,
+        popupLaunch.anchorPoint.x + 16,
+        "popup should use the cursor location captured when the selection hotkey was pressed"
+      );
+      assert.equal(
+        popupLaunch.bounds.y,
+        popupLaunch.anchorPoint.y + 16,
+        "popup should use the cursor location captured when the selection hotkey was pressed"
+      );
 
       const startedAt = Date.now();
       let popupPage = null as Awaited<
@@ -128,16 +146,17 @@ test(
         return Boolean(root && /apple/i.test(root.textContent ?? ""));
       });
 
-      await electronApp.evaluate(() => {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const path = require("node:path") as typeof import("node:path");
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { closeSelectionPopup } = require(
-          path.join(process.cwd(), "dist/main/selection-translate/popup-window.js")
-        ) as typeof import("../main/selection-translate/popup-window");
-        closeSelectionPopup();
+      const focusedBackdrop = await electronApp.evaluate(({ BrowserWindow }) => {
+        const backdrop = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().includes("selection-backdrop.html")
+        );
+        if (!backdrop) {
+          return false;
+        }
+        backdrop.focus();
         return true;
       });
+      assert.equal(focusedBackdrop, true, "dismiss backdrop window should exist");
 
       const closedAt = Date.now();
       while (Date.now() - closedAt < 10000) {
@@ -149,7 +168,7 @@ test(
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      assert.fail("selection popup window should close");
+      assert.fail("selection popup window should close after the outside backdrop gains focus");
     } catch (error) {
       if (session) {
         await captureE2EFailureArtifacts(session.page, testName, error, session.electronApp);

@@ -53,3 +53,13 @@ test("e2e test utils can opt into real blur handling for window-hide policy veri
     "launch helper should expose a dedicated env flag for real blur handling"
   );
 });
+
+test("e2e test utils can open plugins from both classic and Command Center search results", () => {
+  const source = readE2EUtilsSource();
+
+  assert.match(
+    source,
+    /locator\("\.result-item\.result-tile, \.command-result"\)/,
+    "plugin-opening helper should support the Command Center search result markup"
+  );
+});
