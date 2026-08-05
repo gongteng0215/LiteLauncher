@@ -1248,6 +1248,21 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     "LiteSnap overlay should persist annotation style and last-tool changes back to settings"
   );
   assert.match(
+    overlayRendererSource,
+    /let lastAnnotationTool: AnnotationTool = "select"/,
+    "LiteSnap should retain the last drawing tool separately from selection mode"
+  );
+  assert.match(
+    overlayRendererSource,
+    /annotationTool: lastAnnotationTool/,
+    "LiteSnap should not overwrite the saved drawing tool when returning to selection mode"
+  );
+  assert.match(
+    overlayRendererSource,
+    /restoreLastAnnotationToolAfterSelection\(\)[\s\S]*setActiveTool\(lastAnnotationTool, false\)/,
+    "LiteSnap should restore the saved drawing tool only after a valid selection exists"
+  );
+  assert.match(
     settingsSource,
     /annotationTool:[\s\S]*annotationFillShapes:/,
     "LiteSnap settings should remember the last annotation tool and fill state"
@@ -1429,6 +1444,16 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
     "panel should render an editable OCR result view"
   );
   assert.match(panelImplsSource, /ensureLiteSnapOcrCacheLoaded/);
+  assert.match(
+    panelImplsSource,
+    /formatLiteSnapOcrEngineStatus\(\)[\s\S]*中文：[\s\S]*英文：/,
+    "OCR UI should show separate Chinese and English engine readiness states"
+  );
+  assert.match(
+    panelImplsSource,
+    /Windows 本地 OCR 会在已就绪的中文\/英文引擎间自动选择/,
+    "OCR UI should explain that installed engines are selected automatically"
+  );
   assert.match(panelImplsSource, /liteSnapGetOcrProbeCache/);
   assert.match(panelImplsSource, /persistLiteSnapOcrProbeCacheIfReady/);
   assert.match(channelsSource, /liteSnapGetOcrProbeCache:/);

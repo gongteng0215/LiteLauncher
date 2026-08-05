@@ -343,6 +343,64 @@ test(
 );
 
 test(
+  "electron smoke: LiteSnap restores the saved drawing tool after selection",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap restores the saved drawing tool after selection";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async () => {
+        await window.launcher.setLiteSnapSettings({ annotationTool: "arrow" });
+      });
+
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      assert.equal(
+        await overlayPage.evaluate(
+          () => document.getElementById("litesnap-overlay")?.dataset.tool
+        ),
+        "select",
+        "capture must begin in selection mode so a region can be created"
+      );
+
+      await createOverlaySelection(overlayPage);
+      const activeTool = await overlayPage.evaluate(() => ({
+        tool: document.getElementById("litesnap-overlay")?.dataset.tool,
+        arrowActive: document
+          .querySelector('#litesnap-toolbar [data-tool="arrow"]')
+          ?.classList.contains("is-active")
+      }));
+      assert.deepEqual(activeTool, { tool: "arrow", arrowActive: true });
+
+      await overlayPage.keyboard.press("Escape").catch(() => undefined);
+      await waitForOverlayVisibility(session, false);
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+    }
+  }
+);
+
+test(
   "electron smoke: LiteSnap double click copies the current selection",
   { timeout: 180000 },
   async (t) => {

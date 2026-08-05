@@ -13433,6 +13433,22 @@ function isLiteSnapOcrRuntimeReady(): boolean {
   );
 }
 
+function formatLiteSnapOcrEngineStatus(): string {
+  const format = (ready: boolean | undefined): string => {
+    if (ready === true) {
+      return "已就绪";
+    }
+    if (ready === false) {
+      return "未就绪";
+    }
+    return "未检测";
+  };
+
+  return `中文：${format(liteSnapOcrProbeState?.chineseReady)}；英文：${format(
+    liteSnapOcrProbeState?.englishReady
+  )}`;
+}
+
 function resolveLiteSnapMissingOcrLanguages(): Array<"zh-CN" | "en-US"> {
   if (isLiteSnapOcrRuntimeReady()) {
     return [];
@@ -13552,6 +13568,12 @@ function buildLiteSnapOcrConfigurationSection(options: {
         : "点「检测 OCR」查看模块与语言包状态"
   );
 
+  const ocrEngineInfo = createLiteSnapInfoRow(
+    "OCR 语言引擎",
+    formatLiteSnapOcrEngineStatus(),
+    "Windows 本地 OCR 会在已就绪的中文/英文引擎间自动选择"
+  );
+
   const ocrSetupGuide = createLiteSnapOcrSetupGuideSection();
 
   const ocrProbeResultField = document.createElement("div");
@@ -13614,6 +13636,7 @@ function buildLiteSnapOcrConfigurationSection(options: {
 
   const nodes: HTMLElement[] = [
     ocrProbeInfo,
+    ocrEngineInfo,
     ...(ocrReady ? [] : [ocrSetupGuide]),
     ocrProbeResultField,
     ocrProbeActions
@@ -17314,7 +17337,7 @@ window.__LL_PANEL_IMPLS__ = {
       const ocrStatusRow = createLiteSnapInfoRow(
         "文字识别",
         liteSnapPanelData.statusMessage || "已识别文字，可编辑后复制。",
-        "识别使用 Windows 本地 OCR（中/英引擎自动选择），可在下方编辑"
+        `识别使用 Windows 本地 OCR（中/英引擎自动选择）；${formatLiteSnapOcrEngineStatus()}；可在下方编辑`
       );
 
       const ocrField = document.createElement("div");
@@ -17637,7 +17660,7 @@ window.__LL_PANEL_IMPLS__ = {
             1,
             60
           ),
-          "范围 1–60 px；截图标注将使用此值"
+          "范围 1–60 px；截图标注会自动记住最后使用的粗细"
         ),
         createLiteSnapFieldRow(
           "文字大小",
@@ -17911,7 +17934,7 @@ window.__LL_PANEL_IMPLS__ = {
         createLiteSnapInfoRow(
           "标注预设",
           `${liteSnapPanelData.settings.annotationColor} / ${liteSnapPanelData.settings.annotationLineWidth}px / ${liteSnapPanelData.settings.annotationTextSize}px`,
-          "标注工具的默认颜色、线宽与字号"
+          "颜色、线宽、字号和填充会自动记住；框选后恢复上次标注工具"
         )
       ];
 

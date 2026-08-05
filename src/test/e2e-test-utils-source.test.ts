@@ -59,7 +59,12 @@ test("e2e test utils can open plugins from both classic and Command Center searc
 
   assert.match(
     source,
-    /locator\("\.result-item\.result-tile, \.command-result"\)/,
+    /const commandResult = page\.locator\("\.command-result"\)/,
     "plugin-opening helper should support the Command Center search result markup"
+  );
+  assert.match(
+    source,
+    /const result = \(await commandResult\.isVisible\(\)\.catch\(\(\) => false\)\)/,
+    "plugin-opening helper should prioritize the visible Command Center result over background tiles"
   );
 });

@@ -42,6 +42,12 @@ test("selection-translate popup window and renderer assets exist", () => {
   assert.match(popupSource, /dismissOnOutsideClickEnabled/);
   assert.match(popupSource, /setAlwaysOnTop\(true, "floating"\)/);
   assert.match(popupSource, /setAlwaysOnTop\(true, "screen-saver"\)/);
+  assert.match(popupSource, /POPUP_WIDTH = 420/);
+  assert.match(popupSource, /POPUP_HEIGHT_WITH_CANDIDATES = 480/);
+  assert.match(popupSource, /popupRequestSequence/);
+  assert.match(popupSource, /isCurrentPopupRequest/);
+  assert.match(cssSource, /flex:\s*0 0 auto/);
+  assert.match(cssSource, /scrollbar-gutter:\s*stable/);
   assert.match(preloadSource, /selectionPopup/);
   assert.match(htmlSource, /selection-popup\.js/);
   assert.match(cssSource, /\.selection-popup/);

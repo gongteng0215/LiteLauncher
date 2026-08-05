@@ -187,10 +187,29 @@ export async function openPluginFromSearch(
   await searchInput.click();
   await searchInput.fill(query);
 
-  const result = page
-    .locator(".result-item.result-tile, .command-result")
+  const commandResult = page.locator(".command-result").filter({ hasText: title }).first();
+  const resultTile = page
+    .locator(".result-item.result-tile")
     .filter({ hasText: title })
     .first();
+  await page.waitForFunction(
+    (expectedTitle) => {
+      const matchesTitle = (node: Element): boolean =>
+        (node.textContent ?? "").includes(expectedTitle);
+      const isVisible = (node: Element): boolean => {
+        const element = node as HTMLElement;
+        return Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+      };
+      return Array.from(
+        document.querySelectorAll(".command-result, .result-item.result-tile")
+      ).some((node) => matchesTitle(node) && isVisible(node));
+    },
+    title,
+    { timeout: 10000 }
+  );
+  const result = (await commandResult.isVisible().catch(() => false))
+    ? commandResult
+    : resultTile;
   await result.waitFor({ state: "visible", timeout: 10000 });
   await result.click();
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { calculateSelectionPopupBounds } from "../shared/selection-translate";
 import {
   captureE2EFailureArtifacts,
   launchE2ESession,
@@ -169,6 +170,146 @@ test(
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       assert.fail("selection popup window should close after the outside backdrop gains focus");
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(session.page, testName, error, session.electronApp);
+      }
+      throw error;
+    } finally {
+      await session?.close();
+    }
+  }
+);
+
+test(
+  "electron smoke: selection popup flips at display edges and ignores a stale open request",
+  { timeout: 180000 },
+  async () => {
+    const testName =
+      "electron smoke: selection popup flips at display edges and ignores a stale open request";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    try {
+      session = await launchE2ESession();
+      const { electronApp } = session;
+
+      const popupLaunch = await electronApp.evaluate(async ({ BrowserWindow, screen }) => {
+        const moduleApi = process.getBuiltinModule("module") as typeof import("node:module");
+        const appRequire = moduleApi.createRequire(`${process.cwd()}\\package.json`);
+        const path = appRequire("node:path") as typeof import("node:path");
+        const { showSelectionPopup, closeSelectionPopup } = appRequire(
+          path.join(process.cwd(), "dist/main/selection-translate/popup-window.js")
+        ) as typeof import("../main/selection-translate/popup-window");
+        closeSelectionPopup();
+        const { workArea } = screen.getPrimaryDisplay();
+        const anchorPoint = {
+          x: workArea.x + workArea.width - 8,
+          y: workArea.y + workArea.height - 8
+        };
+        await Promise.all([
+          showSelectionPopup(
+            {
+              mode: "dictionary",
+              sourceText: "first",
+              entry: {
+                word: "first",
+                phonetic: "fɜːst",
+                translation: "第一",
+                definition: "before all others",
+                pos: "adj",
+                tags: "",
+                collins: 1,
+                oxford: 1,
+                exchange: ""
+              }
+            },
+            {
+              dismissOnOutsideClick: false,
+              anchorPoint: { x: workArea.x + 48, y: workArea.y + 48 }
+            }
+          ),
+          showSelectionPopup(
+            {
+              mode: "dictionary",
+              sourceText: "second",
+              entry: {
+                word: "second",
+                phonetic: "ˈsekənd",
+                translation: "第二",
+                definition: "after another entry",
+                pos: "adj",
+                tags: "",
+                collins: 1,
+                oxford: 1,
+                exchange: ""
+              },
+              candidates: [
+                {
+                  word: "second",
+                  phonetic: "ˈsekənd",
+                  translation: "第二",
+                  definition: "after another entry",
+                  pos: "adj",
+                  tags: "",
+                  collins: 1,
+                  oxford: 1,
+                  exchange: ""
+                },
+                {
+                  word: "secondary",
+                  phonetic: "ˈsekəndri",
+                  translation: "次要的",
+                  definition: "less important",
+                  pos: "adj",
+                  tags: "",
+                  collins: 1,
+                  oxford: 1,
+                  exchange: ""
+                }
+              ]
+            },
+            { dismissOnOutsideClick: false, anchorPoint }
+          )
+        ]);
+        const popup = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().includes("selection-popup.html")
+        );
+        if (!popup) {
+          throw new Error("selection popup should exist after concurrent opens");
+        }
+        return { anchorPoint, workArea, bounds: popup.getBounds() };
+      });
+
+      assert.deepEqual(
+        popupLaunch.bounds,
+        calculateSelectionPopupBounds(
+          popupLaunch.anchorPoint,
+          { width: 420, height: 480 },
+          popupLaunch.workArea
+        ),
+        "edge placement should flip before clamping the popup to the display"
+      );
+
+      const popupPage = electronApp
+        .windows()
+        .find((item) => item.url().includes("selection-popup.html"));
+      assert.ok(popupPage, "selection popup window should remain open");
+      await popupPage.waitForLoadState("domcontentloaded");
+      await popupPage.waitForFunction(() => /second/i.test(document.body.textContent ?? ""));
+      assert.doesNotMatch(
+        await popupPage.locator("body").innerText(),
+        /first/i,
+        "the stale popup request must not replace the newest payload"
+      );
+
+      await electronApp.evaluate(() => {
+        const moduleApi = process.getBuiltinModule("module") as typeof import("node:module");
+        const appRequire = moduleApi.createRequire(`${process.cwd()}\\package.json`);
+        const path = appRequire("node:path") as typeof import("node:path");
+        const { closeSelectionPopup } = appRequire(
+          path.join(process.cwd(), "dist/main/selection-translate/popup-window.js")
+        ) as typeof import("../main/selection-translate/popup-window");
+        closeSelectionPopup();
+      });
     } catch (error) {
       if (session) {
         await captureE2EFailureArtifacts(session.page, testName, error, session.electronApp);

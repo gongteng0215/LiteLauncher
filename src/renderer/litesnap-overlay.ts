@@ -181,6 +181,9 @@
   let committing = false;
 
   let activeTool: AnnotationTool = "select";
+  // "select" is needed to create a new region, so keep the last drawing tool
+  // separately and restore it only after a valid region has been chosen.
+  let lastAnnotationTool: AnnotationTool = "select";
   let activeColor = "#ff3b30";
   let activeLineWidth = 3;
   let textSize = 16;
@@ -1043,7 +1046,7 @@
         annotationColor: activeColor,
         annotationLineWidth: activeLineWidth,
         annotationTextSize: textSize,
-        annotationTool: activeTool,
+        annotationTool: lastAnnotationTool,
         annotationFillShapes: fillShapes
       });
     }, 400);
@@ -1125,6 +1128,9 @@
 
   function setActiveTool(tool: AnnotationTool, persist = true): void {
     activeTool = tool;
+    if (tool !== "select") {
+      lastAnnotationTool = tool;
+    }
     if (overlayRoot) {
       overlayRoot.dataset.tool = tool;
     }
@@ -1147,6 +1153,13 @@
     if (persist) {
       schedulePersistAnnotationSettings();
     }
+  }
+
+  function restoreLastAnnotationToolAfterSelection(): void {
+    if (activeTool !== "select" || lastAnnotationTool === "select") {
+      return;
+    }
+    setActiveTool(lastAnnotationTool, false);
   }
 
   function syncToolbarStyleRow(): void {
@@ -3070,12 +3083,16 @@
         };
         clearWindowHint();
         markSelectionCommittedIfValid();
+        restoreLastAnnotationToolAfterSelection();
         renderSelection();
         return;
       }
     }
 
     markSelectionCommittedIfValid();
+    if (wasSelecting && isValidSelection(selection)) {
+      restoreLastAnnotationToolAfterSelection();
+    }
     renderSelection();
   }
 
@@ -3361,13 +3378,13 @@
     activeColor = state.annotationColor || activeColor;
     activeLineWidth = state.annotationLineWidth || activeLineWidth;
     textSize = state.annotationTextSize || textSize;
+    lastAnnotationTool = state.annotationTool;
     setActiveColor(activeColor, false);
     setActiveLineWidth(activeLineWidth, false);
     setFillShapes(Boolean(state.annotationFillShapes), false);
-    // Intentionally do NOT restore the last annotation tool here. Every capture
-    // must start in "select" mode so the user can immediately drag a region or
-    // click a detected window. Restoring e.g. the rectangle tool would force the
-    // user to click the select button before they could choose an area again.
+    // Every capture starts in "select" mode so the user can drag a region or
+    // grab a window. The saved drawing tool is restored after that selection is
+    // valid, preserving both workflows.
   }
 
   function applyOverlayState(state: OverlayState): void {

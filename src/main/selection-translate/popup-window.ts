@@ -6,11 +6,14 @@ import type {
   SelectionPopupPayload,
   SelectionPopupShowOptions
 } from "../../shared/selection-translate";
-import { isPointInBounds } from "../../shared/selection-translate";
+import {
+  calculateSelectionPopupBounds,
+  isPointInBounds
+} from "../../shared/selection-translate";
 
-const POPUP_WIDTH = 360;
-const POPUP_HEIGHT = 280;
-const POPUP_HEIGHT_WITH_CANDIDATES = 360;
+const POPUP_WIDTH = 420;
+const POPUP_HEIGHT = 360;
+const POPUP_HEIGHT_WITH_CANDIDATES = 480;
 const CURSOR_OFFSET = 16;
 
 let popupWindow: BrowserWindow | null = null;
@@ -28,6 +31,8 @@ let popupLifecycleHooks: {
   onOpen?: () => void;
   onClose?: () => void;
 } = {};
+let popupRequestSequence = 0;
+let activePopupRequestId = 0;
 
 export function getVirtualDesktopBounds(): {
   x: number;
@@ -83,7 +88,7 @@ function resolvePopupSize(payload: SelectionPopupPayload): { width: number; heig
   };
 }
 
-function clampPopupBounds(
+function resolvePopupBounds(
   point: { x: number; y: number },
   size: { width: number; height: number }
 ): {
@@ -93,18 +98,11 @@ function clampPopupBounds(
   height: number;
 } {
   const display = screen.getDisplayNearestPoint(point);
-  const { workArea } = display;
-  const width = Math.min(size.width, workArea.width);
-  const height = Math.min(size.height, workArea.height);
-  const x = Math.min(
-    Math.max(point.x + CURSOR_OFFSET, workArea.x),
-    workArea.x + workArea.width - width
-  );
-  const y = Math.min(
-    Math.max(point.y + CURSOR_OFFSET, workArea.y),
-    workArea.y + workArea.height - height
-  );
-  return { x, y, width, height };
+  return calculateSelectionPopupBounds(point, size, display.workArea, CURSOR_OFFSET);
+}
+
+function isCurrentPopupRequest(requestId: number): boolean {
+  return requestId !== 0 && requestId === activePopupRequestId;
 }
 
 function restoreElevatedWindows(): void {
@@ -328,7 +326,11 @@ function createPopupWindow(bounds: {
     if (!dismissOnOutsideClickEnabled) {
       return;
     }
+    const requestId = activePopupRequestId;
     setTimeout(() => {
+      if (!isCurrentPopupRequest(requestId)) {
+        return;
+      }
       if (!popupWindow || popupWindow.isDestroyed() || popupWindow !== window) {
         return;
       }
@@ -348,9 +350,11 @@ function createPopupWindow(bounds: {
     }, 0);
   });
   window.on("closed", () => {
-    if (popupWindow === window) {
-      popupWindow = null;
+    if (popupWindow !== window) {
+      return;
     }
+    popupWindow = null;
+    activePopupRequestId = 0;
     closeDismissBackdrop();
     restoreElevatedWindows();
     const onClose = popupLifecycleHooks.onClose;
@@ -362,6 +366,7 @@ function createPopupWindow(bounds: {
 }
 
 export function closeSelectionPopup(): void {
+  activePopupRequestId = 0;
   closeDismissBackdrop();
   restoreElevatedWindows();
 
@@ -372,14 +377,20 @@ export function closeSelectionPopup(): void {
     onClose?.();
     return;
   }
-  popupWindow.close();
+  const window = popupWindow;
   popupWindow = null;
+  const onClose = popupLifecycleHooks.onClose;
+  popupLifecycleHooks = {};
+  window.close();
+  onClose?.();
 }
 
 export async function showSelectionPopup(
   payload: SelectionPopupPayload,
   options: SelectionPopupShowOptions = {}
 ): Promise<void> {
+  const requestId = ++popupRequestSequence;
+  activePopupRequestId = requestId;
   ensureHandlers();
   ensureDisplayMetricsListener();
   latestPayload = payload;
@@ -393,10 +404,13 @@ export async function showSelectionPopup(
   };
 
   const point = options.anchorPoint ?? screen.getCursorScreenPoint();
-  const bounds = clampPopupBounds(point, resolvePopupSize(payload));
+  const bounds = resolvePopupBounds(point, resolvePopupSize(payload));
 
   if (dismissOnOutsideClickEnabled) {
     await ensureDismissBackdropVisible();
+    if (!isCurrentPopupRequest(requestId)) {
+      return;
+    }
     elevatePassthroughWindows(passthroughWindows);
   } else {
     closeDismissBackdrop();
@@ -406,12 +420,19 @@ export async function showSelectionPopup(
   if (!popupWindow || popupWindow.isDestroyed()) {
     popupWindow = createPopupWindow(bounds);
     await popupWindow.loadFile(resolvePopupHtmlPath());
+    if (!isCurrentPopupRequest(requestId)) {
+      return;
+    }
   } else {
     popupWindow.setBounds(bounds);
   }
 
   const deliverPayload = (): void => {
-    if (!popupWindow || popupWindow.isDestroyed()) {
+    if (
+      !isCurrentPopupRequest(requestId) ||
+      !popupWindow ||
+      popupWindow.isDestroyed()
+    ) {
       return;
     }
     popupWindow.webContents.send(IPC_CHANNELS.selectionPopupPayload, payload);
@@ -424,6 +445,9 @@ export async function showSelectionPopup(
   }
   if (!popupWindow.isVisible()) {
     popupWindow.showInactive();
+  }
+  if (!isCurrentPopupRequest(requestId)) {
+    return;
   }
   popupWindow.focus();
   options.onOpen?.();
