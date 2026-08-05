@@ -6,7 +6,8 @@ import {
   launchE2ESession,
   openPluginFromSearch,
   returnToSearch,
-  waitForMode
+  waitForMode,
+  waitForSettingsPanel
 } from "./e2e-test-utils";
 
 type E2ESession = Awaited<ReturnType<typeof launchE2ESession>>;
@@ -72,7 +73,7 @@ async function openCashflowFromSearch(
   await searchInput.fill("cashflow");
 
   const result = page
-    .locator(".result-item.result-tile")
+    .locator(".command-result")
     .filter({ hasText: "富爸爸现金流" })
     .first();
   await result.waitFor({ state: "visible", timeout: 10000 });
@@ -124,8 +125,8 @@ test(
 
       await assert.doesNotReject(() => searchInput.waitFor({ state: "visible", timeout: 10000 }));
       await settingsButton.click();
-      await waitForMode(page, "settings");
-      await page.locator(".settings-title", { hasText: "LiteLauncher 设置" }).waitFor({
+      await waitForSettingsPanel(page);
+      await page.locator(".cc-settings-header h2", { hasText: "设置中心" }).waitFor({
         state: "visible",
         timeout: 10000
       });
@@ -138,7 +139,7 @@ test(
         .waitFor({ state: "visible", timeout: 10000 });
 
       await assert.doesNotReject(() =>
-        statusText.waitFor({ state: "visible", timeout: 5000 })
+        statusText.waitFor({ state: "attached", timeout: 5000 })
       );
       const finalStatus = await statusText.textContent();
       assert.match(finalStatus ?? "", /已打开插件|转换|JSON/);
@@ -258,8 +259,8 @@ test(
       const { page } = session;
 
       await page.locator("#settings-shortcut-btn").click();
-      await waitForMode(page, "settings");
-      await page.locator(".settings-title", { hasText: "LiteLauncher 设置" }).waitFor({
+      await waitForSettingsPanel(page);
+      await page.locator(".cc-settings-header h2", { hasText: "设置中心" }).waitFor({
         state: "visible",
         timeout: 10000
       });
@@ -267,16 +268,20 @@ test(
       await blurLauncherWindow(session);
       await page.waitForTimeout(600);
 
-      const stillSettingsMode = await page.evaluate(
-        () => document.body.dataset.mode === "settings"
+      const settingsOverlayStillOpen = await page.evaluate(
+        () => Boolean(document.querySelector(".cc-settings-overlay-dialog"))
       );
       assert.equal(
-        stillSettingsMode,
+        settingsOverlayStillOpen,
         true,
-        "settings panel should remain visible after the launcher window loses focus"
+        "settings overlay should remain visible after the launcher window loses focus"
       );
 
       await page.keyboard.press("Escape");
+      await page.locator(".cc-settings-overlay-dialog").waitFor({
+        state: "hidden",
+        timeout: 10000
+      });
       await waitForMode(page, "search");
     } catch (error) {
       if (session) {

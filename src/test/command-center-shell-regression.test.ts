@@ -60,6 +60,12 @@ assert(uiSource.includes("cc-settings-overlay-dialog"), "settings overlay must u
 assert(rendererSource.includes("renderSearchSections"), "renderer must keep search section rendering");
 assert(rendererSource.includes("commandCenterUi.initCommandCenterUi"), "renderer must init command center ui");
 assert(rendererSource.includes("renderCommandResults"), "renderer must render inline command results");
+assert(
+  /function setMode\(nextMode: PanelMode\): void \{[\s\S]*input\.value = "";[\s\S]*commandCenterUi\.setCommandSearchStatus\(null\);/.test(
+    rendererSource
+  ),
+  "leaving Command Center search must clear its backdrop before a panel becomes interactive"
+);
 assert(rendererSource.includes("cc-settings-shell"), "settings panel must use command-center shell");
 assert(rendererSource.includes("settings-body"), "settings panel must include body/nav shell");
 assert(rendererSource.includes("showSettingsTab"), "settings panel must switch single group tabs");

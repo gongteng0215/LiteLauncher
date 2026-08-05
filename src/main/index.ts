@@ -2282,7 +2282,10 @@ async function bootstrap(): Promise<void> {
 
   const appUpdater = createAppUpdater({
     getWindow: () =>
-      launcherWindow.isDestroyed() ? null : launcherWindow
+      launcherWindow.isDestroyed() ? null : launcherWindow,
+    reportError: (input) => {
+      queueErrorLog(input);
+    }
   });
   const startLiteSnapCapture = async (): Promise<boolean> => {
     const now = Date.now();

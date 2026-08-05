@@ -5,7 +5,7 @@ import {
   type UpdateDownloadedEvent
 } from "electron-updater";
 
-import { AppUpdaterStatus } from "../shared/types";
+import { type AppErrorLogInput, AppUpdaterStatus } from "../shared/types";
 
 const AUTO_UPDATE_CHECK_DELAY_MS = 12_000;
 const AUTO_UPDATE_RECHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
@@ -21,6 +21,18 @@ function truncateText(value: string, maxLength = 600): string {
   }
 
   return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function redactUpdaterErrorDetail(value: string): string {
+  return truncateText(value)
+    .replace(
+      /([?&](?:access[_-]?token|token|api[_-]?key|authorization|password|secret)=)[^&\s]+/gi,
+      "$1[redacted]"
+    )
+    .replace(
+      /((?:access[_-]?token|token|api[_-]?key|authorization|password|secret)\s*(?:=|:)\s*)(?:Bearer\s+)?[^,;\s]+/gi,
+      "$1[redacted]"
+    );
 }
 
 function formatReleaseNotes(releaseNotes: unknown): string | undefined {
@@ -95,6 +107,7 @@ export type AppUpdaterProvider = {
 
 export type AppUpdaterOptions = {
   getWindow?: () => BrowserWindow | null;
+  reportError?: (input: AppErrorLogInput) => void;
 };
 
 export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterProvider {
@@ -131,6 +144,8 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
   let e2eCheckFailureMessage: string | null = null;
   let promptedDownloadedVersion: string | null = null;
   let installPromptInFlight = false;
+  let updateCheckCycle = 0;
+  let lastReportedErrorCycle = -1;
 
   const setStatus = (next: Partial<AppUpdaterStatus>): AppUpdaterStatus => {
     status = {
@@ -143,28 +158,52 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
     return status;
   };
 
+  const reportUpdaterFailure = (detail: string, stage: string): void => {
+    if (lastReportedErrorCycle === updateCheckCycle) {
+      return;
+    }
+    lastReportedErrorCycle = updateCheckCycle;
+    const safeDetail = redactUpdaterErrorDetail(detail) || "检查更新失败";
+    const context = [
+      `stage=${stage}`,
+      `phase=${status.phase}`,
+      `currentVersion=${status.currentVersion || "unknown"}`,
+      `targetVersion=${status.updateVersion || "none"}`
+    ].join(" ");
+    options.reportError?.({
+      scope: "system",
+      level: "error",
+      message: "自动更新失败",
+      context,
+      detail: safeDetail
+    });
+  };
+
   const provider: AppUpdaterProvider = {
     getStatus(): AppUpdaterStatus {
       return { ...status };
     },
     async checkForUpdates(): Promise<AppUpdaterStatus> {
+      if (activeCheckPromise) {
+        return activeCheckPromise;
+      }
+
+      updateCheckCycle += 1;
       if (e2eCheckFailureMessage) {
-        const detail = truncateText(e2eCheckFailureMessage) || "检查更新失败";
+        const detail =
+          redactUpdaterErrorDetail(e2eCheckFailureMessage) || "检查更新失败";
         setStatus({
           phase: "error",
           downloaded: false,
           progressPercent: undefined,
           message: detail
         });
+        reportUpdaterFailure(detail, "check");
         throw new Error(detail);
       }
 
       if (!supported) {
         return { ...status };
-      }
-
-      if (activeCheckPromise) {
-        return activeCheckPromise;
       }
 
       activeCheckPromise = (async () => {
@@ -178,7 +217,7 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
         } catch (error) {
           const detail =
             error instanceof Error && error.message
-              ? error.message
+              ? redactUpdaterErrorDetail(error.message)
               : "检查更新失败";
           setStatus({
             phase: "error",
@@ -186,6 +225,7 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
             progressPercent: undefined,
             message: truncateText(detail)
           });
+          reportUpdaterFailure(detail, "check");
         } finally {
           activeCheckPromise = null;
         }
@@ -321,7 +361,7 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
     });
 
     autoUpdater.on("error", (error, message) => {
-      const detail = truncateText(
+      const detail = redactUpdaterErrorDetail(
         typeof message === "string" && message.trim()
           ? message
           : error?.message ?? "检查更新失败"
@@ -332,6 +372,7 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
         progressPercent: undefined,
         message: detail || "检查更新失败"
       });
+      reportUpdaterFailure(detail || "检查更新失败", "updater-event");
     });
   }
 

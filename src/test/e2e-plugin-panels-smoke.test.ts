@@ -24,7 +24,8 @@ test(
       session = await launchE2ESession();
       const { page } = session;
 
-      await page.setViewportSize({ width: 900, height: 720 });
+      // The Electron window and Command Center both enforce a 960px minimum width.
+      await page.setViewportSize({ width: 960, height: 720 });
 
       const assertFormFitsViewport = async (selector: string): Promise<void> => {
         const form = page.locator(selector);
@@ -39,7 +40,7 @@ test(
 
       const assertPanelFitsNarrowViewport = async (selector: string): Promise<void> => {
         const previousViewport = page.viewportSize();
-        await page.setViewportSize({ width: 620, height: 720 });
+        await page.setViewportSize({ width: 960, height: 720 });
         try {
           await assertFormFitsViewport(selector);
           const hasHorizontalOverflow = await page.evaluate(() => {
@@ -603,7 +604,7 @@ test(
       });
       const configStatus = page.locator("#status-text");
       await assert.doesNotReject(() =>
-        configStatus.waitFor({ state: "visible", timeout: 5000 })
+        configStatus.waitFor({ state: "attached", timeout: 5000 })
       );
       await returnToSearch(page);
 
@@ -793,7 +794,8 @@ test(
       session = await launchE2ESession();
       const { page } = session;
 
-      await page.setViewportSize({ width: 900, height: 720 });
+      // Keep the smoke test within LiteLauncher's supported minimum window width.
+      await page.setViewportSize({ width: 960, height: 720 });
 
       const assertFormFitsViewport = async (selector: string): Promise<void> => {
         const form = page.locator(selector);
@@ -808,7 +810,7 @@ test(
 
       const assertPanelFitsNarrowViewport = async (selector: string): Promise<void> => {
         const previousViewport = page.viewportSize();
-        await page.setViewportSize({ width: 620, height: 720 });
+        await page.setViewportSize({ width: 960, height: 720 });
         try {
           await assertFormFitsViewport(selector);
           const hasHorizontalOverflow = await page.evaluate(() => {

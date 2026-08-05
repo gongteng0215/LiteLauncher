@@ -949,7 +949,17 @@ let catalogScanConfig: CatalogScanConfig = {
 };
 let visiblePluginIds: string[] = [...DEFAULT_VISIBLE_PLUGIN_IDS];
 let allPluginCatalogItems: LaunchItem[] = [];
-let settingsFocusHint: "plugins" | "errors" | "updates" | "pinned" | undefined;
+type SettingsTabId =
+  | "appearance"
+  | "display"
+  | "scan"
+  | "pinned"
+  | "plugins"
+  | "updates"
+  | "errors";
+
+let settingsFocusHint: SettingsTabId | undefined;
+let activeSettingsTab: SettingsTabId = "appearance";
 let requiredVisiblePluginIdSet = new Set<string>();
 let launchAtLoginStatus: LaunchAtLoginStatus = {
   enabled: false,
@@ -1677,6 +1687,10 @@ function formatErrorLogs(entries: AppErrorLogEntry[]): string {
 }
 
 function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
+  if (status.phase === "error") {
+    return status.message ?? "检查更新失败";
+  }
+
   if (!status.supported) {
     return status.message ?? "当前环境暂不支持自动更新";
   }
@@ -1698,8 +1712,6 @@ function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
         : "新版本已下载完成";
     case "not-available":
       return "当前已是最新版本";
-    case "error":
-      return status.message ?? "检查更新失败";
     case "idle":
     case "unsupported":
     default:
@@ -1708,6 +1720,10 @@ function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
 }
 
 function formatAppUpdaterPhaseText(status: AppUpdaterStatus): string {
+  if (status.phase === "error") {
+    return "检查失败";
+  }
+
   if (!status.supported) {
     return "当前环境不支持";
   }
@@ -1725,8 +1741,6 @@ function formatAppUpdaterPhaseText(status: AppUpdaterStatus): string {
       return status.updateVersion ? `已下载 v${status.updateVersion}` : "安装包已就绪";
     case "not-available":
       return "已是最新版本";
-    case "error":
-      return "检查失败";
     case "idle":
       return "等待检查";
     case "unsupported":
@@ -1775,7 +1789,20 @@ function formatAppUpdaterDiagnosticDetails(
   ];
 }
 
+function formatAppUpdaterDiagnosticsForClipboard(status: AppUpdaterStatus): string {
+  return [
+    "LiteLauncher 自动更新诊断",
+    ...formatAppUpdaterDiagnosticDetails(status).map(
+      (detail) => `${detail.label}: ${detail.value}`
+    )
+  ].join("\n");
+}
+
 function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
+  if (status.phase === "error") {
+    return status.message ?? "可稍后再次检查";
+  }
+
   if (!status.supported) {
     return status.message ?? "当前环境暂不支持自动更新";
   }
@@ -1790,10 +1817,6 @@ function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
 
   if (status.phase === "not-available") {
     return "GitHub Releases 未发现更新";
-  }
-
-  if (status.phase === "error") {
-    return status.message ?? "可稍后再次检查";
   }
 
   return "Windows NSIS 安装版与 macOS 打包版支持自动更新，不支持时请前往 GitHub Releases 手动下载";
@@ -1811,10 +1834,21 @@ async function checkForAppUpdatesFromSettings(): Promise<void> {
     appUpdaterStatus = await launcher.checkForAppUpdates();
     setStatus(`自动更新：${formatAppUpdaterStatusSummary(appUpdaterStatus)}`);
   } catch {
+    try {
+      appUpdaterStatus = await launcher.getAppUpdaterStatus();
+    } catch {
+      appUpdaterStatus = {
+        ...appUpdaterStatus,
+        phase: "error",
+        downloaded: false,
+        progressPercent: undefined,
+        message: "检查更新失败"
+      };
+    }
     setStatus("检查更新失败");
   }
 
-  renderList();
+  refreshOpenSettingsOverlay();
 }
 
 async function installAppUpdateNowFromSettings(): Promise<void> {
@@ -1911,7 +1945,7 @@ async function clearErrorLogsFromSettings(): Promise<void> {
     const cleared = await launcher.clearErrorLogs();
     errorLogEntries = [];
     setStatus(`已清空错误日志（${cleared} 条）`);
-    renderList();
+    refreshOpenSettingsOverlay();
   } catch {
     setStatus("清空错误日志失败");
   }
@@ -1990,6 +2024,9 @@ function setMode(nextMode: PanelMode): void {
   }
   input.value = "";
   currentQuery = "";
+  // A Command Center result may have left its backdrop above the home shell.
+  // Clear it before making a panel interactive so it cannot intercept panel clicks.
+  commandCenterUi.setCommandSearchStatus(null);
   input.readOnly =
     mode === "settings" ||
     mode === "password" ||
@@ -4246,15 +4283,6 @@ function renderSettingsPanel(
   const settingsContent = document.createElement("div");
   settingsContent.className = "settings-content";
 
-  type SettingsTabId =
-    | "appearance"
-    | "display"
-    | "scan"
-    | "pinned"
-    | "plugins"
-    | "updates"
-    | "errors";
-
   const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
     { id: "appearance", label: "外观主题" },
     { id: "display", label: "搜索展示" },
@@ -4265,21 +4293,13 @@ function renderSettingsPanel(
     { id: "errors", label: "错误日志" }
   ];
 
-  const initialTab: SettingsTabId =
-    settingsFocusHint === "errors"
-      ? "errors"
-      : settingsFocusHint === "plugins"
-        ? "plugins"
-        : settingsFocusHint === "pinned"
-          ? "pinned"
-          : settingsFocusHint === "updates"
-            ? "updates"
-            : "appearance";
+  const initialTab: SettingsTabId = settingsFocusHint ?? activeSettingsTab;
 
   const navButtons = new Map<SettingsTabId, HTMLButtonElement>();
   const groupSections = new Map<SettingsTabId, HTMLElement>();
 
   const showSettingsTab = (tabId: SettingsTabId): void => {
+    activeSettingsTab = tabId;
     for (const [id, section] of groupSections) {
       section.hidden = id !== tabId;
     }
@@ -4835,7 +4855,21 @@ function renderSettingsPanel(
   checkUpdatesButton.addEventListener("click", () => {
     void checkForAppUpdatesFromSettings();
   });
-  updaterActions.appendChild(checkUpdatesButton);
+
+  const copyUpdaterDiagnosticsButton = document.createElement("button");
+  copyUpdaterDiagnosticsButton.type = "button";
+  copyUpdaterDiagnosticsButton.className =
+    "settings-btn settings-btn-secondary settings-system-action-btn";
+  copyUpdaterDiagnosticsButton.textContent = "复制更新诊断";
+  copyUpdaterDiagnosticsButton.addEventListener("click", () => {
+    void copyTextToClipboard(formatAppUpdaterDiagnosticsForClipboard(appUpdaterStatus)).then(
+      (copied) => {
+        setStatus(copied ? "更新诊断已复制" : "复制更新诊断失败");
+      }
+    );
+  });
+
+  updaterActions.append(checkUpdatesButton, copyUpdaterDiagnosticsButton);
 
   if (appUpdaterStatus.downloaded && appUpdaterStatus.phase === "downloaded") {
     const installNowButton = document.createElement("button");
@@ -4937,7 +4971,7 @@ function renderSettingsPanel(
   refreshErrorLogButton.addEventListener("click", () => {
     void refreshErrorLogs(40).then(() => {
       setStatus(`错误日志已刷新（${errorLogEntries.length} 条）`);
-      renderList();
+      refreshOpenSettingsOverlay();
     });
   });
 
@@ -5074,7 +5108,17 @@ function renderSettingsPanel(
 function dismissSettingsOverlay(): void {
   commandCenterUi.closeSettingsOverlay();
   settingsFocusHint = undefined;
+  activeSettingsTab = "appearance";
   syncAutoHideSuspension();
+}
+
+function refreshOpenSettingsOverlay(): void {
+  if (!commandCenterUi.isSettingsOverlayOpen()) {
+    return;
+  }
+  commandCenterUi.openSettingsOverlay((container) => {
+    renderSettingsPanel(container, { listItemWrap: false });
+  });
 }
 
 async function loadSettingsPanelData(): Promise<boolean> {

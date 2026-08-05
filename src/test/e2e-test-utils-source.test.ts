@@ -64,7 +64,12 @@ test("e2e test utils can open plugins from both classic and Command Center searc
   );
   assert.match(
     source,
-    /const result = \(await commandResult\.isVisible\(\)\.catch\(\(\) => false\)\)/,
-    "plugin-opening helper should prioritize the visible Command Center result over background tiles"
+    /const commandResultsHost = page\.locator\("#command-results"\);[\s\S]*const result = \(await commandResultsHost\.count\(\)\) > 0 \? commandResult : resultTile;/,
+    "plugin-opening helper should wait for the Command Center result instead of clicking a background tile"
+  );
+  assert.match(
+    source,
+    /await searchInput\.fill\(title\);[\s\S]*await commandResult\.waitFor\(\{ state: "visible", timeout: 10000 \}\);/,
+    "plugin-opening helper should fall back to a plugin's display title when an English alias has no match"
   );
 });

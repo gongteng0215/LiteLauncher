@@ -92,6 +92,16 @@ export async function waitForMode(page: Page, mode: string): Promise<void> {
   );
 }
 
+export async function waitForSettingsPanel(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      document.body.dataset.mode === "settings" ||
+      Boolean(document.querySelector(".cc-settings-overlay-dialog")),
+    undefined,
+    { timeout: 10000 }
+  );
+}
+
 export async function waitForStatusText(
   page: Page,
   expectedText: string
@@ -187,30 +197,25 @@ export async function openPluginFromSearch(
   await searchInput.click();
   await searchInput.fill(query);
 
+  const commandResultsHost = page.locator("#command-results");
   const commandResult = page.locator(".command-result").filter({ hasText: title }).first();
   const resultTile = page
     .locator(".result-item.result-tile")
     .filter({ hasText: title })
     .first();
-  await page.waitForFunction(
-    (expectedTitle) => {
-      const matchesTitle = (node: Element): boolean =>
-        (node.textContent ?? "").includes(expectedTitle);
-      const isVisible = (node: Element): boolean => {
-        const element = node as HTMLElement;
-        return Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
-      };
-      return Array.from(
-        document.querySelectorAll(".command-result, .result-item.result-tile")
-      ).some((node) => matchesTitle(node) && isVisible(node));
-    },
-    title,
-    { timeout: 10000 }
-  );
-  const result = (await commandResult.isVisible().catch(() => false))
-    ? commandResult
-    : resultTile;
-  await result.waitFor({ state: "visible", timeout: 10000 });
+  const result = (await commandResultsHost.count()) > 0 ? commandResult : resultTile;
+  try {
+    await result.waitFor({ state: "visible", timeout: 6000 });
+  } catch (error) {
+    if (result !== commandResult) {
+      throw error;
+    }
+
+    // Some plugins have Chinese display names but no matching English alias.
+    // Fall back to the exact title so Command Center returns an interactive result.
+    await searchInput.fill(title);
+    await commandResult.waitFor({ state: "visible", timeout: 10000 });
+  }
   await result.click();
 
   await waitForMode(page, "plugin");

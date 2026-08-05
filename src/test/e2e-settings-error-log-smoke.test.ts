@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   captureE2EFailureArtifacts,
   launchE2ESession,
-  waitForMode,
+  waitForSettingsPanel,
   waitForStatusText
 } from "./e2e-test-utils";
 
@@ -38,7 +38,8 @@ test(
       assert.ok(seedResult.length >= 1, "should seed at least one error log entry");
 
       await page.locator("#settings-shortcut-btn").click();
-      await waitForMode(page, "settings");
+      await waitForSettingsPanel(page);
+      await page.locator('button[data-settings-tab="errors"]').click();
 
       const highlightCard = page.locator(".settings-error-log-highlight-card").first();
       await highlightCard.waitFor({ state: "visible", timeout: 10000 });
@@ -98,7 +99,8 @@ test(
       assert.ok(seedResult.length >= 1, "should seed at least one pin diagnostic entry");
 
       await page.locator("#settings-shortcut-btn").click();
-      await waitForMode(page, "settings");
+      await waitForSettingsPanel(page);
+      await page.locator('button[data-settings-tab="updates"]').click();
 
       const updaterDetails = page.locator(".settings-system-update-detail-row");
       await updaterDetails.first().waitFor({ state: "visible", timeout: 10000 });
@@ -108,6 +110,7 @@ test(
       assert.match(updaterDetailText ?? "", /最近阶段/);
 
       const copyButton = page.getByRole("button", { name: "复制日志" });
+      await page.locator('button[data-settings-tab="errors"]').click();
       await copyButton.click();
       await waitForStatusText(page, "错误日志已复制");
 
@@ -154,11 +157,15 @@ test(
       const { page } = session;
 
       await page.evaluate(async () => {
-        await window.launcher.setE2EAppUpdaterCheckFailure("E2E 检查更新失败");
+        await window.launcher.clearErrorLogs();
+        await window.launcher.setE2EAppUpdaterCheckFailure(
+          "E2E 检查更新失败 access_token=super-secret-token"
+        );
       });
 
       await page.locator("#settings-shortcut-btn").click();
-      await waitForMode(page, "settings");
+      await waitForSettingsPanel(page);
+      await page.locator('button[data-settings-tab="updates"]').click();
 
       const updaterDetailText = await page.locator(".settings-system-update-details").textContent();
       assert.match(updaterDetailText ?? "", /自动更新未启用/);
@@ -169,6 +176,37 @@ test(
 
       await page.getByRole("button", { name: "检查更新" }).click();
       await waitForStatusText(page, "检查更新失败");
+      await page.waitForFunction(() => {
+        const cardText = document.querySelector(".settings-system-update-card")?.textContent || "";
+        return cardText.includes("检查失败") && cardText.includes("E2E 检查更新失败") && cardText.includes("[redacted]");
+      });
+
+      await page.waitForFunction(async () => {
+        const logs = await window.launcher.getErrorLogs(10);
+        return logs.some((entry) => entry.message === "自动更新失败");
+      });
+      await page.locator('button[data-settings-tab="errors"]').click();
+      await page.getByRole("button", { name: "刷新日志" }).click();
+      await waitForStatusText(page, "错误日志已刷新");
+      const rawLogValue = await page.locator(".settings-log-output").inputValue();
+      assert.match(rawLogValue, /自动更新失败/);
+      assert.match(rawLogValue, /stage=check/);
+      assert.match(rawLogValue, /E2E 检查更新失败/);
+      assert.match(rawLogValue, /access_token=\[redacted\]/);
+      assert.doesNotMatch(rawLogValue, /super-secret-token/);
+
+      await page.locator('button[data-settings-tab="updates"]').click();
+      await page.getByRole("button", { name: "复制更新诊断" }).click();
+      await waitForStatusText(page, "更新诊断已复制");
+      const diagnosticsClipboard = await session.electronApp.evaluate(({ clipboard }) =>
+        clipboard.readText()
+      );
+      assert.match(diagnosticsClipboard, /LiteLauncher 自动更新诊断/);
+      assert.match(diagnosticsClipboard, /当前版本/);
+      assert.match(diagnosticsClipboard, /最近阶段/);
+      assert.match(diagnosticsClipboard, /检查失败/);
+      assert.match(diagnosticsClipboard, /\[redacted\]/);
+      assert.doesNotMatch(diagnosticsClipboard, /super-secret-token/);
     } catch (error) {
       if (session) {
         const artifactDir = await captureE2EFailureArtifacts(

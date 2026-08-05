@@ -67,6 +67,31 @@ test("renderer settings surface pin failures as dedicated diagnostics and suppor
   );
 });
 
+test("renderer refreshes the open settings overlay after diagnostics change", () => {
+  const source = fs.readFileSync(rendererPath, "utf8");
+
+  assert.match(
+    source,
+    /function refreshOpenSettingsOverlay\(\): void \{[\s\S]*isSettingsOverlayOpen\(\)[\s\S]*openSettingsOverlay\([\s\S]*renderSettingsPanel/,
+    "settings diagnostics should redraw the Command Center settings overlay in place"
+  );
+  assert.match(
+    source,
+    /async function checkForAppUpdatesFromSettings\(\): Promise<void> \{[\s\S]*refreshOpenSettingsOverlay\(\);/,
+    "a completed update check should refresh the visible update card"
+  );
+  assert.match(
+    source,
+    /refreshErrorLogButton\.addEventListener\([\s\S]*refreshOpenSettingsOverlay\(\);/,
+    "refreshing error logs should update the visible error-log tab"
+  );
+  assert.match(
+    source,
+    /copyTextToClipboard\(formatAppUpdaterDiagnosticsForClipboard\(appUpdaterStatus\)\)/,
+    "the update card should provide a copyable diagnostic payload"
+  );
+});
+
 test("renderer suspends blur auto-hide while plugin, settings, and cashflow panels are active", () => {
   const source = fs.readFileSync(rendererPath, "utf8");
 
@@ -87,7 +112,7 @@ test("renderer suspends blur auto-hide while plugin, settings, and cashflow pane
   );
   assert.match(
     source,
-    /shouldSuspendAutoHideForMode\(nextMode\) \|\| pluginNativeInteractionLocked/,
+    /(?:UI_TUNING_KEEP_OPEN \|\|\s*)?shouldSuspendAutoHideForMode\(nextMode\) \|\|\s*pluginNativeInteractionLocked/,
     "shared blur-hide synchronization should preserve native interaction locks"
   );
   assert.match(

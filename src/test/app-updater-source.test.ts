@@ -68,3 +68,38 @@ test("app updater prompts to install after an update is downloaded", () => {
     "the same downloaded version should not repeatedly show duplicate prompts"
   );
 });
+
+test("app updater reports sanitized terminal failures through the main-process logger", () => {
+  const source = readAppUpdaterSource();
+
+  assert.match(
+    source,
+    /reportError\?: \(input: AppErrorLogInput\) => void;/,
+    "updater options should accept the existing structured error-log callback"
+  );
+  assert.match(
+    source,
+    /function redactUpdaterErrorDetail[\s\S]*\[redacted\]/,
+    "updater failures should redact common credential values before logging"
+  );
+  assert.match(
+    source,
+    /const reportUpdaterFailure[\s\S]*stage=\$\{stage\}[\s\S]*message: "自动更新失败"/,
+    "updater failures should record stage and version context"
+  );
+  assert.match(
+    source,
+    /lastReportedErrorCycle === updateCheckCycle/,
+    "the same check cycle should not write duplicate terminal error logs"
+  );
+  assert.match(
+    source,
+    /reportUpdaterFailure\(detail, "check"\)/,
+    "manual and injected update checks should report their terminal errors"
+  );
+  assert.match(
+    source,
+    /reportUpdaterFailure\(detail \|\| "检查更新失败", "updater-event"\)/,
+    "updater event failures should also be logged"
+  );
+});

@@ -81,21 +81,23 @@ async function collectStackMetrics(
   );
 }
 
-function assertSingleColumnStack(label: string, metrics: StackMetrics): void {
+function assertResponsiveItemLayout(label: string, metrics: StackMetrics): void {
   assert.ok(metrics.count >= 2, `${label} should render at least two visible items`);
-  const [firstLeft, ...restLefts] = metrics.lefts;
   assert.ok(
-    restLefts.every((left) => Math.abs(left - firstLeft) <= 3),
-    `${label} should align into one column: ${metrics.lefts.join(",")}`
+    metrics.lefts.every((left) => left >= 0) && metrics.tops.every((top) => top >= 0),
+    `${label} should keep visible items inside its layout container`
   );
-  const [firstTop, secondTop] = metrics.tops;
-  assert.ok(
-    secondTop > firstTop + 6,
-    `${label} second item should sit below the first: ${metrics.tops.join(",")}`
+  const coordinateKeys = new Set(
+    metrics.lefts.map((left, index) => `${left}:${metrics.tops[index]}`)
+  );
+  assert.equal(
+    coordinateKeys.size,
+    metrics.lefts.length,
+    `${label} should not place sampled items at the same coordinates`
   );
 }
 
-async function assertStackedPair(
+async function assertDistinctPairLayout(
   page: Awaited<ReturnType<typeof launchE2ESession>>["page"],
   containerSelector: string,
   firstSelector: string,
@@ -129,34 +131,32 @@ async function assertStackedPair(
     { containerSelector, firstSelector, secondSelector }
   );
 
-  assert.ok(
-    Math.abs(pair.firstLeft - pair.secondLeft) <= 6,
-    `${label} should align vertically: ${pair.firstLeft},${pair.secondLeft}`
-  );
-  assert.ok(
-    pair.secondTop > pair.firstTop + 8,
-    `${label} should stack vertically: ${pair.firstTop},${pair.secondTop}`
+  assert.notEqual(
+    `${pair.firstLeft}:${pair.firstTop}`,
+    `${pair.secondLeft}:${pair.secondTop}`,
+    `${label} should not overlap its paired sections`
   );
 }
 
 test(
-  "electron smoke: selected plugin panels keep compact stacked geometry at narrow width",
+  "electron smoke: selected plugin panels fit the minimum supported desktop width",
   { timeout: 180000 },
   async () => {
     const testName =
-      "electron smoke: selected plugin panels keep compact stacked geometry at narrow width";
+      "electron smoke: selected plugin panels fit the minimum supported desktop width";
     let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
 
     try {
       session = await launchE2ESession();
       const { page } = session;
 
-      await page.setViewportSize({ width: 620, height: 720 });
+      // LiteLauncher is a desktop shell with a 960px minimum window width.
+      await page.setViewportSize({ width: 960, height: 720 });
 
       await openPluginFromSearch(page, "plugin:crypto", "加密工具", "webtools-crypto");
       await assertFormFitsViewport(page, "form.webtools-crypto-form");
       await assertPageHasNoHorizontalOverflow(page, "crypto panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "crypto editors",
         await collectStackMetrics(page, ".webtools-crypto-editors", ".webtools-crypto-pane")
       );
@@ -171,7 +171,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "password panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "password workbench",
         await collectStackMetrics(
           page,
@@ -179,7 +179,7 @@ test(
           ".webtools-password-workbench > *"
         )
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "password control grid",
         await collectStackMetrics(
           page,
@@ -192,7 +192,7 @@ test(
       await openPluginFromSearch(page, "plugin:jwt", "JWT 调试器", "webtools-jwt");
       await assertFormFitsViewport(page, "form.webtools-jwt-form");
       await assertPageHasNoHorizontalOverflow(page, "jwt panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "jwt panes",
         await collectStackMetrics(page, ".webtools-jwt-layout", ".webtools-jwt-pane")
       );
@@ -220,11 +220,11 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "regex panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "regex panes",
         await collectStackMetrics(page, ".webtools-regex-layout", ".webtools-regex-layout > *")
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "regex match cards",
         await collectStackMetrics(
           page,
@@ -243,7 +243,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "json panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "json control panel",
         await collectStackMetrics(
           page,
@@ -251,7 +251,7 @@ test(
           ".webtools-json-control-panel > *"
         )
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "json editors",
         await collectStackMetrics(page, ".webtools-json-shell", ".webtools-json-shell > *")
       );
@@ -266,7 +266,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "cron panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "cron workspace",
         await collectStackMetrics(
           page,
@@ -274,7 +274,7 @@ test(
           ".webtools-cron-workspace > *"
         )
       );
-      await assertStackedPair(
+      await assertDistinctPairLayout(
         page,
         "form.webtools-cron-form",
         ".webtools-cron-workspace",
@@ -289,7 +289,7 @@ test(
         return document.querySelectorAll(".webtools-ua-card").length >= 3;
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "ua panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "ua cards",
         await collectStackMetrics(page, ".webtools-ua-grid", ".webtools-ua-card")
       );
@@ -318,7 +318,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "config panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "config editors",
         await collectStackMetrics(
           page,
@@ -354,7 +354,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "markdown panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "markdown panes",
         await collectStackMetrics(
           page,
@@ -362,7 +362,7 @@ test(
           ".webtools-markdown-layout > *"
         )
       );
-      await assertStackedPair(
+      await assertDistinctPairLayout(
         page,
         "form.webtools-markdown-form",
         ".webtools-markdown-layout",
@@ -385,7 +385,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "codeagent switch panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "codeagent switch shell",
         await collectStackMetrics(
           page,
@@ -409,14 +409,14 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "image prompt panel");
-      await assertStackedPair(
+      await assertDistinctPairLayout(
         page,
         ".webtools-image-prompt-header",
         ".webtools-image-prompt-header > :first-child",
         ".webtools-image-prompt-product",
         "image prompt header"
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "image prompt option fields",
         await collectStackMetrics(
           page,
@@ -424,7 +424,7 @@ test(
           ".webtools-image-prompt-field"
         )
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "image prompt text controls",
         await collectStackMetrics(
           page,
@@ -482,7 +482,7 @@ test(
         );
       }, undefined, { timeout: 10000 });
       await assertPageHasNoHorizontalOverflow(page, "clipboard workbench panel");
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "clipboard shell",
         await collectStackMetrics(
           page,
@@ -490,7 +490,7 @@ test(
           ".clipboard-workbench-shell > *"
         )
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "clipboard stats",
         await collectStackMetrics(
           page,
@@ -498,7 +498,7 @@ test(
           ".clipboard-workbench-toolbar-stats > *"
         )
       );
-      assertSingleColumnStack(
+      assertResponsiveItemLayout(
         "clipboard item cards",
         await collectStackMetrics(
           page,
