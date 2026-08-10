@@ -13268,7 +13268,7 @@ let liteSnapPanelData: LiteSnapPanelData = {
   statusMessage: DEFAULT_LITESNAP_PANEL_DATA.statusMessage
 };
 let liteSnapOcrIssue: "module_missing" | "language_pack" | null = null;
-let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" | "history" =
+let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" | "history" | "diagnostics" =
   "main";
 let liteSnapHistoryItems: Array<{
   id: string;
@@ -13278,6 +13278,15 @@ let liteSnapHistoryItems: Array<{
   height: number;
   source: string;
   createdAt: number;
+}> = [];
+let liteSnapDiagnostics: Array<{
+  id: string;
+  operation: string;
+  status: string;
+  createdAt: number;
+  durationMs: number;
+  metrics: Record<string, number | string | boolean>;
+  message: string;
 }> = [];
 let liteSnapOcrText = "";
 let liteSnapTranslateSourceText = "";
@@ -13780,6 +13789,7 @@ function buildLiteSnapTarget(
     | "pin-from-clipboard"
     | "open-settings"
     | "open-history"
+    | "open-diagnostics"
     | "start-color-capture"
 ): string {
   const params = new URLSearchParams();
@@ -15356,6 +15366,7 @@ async function executeLiteSnapPanelAction(
     | "close-all-pinned-windows"
     | "open-settings"
     | "open-history"
+    | "open-diagnostics"
     | "start-color-capture"
 ): Promise<void> {
   const launcher = getLauncherApi();
@@ -15371,6 +15382,11 @@ async function executeLiteSnapPanelAction(
 
   if (action === "open-history") {
     openLiteSnapHistoryView();
+    return;
+  }
+
+  if (action === "open-diagnostics") {
+    openLiteSnapDiagnosticsView();
     return;
   }
 
@@ -15431,6 +15447,13 @@ function openLiteSnapHistoryView(): void {
   void hydrateLiteSnapHistory();
 }
 
+function openLiteSnapDiagnosticsView(): void {
+  liteSnapPanelView = "diagnostics";
+  setStatus("已进入 LiteSnap 诊断页。");
+  renderList();
+  void hydrateLiteSnapDiagnostics();
+}
+
 function returnToLiteSnapMainView(): void {
   liteSnapPanelView = "main";
   setStatus("已返回 LiteSnap 主页面。");
@@ -15465,6 +15488,8 @@ function formatLiteSnapHistorySource(source: string): string {
       return "贴图";
     case "clipboard-pin":
       return "剪贴板贴图";
+    case "history-edit":
+      return "二次编辑";
     default:
       return source;
   }
@@ -15526,6 +15551,107 @@ async function hydrateLiteSnapHistory(): Promise<void> {
     liteSnapPanelView === "history"
   ) {
     renderList();
+  }
+}
+
+function formatLiteSnapDiagnostic(entry: (typeof liteSnapDiagnostics)[number]): string {
+  const metrics = Object.entries(entry.metrics)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" · ");
+  return [
+    `${entry.operation} / ${entry.status}`,
+    `${Math.max(0, Math.round(entry.durationMs))} ms`,
+    metrics,
+    entry.message
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function formatLiteSnapDiagnosticsForClipboard(): Promise<string> {
+  let version = "unknown";
+  try {
+    const status = await getLauncherApi()?.getAppUpdaterStatus?.();
+    version = status?.currentVersion || version;
+  } catch {
+    // Diagnostics remain useful even if the updater status is unavailable.
+  }
+  const system = navigator.userAgent.replace(/\s+/g, " ").trim();
+  return [
+    "LiteSnap diagnostics",
+    `version=${version}`,
+    `system=${system}`,
+    ...liteSnapDiagnostics.map((entry) => `${new Date(entry.createdAt).toISOString()} ${formatLiteSnapDiagnostic(entry).replace(/\n/g, " | ")}`)
+  ].join("\n");
+}
+
+async function hydrateLiteSnapDiagnostics(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapGetDiagnostics) {
+    liteSnapDiagnostics = [];
+    return;
+  }
+  try {
+    const entries = await launcher.liteSnapGetDiagnostics();
+    liteSnapDiagnostics = Array.isArray(entries) ? entries.map((entry) => ({
+      id: entry.id,
+      operation: entry.operation,
+      status: entry.status,
+      createdAt: entry.createdAt,
+      durationMs: entry.durationMs,
+      metrics: { ...entry.metrics },
+      message: entry.message
+    })) : [];
+  } catch (error) {
+    console.warn("[litesnap] list diagnostics failed", error);
+    liteSnapDiagnostics = [];
+  }
+  if (activePluginPanel?.pluginId === LITESNAP_PLUGIN_ID && liteSnapPanelView === "diagnostics") {
+    renderList();
+  }
+}
+
+async function runLiteSnapHistoryEdit(id: string): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapHistoryEdit) {
+    setStatus("当前版本暂不支持二次编辑，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    const ok = await launcher.liteSnapHistoryEdit(id);
+    if (!ok) {
+      setStatus("无法打开该历史截图，请重试。");
+      return;
+    }
+    setStatus("已在编辑器中打开历史截图；导出会新建一条历史记录。");
+    backToSearch();
+  } catch (error) {
+    console.warn("[litesnap] history edit failed", error);
+    setStatus("打开历史截图失败，请重试。");
+  }
+}
+
+async function runLiteSnapCopyDiagnostics(): Promise<void> {
+  const copied = await copyTextToClipboard(await formatLiteSnapDiagnosticsForClipboard());
+  setStatus(copied ? "已复制诊断信息。" : "复制诊断信息失败，请重试。");
+}
+
+async function runLiteSnapClearDiagnostics(): Promise<void> {
+  const launcher = getLauncherApi();
+  if (!launcher?.liteSnapClearDiagnostics) {
+    setStatus("当前版本暂不支持清空诊断，请升级 LiteLauncher。");
+    return;
+  }
+  try {
+    await launcher.liteSnapClearDiagnostics();
+    liteSnapDiagnostics = [];
+    setStatus("已清空 LiteSnap 诊断。");
+    if (liteSnapPanelView === "diagnostics") {
+      renderList();
+    }
+  } catch (error) {
+    console.warn("[litesnap] clear diagnostics failed", error);
+    setStatus("清空诊断失败，请重试。");
   }
 }
 
@@ -16038,7 +16164,13 @@ window.__LL_PANEL_IMPLS__ = {
       return false;
     }
 
-    if (liteSnapPanelView === "settings" || liteSnapPanelView === "ocr" || liteSnapPanelView === "translate") {
+    if (
+      liteSnapPanelView === "settings" ||
+      liteSnapPanelView === "ocr" ||
+      liteSnapPanelView === "translate" ||
+      liteSnapPanelView === "history" ||
+      liteSnapPanelView === "diagnostics"
+    ) {
       returnToLiteSnapMainView();
       return true;
     }
@@ -16054,6 +16186,7 @@ window.__LL_PANEL_IMPLS__ = {
     if (activePluginId !== LITESNAP_PLUGIN_ID) {
       liteSnapPanelView = "main";
       liteSnapHistoryItems = [];
+      liteSnapDiagnostics = [];
     }
     if (activePluginId !== WEBTOOLS_TRANSLATE_PLUGIN_ID) {
       translateToolPanelView = "main";
@@ -17292,6 +17425,9 @@ window.__LL_PANEL_IMPLS__ = {
     } else if (dataRecord?.preferredView === "history") {
       liteSnapPanelView = "history";
       void hydrateLiteSnapHistory();
+    } else if (dataRecord?.preferredView === "diagnostics") {
+      liteSnapPanelView = "diagnostics";
+      void hydrateLiteSnapDiagnostics();
     } else {
       liteSnapPanelView = "main";
     }
@@ -17325,7 +17461,8 @@ window.__LL_PANEL_IMPLS__ = {
       } else if (
         liteSnapPanelView === "ocr" ||
         liteSnapPanelView === "translate" ||
-        liteSnapPanelView === "history"
+        liteSnapPanelView === "history" ||
+        liteSnapPanelView === "diagnostics"
       ) {
         // OCR / translate / history views use explicit buttons; Enter should not start a capture.
       } else {
@@ -17771,6 +17908,84 @@ window.__LL_PANEL_IMPLS__ = {
         createLiteSnapFieldsGrid(settingsRows),
         settingsActions
       );
+    } else if (liteSnapPanelView === "diagnostics") {
+      const diagnosticsStatus = createLiteSnapInfoRow(
+        "LiteSnap 诊断",
+        `最近 ${liteSnapDiagnostics.length} 条操作记录（最多保留 20 条）`,
+        "仅保存耗时、尺寸、帧数和技术状态；不保存截图、文件路径、OCR 文本或剪贴板内容。"
+      );
+
+      const diagnosticsList = document.createElement("div");
+      diagnosticsList.className = "litesnap-history-list";
+      if (liteSnapDiagnostics.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "litesnap-history-empty";
+        empty.textContent = "暂无诊断记录。完成一次截图、OCR 或二次编辑后会显示在这里。";
+        diagnosticsList.appendChild(empty);
+      } else {
+        for (const entry of liteSnapDiagnostics) {
+          const row = document.createElement("article");
+          row.className = "litesnap-history-row";
+          const body = document.createElement("div");
+          body.className = "litesnap-history-row-body";
+          const titleRow = document.createElement("div");
+          titleRow.className = "litesnap-history-row-top";
+          const operation = document.createElement("span");
+          operation.className = "litesnap-history-source";
+          operation.textContent = `${entry.operation} · ${entry.status}`;
+          const duration = document.createElement("span");
+          duration.className = "litesnap-history-size";
+          duration.textContent = `${Math.max(0, Math.round(entry.durationMs))} ms`;
+          titleRow.append(operation, duration);
+          const timestamp = document.createElement("div");
+          timestamp.className = "litesnap-history-time";
+          timestamp.textContent = formatLiteSnapHistoryTime(entry.createdAt);
+          const detail = document.createElement("pre");
+          detail.className = "litesnap-history-time";
+          detail.style.whiteSpace = "pre-wrap";
+          detail.style.margin = "6px 0 0";
+          detail.textContent = formatLiteSnapDiagnostic(entry);
+          body.append(titleRow, timestamp, detail);
+          row.appendChild(body);
+          diagnosticsList.appendChild(row);
+        }
+      }
+
+      const footer = document.createElement("div");
+      footer.className = "litesnap-panel-footer";
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "settings-btn settings-btn-secondary";
+      copyButton.textContent = "复制诊断";
+      copyButton.addEventListener("click", () => {
+        void runLiteSnapCopyDiagnostics();
+      });
+      const clearButton = document.createElement("button");
+      clearButton.type = "button";
+      clearButton.className = "settings-btn settings-btn-secondary";
+      clearButton.textContent = "清空诊断";
+      clearButton.disabled = liteSnapDiagnostics.length === 0;
+      clearButton.addEventListener("click", () => {
+        void runLiteSnapClearDiagnostics();
+      });
+      const spacer = document.createElement("div");
+      spacer.className = "litesnap-panel-footer-spacer";
+      const backButton = document.createElement("button");
+      backButton.type = "button";
+      backButton.className = "settings-btn settings-btn-secondary";
+      backButton.textContent = "返回主页面";
+      backButton.addEventListener("click", () => {
+        returnToLiteSnapMainView();
+      });
+      const searchButton = document.createElement("button");
+      searchButton.type = "button";
+      searchButton.className = "settings-btn settings-btn-secondary";
+      searchButton.textContent = "返回搜索";
+      searchButton.addEventListener("click", () => {
+        backToSearch();
+      });
+      footer.append(copyButton, clearButton, spacer, backButton, searchButton);
+      form.append(diagnosticsStatus, diagnosticsList, footer);
     } else if (liteSnapPanelView === "history") {
       const historyHead = document.createElement("div");
       historyHead.className = "litesnap-history-head";
@@ -17841,6 +18056,14 @@ window.__LL_PANEL_IMPLS__ = {
             void runLiteSnapHistoryCopy(item.id);
           });
 
+          const editButton = document.createElement("button");
+          editButton.type = "button";
+          editButton.className = "litesnap-history-action";
+          editButton.textContent = "编辑";
+          editButton.addEventListener("click", () => {
+            void runLiteSnapHistoryEdit(item.id);
+          });
+
           const pinButton = document.createElement("button");
           pinButton.type = "button";
           pinButton.className = "litesnap-history-action is-primary";
@@ -17857,7 +18080,7 @@ window.__LL_PANEL_IMPLS__ = {
             void runLiteSnapHistoryDelete(item.id);
           });
 
-          itemActions.append(copyButton, pinButton, deleteButton);
+          itemActions.append(copyButton, editButton, pinButton, deleteButton);
           body.append(bodyTop, timeText, itemActions);
           row.append(thumbWrap, body);
           historyList.appendChild(row);
@@ -17981,6 +18204,14 @@ window.__LL_PANEL_IMPLS__ = {
         void executeLiteSnapPanelAction("open-history");
       });
 
+      const diagnosticsButton = document.createElement("button");
+      diagnosticsButton.type = "button";
+      diagnosticsButton.className = "settings-btn settings-btn-secondary";
+      diagnosticsButton.textContent = "性能诊断";
+      diagnosticsButton.addEventListener("click", () => {
+        void executeLiteSnapPanelAction("open-diagnostics");
+      });
+
       const togglePinsButton = document.createElement("button");
       togglePinsButton.type = "button";
       togglePinsButton.className = "settings-btn settings-btn-secondary";
@@ -17997,7 +18228,12 @@ window.__LL_PANEL_IMPLS__ = {
         void executeLiteSnapPanelAction("close-all-pinned-windows");
       });
 
-      secondaryActions.append(historyButton, togglePinsButton, closeAllPinsButton);
+      secondaryActions.append(
+        historyButton,
+        diagnosticsButton,
+        togglePinsButton,
+        closeAllPinsButton
+      );
 
       const footer = document.createElement("div");
       footer.className = "litesnap-panel-footer";

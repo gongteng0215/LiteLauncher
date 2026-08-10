@@ -26,6 +26,7 @@ export interface LaunchE2ESessionOptions {
   executablePath?: string;
   workingDirectory?: string;
   enableRealBlurHandling?: boolean;
+  extraEnv?: Record<string, string>;
 }
 
 function sanitizeArtifactName(name: string): string {
@@ -157,6 +158,7 @@ export async function launchE2ESession(
   const launchCwd = options.workingDirectory ?? PROJECT_ROOT;
   const launchArgs = executablePath ? [] : ["."];
   const env = buildElectronEnv(userDataDir);
+  Object.assign(env, options.extraEnv ?? {});
   if (options.enableRealBlurHandling) {
     env.LITELAUNCHER_E2E_REAL_BLUR = "1";
   }

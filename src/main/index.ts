@@ -47,6 +47,7 @@ import { LiteDatabase } from "./database";
 import { registerIpcHandlers } from "./ipc";
 import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
 import { LiteSnapHistoryStore } from "./litesnap/history-store";
+import { LiteSnapDiagnosticStore } from "./litesnap/diagnostic-store";
 import { LiteSnapImageStore } from "./litesnap/image-store";
 import { translateWithBaidu } from "./translate/baidu-translator";
 import { TranslateSettingsStore } from "./translate/settings";
@@ -2189,6 +2190,7 @@ async function bootstrap(): Promise<void> {
   }
   const liteSnapImageStore = new LiteSnapImageStore();
   const liteSnapHistoryStore = new LiteSnapHistoryStore(activeDatabase);
+  const liteSnapDiagnosticStore = new LiteSnapDiagnosticStore(activeDatabase);
   const liteSnapPinWindowManager = new LiteSnapPinWindowManager();
   liteSnapPinWindowManager.setSaveImageProvider(async (image) => {
     const settings = await liteSnapSettingsStore.getSettings();
@@ -2204,7 +2206,9 @@ async function bootstrap(): Promise<void> {
     liteSnapSettingsStore,
     liteSnapImageStore,
     liteSnapPinWindowManager,
-    liteSnapHistoryStore
+    liteSnapHistoryStore,
+    liteSnapDiagnosticStore,
+    queueErrorLog
   );
   searchDisplayConfig = await loadSearchDisplayConfig(activeDatabase);
   uiThemeConfig = await loadUiThemeConfig(activeDatabase);
@@ -2840,6 +2844,21 @@ async function bootstrap(): Promise<void> {
             }
             return liteSnapPinWindowManager.pinImage(image);
           },
+          historyEdit: async (id) => {
+            const item = await liteSnapHistoryStore.get(id);
+            if (!item) {
+              return false;
+            }
+            const image = nativeImage.createFromPath(item.filePath);
+            return liteSnapCaptureSessionManager.startHistoryEdit(image);
+          },
+          startLongCapture: (input) => liteSnapCaptureSessionManager.startLongCapture(input),
+          controlLongCapture: (control) =>
+            liteSnapCaptureSessionManager.controlLongCapture(control),
+          getLongCaptureProgress: () =>
+            liteSnapCaptureSessionManager.getLongCaptureProgress(),
+          getDiagnostics: () => liteSnapDiagnosticStore.list(),
+          clearDiagnostics: () => liteSnapDiagnosticStore.clear(),
           probeOcr: () => liteSnapCaptureSessionManager.probeOcrStatusAsync(),
           getOcrCapabilities: () =>
             liteSnapCaptureSessionManager.listOcrCapabilities(),

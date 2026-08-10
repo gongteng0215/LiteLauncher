@@ -8,7 +8,11 @@ import {
   LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapDiagnosticEntry,
   LiteSnapHistoryItem,
+  LiteSnapLongCaptureControl,
+  LiteSnapLongCaptureProgress,
+  LiteSnapLongCaptureStartInput,
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
@@ -128,6 +132,12 @@ type LiteSnapProvider = {
   clearHistory: () => Promise<number>;
   historyCopy: (id: string) => Promise<boolean>;
   historyPin: (id: string) => Promise<boolean>;
+  historyEdit: (id: string) => Promise<boolean>;
+  startLongCapture: (input: LiteSnapLongCaptureStartInput) => Promise<boolean>;
+  controlLongCapture: (control: LiteSnapLongCaptureControl) => Promise<boolean>;
+  getLongCaptureProgress: () => LiteSnapLongCaptureProgress | null;
+  getDiagnostics: () => Promise<LiteSnapDiagnosticEntry[]>;
+  clearDiagnostics: () => Promise<number>;
   probeOcr: () => Promise<import("../shared/litesnap-ocr-help").LiteSnapOcrProbeResult>;
   getOcrCapabilities: () => Promise<
     import("../shared/litesnap-ocr-help").LiteSnapOcrCapabilitiesResult
@@ -275,6 +285,12 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapClearHistory,
   IPC_CHANNELS.liteSnapHistoryCopy,
   IPC_CHANNELS.liteSnapHistoryPin,
+  IPC_CHANNELS.liteSnapHistoryEdit,
+  IPC_CHANNELS.liteSnapStartLongCapture,
+  IPC_CHANNELS.liteSnapControlLongCapture,
+  IPC_CHANNELS.liteSnapGetLongCaptureProgress,
+  IPC_CHANNELS.liteSnapGetDiagnostics,
+  IPC_CHANNELS.liteSnapClearDiagnostics,
   IPC_CHANNELS.getTranslateToolSettings,
   IPC_CHANNELS.setTranslateToolSettings,
   IPC_CHANNELS.translateToolTranslateText,
@@ -1609,6 +1625,45 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.liteSnapHistoryPin, async (_, idInput: unknown) => {
     const id = typeof idInput === "string" ? idInput : "";
     return options.liteSnapProvider.historyPin(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapHistoryEdit, async (_, idInput: unknown) => {
+    const id = typeof idInput === "string" ? idInput : "";
+    return options.liteSnapProvider.historyEdit(id);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.liteSnapStartLongCapture,
+    async (_, input: LiteSnapLongCaptureStartInput | null) => {
+      const selection = input?.selection;
+      if (!selection) {
+        return false;
+      }
+      return options.liteSnapProvider.startLongCapture({ selection });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapControlLongCapture, async (_, controlInput: unknown) => {
+    const control =
+      controlInput === "pause" ||
+      controlInput === "resume" ||
+      controlInput === "finish" ||
+      controlInput === "cancel"
+        ? controlInput
+        : "cancel";
+    return options.liteSnapProvider.controlLongCapture(control);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapGetLongCaptureProgress, () => {
+    return options.liteSnapProvider.getLongCaptureProgress();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapGetDiagnostics, async () => {
+    return options.liteSnapProvider.getDiagnostics();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.liteSnapClearDiagnostics, async () => {
+    return options.liteSnapProvider.clearDiagnostics();
   });
 
   ipcMain.handle(IPC_CHANNELS.getTranslateToolSettings, () => {

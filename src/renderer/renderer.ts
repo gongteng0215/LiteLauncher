@@ -373,6 +373,14 @@ interface LauncherApi {
   liteSnapClearHistory(): Promise<number>;
   liteSnapHistoryCopy(id: string): Promise<boolean>;
   liteSnapHistoryPin(id: string): Promise<boolean>;
+  liteSnapHistoryEdit(id: string): Promise<boolean>;
+  liteSnapStartLongCapture(input: import("../shared/litesnap").LiteSnapLongCaptureStartInput): Promise<boolean>;
+  liteSnapControlLongCapture(
+    control: import("../shared/litesnap").LiteSnapLongCaptureControl
+  ): Promise<boolean>;
+  liteSnapGetLongCaptureProgress(): Promise<import("../shared/litesnap").LiteSnapLongCaptureProgress | null>;
+  liteSnapGetDiagnostics(): Promise<import("../shared/litesnap").LiteSnapDiagnosticEntry[]>;
+  liteSnapClearDiagnostics(): Promise<number>;
   rebuildCatalog(): Promise<CatalogRebuildResult>;
   getLaunchAtLoginStatus(): Promise<LaunchAtLoginStatus>;
   setLaunchAtLoginEnabled(enabled: boolean): Promise<LaunchAtLoginStatus>;

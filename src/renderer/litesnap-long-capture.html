@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiteSnap 长截图</title>
+    <style>
+      :root { color-scheme: dark; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+      body { margin: 0; background: transparent; color: #f5f3ff; user-select: none; }
+      main { box-sizing: border-box; min-height: 112px; padding: 12px 14px; border: 1px solid #6d4bc3; border-radius: 12px; background: rgba(23, 17, 39, .97); box-shadow: 0 12px 30px rgba(0,0,0,.35); }
+      .top { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; color:#d8ccff; }
+      .title { font-weight:700; color:#fff; font-size:13px; }
+      .meta { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#b7aacd; }
+      .actions { display:flex; gap:7px; margin-top:11px; }
+      button { border:1px solid #62537f; border-radius:7px; padding:6px 10px; color:#f5f3ff; background:#2c2540; cursor:pointer; font:inherit; font-size:12px; }
+      button:hover { background:#423462; } button.primary { background:#7245d6; border-color:#8c65e8; } button.danger { color:#ffb4c0; } button:disabled { opacity:.5; cursor:default; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="top"><span class="title">长截图</span><span id="meta" class="meta">准备中…</span></div>
+      <div class="actions">
+        <button id="pause" type="button">暂停</button>
+        <button id="finish" class="primary" type="button">完成</button>
+        <button id="cancel" class="danger" type="button">取消</button>
+      </div>
+    </main>
+    <script>
+      (() => {
+        const meta = document.getElementById("meta");
+        const pause = document.getElementById("pause");
+        const finish = document.getElementById("finish");
+        const cancel = document.getElementById("cancel");
+        let phase = "capturing";
+        const render = (state) => {
+          const progress = state && state.longCapture;
+          if (!progress) return;
+          phase = progress.phase;
+          meta.textContent = `${progress.message} · ${progress.frameCount} 帧 · ${progress.stitchedHeight}px`;
+          pause.textContent = phase === "paused" ? "继续" : "暂停";
+          pause.disabled = phase !== "capturing" && phase !== "paused";
+          finish.disabled = phase === "finishing" || progress.frameCount < 1;
+        };
+        pause.addEventListener("click", () => window.launcher.liteSnapControlLongCapture(phase === "paused" ? "resume" : "pause"));
+        finish.addEventListener("click", () => window.launcher.liteSnapControlLongCapture("finish"));
+        cancel.addEventListener("click", () => window.launcher.liteSnapControlLongCapture("cancel"));
+        window.launcher.onLiteSnapOverlayStateChanged(render);
+        window.launcher.liteSnapGetLongCaptureProgress()
+          .then((progress) => render({ longCapture: progress }))
+          .catch(() => undefined);
+      })();
+    </script>
+  </body>
+</html>

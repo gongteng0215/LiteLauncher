@@ -1628,3 +1628,46 @@ test("LiteSnap history store, color mode, and recent colors are wired", () => {
   assert.match(mainIndexSource, /clipboard-pin/);
   assert.match(mainIndexSource, /startLiteSnapColorCapture/);
 });
+
+test("LiteSnap long capture, history editing, and anonymous diagnostics are wired", () => {
+  const sharedSource = fs.readFileSync(sharedLiteSnapPath, "utf8");
+  const channelsSource = fs.readFileSync(channelsPath, "utf8");
+  const ipcSource = fs.readFileSync(ipcPath, "utf8");
+  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const providerSource = fs.readFileSync(captureProviderPath, "utf8");
+  const addonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
+  const panelSource = fs.readFileSync(panelImplsPath, "utf8");
+  const databaseSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "database.ts"),
+    "utf8"
+  );
+  const diagnosticStoreSource = fs.readFileSync(
+    path.join(process.cwd(), "src", "main", "litesnap", "diagnostic-store.ts"),
+    "utf8"
+  );
+
+  assert.match(sharedSource, /"long-capture"/);
+  assert.match(sharedSource, /"history-edit"/);
+  assert.match(sharedSource, /LiteSnapLongCaptureProgress/);
+  assert.match(channelsSource, /liteSnapStartLongCapture/);
+  assert.match(channelsSource, /liteSnapControlLongCapture/);
+  assert.match(channelsSource, /liteSnapGetLongCaptureProgress/);
+  assert.match(channelsSource, /liteSnapGetDiagnostics/);
+  assert.match(ipcSource, /startLongCapture/);
+  assert.match(ipcSource, /historyEdit/);
+  assert.match(captureSource, /matchLiteSnapVerticalFrames/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_FRAMES = 120/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_DURATION_MS = 120_000/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_HEIGHT = 30_000/);
+  assert.match(captureSource, /session\.historyEdit \? "history-edit"/);
+  assert.match(captureSource, /reportLongCaptureFailure/);
+  assert.match(captureSource, /LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION/);
+  assert.match(providerSource, /scrollWindowAtPoint/);
+  assert.match(addonSource, /WM_MOUSEWHEEL/);
+  assert.match(databaseSource, /CREATE TABLE IF NOT EXISTS litesnap_diagnostics/);
+  assert.match(diagnosticStoreSource, /LITESNAP_DIAGNOSTIC_MAX_ITEMS = 20/);
+  assert.match(diagnosticStoreSource, /sanitizeDiagnosticMetrics/);
+  assert.match(panelSource, /openLiteSnapDiagnosticsView/);
+  assert.match(panelSource, /runLiteSnapHistoryEdit/);
+  assert.match(panelSource, /复制诊断/);
+});

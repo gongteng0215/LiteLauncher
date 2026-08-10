@@ -10,6 +10,7 @@ const WATCHED_RENDERER_FILES = new Set([
   "styles-plugin-theme-remaps.css",
   "litesnap-overlay.html",
   "litesnap-overlay.css",
+  "litesnap-long-capture.html",
   "selection-popup.html",
   "selection-popup.css",
   "selection-backdrop.html"
@@ -103,6 +104,7 @@ function copyAllAssets() {
     ["src/renderer/styles-plugin-theme-remaps.css", "dist/renderer/styles-plugin-theme-remaps.css"],
     ["src/renderer/litesnap-overlay.html", "dist/renderer/litesnap-overlay.html"],
     ["src/renderer/litesnap-overlay.css", "dist/renderer/litesnap-overlay.css"],
+    ["src/renderer/litesnap-long-capture.html", "dist/renderer/litesnap-long-capture.html"],
     ["src/renderer/selection-popup.html", "dist/renderer/selection-popup.html"],
     ["src/renderer/selection-popup.css", "dist/renderer/selection-popup.css"],
     ["src/renderer/selection-backdrop.html", "dist/renderer/selection-backdrop.html"]

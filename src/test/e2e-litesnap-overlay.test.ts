@@ -53,6 +53,23 @@ async function waitForOverlayWindow(
   throw new Error("LiteSnap overlay window should open");
 }
 
+async function waitForLongCaptureController(
+  session: Awaited<ReturnType<typeof launchE2ESession>>
+) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15000) {
+    const controller = session.electronApp
+      .windows()
+      .find((page) => page.url().includes("litesnap-long-capture.html"));
+    if (controller) {
+      await controller.waitForLoadState("domcontentloaded");
+      return controller;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("LiteSnap long capture controller should open");
+}
+
 async function waitForOverlayReady(
   overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>>
 ): Promise<void> {
@@ -102,7 +119,11 @@ async function waitForOverlayVisibility(
   while (Date.now() - startedAt < 10000) {
     const currentVisible = await session.electronApp.evaluate(({ BrowserWindow }) => {
       const overlayWindow = BrowserWindow.getAllWindows().find((window) => {
-        return window.webContents.getURL().includes("litesnap-overlay.html");
+        return (
+          !window.isDestroyed() &&
+          !window.webContents.isDestroyed() &&
+          window.webContents.getURL().includes("litesnap-overlay.html")
+        );
       });
       if (!overlayWindow || overlayWindow.isDestroyed()) {
         return false;
@@ -514,6 +535,238 @@ test(
         await closeLiteSnapE2ESession(session);
       }
       await fs.rm(saveDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap history editing preserves the original and creates a new item",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap history editing preserves the original and creates a new item";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "copy");
+      await waitForOverlayVisibility(session, false);
+
+      const historyBefore = await session.page.evaluate(() => window.launcher.liteSnapListHistory());
+      assert.ok(historyBefore.length >= 1, "copy should add an original history item");
+      const original = historyBefore[0];
+      assert.ok(original, "history should expose the original item");
+
+      const opened = await session.page.evaluate((id) => window.launcher.liteSnapHistoryEdit(id), original.id);
+      assert.equal(opened, true, "history image should open in the editor");
+      await waitForOverlayVisibility(session, true);
+      await waitForOverlayReady(overlayPage);
+
+      const editorState = await overlayPage.evaluate(async () => {
+        const state = await window.launcher.liteSnapGetOverlayState();
+        const longButton = document.querySelector<HTMLButtonElement>('button[data-action="long"]');
+        const selection = document.getElementById("litesnap-selection") as HTMLElement | null;
+        return {
+          editorMode: state?.editorMode,
+          longButtonHidden: longButton?.hidden ?? false,
+          selectionVisible: Boolean(selection && !selection.hidden)
+        };
+      });
+      assert.deepEqual(editorState, {
+        editorMode: true,
+        longButtonHidden: true,
+        selectionVisible: true
+      });
+
+      const editorViewport = await overlayPage.evaluate(() => {
+        const root = document.getElementById("litesnap-overlay") as HTMLElement;
+        const canvas = document.getElementById("litesnap-canvas") as HTMLCanvasElement;
+        root.dispatchEvent(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            ctrlKey: true,
+            deltaY: -120,
+            clientX: 180,
+            clientY: 120
+          })
+        );
+        const pointer = (type: string, x: number, y: number, button: number) =>
+          root.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 8,
+              pointerType: "mouse",
+              isPrimary: true,
+              button,
+              clientX: x,
+              clientY: y
+            })
+          );
+        pointer("pointerdown", 180, 120, 1);
+        pointer("pointermove", 216, 148, 1);
+        pointer("pointerup", 216, 148, 1);
+        return {
+          backgroundSize: root.style.backgroundSize,
+          transform: canvas.style.transform
+        };
+      });
+      assert.match(editorViewport.backgroundSize, /px/);
+      assert.match(editorViewport.transform, /scale\(/);
+      assert.match(editorViewport.transform, /translate\(/);
+
+      await overlayPage.evaluate(() => {
+        document.querySelector<HTMLButtonElement>('[data-tool="rect"]')?.click();
+      });
+      await dispatchOverlayDrag(overlayPage, { x: 80, y: 80 }, { x: 200, y: 150 });
+      await clickOverlayToolbarButton(overlayPage, "copy");
+      await waitForOverlayVisibility(session, false);
+
+      const historyAfter = await session.page.evaluate(() => window.launcher.liteSnapListHistory());
+      assert.ok(
+        historyAfter.some((item) => item.id === original.id),
+        "editing must never overwrite the original history item"
+      );
+      assert.ok(
+        historyAfter.some((item) => item.source === "history-edit"),
+        "exporting an edit should create a separate history-edit item"
+      );
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap long capture pauses, resumes, finishes, and cancels deterministically",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap long capture pauses, resumes, finishes, and cancels deterministically";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession({
+        extraEnv: { LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION: "1" }
+      });
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "long");
+
+      let controller = await waitForLongCaptureController(session);
+      await session.page.waitForFunction(
+        async () => {
+          const progress = await window.launcher.liteSnapGetLongCaptureProgress();
+          return (progress?.frameCount ?? 0) >= 2;
+        },
+        undefined,
+        { timeout: 15000 }
+      );
+      await controller.locator("#pause").click();
+      await session.page.waitForFunction(
+        async () => (await window.launcher.liteSnapGetLongCaptureProgress())?.phase === "paused",
+        undefined,
+        { timeout: 10000 }
+      );
+      await controller.locator("#pause").click();
+      await session.page.waitForFunction(
+        async () => (await window.launcher.liteSnapGetLongCaptureProgress())?.phase === "capturing",
+        undefined,
+        { timeout: 10000 }
+      );
+      await controller.locator("#finish").click();
+      try {
+        await waitForOverlayVisibility(session, true);
+      } catch (error) {
+        const snapshot = await session.page.evaluate(async () => ({
+          state: await window.launcher.liteSnapGetOverlayState(),
+          progress: await window.launcher.liteSnapGetLongCaptureProgress(),
+          diagnostics: await window.launcher.liteSnapGetDiagnostics()
+        }));
+        throw new Error(
+          `long capture did not return to the editor: ${JSON.stringify(snapshot)}; ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      await waitForOverlayReady(overlayPage);
+
+      const completed = await session.page.evaluate(async () => {
+        const state = await window.launcher.liteSnapGetOverlayState();
+        const diagnostics = await window.launcher.liteSnapGetDiagnostics();
+        return { state, diagnostics };
+      });
+      assert.equal(completed.state?.editorMode, true);
+      const completeDiagnostic = completed.diagnostics.find(
+        (entry) => entry.operation === "long-capture" && entry.status === "success"
+      );
+      assert.ok(completeDiagnostic, "finished long capture should have a success diagnostic");
+      assert.ok(
+        Number(completeDiagnostic.metrics.stitchedHeight) > 0,
+        "long capture diagnostic should include output height"
+      );
+
+      await overlayPage.keyboard.press("Escape");
+      await waitForOverlayVisibility(session, false);
+
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "long");
+      controller = await waitForLongCaptureController(session);
+      await controller.locator("#cancel").click();
+      await waitForOverlayVisibility(session, false);
+
+      const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
+      assert.ok(
+        diagnostics.some(
+          (entry) => entry.operation === "long-capture" && entry.status === "cancelled"
+        ),
+        "cancelled long capture should persist a cancellation diagnostic"
+      );
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
     }
   }
 );

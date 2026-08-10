@@ -5,7 +5,11 @@ import {
   LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapDiagnosticEntry,
   LiteSnapHistoryItem,
+  LiteSnapLongCaptureControl,
+  LiteSnapLongCaptureProgress,
+  LiteSnapLongCaptureStartInput,
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
@@ -186,6 +190,24 @@ const api = {
   },
   liteSnapHistoryPin(id: string): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapHistoryPin, id);
+  },
+  liteSnapHistoryEdit(id: string): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapHistoryEdit, id);
+  },
+  liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartLongCapture, input);
+  },
+  liteSnapControlLongCapture(control: LiteSnapLongCaptureControl): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapControlLongCapture, control);
+  },
+  liteSnapGetLongCaptureProgress(): Promise<LiteSnapLongCaptureProgress | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetLongCaptureProgress);
+  },
+  liteSnapGetDiagnostics(): Promise<LiteSnapDiagnosticEntry[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapGetDiagnostics);
+  },
+  liteSnapClearDiagnostics(): Promise<number> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapClearDiagnostics);
   },
   getTranslateToolSettings(): Promise<TranslateSettings> {
     return ipcRenderer.invoke(IPC_CHANNELS.getTranslateToolSettings);

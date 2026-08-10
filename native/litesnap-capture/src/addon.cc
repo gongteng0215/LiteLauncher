@@ -564,6 +564,64 @@ napi_value GetWindowRectAtPoint(napi_env env, napi_callback_info info) {
   return result;
 }
 
+napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value args[3];
+  if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok ||
+      argc < 3) {
+    return CreateNull(env);
+  }
+
+  int32_t x = 0;
+  int32_t y = 0;
+  int32_t delta = 0;
+  if (napi_get_value_int32(env, args[0], &x) != napi_ok ||
+      napi_get_value_int32(env, args[1], &y) != napi_ok ||
+      napi_get_value_int32(env, args[2], &delta) != napi_ok || delta == 0) {
+    return CreateNull(env);
+  }
+
+  const POINT point{ x, y };
+  HWND hwnd = WindowFromPoint(point);
+  if (hwnd == nullptr) {
+    napi_value result;
+    napi_get_boolean(env, false, &result);
+    return result;
+  }
+
+  // Child controls frequently own the scroll surface; send there first and
+  // fall back to its root window.  The overlay is hidden before this call, so
+  // the selected application's HWND remains under the original screen point.
+  DWORD_PTR message_result = 0;
+  const LPARAM point_param = MAKELPARAM(static_cast<SHORT>(x), static_cast<SHORT>(y));
+  const WPARAM wheel_param = MAKEWPARAM(0, static_cast<SHORT>(delta));
+  LRESULT sent = SendMessageTimeoutW(
+      hwnd,
+      WM_MOUSEWHEEL,
+      wheel_param,
+      point_param,
+      SMTO_ABORTIFHUNG | SMTO_BLOCK,
+      350,
+      &message_result);
+  if (sent == 0) {
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    if (root != nullptr && root != hwnd) {
+      sent = SendMessageTimeoutW(
+          root,
+          WM_MOUSEWHEEL,
+          wheel_param,
+          point_param,
+          SMTO_ABORTIFHUNG | SMTO_BLOCK,
+          350,
+          &message_result);
+    }
+  }
+
+  napi_value result;
+  napi_get_boolean(env, sent != 0, &result);
+  return result;
+}
+
 struct OcrWork {
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
@@ -1147,6 +1205,16 @@ napi_value Init(napi_env env, napi_value exports) {
       nullptr,
       &window_rect_fn);
   napi_set_named_property(env, exports, "getWindowRectAtPoint", window_rect_fn);
+
+  napi_value scroll_window_fn;
+  napi_create_function(
+      env,
+      "scrollWindowAtPoint",
+      NAPI_AUTO_LENGTH,
+      ScrollWindowAtPoint,
+      nullptr,
+      &scroll_window_fn);
+  napi_set_named_property(env, exports, "scrollWindowAtPoint", scroll_window_fn);
 
   napi_value recognize_text_fn;
   napi_create_function(

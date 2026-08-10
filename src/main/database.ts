@@ -9,6 +9,11 @@ import {
   LaunchItem,
   UsageRecord
 } from "../shared/types";
+import type {
+  LiteSnapDiagnosticEntry,
+  LiteSnapDiagnosticOperation,
+  LiteSnapDiagnosticStatus
+} from "../shared/litesnap";
 import { applySqlitePerformancePragmas } from "./sqlite-pragmas";
 
 function ensureParentDirectory(filePath: string): void {
@@ -186,6 +191,22 @@ export class LiteDatabase {
 
     await this.run(
       "CREATE INDEX IF NOT EXISTS litesnap_history_created_idx ON litesnap_history(createdAt DESC)"
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS litesnap_diagnostics (
+         id TEXT PRIMARY KEY,
+         operation TEXT NOT NULL,
+         status TEXT NOT NULL,
+         durationMs INTEGER NOT NULL,
+         metricsJson TEXT NOT NULL,
+         message TEXT NOT NULL,
+         createdAt INTEGER NOT NULL
+       )`
+    );
+
+    await this.run(
+      "CREATE INDEX IF NOT EXISTS litesnap_diagnostics_created_idx ON litesnap_diagnostics(createdAt DESC)"
     );
 
     await this.run(
@@ -945,6 +966,81 @@ export class LiteDatabase {
       [maxItems]
     );
     return overflow;
+  }
+
+  public async insertLiteSnapDiagnostic(input: LiteSnapDiagnosticEntry): Promise<void> {
+    await this.run(
+      `INSERT INTO litesnap_diagnostics
+         (id, operation, status, durationMs, metricsJson, message, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.id,
+        input.operation,
+        input.status,
+        Math.max(0, Math.round(input.durationMs)),
+        JSON.stringify(input.metrics ?? {}),
+        String(input.message ?? "").slice(0, 1200),
+        input.createdAt
+      ]
+    );
+  }
+
+  public async listLiteSnapDiagnostics(limit: number): Promise<LiteSnapDiagnosticEntry[]> {
+    const rows = await this.all<{
+      id: string;
+      operation: string;
+      status: string;
+      durationMs: number;
+      metricsJson: string;
+      message: string;
+      createdAt: number;
+    }>(
+      `SELECT id, operation, status, durationMs, metricsJson, message, createdAt
+       FROM litesnap_diagnostics
+       ORDER BY createdAt DESC
+       LIMIT ?`,
+      [Math.max(1, Math.round(limit))]
+    );
+
+    return rows.map((row) => {
+      let metrics: Record<string, number | string | boolean> = {};
+      try {
+        const parsed = JSON.parse(row.metricsJson) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          metrics = Object.fromEntries(
+            Object.entries(parsed as Record<string, unknown>).filter(
+              ([, value]) =>
+                typeof value === "number" || typeof value === "string" || typeof value === "boolean"
+            )
+          ) as Record<string, number | string | boolean>;
+        }
+      } catch {
+        metrics = {};
+      }
+      return {
+        id: row.id,
+        operation: row.operation as LiteSnapDiagnosticOperation,
+        status: row.status as LiteSnapDiagnosticStatus,
+        durationMs: coerceSqliteNumber(row.durationMs),
+        metrics,
+        message: row.message,
+        createdAt: coerceSqliteNumber(row.createdAt)
+      };
+    });
+  }
+
+  public async trimLiteSnapDiagnostics(maxItems: number): Promise<void> {
+    await this.run(
+      `DELETE FROM litesnap_diagnostics
+       WHERE id NOT IN (
+         SELECT id FROM litesnap_diagnostics ORDER BY createdAt DESC LIMIT ?
+       )`,
+      [Math.max(1, Math.round(maxItems))]
+    );
+  }
+
+  public async clearLiteSnapDiagnostics(): Promise<number> {
+    return this.runWithChanges("DELETE FROM litesnap_diagnostics");
   }
 
   public async recordErrorLog(input: AppErrorLogInput): Promise<void> {

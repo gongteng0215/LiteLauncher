@@ -198,8 +198,8 @@ test("LiteSnap settings subview handles Esc inside plugin mode before leaving to
   );
   assert.match(
     panelImplsSource,
-    /let liteSnapPanelView: "main" \| "settings" \| "ocr" \| "translate" \| "history"\s*=\s*"main";/,
-    "LiteSnap should keep local main/settings/ocr/translate/history subview state"
+    /let liteSnapPanelView: "main" \| "settings" \| "ocr" \| "translate" \| "history" \| "diagnostics"\s*=\s*"main";/,
+    "LiteSnap should keep local main/settings/ocr/translate/history/diagnostics subview state"
   );
   assert.match(
     panelImplsSource,

@@ -227,7 +227,7 @@ jobs:
           )"
           newest_tag="v${newest}"
           if [ "${newest_tag}" = "${tag}" ]; then
-            gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
             echo "Marked ${tag} as Latest."
           else
             gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false

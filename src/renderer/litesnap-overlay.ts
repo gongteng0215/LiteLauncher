@@ -1,5 +1,5 @@
 (() => {
-  type OverlayAction = "copy" | "save" | "pin" | "cancel" | "ocr" | "translate";
+  type OverlayAction = "copy" | "save" | "pin" | "cancel" | "ocr" | "translate" | "long";
   type ResizeHandle = "n" | "s" | "w" | "e" | "nw" | "ne" | "sw" | "se";
   type DragMode =
     | "idle"
@@ -8,7 +8,8 @@
     | "resizing"
     | "drawing"
     | "annotation-moving"
-    | "annotation-resizing";
+    | "annotation-resizing"
+    | "editor-panning";
   type AnnotationTool =
     | "select"
     | "rect"
@@ -24,7 +25,7 @@
 
   type OverlayState = {
     captureId: string;
-    mode?: "capture" | "color";
+    mode?: "capture" | "color" | "edit";
     imageDataUrl: string | null;
     sourceImageDataUrl: string | null;
     viewportWidth: number;
@@ -36,6 +37,7 @@
     annotationTool: AnnotationTool;
     annotationFillShapes: boolean;
     recentColors?: string[];
+    editorMode?: boolean;
   };
 
   type SelectionRect = {
@@ -229,6 +231,8 @@
   let pooledTileCtx: CanvasRenderingContext2D | null = null;
   let pooledBlurCanvas: HTMLCanvasElement | null = null;
   let pooledBlurCtx: CanvasRenderingContext2D | null = null;
+  let editorZoom = 1;
+  let editorPan = { x: 0, y: 0 };
 
   const WINDOW_PROBE_DEBOUNCE_MS = 80;
   const WINDOW_PROBE_MIN_MOVE_PX = 8;
@@ -1017,6 +1021,70 @@
     return overlayMode === "color";
   }
 
+  function isEditorMode(): boolean {
+    return Boolean(overlayState?.editorMode || overlayState?.mode === "edit");
+  }
+
+  function screenToEditorPoint(x: number, y: number): Point {
+    if (!isEditorMode()) {
+      return { x, y };
+    }
+    return {
+      x: (x - editorPan.x) / editorZoom,
+      y: (y - editorPan.y) / editorZoom
+    };
+  }
+
+  function applyEditorViewTransform(): void {
+    if (!overlayRoot || !overlayState) {
+      return;
+    }
+    const baseWidth = overlayState.viewportWidth;
+    const baseHeight = overlayState.viewportHeight;
+    if (!isEditorMode()) {
+      overlayRoot.style.backgroundPosition = "0 0";
+      overlayRoot.style.backgroundSize = `${baseWidth}px ${baseHeight}px`;
+      for (const element of [canvasNode, annotationFrameNode, textInput]) {
+        if (element) {
+          element.style.transform = "";
+          element.style.transformOrigin = "";
+        }
+      }
+      return;
+    }
+    const transform = `translate(${editorPan.x}px, ${editorPan.y}px) scale(${editorZoom})`;
+    overlayRoot.style.backgroundPosition = `${editorPan.x}px ${editorPan.y}px`;
+    overlayRoot.style.backgroundSize = `${baseWidth * editorZoom}px ${baseHeight * editorZoom}px`;
+    overlayRoot.style.backgroundRepeat = "no-repeat";
+    for (const element of [canvasNode, annotationFrameNode, textInput]) {
+      if (element) {
+        element.style.transformOrigin = "0 0";
+        element.style.transform = transform;
+      }
+    }
+  }
+
+  function setEditorZoom(nextZoom: number, anchor?: Point): void {
+    if (!isEditorMode()) {
+      return;
+    }
+    const boundedZoom = clamp(nextZoom, 0.35, 4);
+    if (boundedZoom === editorZoom) {
+      return;
+    }
+    const focus = anchor ?? {
+      x: getViewportWidth() / 2,
+      y: getViewportHeight() / 2
+    };
+    const world = screenToEditorPoint(focus.x, focus.y);
+    editorZoom = boundedZoom;
+    editorPan = {
+      x: focus.x - world.x * editorZoom,
+      y: focus.y - world.y * editorZoom
+    };
+    applyEditorViewTransform();
+  }
+
   async function copyHoveredColor(options?: { exitAfter?: boolean }): Promise<void> {
     const color = hoveredColor;
     void navigator.clipboard?.writeText(color).catch(() => undefined);
@@ -1101,6 +1169,11 @@
     eventTarget: EventTarget | null = null
   ): void {
     if (!brushPreviewNode) {
+      return;
+    }
+
+    if (isEditorMode()) {
+      hideBrushPreview();
       return;
     }
 
@@ -2480,6 +2553,11 @@
       return;
     }
 
+    if (action === "long") {
+      await startLongCapture();
+      return;
+    }
+
     if (!selection || !isValidSelection(selection) || committing) {
       return;
     }
@@ -2508,6 +2586,32 @@
     committing = false;
     setToolbarDisabled(false);
     showStatus(result.message, true);
+  }
+
+  async function startLongCapture(): Promise<void> {
+    if (!selection || !isValidSelection(selection) || committing || isEditorMode()) {
+      return;
+    }
+    if (!window.launcher.liteSnapStartLongCapture) {
+      showStatus("Long capture is unavailable. Restart LiteLauncher and try again.", true);
+      return;
+    }
+    finishTextInput(true);
+    committing = true;
+    setToolbarDisabled(true);
+    try {
+      const started = await window.launcher.liteSnapStartLongCapture({ selection });
+      if (!started) {
+        committing = false;
+        setToolbarDisabled(false);
+        showStatus("Long capture needs a selectable scrollable Windows window.", true);
+      }
+    } catch (error) {
+      console.warn("[litesnap-overlay] long capture start failed", error);
+      committing = false;
+      setToolbarDisabled(false);
+      showStatus("Starting long capture failed.", true);
+    }
   }
 
   async function recognizeSelectionText(): Promise<void> {
@@ -2841,15 +2945,29 @@
       return;
     }
 
-    const pointX = event.clientX;
-    const pointY = event.clientY;
+    if (isEditorMode() && event.button === 1) {
+      event.preventDefault();
+      dragMode = "editor-panning";
+      pointerStart = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        selection: null,
+        handle: null
+      };
+      return;
+    }
+
+    const point = screenToEditorPoint(event.clientX, event.clientY);
+    const pointX = point.x;
+    const pointY = point.y;
     updateBrushPreview(pointX, pointY, event.target);
 
     // Allow resizing the crop frame from handles/edges even while an annotation
     // tool is active (WeChat-style).
-    const handle =
-      getHandleFromTarget(event.target) ??
-      getSelectionEdgeHandleAtPoint(pointX, pointY);
+    const handle = isEditorMode()
+      ? null
+      : getHandleFromTarget(event.target) ?? getSelectionEdgeHandleAtPoint(pointX, pointY);
     if (handle && selection && isValidSelection(selection)) {
       beginSelectionResize(handle, event.pointerId, pointX, pointY);
       renderSelection();
@@ -2942,6 +3060,9 @@
         return;
       }
       selectedAnnotationIndex = null;
+      if (isEditorMode()) {
+        return;
+      }
       dragMode = "moving";
       pointerStart = {
         pointerId: event.pointerId,
@@ -2989,17 +3110,36 @@
 
   function handlePointerMove(event: PointerEvent): void {
     noteCapturePointerActivity();
-    scheduleLoupeUpdate(event.clientX, event.clientY);
-    updateBrushPreview(event.clientX, event.clientY, event.target);
+    if (!isEditorMode()) {
+      scheduleLoupeUpdate(event.clientX, event.clientY);
+      updateBrushPreview(event.clientX, event.clientY, event.target);
+    }
     if (!pointerStart || event.pointerId !== pointerStart.pointerId) {
-      scheduleWindowSelectionProbe(event.clientX, event.clientY);
+      if (!isEditorMode()) {
+        scheduleWindowSelectionProbe(event.clientX, event.clientY);
+      }
       return;
     }
 
+    if (dragMode === "editor-panning") {
+      editorPan = {
+        x: editorPan.x + event.clientX - pointerStart.x,
+        y: editorPan.y + event.clientY - pointerStart.y
+      };
+      pointerStart.x = event.clientX;
+      pointerStart.y = event.clientY;
+      applyEditorViewTransform();
+      return;
+    }
+
+    const point = screenToEditorPoint(event.clientX, event.clientY);
+    const pointX = point.x;
+    const pointY = point.y;
+
     if (dragMode === "drawing") {
-      const point = clampPointToSelection(event.clientX, event.clientY);
-      extendDraftAnnotation(point);
-      updateBrushPreview(point.x, point.y, event.target);
+      const clampedPoint = clampPointToSelection(pointX, pointY);
+      extendDraftAnnotation(clampedPoint);
+      updateBrushPreview(clampedPoint.x, clampedPoint.y, event.target);
       scheduleOverlayRender("annotations");
       return;
     }
@@ -3008,19 +3148,19 @@
       selection = normalizeRect(
         pointerStart.x,
         pointerStart.y,
-        event.clientX,
-        event.clientY
+        pointX,
+        pointY
       );
     } else if (dragMode === "moving") {
-      applyMove(event.clientX, event.clientY);
+      applyMove(pointX, pointY);
     } else if (dragMode === "resizing") {
-      applyResize(event.clientX, event.clientY);
+      applyResize(pointX, pointY);
     } else if (dragMode === "annotation-moving") {
-      applyAnnotationMove(event.clientX, event.clientY);
+      applyAnnotationMove(pointX, pointY);
       scheduleOverlayRender("annotations");
       return;
     } else if (dragMode === "annotation-resizing") {
-      applyAnnotationResize(event.clientX, event.clientY);
+      applyAnnotationResize(pointX, pointY);
       scheduleOverlayRender("annotations");
       return;
     }
@@ -3039,10 +3179,15 @@
     const wasResizing = dragMode === "resizing";
     const wasMovingAnnotation = dragMode === "annotation-moving";
     const wasResizingAnnotation = dragMode === "annotation-resizing";
+    const wasEditorPanning = dragMode === "editor-panning";
     const priorSelection = pointerStart.selection;
-    const releasePoint: Point = { x: event.clientX, y: event.clientY };
+    const releasePoint = screenToEditorPoint(event.clientX, event.clientY);
     pointerStart = null;
     dragMode = "idle";
+
+    if (wasEditorPanning) {
+      return;
+    }
 
     if (wasDrawing) {
       finalizeDraftAnnotation();
@@ -3118,7 +3263,8 @@
       return;
     }
 
-    if (!containsPoint(selection, event.clientX, event.clientY)) {
+    const point = screenToEditorPoint(event.clientX, event.clientY);
+    if (!containsPoint(selection, point.x, point.y)) {
       return;
     }
 
@@ -3278,6 +3424,8 @@
           void recognizeSelectionText();
         } else if (action === "translate") {
           void translateSelectionText();
+        } else if (action === "long") {
+          void startLongCapture();
         } else if (action) {
           void commitSelection(action);
         }
@@ -3328,6 +3476,26 @@
         return;
       }
 
+      if (isEditorMode() && (event.ctrlKey || event.metaKey)) {
+        if (event.key === "+" || event.key === "=") {
+          event.preventDefault();
+          setEditorZoom(editorZoom * 1.15);
+          return;
+        }
+        if (event.key === "-") {
+          event.preventDefault();
+          setEditorZoom(editorZoom / 1.15);
+          return;
+        }
+        if (event.key === "0") {
+          event.preventDefault();
+          editorZoom = 1;
+          editorPan = { x: 0, y: 0 };
+          applyEditorViewTransform();
+          return;
+        }
+      }
+
       if (
         (event.key === "z" || event.key === "Z") &&
         (event.ctrlKey || event.metaKey)
@@ -3374,6 +3542,26 @@
     });
   }
 
+  function bindEditorViewportControls(): void {
+    if (!overlayRoot) {
+      return;
+    }
+    overlayRoot.addEventListener(
+      "wheel",
+      (event) => {
+        if (!isEditorMode() || !(event.ctrlKey || event.metaKey)) {
+          return;
+        }
+        event.preventDefault();
+        setEditorZoom(
+          editorZoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12),
+          { x: event.clientX, y: event.clientY }
+        );
+      },
+      { passive: false }
+    );
+  }
+
   function applyAnnotationDefaults(state: OverlayState): void {
     activeColor = state.annotationColor || activeColor;
     activeLineWidth = state.annotationLineWidth || activeLineWidth;
@@ -3404,6 +3592,8 @@
       annotationCanvasCtx = null;
       annotationCanvasPixelWidth = 0;
       annotationCanvasPixelHeight = 0;
+      editorZoom = 1;
+      editorPan = { x: 0, y: 0 };
       lastLoupeSampleCell = null;
       lastWindowProbePoint = null;
       if (overlayRoot) {
@@ -3425,6 +3615,9 @@
       hintNode.textContent = isColorMode()
         ? "取色模式：移动鼠标取样，单击或按 C 复制颜色后退出，Esc 取消。"
         : "拖拽选择区域，松开后可标注。Enter 复制，Esc 取消。";
+      if (isEditorMode()) {
+        hintNode.textContent = "编辑历史截图：Ctrl + 滚轮缩放，中键拖动平移；添加标注后可复制、保存或贴图，原图不会被覆盖。";
+      }
     }
 
     if (isColorMode()) {
@@ -3443,6 +3636,27 @@
     } else {
       buildColorControls();
     }
+
+    const longCaptureButton = toolbarNode?.querySelector<HTMLButtonElement>(
+      '[data-action="long"]'
+    );
+    if (longCaptureButton) {
+      longCaptureButton.hidden = isEditorMode();
+    }
+
+    if (isEditorMode()) {
+      selection = {
+        x: 0,
+        y: 0,
+        width: state.viewportWidth,
+        height: state.viewportHeight
+      };
+      lastSelection = { ...selection };
+      selectionCommitted = true;
+      dragMode = "idle";
+      setActiveTool("select", false);
+    }
+    applyEditorViewTransform();
 
     if (!state.imageDataUrl) {
       showStatus("Preparing screenshot...", true);
@@ -3473,16 +3687,24 @@
         compositeImageSource = dataUrl;
         root.style.backgroundImage = `url("${dataUrl}")`;
         root.style.backgroundSize = backgroundSize;
+        applyEditorViewTransform();
         root.dataset.ready = "true";
         allowWindowHintAfterReady = false;
+        if (isEditorMode()) {
+          renderSelection();
+        }
       } catch {
         if (overlayState !== pendingState) {
           return;
         }
         root.style.backgroundImage = `url("${dataUrl}")`;
         root.style.backgroundSize = backgroundSize;
+        applyEditorViewTransform();
         root.dataset.ready = "true";
         allowWindowHintAfterReady = false;
+        if (isEditorMode()) {
+          renderSelection();
+        }
       }
     })();
     hideStatus();
@@ -3521,6 +3743,7 @@
     bindToolbar();
     bindTextInput();
     bindKeyboard();
+    bindEditorViewportControls();
     bindOverlayStateSubscription();
   }
 

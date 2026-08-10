@@ -33,6 +33,12 @@ export interface LiteSnapCaptureProvider {
     x: number,
     y: number
   ): Promise<Rectangle | null>;
+  scrollWindowAtPoint?(
+    display: Display,
+    x: number,
+    y: number,
+    delta: number
+  ): Promise<boolean>;
   recognizeText(
     image: NativeImage,
     options?: LiteSnapRecognizeTextOptions
@@ -80,6 +86,7 @@ type NativeLiteSnapCaptureAddon = {
     x: number,
     y: number
   ): Rectangle | null;
+  scrollWindowAtPoint?(x: number, y: number, delta: number): boolean;
   recognizeText?(request: {
     data: Buffer;
     width: number;
@@ -161,6 +168,10 @@ export class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider 
 
   public async getWindowRectAtPoint(): Promise<Rectangle | null> {
     return null;
+  }
+
+  public async scrollWindowAtPoint(): Promise<boolean> {
+    return false;
   }
 
   public async recognizeText(
@@ -264,6 +275,24 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     }
 
     return toDisplayDipRect(display, rect);
+  }
+
+  public async scrollWindowAtPoint(
+    display: Display,
+    x: number,
+    y: number,
+    delta: number
+  ): Promise<boolean> {
+    if (typeof this.addon.scrollWindowAtPoint !== "function") {
+      return false;
+    }
+    const screenPoint = toPhysicalDisplayPoint(display, x, y);
+    try {
+      return Boolean(this.addon.scrollWindowAtPoint(screenPoint.x, screenPoint.y, delta));
+    } catch (error) {
+      console.warn("[litesnap] native scroll failed", error);
+      return false;
+    }
   }
 
   public async recognizeText(

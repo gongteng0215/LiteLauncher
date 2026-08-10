@@ -35,3 +35,34 @@ export function createLiteSnapOverlayWindow(display: Display): BrowserWindow {
 
   return window;
 }
+
+export function createLiteSnapLongCaptureController(display: Display): BrowserWindow {
+  const window = new BrowserWindow({
+    x: display.workArea.x + Math.max(12, Math.round((display.workArea.width - 360) / 2)),
+    y: display.workArea.y + Math.max(12, display.workArea.height - 132),
+    width: 360,
+    height: 112,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#151023",
+    show: false,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: true,
+    webPreferences: {
+      preload: path.join(__dirname, "../../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  window.setMenuBarVisibility(false);
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  window.loadFile(path.join(__dirname, "../../renderer/litesnap-long-capture.html"));
+  return window;
+}

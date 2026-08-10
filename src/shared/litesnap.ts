@@ -24,13 +24,51 @@ export type LiteSnapPanelAction =
 
 export type LiteSnapCaptureAction = "copy" | "save" | "pin";
 
-export type LiteSnapOverlayMode = "capture" | "color";
+export type LiteSnapOverlayMode = "capture" | "color" | "edit";
 
 export type LiteSnapHistorySource =
   | "capture-copy"
   | "capture-save"
   | "capture-pin"
-  | "clipboard-pin";
+  | "clipboard-pin"
+  | "history-edit";
+
+export type LiteSnapLongCapturePhase =
+  | "idle"
+  | "capturing"
+  | "paused"
+  | "finishing"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export type LiteSnapLongCaptureControl = "pause" | "resume" | "finish" | "cancel";
+
+export interface LiteSnapLongCaptureProgress {
+  phase: LiteSnapLongCapturePhase;
+  frameCount: number;
+  stitchedHeight: number;
+  elapsedMs: number;
+  message: string;
+}
+
+export type LiteSnapDiagnosticOperation =
+  | "capture"
+  | "long-capture"
+  | "history-edit"
+  | "ocr";
+
+export type LiteSnapDiagnosticStatus = "success" | "cancelled" | "failed";
+
+export interface LiteSnapDiagnosticEntry {
+  id: string;
+  operation: LiteSnapDiagnosticOperation;
+  status: LiteSnapDiagnosticStatus;
+  createdAt: number;
+  durationMs: number;
+  metrics: Record<string, number | string | boolean>;
+  message: string;
+}
 
 export type LiteSnapAnnotationTool =
   | "select"
@@ -66,7 +104,7 @@ export interface LiteSnapSettings {
 export interface LiteSnapPanelPayload {
   settings: LiteSnapSettings;
   statusMessage?: string;
-  preferredView?: "main" | "settings" | "ocr" | "translate" | "history";
+  preferredView?: "main" | "settings" | "ocr" | "translate" | "history" | "diagnostics";
   ocrText?: string;
   ocrIssue?: LiteSnapOcrIssue;
   translateSourceText?: string;
@@ -116,6 +154,8 @@ export interface LiteSnapOverlayState {
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
   recentColors: string[];
+  editorMode?: boolean;
+  longCapture?: LiteSnapLongCaptureProgress;
 }
 
 export interface LiteSnapCommitCaptureInput {
@@ -129,6 +169,10 @@ export interface LiteSnapCommitCaptureResult {
   ok: boolean;
   message: string;
   savedPath?: string;
+}
+
+export interface LiteSnapLongCaptureStartInput {
+  selection: LiteSnapOverlaySelection;
 }
 
 export interface LiteSnapRecognizeTextInput {

@@ -18,7 +18,11 @@ import {
   LiteSnapCloseAllPinnedWindowsResult,
   LiteSnapCommitCaptureInput,
   LiteSnapCommitCaptureResult,
+  LiteSnapDiagnosticEntry,
   LiteSnapHistoryItem,
+  LiteSnapLongCaptureControl,
+  LiteSnapLongCaptureProgress,
+  LiteSnapLongCaptureStartInput,
   LiteSnapOverlaySelection,
   LiteSnapOverlayState,
   LiteSnapPinnedWindowsToggleResult,
@@ -429,6 +433,12 @@ declare global {
       liteSnapClearHistory(): Promise<number>;
       liteSnapHistoryCopy(id: string): Promise<boolean>;
       liteSnapHistoryPin(id: string): Promise<boolean>;
+      liteSnapHistoryEdit(id: string): Promise<boolean>;
+      liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<boolean>;
+      liteSnapControlLongCapture(control: LiteSnapLongCaptureControl): Promise<boolean>;
+      liteSnapGetLongCaptureProgress(): Promise<LiteSnapLongCaptureProgress | null>;
+      liteSnapGetDiagnostics(): Promise<LiteSnapDiagnosticEntry[]>;
+      liteSnapClearDiagnostics(): Promise<number>;
       liteSnapGetOverlayState(): Promise<LiteSnapOverlayState | null>;
       liteSnapGetWindowRectAtPoint(
         x: number,
