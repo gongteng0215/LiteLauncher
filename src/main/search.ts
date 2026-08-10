@@ -8,6 +8,10 @@ import { UsageStore } from "./usage-store";
 import { buildWindowsStartAppItemId } from "./windows-startapp";
 
 const DYNAMIC_COMMAND_CACHE = new Map<string, LaunchItem>();
+// Dynamic PATH/WindowsApps probing is a convenience. It must never delay the
+// catalog and plugin matches that users typed for, especially when Windows
+// command discovery is slow or unavailable.
+const DYNAMIC_COMMAND_WAIT_BUDGET_MS = 650;
 
 function isSimpleCommandQuery(query: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{1,63}$/i.test(query);
@@ -294,6 +298,25 @@ async function resolveWindowsStartApp(
 
 const DYNAMIC_COMMAND_RESOLUTION_INFLIGHT = new Map<string, Promise<void>>();
 
+function waitForDynamicCommandResolution(resolution: Promise<void>): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const complete = (didFinish: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve(didFinish);
+    };
+    const timeout = setTimeout(() => complete(false), DYNAMIC_COMMAND_WAIT_BUDGET_MS);
+    resolution.then(
+      () => complete(true),
+      () => complete(true)
+    );
+  });
+}
+
 async function resolveDynamicCommandItem(
   cacheKey: string,
   normalized: string
@@ -380,15 +403,15 @@ export async function getDynamicSearchItems(
 
   const cacheKey = normalized.toLowerCase();
   if (!DYNAMIC_COMMAND_CACHE.has(cacheKey)) {
-    const inflight = DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.get(cacheKey);
-    if (inflight) {
-      await inflight;
-    } else {
-      const resolution = resolveDynamicCommandItem(cacheKey, normalized).finally(() => {
+    let resolution = DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.get(cacheKey);
+    if (!resolution) {
+      resolution = resolveDynamicCommandItem(cacheKey, normalized).finally(() => {
         DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.delete(cacheKey);
       });
       DYNAMIC_COMMAND_RESOLUTION_INFLIGHT.set(cacheKey, resolution);
-      await resolution;
+    }
+    if (!(await waitForDynamicCommandResolution(resolution))) {
+      return [];
     }
   }
 
@@ -413,6 +436,5 @@ export function searchItems(
 ): LaunchItem[] {
   return computeSearchItems(query, catalog, usageStore.toObject(), limit, options);
 }
-
 
 

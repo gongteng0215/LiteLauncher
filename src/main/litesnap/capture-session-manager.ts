@@ -118,7 +118,10 @@ const OVERLAY_READY_TIMEOUT_MS = 8000;
 const FRAME_CACHE_REFRESH_MAX_MS = 8000;
 const PREVIEW_JPEG_QUALITY = 92;
 const DISPLAY_FOLLOW_POLL_MS = 50;
-const LONG_CAPTURE_DELAY_MS = 220;
+// Real Windows applications often animate a wheel movement. Waiting a little
+// longer keeps the next frame out of the animation and makes overlap matching
+// deterministic instead of treating transient frames as a stitch failure.
+const LONG_CAPTURE_DELAY_MS = 360;
 const LONG_CAPTURE_MAX_FRAMES = 120;
 const LONG_CAPTURE_MAX_DURATION_MS = 120_000;
 const LONG_CAPTURE_MAX_HEIGHT = 30_000;
@@ -1548,17 +1551,35 @@ export class LiteSnapCaptureSessionManager {
     }
     const width = 360;
     const height = 112;
-    const preferredX = display.bounds.x + selection.x + Math.round((selection.width - width) / 2);
-    const preferredY = display.bounds.y + selection.y + selection.height + 12;
-    const maxX = display.workArea.x + display.workArea.width - width - 12;
-    const maxY = display.workArea.y + display.workArea.height - height - 12;
+    const padding = 12;
+    const selectionBounds = {
+      x: display.bounds.x + selection.x,
+      y: display.bounds.y + selection.y,
+      width: selection.width,
+      height: selection.height
+    };
+    const candidates = [
+      { x: selectionBounds.x + Math.round((selectionBounds.width - width) / 2), y: selectionBounds.y + selectionBounds.height + padding },
+      { x: selectionBounds.x + Math.round((selectionBounds.width - width) / 2), y: selectionBounds.y - height - padding },
+      { x: selectionBounds.x + selectionBounds.width + padding, y: selectionBounds.y + Math.round((selectionBounds.height - height) / 2) },
+      { x: selectionBounds.x - width - padding, y: selectionBounds.y + Math.round((selectionBounds.height - height) / 2) }
+    ];
+    const minX = display.workArea.x + padding;
+    const minY = display.workArea.y + padding;
+    const maxX = display.workArea.x + display.workArea.width - width - padding;
+    const maxY = display.workArea.y + display.workArea.height - height - padding;
+    const candidate = candidates.find(
+      (item) => item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY
+    ) ?? candidates[0];
     controller.setBounds({
-      x: Math.max(display.workArea.x + 12, Math.min(maxX, preferredX)),
-      y: Math.max(display.workArea.y + 12, Math.min(maxY, preferredY)),
+      x: Math.max(minX, Math.min(maxX, candidate.x)),
+      y: Math.max(minY, Math.min(maxY, candidate.y)),
       width,
       height
     });
-    controller.show();
+    // Do not steal focus from the scroll target. A click on the controller
+    // can still pause/finish/cancel; resuming re-activates the target natively.
+    controller.showInactive();
     controller.moveTop();
   }
 

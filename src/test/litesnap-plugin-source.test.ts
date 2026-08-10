@@ -1663,7 +1663,26 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   assert.match(captureSource, /reportLongCaptureFailure/);
   assert.match(captureSource, /LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION/);
   assert.match(providerSource, /scrollWindowAtPoint/);
-  assert.match(addonSource, /WM_MOUSEWHEEL/);
+  assert.match(
+    addonSource,
+    /FindExternalWindowAtPoint[\s\S]*WindowFromPoint[\s\S]*EnumWindows\(FindWindowAtPointProc/,
+    "long capture should prefer the app directly under the cursor and only enumerate as a fallback"
+  );
+  assert.match(
+    addonSource,
+    /ScrollWindowAtPoint[\s\S]*FindExternalWindowAtPoint[\s\S]*SendInput\(2, inputs/,
+    "long capture should target the underlying application and inject a real wheel event"
+  );
+  assert.match(
+    captureSource,
+    /const LONG_CAPTURE_DELAY_MS = 360/,
+    "long capture should wait for a real application scroll animation to settle"
+  );
+  assert.match(
+    captureSource,
+    /controller\.showInactive\(\)/,
+    "the long-capture controller must not take focus away from the scroll target"
+  );
   assert.match(databaseSource, /CREATE TABLE IF NOT EXISTS litesnap_diagnostics/);
   assert.match(diagnosticStoreSource, /LITESNAP_DIAGNOSTIC_MAX_ITEMS = 20/);
   assert.match(diagnosticStoreSource, /sanitizeDiagnosticMetrics/);

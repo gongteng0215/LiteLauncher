@@ -53,6 +53,30 @@ struct WindowSearchContext {
   DWORD current_process_id;
 };
 
+bool IsShellBackgroundWindow(HWND hwnd) {
+  wchar_t class_name[64]{};
+  if (GetClassNameW(
+          hwnd,
+          class_name,
+          static_cast<int>(sizeof(class_name) / sizeof(class_name[0]))) == 0) {
+    return false;
+  }
+  return lstrcmpW(class_name, L"Progman") == 0 ||
+         lstrcmpW(class_name, L"WorkerW") == 0 ||
+         lstrcmpW(class_name, L"Shell_TrayWnd") == 0 ||
+         lstrcmpW(class_name, L"Shell_SecondaryTrayWnd") == 0;
+}
+
+bool IsUsableExternalWindow(HWND hwnd, DWORD current_process_id) {
+  if (hwnd == nullptr || !IsWindowVisible(hwnd) || IsIconic(hwnd) ||
+      IsShellBackgroundWindow(hwnd)) {
+    return false;
+  }
+  DWORD process_id = 0;
+  GetWindowThreadProcessId(hwnd, &process_id);
+  return process_id != 0 && process_id != current_process_id;
+}
+
 bool ReadInt32Property(
     napi_env env,
     napi_value object,
@@ -475,13 +499,7 @@ napi_value CaptureDisplayFrames(napi_env env, napi_callback_info info) {
 
 BOOL CALLBACK FindWindowAtPointProc(HWND hwnd, LPARAM lparam) {
   auto* context = reinterpret_cast<WindowSearchContext*>(lparam);
-  if (hwnd == nullptr || !IsWindowVisible(hwnd) || IsIconic(hwnd)) {
-    return TRUE;
-  }
-
-  DWORD process_id = 0;
-  GetWindowThreadProcessId(hwnd, &process_id);
-  if (process_id == context->current_process_id) {
+  if (!IsUsableExternalWindow(hwnd, context->current_process_id)) {
     return TRUE;
   }
 
@@ -507,6 +525,25 @@ BOOL CALLBACK FindWindowAtPointProc(HWND hwnd, LPARAM lparam) {
   return TRUE;
 }
 
+HWND FindExternalWindowAtPoint(POINT point) {
+  const DWORD current_process_id = GetCurrentProcessId();
+  // The direct hit preserves Windows z-order and finds the actual app under
+  // the cursor. Only fall back to enumeration when LiteSnap's own controller
+  // is covering that coordinate.
+  HWND hit = WindowFromPoint(point);
+  HWND root = hit == nullptr ? nullptr : GetAncestor(hit, GA_ROOT);
+  if (IsUsableExternalWindow(root, current_process_id)) {
+    return root;
+  }
+
+  WindowSearchContext context{};
+  context.point = point;
+  context.result = nullptr;
+  context.current_process_id = current_process_id;
+  EnumWindows(FindWindowAtPointProc, reinterpret_cast<LPARAM>(&context));
+  return context.result;
+}
+
 napi_value GetWindowRectAtPoint(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value args[2];
@@ -522,13 +559,7 @@ napi_value GetWindowRectAtPoint(napi_env env, napi_callback_info info) {
     return CreateNull(env);
   }
 
-  WindowSearchContext context{};
-  context.point = POINT{ x, y };
-  context.result = nullptr;
-  context.current_process_id = GetCurrentProcessId();
-  EnumWindows(FindWindowAtPointProc, reinterpret_cast<LPARAM>(&context));
-
-  HWND hwnd = context.result;
+  HWND hwnd = FindExternalWindowAtPoint(POINT{ x, y });
   if (hwnd == nullptr) {
     return CreateNull(env);
   }
@@ -582,43 +613,46 @@ napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
   }
 
   const POINT point{ x, y };
-  HWND hwnd = WindowFromPoint(point);
-  if (hwnd == nullptr) {
+  // Resolve the selected application's top-level window. The resolver avoids
+  // LiteSnap's floating controller when it happens to overlap the selection.
+  HWND root = FindExternalWindowAtPoint(point);
+  if (root == nullptr) {
     napi_value result;
     napi_get_boolean(env, false, &result);
     return result;
   }
 
-  // Child controls frequently own the scroll surface; send there first and
-  // fall back to its root window.  The overlay is hidden before this call, so
-  // the selected application's HWND remains under the original screen point.
-  DWORD_PTR message_result = 0;
-  const LPARAM point_param = MAKELPARAM(static_cast<SHORT>(x), static_cast<SHORT>(y));
-  const WPARAM wheel_param = MAKEWPARAM(0, static_cast<SHORT>(delta));
-  LRESULT sent = SendMessageTimeoutW(
-      hwnd,
-      WM_MOUSEWHEEL,
-      wheel_param,
-      point_param,
-      SMTO_ABORTIFHUNG | SMTO_BLOCK,
-      350,
-      &message_result);
-  if (sent == 0) {
-    HWND root = GetAncestor(hwnd, GA_ROOT);
-    if (root != nullptr && root != hwnd) {
-      sent = SendMessageTimeoutW(
-          root,
-          WM_MOUSEWHEEL,
-          wheel_param,
-          point_param,
-          SMTO_ABORTIFHUNG | SMTO_BLOCK,
-          350,
-          &message_result);
-    }
-  }
+  // SendInput follows the same route as a physical wheel. Chromium, Office
+  // and many custom controls ignore a synthetic WM_MOUSEWHEEL message, so a
+  // successful SendMessageTimeout is not evidence that the content moved.
+  // Keep the user's cursor position unchanged after the queued input.
+  SetForegroundWindow(root);
+  const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int virtual_width = (std::max)(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+  const int virtual_height = (std::max)(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+  POINT original_point{};
+  GetCursorPos(&original_point);
+  const auto to_absolute = [](int value, int origin, int span) -> LONG {
+    const long long scaled =
+        (static_cast<long long>(value - origin) * 65535LL) /
+        static_cast<long long>((std::max)(1, span - 1));
+    return static_cast<LONG>(std::clamp(scaled, 0LL, 65535LL));
+  };
+  INPUT inputs[2]{};
+  inputs[0].type = INPUT_MOUSE;
+  inputs[0].mi.dx = to_absolute(x, virtual_left, virtual_width);
+  inputs[0].mi.dy = to_absolute(y, virtual_top, virtual_height);
+  inputs[0].mi.dwFlags =
+      MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+  inputs[1].type = INPUT_MOUSE;
+  inputs[1].mi.mouseData = static_cast<DWORD>(delta);
+  inputs[1].mi.dwFlags = MOUSEEVENTF_WHEEL;
+  const UINT injected = SendInput(2, inputs, sizeof(INPUT));
+  SetCursorPos(original_point.x, original_point.y);
 
   napi_value result;
-  napi_get_boolean(env, sent != 0, &result);
+  napi_get_boolean(env, injected == 2, &result);
   return result;
 }
 

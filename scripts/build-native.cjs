@@ -205,16 +205,19 @@ function buildWithCl(vcVars64PathValue, windowsSdkVersion) {
     `  /I"${cppWinrtIncludeDir}" ^`,
     `  /Fo"${addonObjPath}" ^`,
     `  "${addonSourcePath}"`,
+    "if errorlevel 1 exit /b %errorlevel%",
     "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
     "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /DHOST_BINARY=\\\"node.exe\\\" ^",
     `  /Fo"${hookObjPath}" ^`,
     `  "${hookSourcePath}"`,
+    "if errorlevel 1 exit /b %errorlevel%",
     "link /nologo /DLL ^",
     `  /OUT:"${builtAddonPath}" ^`,
     `  "${addonObjPath}" ^`,
     `  "${hookObjPath}" ^`,
     "  delayimp.lib /DELAYLOAD:node.exe /ignore:4199 ^",
     `  user32.lib gdi32.lib dwmapi.lib WindowsApp.lib "${vendorNodeLibPath}"`,
+    "if errorlevel 1 exit /b %errorlevel%",
     ""
   ].join("\r\n");
 
@@ -286,13 +289,9 @@ log("building LiteSnap native capture addon with cl.exe");
 const result = buildWithCl(vcVars64Path, windowsSdkVersion);
 
 if (result.status !== 0) {
-  if (publishPrebuiltAddon("Native compile failed.")) {
-    process.exit(0);
-  }
-  if (requireNativeBuild) {
-    process.exit(result.status ?? 1);
-  }
-  finishOptionalSkip("native build failed; Electron fallback will remain active");
+  fail(
+    `native build failed with exit code ${result.status ?? 1}; refusing to publish a stale native addon`
+  );
 }
 
 if (!fs.existsSync(builtAddonPath)) {
