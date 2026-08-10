@@ -200,7 +200,7 @@ function buildWithCl(vcVars64PathValue, windowsSdkVersion) {
     `@call "${vcVars64PathValue}"`,
     `if not exist "${releaseDir}" mkdir "${releaseDir}"`,
     "cl /nologo /c /EHsc /std:c++17 /GR- /W3 ^",
-    "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /DBUILDING_NODE_EXTENSION /DNODE_GYP_MODULE_NAME=litesnap_capture ^",
+    "  /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS /DBUILDING_NODE_EXTENSION /DNODE_GYP_MODULE_NAME=litesnap_capture ^",
     `  /I"${vendorIncludeDir}" ^`,
     `  /I"${cppWinrtIncludeDir}" ^`,
     `  /Fo"${addonObjPath}" ^`,
