@@ -59,9 +59,10 @@ jobs:
           if (-not (Test-Path "release/ecdict-fts.db")) {
             throw "release/ecdict-fts.db is missing after build-dictionary-pack"
           }
-          if (-not (Test-Path "dist/native/litesnap-capture.node")) {
-            throw "dist/native/litesnap-capture.node is missing after build"
+          if (-not (Test-Path "dist/native/litesnap-capture-manifest.json")) {
+            throw "dist/native/litesnap-capture-manifest.json is missing after build"
           }
+          node scripts/probe-native-addon.cjs --native-dir dist/native
           pnpm exec electron-builder --win --x64 --publish never
           node scripts/verify-release-output.cjs win
 

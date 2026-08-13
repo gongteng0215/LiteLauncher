@@ -143,6 +143,21 @@ test("desktop build workflow requires LiteSnap native addon on Windows", () => {
     /LITELAUNCHER_REQUIRE_NATIVE_CAPTURE:\s*"1"/,
     "windows build should require the LiteSnap native addon"
   );
+  assert.match(
+    workflow,
+    /Test-Path "dist\/native\/litesnap-capture-manifest\.json"/,
+    "windows packaging should require the active hashed-addon manifest"
+  );
+  assert.match(
+    workflow,
+    /node scripts\/probe-native-addon\.cjs --native-dir dist\/native/,
+    "windows packaging should probe the addon selected by the active manifest"
+  );
+  assert.doesNotMatch(
+    workflow,
+    /Test-Path "dist\/native\/litesnap-capture\.node"/,
+    "a clean release runner must not require the removed legacy addon filename"
+  );
 });
 
 test("build-native script discovers Visual Studio 2026 toolchains", () => {
@@ -151,7 +166,11 @@ test("build-native script discovers Visual Studio 2026 toolchains", () => {
     "utf8"
   );
 
-  assert.match(buildNativeSource, /prebuilt\/win-x64-electron-40\.node/);
+  assert.match(
+    buildNativeSource,
+    /"prebuilt",\s*"win-x64-electron-40\.node"/,
+    "native build should keep the Electron 40 prebuilt fallback"
+  );
   assert.match(buildNativeSource, /resolveVcVars64PathViaVswhere\(false\)/);
   assert.match(buildNativeSource, /"18"/);
 });
