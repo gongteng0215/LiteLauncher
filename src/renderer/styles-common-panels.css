@@ -1,0 +1,51 @@
+/* Shared plugin panel anatomy and independent body scrolling. */
+body.mode-plugin .panel-section.results,
+body.mode-cashflow .panel-section.results,
+body.mode-password .panel-section.results {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+body.mode-plugin .settings-panel,
+body.mode-cashflow .settings-panel,
+body.mode-password .settings-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--ll-space-4);
+  border-radius: var(--ll-radius-card);
+}
+
+body.mode-plugin .settings-form,
+body.mode-cashflow .settings-form,
+body.mode-password .settings-form {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settings-form > :where(h3, .settings-title):first-child,
+.plugin-panel-title {
+  margin-top: 0;
+}
+
+.webtools-toolbar,
+.litesnap-action-row,
+.clipboard-workbench-toolbar,
+.hardware-inspector-toolbar,
+.codeagent-switch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ll-space-2);
+  min-width: 0;
+}
+
+.settings-empty,
+.webtools-empty,
+.litesnap-empty,
+.clipboard-workbench-empty {
+  min-height: 72px;
+  padding: var(--ll-space-4);
+  border: 1px dashed var(--ll-line-strong);
+  border-radius: var(--ll-radius-control);
+  color: var(--ll-text-muted);
+}

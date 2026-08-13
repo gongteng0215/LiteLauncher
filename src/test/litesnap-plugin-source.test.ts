@@ -26,6 +26,18 @@ const captureManagerPath = path.join(
   "litesnap",
   "capture-session-manager.ts"
 );
+const captureRuntimePaths = [
+  captureManagerPath,
+  "capture-session-types.ts",
+  "frame-cache-service.ts",
+  "capture-image-service.ts",
+  "ocr-service.ts",
+  "capture-commit-service.ts",
+  "capture-diagnostic-service.ts",
+  "overlay-lifecycle-service.ts"
+].map((filePath) => path.isAbsolute(filePath)
+  ? filePath
+  : path.join(process.cwd(), "src", "main", "litesnap", filePath));
 const ocrCapabilityInstallerPath = path.join(
   process.cwd(),
   "src",
@@ -82,6 +94,21 @@ const panelImplsPath = path.join(
   "renderer",
   "plugin-panel-impls.ts"
 );
+const liteSnapPanelRuntimePaths = [
+  "panel-runtime-foundation.ts",
+  "panel-runtime-core.ts",
+  "panel-routing.ts",
+  "panel-modules/litesnap-panel.ts",
+  "plugin-panel-impls.ts"
+].map((filePath) => path.join(process.cwd(), "src", "renderer", filePath));
+
+function readCaptureRuntimeSource(): string {
+  return captureRuntimePaths.map((filePath) => fs.readFileSync(filePath, "utf8")).join("\n");
+}
+
+function readLiteSnapPanelRuntimeSource(): string {
+  return liteSnapPanelRuntimePaths.map((filePath) => fs.readFileSync(filePath, "utf8")).join("\n");
+}
 const overlayRendererPath = path.join(
   process.cwd(),
   "src",
@@ -236,7 +263,7 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
 
 test("LiteSnap main-process runtime scaffolding exists", () => {
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const captureProviderSource = fs.readFileSync(captureProviderPath, "utf8");
   const windowCoordinatorSource = fs.readFileSync(
     longCaptureWindowCoordinatorPath,
@@ -441,12 +468,12 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     captureSource,
-    /clipboard\.writeImage\(cropped\)[\s\S]*pinWindowManager\.pinImage\(cropped, placement\)/,
+    /clipboard\.writeImage\(image\)[\s\S]*pinWindowManager\.pinImage\(image, placement\)/,
     "LiteSnap pin action should also copy the screenshot to the clipboard"
   );
   assert.match(
     captureSource,
-    /const placement = \{[\s\S]*session\.display\.bounds\.x \+ input\.selection\.x[\s\S]*\}\s*;[\s\S]*clipboard\.writeImage\(cropped\)[\s\S]*pinWindowManager\.pinImage\(cropped, placement\)/,
+    /const placement = \{[\s\S]*session\.display\.bounds\.x \+ input\.selection\.x[\s\S]*\}\s*;[\s\S]*clipboard\.writeImage\(image\)[\s\S]*pinWindowManager\.pinImage\(image, placement\)/,
     "LiteSnap should pin captured screenshots at their original on-screen location and size"
   );
   assert.match(
@@ -507,7 +534,7 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
 });
 
 test("LiteSnap capture manager launches a first-party overlay instead of handing off to ms-screenclip", () => {
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const buildNativeSource = fs.readFileSync(buildNativeScriptPath, "utf8");
@@ -612,17 +639,17 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /if \(input\.action === "save"\) \{[\s\S]*const settings = await this\.settingsStore\.getSettings\(\)[\s\S]*await this\.cancelCapture\(\)[\s\S]*const savedPath = await this\.imageStore\.saveImage\(cropped, settings\)/,
+    /if \(input\.action === "save"\) \{[\s\S]*const settings = await this\.settingsStore\.getSettings\(\)[\s\S]*await this\.hooks\.cancelCapture\(\)[\s\S]*const savedPath = await this\.imageStore\.saveImage\(image, settings\)/,
     "LiteSnap save flow should close the topmost overlay before the potentially slow disk save starts"
   );
   assert.match(
     captureSource,
-    /private revealSavedCapture\(savedPath: string\): void[\s\S]*setTimeout\(\(\) => \{[\s\S]*shell\.showItemInFolder\(savedPath\)/,
+    /public revealSavedCapture\(savedPath: string\): void[\s\S]*setTimeout\(\(\) => \{[\s\S]*shell\.showItemInFolder\(savedPath\)/,
     "LiteSnap should reveal saved screenshots asynchronously so Explorer cannot block overlay teardown"
   );
   assert.match(
     captureSource,
-    /public prewarmCaptureCache\(\): void[\s\S]*this\.warmDisplayFrameCache\(/,
+    /public prewarmCaptureCache\(\): void[\s\S]*this\.frameCacheService\.warmDisplay\(/,
     "LiteSnap should warm the screenshot frame cache without waiting for the overlay window"
   );
   assert.match(
@@ -632,7 +659,7 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /async prewarmOverlay\(\): Promise<boolean>[\s\S]*await this\.waitForOverlayReady\(overlayWindow\)/,
+    /async prewarmOverlay\(\): Promise<boolean>[\s\S]*await this\.overlayLifecycle\.waitForReady\(overlayWindow\)/,
     "LiteSnap overlay prewarm should load the reusable overlay window without blocking on capture"
   );
   assert.match(
@@ -647,37 +674,37 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /await this\.prepareOverlayRenderer\(overlayWindow\)[\s\S]*this\.showPreparingOverlay\(overlayWindow\)/,
+    /await this\.overlayLifecycle\.prepareRenderer\(overlayWindow\)[\s\S]*this\.overlayLifecycle\.showPreparing\(overlayWindow\)/,
     "LiteSnap should reset the reused overlay renderer before showing the preparing overlay"
   );
   assert.match(
     captureSource,
-    /private activateOverlayWindow\([\s\S]*overlayWindow\.setIgnoreMouseEvents\(true\)/,
+    /public activate\([\s\S]*window\.setIgnoreMouseEvents\(true\)/,
     "LiteSnap should keep the preparing overlay mouse-transparent until the screenshot is ready"
   );
   assert.match(
     captureSource,
-    /private async showInteractiveOverlay\([\s\S]*overlayWindow\.setIgnoreMouseEvents\(false\)/,
+    /public async showInteractive\([\s\S]*window\.setIgnoreMouseEvents\(false\)/,
     "LiteSnap should re-enable pointer capture only after the screenshot becomes interactive"
   );
   assert.match(
     captureSource,
-    /const framesPromise = this\.resolveCaptureFrames\(display\)[\s\S]*captureDisplayFramesWithFallback\(/,
+    /const framesPromise = this\.frameCacheService\.resolve\(display\)[\s\S]*captureDisplayFramesWithFallback\(/,
     "LiteSnap should capture the display in parallel with overlay preparation"
   );
   assert.match(
     captureSource,
-    /await this\.showInteractiveOverlay\(overlayWindow\)/,
+    /await this\.overlayLifecycle\.showInteractive\(overlayWindow\)/,
     "LiteSnap should reveal the overlay once the screenshot frame is ready"
   );
   assert.match(
     captureSource,
-    /type CaptureSession = \{[\s\S]*previewImage: NativeImage \| null;[\s\S]*previewImageDataUrl: string \| null;[\s\S]*sourceImage: NativeImage \| null;/,
+    /type LiteSnapCaptureSession = \{[\s\S]*previewImage: NativeImage \| null;[\s\S]*previewImageDataUrl: string \| null;[\s\S]*sourceImage: NativeImage \| null;/,
     "LiteSnap should keep separate preview and source images for fast start plus full-quality crop"
   );
   assert.match(
     captureSource,
-    /this\.showPreparingOverlay\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(0\)/,
+    /this\.overlayLifecycle\.showPreparing\(overlayWindow\)[\s\S]*public showPreparing\([\s\S]*window\.setOpacity\(0\)/,
     "LiteSnap should keep the preparing overlay transparent until the screenshot is painted"
   );
   assert.match(
@@ -707,47 +734,47 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /resolveCompositedBuffer\([\s\S]*ArrayBuffer\.isView[\s\S]*nativeImage\.createFromBuffer/,
+    /resolveCommitImage\([\s\S]*nativeImage\.createFromBuffer[\s\S]*resolveCompositedBuffer\([\s\S]*ArrayBuffer\.isView/,
     "LiteSnap should accept binary composited PNG buffers instead of requiring base64 data URLs"
   );
   assert.match(
     captureSource,
-    /scheduleNextFrameCacheRefresh\([\s\S]*warmPreviewFrameCache\(display\)/,
+    /scheduleNextFrameCacheRefresh\([\s\S]*frameCacheService\.warmPreview\(display\)/,
     "LiteSnap idle frame-cache refresh should warm preview frames only"
   );
   assert.match(
     captureSource,
-    /captureAndStorePreviewCache\([\s\S]*sourceImage: null/,
+    /captureAndStorePreview\([\s\S]*sourceImage: null/,
     "LiteSnap preview-only cache entries should not retain a full source image"
   );
   assert.match(
     captureSource,
-    /resolveCaptureFrames\([\s\S]*captureSourceImageWithFallback\(/,
+    /public async resolve\([\s\S]*captureSourceImageWithFallback\(/,
     "LiteSnap should capture the full source image on demand when only preview cache is warm"
   );
   assert.match(
     captureSource,
-    /private warmDisplayFrameCache\(display: Display\): void/,
+    /public warmDisplay\(display: Display\): void/,
     "LiteSnap should prewarm a short-lived display frame cache for the next capture"
   );
   assert.match(
     captureSource,
-    /shouldRefreshIdleFrameCache\([\s\S]*idleFrameCachePaused/,
+    /idleFrameCachePaused \|\| !this\.frameCacheService\.shouldRefreshIdle\(\)/,
     "LiteSnap frame cache refresh should pause while the launcher window is focused"
   );
   assert.match(
     captureSource,
-    /pauseIdleFrameCache\(\): void[\s\S]*stopFrameCacheRefresh\(\)[\s\S]*abortFrameCacheWarm\(\)/,
+    /pauseIdleFrameCache\(\): void[\s\S]*stopFrameCacheRefresh\(\)[\s\S]*frameCacheService\.abortWarm\(\)/,
     "LiteSnap should stop background frame-cache work when the launcher gains focus"
   );
   assert.match(
     captureSource,
-    /startCaptureInternal\([\s\S]*stopFrameCacheRefresh\(\)[\s\S]*abortFrameCacheWarm\(\)/,
+    /startCaptureInternal\([\s\S]*stopFrameCacheRefresh\(\)[\s\S]*frameCacheService\.abortWarm\(\)/,
     "LiteSnap should abort idle frame-cache work before starting a real capture"
   );
   assert.match(
     captureSource,
-    /private async waitForOverlayFrameReady\([\s\S]*Promise<boolean>/,
+    /private async waitForFrameReady\([\s\S]*Promise<boolean>/,
     "LiteSnap should report whether the overlay screenshot background is ready"
   );
   assert.doesNotMatch(
@@ -802,23 +829,23 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /private parkOverlayWindow\([\s\S]*overlayWindow\.setOpacity\(0\)/,
+    /public park\([\s\S]*window\.setOpacity\(0\)/,
     "LiteSnap should keep the parked overlay transparent so the next show cannot flash the previous screenshot"
   );
   assert.match(
     captureSource,
-    /overlayWindow\.show\(\);[\s\S]*let frameReady = await this\.waitForOverlayFrameReady\(overlayWindow\)[\s\S]*overlayWindow\.setOpacity\(1\)/,
+    /window\.show\(\);[\s\S]*let frameReady = await this\.waitForFrameReady\(window\)[\s\S]*window\.setOpacity\(1\)/,
     "LiteSnap should reveal the overlay only after the new frame has painted into the transparent window"
   );
   assert.match(
     captureSource,
-    /waitForOverlayFrameReady\([\s\S]*dataset\.ready === "true"[\s\S]*2500[\s\S]*return result === true/,
+    /waitForFrameReady\([\s\S]*dataset\.ready === "true"[\s\S]*2500[\s\S]*return result === true/,
     "LiteSnap should wait for the renderer to decode and mark the screenshot ready before revealing the overlay"
   );
 });
 
 test("LiteSnap renderer panel actions call the preload bridge for capture and pin flows", () => {
-  const panelImplsSource = fs.readFileSync(panelImplsPath, "utf8");
+  const panelImplsSource = readLiteSnapPanelRuntimeSource();
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
   const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
   const stylesSource = fs.readFileSync(
@@ -1056,7 +1083,7 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   const overlayCssSource = fs.readFileSync(overlayCssPath, "utf8");
   const copyAssetsSource = fs.readFileSync(copyAssetsPath, "utf8");
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
 
   assert.match(overlayRendererSource, /copy|save|pin|cancel/);
@@ -1383,7 +1410,7 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   const channelsSource = fs.readFileSync(channelsPath, "utf8");
   const preloadSource = fs.readFileSync(preloadPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const nativeAddonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
@@ -1391,7 +1418,7 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   const mainIndexSource = fs.readFileSync(mainIndexPath, "utf8");
   const overlayHtmlSource = fs.readFileSync(overlayHtmlPath, "utf8");
   const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
-  const panelImplsSource = fs.readFileSync(panelImplsPath, "utf8");
+  const panelImplsSource = readLiteSnapPanelRuntimeSource();
 
   assert.match(
     nativeAddonSource,
@@ -1445,12 +1472,12 @@ test("LiteSnap wires Windows OCR text recognition end to end", () => {
   );
   assert.match(
     captureSource,
-    /prepareOcrImage\([\s\S]*resize\(/,
+    /prepareImage\([\s\S]*resize\(/,
     "OCR should upscale very small crops before recognition"
   );
   assert.match(
     captureSource,
-    /recognizeOcrWithFallback\([\s\S]*recognizeWithLanguage\(image, "chinese"\)/,
+    /recognizeWithFallback\([\s\S]*recognizeWithLanguage\(image, "chinese"\)/,
     "OCR should run Chinese and English engines sequentially instead of in parallel"
   );
   assert.match(
@@ -1639,7 +1666,7 @@ test("LiteSnap history store, color mode, and recent colors are wired", () => {
     path.join(process.cwd(), "src", "main", "litesnap", "history-store.ts"),
     "utf8"
   );
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
   const pluginSource = fs.readFileSync(
@@ -1678,7 +1705,7 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   const sharedSource = fs.readFileSync(sharedLiteSnapPath, "utf8");
   const channelsSource = fs.readFileSync(channelsPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
-  const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureSource = readCaptureRuntimeSource();
   const captureProviderSource = fs.readFileSync(captureProviderPath, "utf8");
   const windowCoordinatorSource = fs.readFileSync(
     longCaptureWindowCoordinatorPath,
@@ -1691,7 +1718,7 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
   const controllerSource = fs.readFileSync(longCaptureControllerHtmlPath, "utf8");
   const guideSource = fs.readFileSync(longCaptureGuideHtmlPath, "utf8");
-  const panelSource = fs.readFileSync(panelImplsPath, "utf8");
+  const panelSource = readLiteSnapPanelRuntimeSource();
   const databaseSource = fs.readFileSync(
     path.join(process.cwd(), "src", "main", "database.ts"),
     "utf8"
@@ -1780,7 +1807,7 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   assert.match(captureSource, /includeLayeredWindows: true/);
   assert.match(fs.readFileSync(overlayWindowPath, "utf8"), /setContentProtection\(true\)/);
   assert.match(captureSource, /session\.overlayWindow\.setContentProtection\(true\)/);
-  assert.match(captureSource, /showInteractiveOverlay[\s\S]*setContentProtection\(false\)/);
+  assert.match(captureSource, /showInteractive[\s\S]*setContentProtection\(false\)/);
   assert.match(captureProviderSource, /captureRegionImage/);
   assert.match(captureProviderSource, /resolveLiteSnapPhysicalCaptureRegion/);
   assert.match(captureSource, /LONG_CAPTURE_MAX_MEMORY_BYTES/);

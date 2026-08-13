@@ -543,3 +543,11 @@ body {
   font-size: 13px;
   box-shadow: 0 12px 30px rgba(2, 6, 23, 0.36);
 }
+
+.litesnap-overlay__tool:focus-visible,
+.litesnap-overlay__action:focus-visible,
+.litesnap-overlay__text-input:focus-visible {
+  outline: 1px solid var(--ll-accent-hover);
+  outline-offset: 1px;
+  box-shadow: var(--ll-focus-ring);
+}

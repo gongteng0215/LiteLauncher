@@ -7,6 +7,7 @@ import {
   isKeyboardDrivenSearchInputKey,
   shouldDebounceSearchRefresh
 } from "../shared/search-input";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 
@@ -38,7 +39,7 @@ test("keyboard-driven search input detection includes delete/backspace and exclu
 });
 
 test("renderer wires keyboard-aware debounce scheduling for search input", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.doesNotMatch(
     source,

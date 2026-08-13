@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 
 test("renderer error log formatter translates pin failures into readable Chinese summaries", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,
@@ -20,7 +21,7 @@ test("renderer error log formatter translates pin failures into readable Chinese
 });
 
 test("renderer settings surface launcher topmost diagnostics as dedicated summaries", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,
@@ -43,7 +44,7 @@ test("renderer settings surface launcher topmost diagnostics as dedicated summar
 });
 
 test("renderer settings surface pin failures as dedicated diagnostics and support copying raw logs", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,
@@ -68,7 +69,7 @@ test("renderer settings surface pin failures as dedicated diagnostics and suppor
 });
 
 test("renderer refreshes the open settings overlay after diagnostics change", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,
@@ -93,7 +94,7 @@ test("renderer refreshes the open settings overlay after diagnostics change", ()
 });
 
 test("renderer suspends blur auto-hide while plugin, settings, and cashflow panels are active", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,

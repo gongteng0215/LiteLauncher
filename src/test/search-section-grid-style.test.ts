@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 const ipcPath = path.join(process.cwd(), "src", "main", "ipc.ts");
@@ -115,7 +116,7 @@ test("settings diagnostics add a compact summary grid and updater detail rows", 
 });
 
 test("section grid column calculation runs after the grid is attached to the DOM", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
   const renderSearchSectionsMatch = rendererSource.match(
     /function renderSearchSections\(\): void \{([\s\S]*?)\n\}/
   );
@@ -134,7 +135,7 @@ test("section grid column calculation runs after the grid is attached to the DOM
 });
 
 test("section grid columns follow available width instead of per-section item count", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
   const columnFunctionMatch = rendererSource.match(
     /function getAdaptiveSectionGridColumns\([^)]*\): number \{([\s\S]*?)\n\}/
   );
@@ -181,7 +182,7 @@ test("search section title rows can wrap instead of forcing horizontal squeeze",
 });
 
 test("keyboard selection updates active rows without rebuilding the whole list", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
 
   assert.match(
     rendererSource,
@@ -196,7 +197,7 @@ test("keyboard selection updates active rows without rebuilding the whole list",
 });
 
 test("mouse hover updates active rows without rebuilding the whole list", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
 
   assert.match(
     rendererSource,
@@ -206,7 +207,7 @@ test("mouse hover updates active rows without rebuilding the whole list", () => 
 });
 
 test("home search sections are not capped by the legacy display limit of 20", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
 
   assert.equal(
@@ -249,7 +250,7 @@ test("home search sections are not capped by the legacy display limit of 20", ()
 });
 
 test("settings panel only exposes the search result limit that still affects rendering", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
   const fieldsMatch = rendererSource.match(
     /const fields: FieldItem\[\] = \[([\s\S]*?)\n  \];/
   );
@@ -263,7 +264,7 @@ test("settings panel only exposes the search result limit that still affects ren
 });
 
 test("settings panel exposes app update status and actions in the system section", () => {
-  const rendererSource = fs.readFileSync(rendererPath, "utf8");
+  const rendererSource = readRendererSourceBundle();
   const stylesSource = fs.readFileSync(stylesPath, "utf8");
 
   assert.match(

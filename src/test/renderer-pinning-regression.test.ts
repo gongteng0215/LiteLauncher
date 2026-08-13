@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { findLaunchEntryIndexByItemId } from "../renderer/pinning";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 test("findLaunchEntryIndexByItemId relocates a launch result after list refresh", () => {
   const entries = [
@@ -36,10 +37,7 @@ test("findLaunchEntryIndexByItemId relocates a launch result after list refresh"
 });
 
 test("renderer pin toggle treats pinned-section membership as pinned", () => {
-  const rendererSource = fs.readFileSync(
-    path.join(process.cwd(), "src", "renderer", "renderer.ts"),
-    "utf8"
-  );
+  const rendererSource = readRendererSourceBundle();
 
   assert.match(
     rendererSource,

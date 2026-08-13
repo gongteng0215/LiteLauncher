@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 const rendererHtmlPath = path.join(process.cwd(), "src", "renderer", "index.html");
@@ -19,6 +20,27 @@ const panelImplsPath = path.join(
   "renderer",
   "plugin-panel-impls.ts"
 );
+const panelRuntimePaths = [
+  "panel-runtime-foundation.ts",
+  "panel-modules/password-panel.ts",
+  "panel-modules/cashflow-panel.ts",
+  "panel-modules/codeagent-panel.ts",
+  "panel-modules/clipboard-panel.ts",
+  "panel-modules/hardware-panel.ts",
+  "panel-modules/webtools-data-runtime.ts",
+  "panel-modules/webtools-convert-runtime.ts",
+  "panel-modules/webtools-network-runtime.ts",
+  "panel-modules/webtools-security-runtime.ts",
+  "panel-runtime-core.ts",
+  "panel-modules/litesnap-panel.ts",
+  "panel-modules/dictionary-translate-panel.ts",
+  "panel-routing.ts",
+  "panel-modules/webtools-developer-panel.ts",
+  "panel-modules/webtools-structured-panel.ts",
+  "panel-modules/webtools-security-panel.ts",
+  "panel-modules/webtools-media-panel.ts",
+  "panel-modules/webtools-text-panel.ts"
+].map((relativePath) => path.join(process.cwd(), "src", "renderer", relativePath));
 const pluginRuntimeTypesPath = path.join(
   process.cwd(),
   "src",
@@ -36,11 +58,13 @@ const clipboardWorkbenchStorePath = path.join(
 );
 
 function readRendererSource(): string {
-  return fs.readFileSync(rendererPath, "utf8");
+  return readRendererSourceBundle();
 }
 
 function readPanelImplsSource(): string {
-  return fs.readFileSync(panelImplsPath, "utf8");
+  return [...panelRuntimePaths, panelImplsPath]
+    .map((filePath) => fs.readFileSync(filePath, "utf8"))
+    .join("\n");
 }
 
 function readPluginRuntimeTypesSource(): string {
@@ -4490,7 +4514,7 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
   );
   {
     const updateSelectionSourceMatch = panelImplsSource.match(
-      /const updateSelectionFromState = \(state: WebtoolsImagePromptState\): void => \{[\s\S]*?\n    \};/
+      /const updateSelectionFromState = \(state: WebtoolsImagePromptState\): void => \{[\s\S]*?\n\s+\};/
     );
     assert.ok(
       updateSelectionSourceMatch,

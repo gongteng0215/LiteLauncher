@@ -9,6 +9,7 @@ import { DEFAULT_CATALOG_SCAN_CONFIG } from "../shared/settings";
 import { IPC_CHANNELS } from "../shared/channels";
 import { LaunchItem } from "../shared/types";
 import { executeItem } from "../main/actions";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 import { buildCatalogWithOptions } from "../main/catalog";
 import {
   normalizePinnedItemIds,
@@ -650,10 +651,7 @@ test("home sections use a single IPC path with deduplicated icon attachment", ()
     path.join(process.cwd(), "src", "shared", "channels.ts"),
     "utf8"
   );
-  const rendererSource = fs.readFileSync(
-    path.join(process.cwd(), "src", "renderer", "renderer.ts"),
-    "utf8"
-  );
+  const rendererSource = readRendererSourceBundle();
   const preloadSource = fs.readFileSync(
     path.join(process.cwd(), "src", "preload", "index.ts"),
     "utf8"

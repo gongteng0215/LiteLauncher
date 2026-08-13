@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 
 test("renderer fallback merge scoring treats app:startapp items as preferred Windows Store app results", () => {
-  const source = fs.readFileSync(rendererPath, "utf8");
+  const source = readRendererSourceBundle();
 
   assert.match(
     source,

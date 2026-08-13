@@ -1,0 +1,60 @@
+/* Shared UI primitives. Loaded after the legacy styles so every surface uses one scale. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:not(.icon-action-btn):not(.result-action-icon):not(.litesnap-tool-btn),
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+select {
+  min-height: var(--ll-control-height);
+}
+
+button,
+input,
+select,
+textarea,
+[tabindex] {
+  outline: none;
+}
+
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  box-shadow: var(--ll-focus-ring);
+  outline: 1px solid var(--ll-accent-hover);
+  outline-offset: 1px;
+}
+
+:where(button, input, select, textarea):disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-status,
+.ui-empty-state,
+.ui-error-state {
+  border: 1px solid var(--ll-line);
+  border-radius: var(--ll-radius-control);
+  padding: var(--ll-space-3) var(--ll-space-4);
+  color: var(--ll-text-muted);
+  background: var(--ll-surface-input);
+}
+
+.ui-error-state {
+  border-color: color-mix(in srgb, var(--ll-danger) 45%, transparent);
+  color: var(--ll-danger);
+}

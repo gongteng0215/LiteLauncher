@@ -9,6 +9,16 @@
 :root {
   color-scheme: dark;
 
+  /* ========== Layout scale ========== */
+  --ll-space-1: 4px;
+  --ll-space-2: 8px;
+  --ll-space-3: 12px;
+  --ll-space-4: 16px;
+  --ll-space-6: 24px;
+  --ll-radius-control: 8px;
+  --ll-radius-card: 12px;
+  --ll-control-height: 36px;
+
   /* ========== Primary accent (edit these) ========== */
   --ll-accent: #9d63ff;
   --ll-accent-rgb: 157, 99, 255;

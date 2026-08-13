@@ -167,3 +167,10 @@ body {
 .selection-popup__icon-btn:hover {
   border-color: rgba(125, 211, 252, 0.55);
 }
+
+.selection-popup__btn:focus-visible,
+.selection-popup__icon-btn:focus-visible {
+  outline: 1px solid var(--ll-accent-hover);
+  outline-offset: 1px;
+  box-shadow: var(--ll-focus-ring);
+}

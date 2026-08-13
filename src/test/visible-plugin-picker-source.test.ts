@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 function readSource(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
 }
 
 test("settings visible plugin picker supports search, groups, pin, and restore", () => {
-  const rendererSource = readSource("src/renderer/renderer.ts");
+  const rendererSource = readRendererSourceBundle();
   const stylesSource = readSource("src/renderer/styles.css");
 
   assert.match(rendererSource, /function createVisiblePluginPicker/);

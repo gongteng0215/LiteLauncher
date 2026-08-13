@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readRendererSourceBundle } from "./renderer-source-bundle";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -15,7 +16,7 @@ const configSource = fs.readFileSync(
   "utf8"
 );
 const uiSource = fs.readFileSync(path.join(root, "src/renderer/command-center-ui.ts"), "utf8");
-const rendererSource = fs.readFileSync(path.join(root, "src/renderer/renderer.ts"), "utf8");
+const rendererSource = readRendererSourceBundle();
 const windowSource = fs.readFileSync(path.join(root, "src/main/window.ts"), "utf8");
 const mainIndexSource = fs.readFileSync(path.join(root, "src/main/index.ts"), "utf8");
 const ipcSource = fs.readFileSync(path.join(root, "src/main/ipc.ts"), "utf8");

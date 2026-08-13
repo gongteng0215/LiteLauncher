@@ -1,0 +1,92 @@
+/* Application shell and responsive page frame. */
+body {
+  min-width: 0;
+}
+
+.shell,
+.launcher-shell,
+.panel-section,
+.result-list,
+.settings-panel-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.launcher-shell {
+  overflow-x: hidden;
+}
+
+.section-heading,
+.settings-header,
+.settings-actions,
+.footer-actions,
+.pinned-header {
+  gap: var(--ll-space-3);
+}
+
+.section-heading__title,
+.settings-title,
+.settings-description,
+.result-title,
+.result-subtitle,
+button,
+label,
+legend {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1080px) {
+  .workspace-row,
+  .command-layout,
+  .settings-two-column,
+  .settings-layout-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .quick-panel,
+  .command-zone {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 960px) {
+  body,
+  .launcher-shell {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .launcher-shell {
+    padding-inline: var(--ll-space-3);
+  }
+
+  .recent-grid,
+  .pinned-grid,
+  .plugin-grid,
+  .tool-grid {
+    max-width: 100%;
+  }
+
+  .plugin-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-auto-rows: minmax(40px, auto);
+  }
+
+  .result-item.plugin-chip {
+    height: auto;
+    min-height: 40px;
+    align-items: center;
+  }
+
+  .result-item.plugin-chip .tile-title {
+    display: block;
+    max-height: none;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: unset;
+    -webkit-line-clamp: unset;
+  }
+}

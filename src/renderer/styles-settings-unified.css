@@ -1,0 +1,82 @@
+/* Settings page hierarchy: title, description, cards, form and visible actions. */
+.settings-panel {
+  border-radius: var(--ll-radius-card);
+  min-width: 0;
+}
+
+.settings-panel,
+.settings-panel-structured,
+.settings-form,
+.settings-group,
+.settings-section {
+  gap: var(--ll-space-4);
+}
+
+.settings-title {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.settings-description {
+  margin: var(--ll-space-1) 0 0;
+  line-height: 1.6;
+}
+
+.settings-card,
+.settings-section,
+.settings-group,
+.settings-diagnostic-summary-card {
+  border-radius: var(--ll-radius-card);
+}
+
+.settings-row,
+.settings-field,
+.settings-field-stack {
+  min-width: 0;
+  gap: var(--ll-space-2);
+}
+
+.settings-value,
+.settings-number,
+.settings-btn,
+.settings-textarea {
+  border-radius: var(--ll-radius-control);
+}
+
+.settings-value,
+.settings-number,
+.settings-textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
+.settings-actions,
+.settings-panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ll-space-2);
+  min-width: 0;
+}
+
+.settings-actions > *,
+.settings-panel-footer > * {
+  max-width: 100%;
+}
+
+@media (max-width: 960px) {
+  .cc-settings-overlay-dialog,
+  .settings-panel,
+  .settings-panel-structured {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-grid,
+  .settings-fields-grid,
+  .settings-form-grid,
+  .settings-two-column {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

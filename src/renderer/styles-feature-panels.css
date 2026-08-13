@@ -1,0 +1,135 @@
+/* Feature-level responsive rules. Keep selectors here instead of hardcoding shared colors. */
+:where(
+  .cashflow-layout,
+  .hardware-inspector-layout,
+  .clipboard-workbench-layout,
+  .codeagent-switch-layout,
+  .litesnap-settings-grid,
+  .webtools-json-layout,
+  .webtools-crypto-editors,
+  .webtools-jwt-layout,
+  .webtools-markdown-layout,
+  .webtools-image-base64-layout,
+  .webtools-api-request,
+  .webtools-qrcode-layout,
+  .dictionary-layout
+) > * {
+  min-width: 0;
+}
+
+@media (max-width: 1040px) {
+  :where(
+    .cashflow-layout,
+    .hardware-inspector-layout,
+    .clipboard-workbench-layout,
+    .codeagent-switch-layout,
+    .litesnap-settings-grid,
+    .webtools-json-layout,
+    .webtools-crypto-editors,
+    .webtools-jwt-layout,
+    .webtools-markdown-layout,
+    .webtools-image-base64-layout,
+    .webtools-api-request,
+    .webtools-qrcode-layout,
+    .dictionary-layout
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 960px) {
+  body.mode-plugin .result-list,
+  body.mode-cashflow .result-list,
+  body.mode-password .result-list {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .settings-actions .settings-btn,
+  .webtools-toolbar .settings-btn {
+    flex: 0 1 auto;
+    white-space: normal;
+  }
+
+  textarea,
+  pre,
+  code,
+  .settings-value,
+  .settings-wrap {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .cashflow-board {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: none !important;
+  }
+
+  .cashflow-column {
+    display: grid !important;
+  }
+
+  :where(
+    .cashflow-block-opportunity,
+    .cashflow-block-assets,
+    .cashflow-block-role,
+    .cashflow-block-ai,
+    .cashflow-block-reports,
+    .cashflow-block-logs
+  ) {
+    grid-area: auto !important;
+    grid-column: auto !important;
+  }
+
+  .codeagent-switch-master-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .codeagent-switch-list-panel,
+  .codeagent-switch-detail-hero {
+    position: static;
+  }
+
+  .codeagent-switch-tool-stack {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .clipboard-workbench-panel,
+  .clipboard-workbench-form,
+  .clipboard-workbench-shell {
+    height: auto;
+  }
+
+  .clipboard-workbench-shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto auto auto auto;
+    overflow: visible;
+  }
+
+  .litesnap-fields-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .clipboard-workbench-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .clipboard-workbench-toolbar > * {
+    width: 100%;
+  }
+
+  .clipboard-workbench-toolbar-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .clipboard-workbench-toolbar-meta {
+    justify-content: flex-start;
+  }
+
+  .clipboard-workbench-search-input {
+    flex-basis: 100%;
+  }
+}

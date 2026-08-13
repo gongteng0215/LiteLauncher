@@ -275,6 +275,48 @@ interface RendererPanelImpls {
   renderCodeAgentSwitchPanel(): void;
 }
 
+declare global {
+interface RendererPanelHost {
+  readonly list: HTMLUListElement;
+  readonly isDevelopment: boolean;
+  getActivePanel(): ActivePluginPanelState | null;
+  setStatus(message: string): void;
+  renderList(): void;
+  refreshEntries(query: string): Promise<void>;
+  backToSearch(): void;
+  copyText(text: string): Promise<boolean>;
+  getLegacyImpls(): RendererPanelImpls;
+  showRecovery(pluginId: string, message: string): void;
+  reportError(pluginId: string, message: string, detail?: string): void;
+}
+
+interface RendererPanelModule {
+  readonly id: string;
+  readonly pluginIds: readonly string[];
+  render(host: RendererPanelHost, panel: ActivePluginPanelState): void;
+  onOpen?(host: RendererPanelHost, panel: ActivePluginPanelState): void;
+  onEnter?(host: RendererPanelHost, panel: ActivePluginPanelState): void;
+  onEscape?(host: RendererPanelHost, panel: ActivePluginPanelState): boolean;
+  cleanup?(host: RendererPanelHost, activePluginId: string | null): void;
+}
+
+interface RendererPanelModuleRegistry {
+  configureHost(host: RendererPanelHost): void;
+  clearHost(): void;
+  register(module: RendererPanelModule): void;
+  unregister(moduleId: string): void;
+  get(pluginId: string): RendererPanelModule | null;
+  require(pluginId: string): RendererPanelModule;
+  listPluginIds(): string[];
+  listModuleIds(): string[];
+  render(pluginId: string, panel: ActivePluginPanelState): boolean;
+  onOpen(pluginId: string, panel: ActivePluginPanelState): boolean;
+  onEnter(pluginId: string, panel: ActivePluginPanelState): boolean;
+  onEscape(pluginId: string, panel: ActivePluginPanelState): boolean;
+  cleanup(activePluginId: string | null): void;
+}
+}
+
 
 interface RendererCommandCenterConfig {
   quickEntries: Array<{
@@ -380,6 +422,7 @@ declare global {
       }>;
     };
     __LL_PANEL_IMPLS__?: RendererPanelImpls;
+    __LL_PANEL_MODULES__?: RendererPanelModuleRegistry;
     __LL_PREPARE_HIDE__?: () => void;
     __LL_UI_THEME__?: {
       DEFAULT: UiThemeConfig;
