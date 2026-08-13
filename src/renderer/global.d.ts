@@ -435,6 +435,7 @@ declare global {
       liteSnapHistoryPin(id: string): Promise<boolean>;
       liteSnapHistoryEdit(id: string): Promise<boolean>;
       liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<boolean>;
+      liteSnapScrollLongCapture(deltaY: number): Promise<boolean>;
       liteSnapControlLongCapture(control: LiteSnapLongCaptureControl): Promise<boolean>;
       liteSnapGetLongCaptureProgress(): Promise<LiteSnapLongCaptureProgress | null>;
       liteSnapGetDiagnostics(): Promise<LiteSnapDiagnosticEntry[]>;

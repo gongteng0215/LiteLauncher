@@ -23,9 +23,14 @@ let electronProcess = null;
 let shuttingDown = false;
 let pendingRestart = false;
 let bundleReadyLogged = false;
+let initialStartAttempted = false;
 let restartTimer = null;
 let readinessInterval = null;
 let distWatcher = null;
+let restartInFlight = null;
+let restartRequested = false;
+let queuedRestartReason = "";
+const terminationTasks = new WeakMap();
 
 function isBundleReady() {
   return [
@@ -46,7 +51,12 @@ function terminateProcessTree(child) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
+  const existing = terminationTasks.get(child);
+  if (existing) {
+    return existing;
+  }
+
+  const task = new Promise((resolve) => {
     const done = () => resolve();
     child.once("exit", done);
 
@@ -69,12 +79,16 @@ function terminateProcessTree(child) {
       resolve();
     }
   });
+  terminationTasks.set(child, task);
+  void task.finally(() => terminationTasks.delete(child));
+  return task;
 }
 
 function startElectron() {
   if (shuttingDown || electronProcess || !isBundleReady()) {
     return;
   }
+  initialStartAttempted = true;
 
   const electronEnv = {
     ...process.env,
@@ -114,6 +128,9 @@ function startElectron() {
   electronProcess.once("error", (error) => {
     log(`failed to start Electron: ${error.message}`);
     electronProcess = null;
+    // A spawn failure is different from Electron exiting normally. Allow the
+    // readiness loop to retry once the executable/files become available.
+    initialStartAttempted = false;
   });
 }
 
@@ -122,16 +139,35 @@ async function restartElectron(reason) {
     return;
   }
 
-  if (!electronProcess) {
-    log(`bundle changed (${reason}), starting Electron`);
-    startElectron();
-    return;
+  if (restartInFlight) {
+    restartRequested = true;
+    queuedRestartReason = reason;
+    return restartInFlight;
   }
 
-  log(`bundle changed (${reason}), restarting Electron`);
-  pendingRestart = true;
-  await terminateProcessTree(electronProcess);
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  restartInFlight = (async () => {
+    let currentReason = reason;
+    do {
+      restartRequested = false;
+      if (shuttingDown || !isBundleReady()) {
+        return;
+      }
+      if (!electronProcess) {
+        log(`bundle changed (${currentReason}), starting Electron`);
+        startElectron();
+      } else {
+        log(`bundle changed (${currentReason}), restarting Electron`);
+        pendingRestart = true;
+        await terminateProcessTree(electronProcess);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      currentReason = queuedRestartReason || currentReason;
+      queuedRestartReason = "";
+    } while (restartRequested);
+  })().finally(() => {
+    restartInFlight = null;
+  });
+  return restartInFlight;
 }
 
 function scheduleRestart(reason) {
@@ -181,12 +217,16 @@ function startReadinessLoop() {
       bundleReadyLogged = true;
       log("bundle ready");
     }
-    startElectron();
+    if (!initialStartAttempted) {
+      startElectron();
+    }
   }, 250);
 }
 
 async function shutdown() {
   shuttingDown = true;
+  restartRequested = false;
+  queuedRestartReason = "";
   if (restartTimer !== null) {
     clearTimeout(restartTimer);
     restartTimer = null;

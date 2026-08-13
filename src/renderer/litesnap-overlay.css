@@ -1,3 +1,12 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
 .litesnap-overlay {
   position: fixed;
   inset: 0;
@@ -15,6 +24,56 @@
 
 .litesnap-overlay[data-ready="false"] .litesnap-overlay__hint,
 .litesnap-overlay[data-ready="false"] .litesnap-overlay__status {
+  display: none;
+}
+
+.litesnap-overlay[data-long-capture-guide="true"] {
+  background: transparent !important;
+  cursor: default;
+}
+
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__canvas,
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__toolbar,
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__hint,
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__loupe,
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__brush-preview {
+  display: none !important;
+}
+
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__selection {
+  display: none !important;
+}
+
+.litesnap-overlay[data-long-capture-guide="true"] .litesnap-overlay__selection .litesnap-overlay__handle {
+  display: none;
+}
+
+.litesnap-overlay[data-scrollable-long-editor="true"] {
+  background-image: none !important;
+  background-color: rgba(6, 8, 14, 0.58);
+}
+
+.litesnap-overlay__editor-viewport {
+  position: absolute;
+  z-index: 7;
+  overflow: auto;
+  background: #0a0f16;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  scrollbar-color: rgba(157, 99, 255, 0.8) rgba(8, 12, 20, 0.75);
+}
+
+.litesnap-overlay__editor-viewport img {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+}
+
+.litesnap-overlay[data-scrollable-long-editor="true"] .litesnap-overlay__selection {
+  pointer-events: none;
+}
+
+.litesnap-overlay[data-scrollable-long-editor="true"] .litesnap-overlay__selection .litesnap-overlay__handle {
   display: none;
 }
 

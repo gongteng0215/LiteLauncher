@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const net = require("net");
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -6,6 +7,8 @@ const nodeCommand = process.execPath;
 
 const children = [];
 let shuttingDown = false;
+let devLockServer = null;
+const DEV_LOCK_PORT = 41971;
 
 function log(message) {
   console.info(`[dev] ${message}`);
@@ -76,6 +79,10 @@ async function shutdown(exitCode = 0) {
 
   const activeChildren = children.splice(0, children.length);
   await Promise.all(activeChildren.map((child) => terminateChild(child)));
+  if (devLockServer) {
+    await new Promise((resolve) => devLockServer.close(() => resolve()));
+    devLockServer = null;
+  }
   process.exit(exitCode);
 }
 
@@ -87,9 +94,21 @@ process.on("SIGTERM", () => {
   void shutdown(0);
 });
 
-log("starting TypeScript watch, asset watch and Electron dev runner");
-spawnChild("pnpm", ["exec", "tsc", "--watch", "--preserveWatchOutput"], "tsc", {
-  shell: process.platform === "win32"
+devLockServer = net.createServer();
+devLockServer.once("error", (error) => {
+  if (error && error.code === "EADDRINUSE") {
+    console.error("[dev] another LiteLauncher dev runner is already active; not starting a duplicate");
+    process.exit(0);
+    return;
+  }
+  console.error(`[dev] failed to acquire dev-runner lock: ${error.message}`);
+  process.exit(1);
 });
-spawnChild(nodeCommand, [path.join("scripts", "copy-assets.cjs"), "--watch"], "copy-assets");
-spawnChild(nodeCommand, [path.join("scripts", "dev-electron.cjs")], "electron");
+devLockServer.listen(DEV_LOCK_PORT, "127.0.0.1", () => {
+  log("starting TypeScript watch, asset watch and Electron dev runner");
+  spawnChild("pnpm", ["exec", "tsc", "--watch", "--preserveWatchOutput"], "tsc", {
+    shell: process.platform === "win32"
+  });
+  spawnChild(nodeCommand, [path.join("scripts", "copy-assets.cjs"), "--watch"], "copy-assets");
+  spawnChild(nodeCommand, [path.join("scripts", "dev-electron.cjs")], "electron");
+});

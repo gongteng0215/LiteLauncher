@@ -134,6 +134,7 @@ type LiteSnapProvider = {
   historyPin: (id: string) => Promise<boolean>;
   historyEdit: (id: string) => Promise<boolean>;
   startLongCapture: (input: LiteSnapLongCaptureStartInput) => Promise<boolean>;
+  scrollLongCapture: (deltaY: number) => Promise<boolean>;
   controlLongCapture: (control: LiteSnapLongCaptureControl) => Promise<boolean>;
   getLongCaptureProgress: () => LiteSnapLongCaptureProgress | null;
   getDiagnostics: () => Promise<LiteSnapDiagnosticEntry[]>;
@@ -287,6 +288,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.liteSnapHistoryPin,
   IPC_CHANNELS.liteSnapHistoryEdit,
   IPC_CHANNELS.liteSnapStartLongCapture,
+  IPC_CHANNELS.liteSnapScrollLongCapture,
   IPC_CHANNELS.liteSnapControlLongCapture,
   IPC_CHANNELS.liteSnapGetLongCaptureProgress,
   IPC_CHANNELS.liteSnapGetDiagnostics,
@@ -1643,12 +1645,17 @@ export function registerIpcHandlers(
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.liteSnapScrollLongCapture, async (_, deltaYInput: unknown) => {
+    const deltaY =
+      typeof deltaYInput === "number" && Number.isFinite(deltaYInput)
+        ? deltaYInput
+        : 0;
+    return options.liteSnapProvider.scrollLongCapture(deltaY);
+  });
+
   ipcMain.handle(IPC_CHANNELS.liteSnapControlLongCapture, async (_, controlInput: unknown) => {
     const control =
-      controlInput === "pause" ||
-      controlInput === "resume" ||
-      controlInput === "finish" ||
-      controlInput === "cancel"
+      controlInput === "capture" || controlInput === "finish" || controlInput === "cancel"
         ? controlInput
         : "cancel";
     return options.liteSnapProvider.controlLongCapture(control);

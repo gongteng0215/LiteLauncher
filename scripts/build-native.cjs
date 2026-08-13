@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -14,7 +15,16 @@ const builtAddonPath = path.join(
   "litesnap_capture.node"
 );
 const distNativeDir = path.join(projectRoot, "dist", "native");
-const distAddonPath = path.join(distNativeDir, "litesnap-capture.node");
+const activeManifestPath = path.join(distNativeDir, "litesnap-capture-manifest.json");
+const HASHED_ADDON_PATTERN = /^litesnap-capture-([a-f0-9]{16})\.node$/;
+const MANIFEST_SCHEMA_VERSION = 1;
+const REQUIRED_EXPORTS = [
+  "captureDisplayRect",
+  "supportsLayeredWindowExclusion",
+  "getWindowRectAtPoint",
+  "scrollWindowAtPoint",
+  "recognizeText"
+];
 const prebuiltAddonPath = path.join(
   nativeRoot,
   "prebuilt",
@@ -123,44 +133,133 @@ function finishOptionalSkip(message) {
   process.exit(0);
 }
 
+function sha256File(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function readActiveManifest() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(activeManifestPath, "utf8"));
+    if (
+      parsed?.schemaVersion !== MANIFEST_SCHEMA_VERSION ||
+      typeof parsed.fileName !== "string" ||
+      !HASHED_ADDON_PATTERN.test(parsed.fileName) ||
+      typeof parsed.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(parsed.sha256) ||
+      typeof parsed.fingerprint !== "string"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isManifestAddonValid(manifest, expectedFingerprint) {
+  if (!manifest || manifest.fingerprint !== expectedFingerprint) {
+    return false;
+  }
+  const addonPath = path.join(distNativeDir, manifest.fileName);
+  if (!fs.existsSync(addonPath) || fs.statSync(addonPath).size <= 0) {
+    return false;
+  }
+  return sha256File(addonPath) === manifest.sha256;
+}
+
+function computeBuildFingerprint(vcVars64PathValue, windowsSdkVersion) {
+  const hash = crypto.createHash("sha256");
+  const inputs = [
+    addonSourcePath,
+    path.join(nativeRoot, "src", "win_delay_load_hook.cc"),
+    path.join(vendorIncludeDir, "node_api.h"),
+    path.join(vendorIncludeDir, "js_native_api.h")
+  ];
+  for (const inputPath of inputs) {
+    hash.update(path.relative(projectRoot, inputPath));
+    hash.update(fs.readFileSync(inputPath));
+  }
+  const nodeLibStat = fs.statSync(vendorNodeLibPath);
+  hash.update(JSON.stringify({
+    arch: process.arch,
+    napi: Number(process.versions.napi ?? 0),
+    vcVars64Path: path.normalize(vcVars64PathValue),
+    windowsSdkVersion,
+    nodeLibSize: nodeLibStat.size,
+    nodeLibMtimeMs: Math.round(nodeLibStat.mtimeMs),
+    compiler: "cl:/EHsc:/std:c++17:/GR-:/W3",
+    linker: "delayimp:user32:gdi32:dwmapi:WindowsApp"
+  }));
+  return hash.digest("hex");
+}
+
+function writeActiveManifest(manifest) {
+  fs.mkdirSync(distNativeDir, { recursive: true });
+  const temporaryPath = `${activeManifestPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  fs.renameSync(temporaryPath, activeManifestPath);
+}
+
+function cleanupHashedAddons(activeFileName) {
+  const candidates = fs
+    .readdirSync(distNativeDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && HASHED_ADDON_PATTERN.test(entry.name))
+    .map((entry) => ({
+      name: entry.name,
+      path: path.join(distNativeDir, entry.name),
+      mtimeMs: fs.statSync(path.join(distNativeDir, entry.name)).mtimeMs
+    }))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  const keep = new Set([activeFileName]);
+  const fallback = candidates.find((candidate) => candidate.name !== activeFileName);
+  if (fallback) {
+    keep.add(fallback.name);
+  }
+  for (const candidate of candidates) {
+    if (keep.has(candidate.name)) {
+      continue;
+    }
+    try {
+      fs.unlinkSync(candidate.path);
+      log(`removed stale ${path.relative(projectRoot, candidate.path)}`);
+    } catch (error) {
+      log(`could not remove stale ${path.relative(projectRoot, candidate.path)}: ${error.code ?? error}`);
+    }
+  }
+}
+
+function publishAddon(sourcePath, fingerprint, reason) {
+  fs.mkdirSync(distNativeDir, { recursive: true });
+  const sha256 = sha256File(sourcePath);
+  const fileName = `litesnap-capture-${sha256.slice(0, 16)}.node`;
+  const destinationPath = path.join(distNativeDir, fileName);
+  if (!fs.existsSync(destinationPath) || sha256File(destinationPath) !== sha256) {
+    fs.copyFileSync(sourcePath, destinationPath);
+  }
+  writeActiveManifest({
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    fileName,
+    sha256,
+    fingerprint,
+    napiVersion: Number(process.versions.napi ?? 0),
+    arch: process.arch,
+    requiredExports: REQUIRED_EXPORTS,
+    builtAt: new Date().toISOString()
+  });
+  log(`${reason} published ${path.relative(projectRoot, destinationPath)}`);
+  cleanupHashedAddons(fileName);
+}
+
 function publishPrebuiltAddon(reason) {
   if (!fs.existsSync(prebuiltAddonPath)) {
     return false;
   }
-
-  fs.mkdirSync(distNativeDir, { recursive: true });
-  fs.copyFileSync(prebuiltAddonPath, distAddonPath);
-  log(
-    `${reason} Using checked-in prebuilt addon ${path.relative(projectRoot, prebuiltAddonPath)}.`
+  publishAddon(
+    prebuiltAddonPath,
+    `prebuilt:${sha256File(prebuiltAddonPath)}`,
+    `${reason} Using checked-in prebuilt addon.`
   );
   return true;
-}
-
-function copyBuiltAddon() {
-  fs.mkdirSync(distNativeDir, { recursive: true });
-  try {
-    fs.copyFileSync(builtAddonPath, distAddonPath);
-  } catch (error) {
-    if (error && error.code === "EBUSY") {
-      const message =
-        "dist/native/litesnap-capture.node is locked by a running LiteLauncher/Electron instance. Stop pnpm dev or close Electron before rebuilding the native addon.";
-      if (
-        fs.existsSync(distAddonPath) &&
-        fs.statSync(distAddonPath).size > 0
-      ) {
-        log(
-          `${message} Keeping the existing ${path.relative(projectRoot, distAddonPath)}.`
-        );
-        return;
-      }
-      if (requireNativeBuild) {
-        fail(message);
-      }
-      finishOptionalSkip(`${message} Keeping the existing native addon.`);
-    }
-    throw error;
-  }
-  log(`published ${path.relative(projectRoot, distAddonPath)}`);
 }
 
 function getLatestWindowsSdkVersion() {
@@ -283,6 +382,14 @@ if (!vcVars64Path || !windowsSdkVersion) {
   finishOptionalSkip("VS/Windows SDK environment is incomplete; skipping optional native build");
 }
 
+const buildFingerprint = computeBuildFingerprint(vcVars64Path, windowsSdkVersion);
+const currentManifest = readActiveManifest();
+if (isManifestAddonValid(currentManifest, buildFingerprint)) {
+  log(`native inputs unchanged; using ${currentManifest.fileName}`);
+  cleanupHashedAddons(currentManifest.fileName);
+  process.exit(0);
+}
+
 log(`using vcvars64 at ${vcVars64Path}`);
 log(`using Windows SDK ${windowsSdkVersion}`);
 log("building LiteSnap native capture addon with cl.exe");
@@ -304,4 +411,4 @@ if (!fs.existsSync(builtAddonPath)) {
   finishOptionalSkip("native build completed without an addon output; keeping Electron fallback");
 }
 
-copyBuiltAddon();
+publishAddon(builtAddonPath, buildFingerprint, "Native build succeeded;");

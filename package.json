@@ -1,6 +1,6 @@
 {
   "name": "litelauncher",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "description": "LiteLauncher lightweight desktop launcher",
   "main": "dist/main/index.js",
   "scripts": {
@@ -17,7 +17,7 @@
     "test:windows-alias": "pnpm run build && node dist/test/windows-app-alias-regression.test.js",
     "test:e2e:windows-codex": "pnpm run build && node dist/test/e2e-windows-codex-regression.test.js",
     "test:e2e:litesnap": "pnpm run build && node dist/test/e2e-litesnap-overlay.test.js",
-    "test:litesnap:logic": "pnpm run build && node dist/test/litesnap-stitch.test.js && node dist/test/litesnap-diagnostic-store.test.js && node dist/test/litesnap-plugin-source.test.js",
+    "test:litesnap:logic": "pnpm run build && node dist/test/litesnap-stitch.test.js && node dist/test/litesnap-long-capture-coordinator.test.js && node dist/test/litesnap-capture-region.test.js && node dist/test/litesnap-native-addon-path.test.js && node dist/test/litesnap-diagnostic-store.test.js && node dist/test/litesnap-plugin-source.test.js",
     "test:e2e:topmost": "pnpm run build && node dist/test/e2e-launcher-topmost-smoke.test.js",
     "test:e2e:dictionary": "pnpm run build && node dist/test/e2e-dictionary-selection-smoke.test.js",
     "test:e2e:smoke": "pnpm run build && node dist/test/e2e-launcher-smoke.test.js && node dist/test/e2e-launcher-topmost-smoke.test.js && node dist/test/e2e-litesnap-overlay.test.js && node dist/test/e2e-settings-error-log-smoke.test.js && node dist/test/e2e-search-layout-smoke.test.js && node dist/test/e2e-plugin-panels-smoke.test.js && node dist/test/e2e-plugin-panel-layout-smoke.test.js && node dist/test/e2e-dictionary-selection-smoke.test.js",
@@ -83,6 +83,7 @@
     "asar": true,
     "asarUnpack": [
       "**/*.node",
+      "**/litesnap-capture-manifest.json",
       "**/assets/ecdict.db"
     ],
     "mac": {
@@ -132,11 +133,6 @@
         "provider": "github",
         "releaseType": "release"
       }
-    ]
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron"
     ]
   },
   "packageManager": "pnpm@10.28.2"

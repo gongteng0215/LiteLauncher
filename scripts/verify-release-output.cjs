@@ -1,5 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 const yaml = require("js-yaml");
 
 const VALID_PLATFORMS = new Set(["win", "mac", "mac-release"]);
@@ -102,19 +104,39 @@ for (const entry of files) {
 }
 
 if (platform === "win") {
-  const nativeAddonPath = path.join(
+  const nativeDirectory = path.join(
     releaseDir,
     "win-unpacked",
     "resources",
     "app.asar.unpacked",
     "dist",
-    "native",
-    "litesnap-capture.node"
+    "native"
   );
-  if (!fs.existsSync(nativeAddonPath)) {
+  const nativeManifestPath = path.join(nativeDirectory, "litesnap-capture-manifest.json");
+  if (!fs.existsSync(nativeManifestPath)) {
     fail(
-      `missing packaged native addon at ${path.relative(projectRoot, nativeAddonPath)}`
+      `missing packaged native manifest at ${path.relative(projectRoot, nativeManifestPath)}`
     );
+  }
+  const nativeManifest = JSON.parse(fs.readFileSync(nativeManifestPath, "utf8"));
+  const nativeAddonPath = path.join(nativeDirectory, path.basename(String(nativeManifest.fileName ?? "")));
+  if (!fs.existsSync(nativeAddonPath)) {
+    fail(`missing active packaged native addon at ${path.relative(projectRoot, nativeAddonPath)}`);
+  }
+  const nativeSha256 = crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(nativeAddonPath))
+    .digest("hex");
+  if (nativeSha256 !== nativeManifest.sha256) {
+    fail("packaged native addon hash does not match its manifest");
+  }
+  const probe = spawnSync(
+    process.execPath,
+    [path.join(projectRoot, "scripts", "probe-native-addon.cjs"), "--native-dir", nativeDirectory],
+    { cwd: projectRoot, encoding: "utf8", windowsHide: true }
+  );
+  if (probe.status !== 0) {
+    fail(`packaged native addon probe failed:\n${probe.stdout ?? ""}\n${probe.stderr ?? ""}`);
   }
 }
 

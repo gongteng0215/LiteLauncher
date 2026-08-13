@@ -2853,6 +2853,8 @@ async function bootstrap(): Promise<void> {
             return liteSnapCaptureSessionManager.startHistoryEdit(image);
           },
           startLongCapture: (input) => liteSnapCaptureSessionManager.startLongCapture(input),
+          scrollLongCapture: (deltaY) =>
+            liteSnapCaptureSessionManager.scrollLongCapture(deltaY),
           controlLongCapture: (control) =>
             liteSnapCaptureSessionManager.controlLongCapture(control),
           getLongCaptureProgress: () =>

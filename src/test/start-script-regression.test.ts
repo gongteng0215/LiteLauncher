@@ -130,4 +130,19 @@ test("dev-electron only restarts for main-process bundle changes", () => {
     /spawn\(electronBinary,\s*\["\."\]/,
     "dev-electron should start Electron without replace-instance args"
   );
+  assert.match(
+    source,
+    /if \(!initialStartAttempted\) \{\s*startElectron\(\);\s*\}/,
+    "a normal Electron exit must not be relaunched forever by the readiness loop"
+  );
+  assert.match(source, /const terminationTasks = new WeakMap\(\)/);
+  assert.match(source, /if \(restartInFlight\)/);
+  assert.match(source, /restartRequested = true/);
+});
+
+test("dev runner refuses a duplicate project watcher", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "scripts", "dev.cjs"), "utf8");
+  assert.match(source, /DEV_LOCK_PORT/);
+  assert.match(source, /EADDRINUSE/);
+  assert.match(source, /another LiteLauncher dev runner is already active/);
 });

@@ -197,6 +197,9 @@ const api = {
   liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartLongCapture, input);
   },
+  liteSnapScrollLongCapture(deltaY: number): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.liteSnapScrollLongCapture, deltaY);
+  },
   liteSnapControlLongCapture(control: LiteSnapLongCaptureControl): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapControlLongCapture, control);
   },

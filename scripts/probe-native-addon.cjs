@@ -1,11 +1,29 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 function log(step) {
   process.stdout.write(`[probe] ${step}\n`);
 }
 
-const addonPath = path.join(__dirname, "..", "dist", "native", "litesnap-capture.node");
+const nativeDirArgIndex = process.argv.indexOf("--native-dir");
+const nativeDir = nativeDirArgIndex >= 0
+  ? path.resolve(process.argv[nativeDirArgIndex + 1])
+  : path.join(__dirname, "..", "dist", "native");
+const manifestPath = path.join(nativeDir, "litesnap-capture-manifest.json");
+let addonPath = path.join(nativeDir, "litesnap-capture.node");
+if (fs.existsSync(manifestPath)) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const candidate = path.join(nativeDir, path.basename(String(manifest.fileName ?? "")));
+  const sha256 = fs.existsSync(candidate)
+    ? crypto.createHash("sha256").update(fs.readFileSync(candidate)).digest("hex")
+    : "";
+  if (sha256 !== manifest.sha256) {
+    log("manifest hash mismatch");
+    process.exit(1);
+  }
+  addonPath = candidate;
+}
 
 log(`electron node ${process.versions.node} modules=${process.modulesVersion ?? process.versions.modules}`);
 log(`addon exists=${fs.existsSync(addonPath)} path=${addonPath}`);
@@ -20,6 +38,23 @@ try {
   process.exit(1);
 }
 
+const requiredExports = [
+  "captureDisplayRect",
+  "supportsLayeredWindowExclusion",
+  "getWindowRectAtPoint",
+  "scrollWindowAtPoint",
+  "recognizeText"
+];
+const missingExports = requiredExports.filter((name) => typeof addon[name] !== "function");
+if (missingExports.length > 0) {
+  log(`missing required exports=${missingExports.join(",")}`);
+  process.exit(1);
+}
+if (addon.supportsLayeredWindowExclusion() !== true) {
+  log("layered-window exclusion is unavailable");
+  process.exit(1);
+}
+
 try {
   log("before capture");
   const result = addon.captureDisplayRect({
@@ -28,7 +63,8 @@ try {
     captureWidth: 100,
     captureHeight: 100,
     outputWidth: 100,
-    outputHeight: 100
+    outputHeight: 100,
+    includeLayeredWindows: false
   });
   log(
     `after capture ok=${Boolean(result)} size=${

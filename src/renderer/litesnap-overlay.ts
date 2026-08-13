@@ -38,6 +38,9 @@
     annotationFillShapes: boolean;
     recentColors?: string[];
     editorMode?: boolean;
+    longCapture?: { phase: string; frameCount: number; stitchedHeight: number; message: string };
+    longCaptureSelection?: SelectionRect;
+    editorSelection?: SelectionRect;
   };
 
   type SelectionRect = {
@@ -158,6 +161,8 @@
   const dimRightNode = document.getElementById("litesnap-dim-right");
   const dimBottomNode = document.getElementById("litesnap-dim-bottom");
   const dimLeftNode = document.getElementById("litesnap-dim-left");
+  const editorViewportNode = document.getElementById("litesnap-editor-viewport");
+  const editorImageNode = document.getElementById("litesnap-editor-image") as HTMLImageElement | null;
   const selectionNode = document.getElementById("litesnap-selection");
   const annotationFrameNode = document.getElementById("litesnap-annotation-frame");
   const sizeNode = document.getElementById("litesnap-size");
@@ -1025,6 +1030,31 @@
     return Boolean(overlayState?.editorMode || overlayState?.mode === "edit");
   }
 
+  function isLongCaptureGuide(): boolean {
+    return Boolean(overlayState?.longCapture && overlayState?.longCaptureSelection && !isEditorMode());
+  }
+
+  function isScrollableLongEditor(): boolean {
+    return Boolean(isEditorMode() && overlayState?.editorSelection);
+  }
+
+  function configureScrollableLongEditor(state: OverlayState, dataUrl: string): void {
+    if (!editorViewportNode || !editorImageNode || !state.editorSelection) {
+      return;
+    }
+    const { x, y, width, height } = state.editorSelection;
+    editorViewportNode.hidden = false;
+    editorViewportNode.style.left = `${x}px`;
+    editorViewportNode.style.top = `${y}px`;
+    editorViewportNode.style.width = `${width}px`;
+    editorViewportNode.style.height = `${height}px`;
+    if (editorImageNode.src !== dataUrl) {
+      editorViewportNode.scrollTop = 0;
+      editorViewportNode.scrollLeft = 0;
+      editorImageNode.src = dataUrl;
+    }
+  }
+
   function screenToEditorPoint(x: number, y: number): Point {
     if (!isEditorMode()) {
       return { x, y };
@@ -1037,6 +1067,9 @@
 
   function applyEditorViewTransform(): void {
     if (!overlayRoot || !overlayState) {
+      return;
+    }
+    if (isScrollableLongEditor()) {
       return;
     }
     const baseWidth = overlayState.viewportWidth;
@@ -1410,6 +1443,7 @@
 
   function shouldShowToolbar(): boolean {
     return (
+      !isLongCaptureGuide() &&
       selectionCommitted &&
       isValidSelection(selection) &&
       dragMode === "idle" &&
@@ -1567,6 +1601,15 @@
   }
 
   function renderSelectionDim(): void {
+    if (overlayRoot) {
+      overlayRoot.dataset.longCaptureMaskReady = "false";
+    }
+    if (isScrollableLongEditor()) {
+      if (dimNode) {
+        dimNode.hidden = true;
+      }
+      return;
+    }
     if (
       !dimNode ||
       !dimTopNode ||
@@ -1575,7 +1618,7 @@
       !dimLeftNode ||
       !selection ||
       !isValidSelection(selection) ||
-      !isOverlayBackgroundReady()
+      (!isOverlayBackgroundReady() && !isLongCaptureGuide())
     ) {
       if (dimNode) {
         dimNode.hidden = true;
@@ -1597,6 +1640,9 @@
     dimRightNode.style.height = `${height}px`;
     dimBottomNode.style.top = `${y + height}px`;
     dimBottomNode.style.height = `${Math.max(0, viewportHeight - y - height)}px`;
+    if (overlayRoot && isLongCaptureGuide()) {
+      overlayRoot.dataset.longCaptureMaskReady = "true";
+    }
   }
 
   function renderSelection(): void {
@@ -1604,7 +1650,7 @@
       return;
     }
 
-    if (!isValidSelection(selection) || !isOverlayBackgroundReady()) {
+    if (!isValidSelection(selection) || (!isOverlayBackgroundReady() && !isLongCaptureGuide())) {
       selectionNode.hidden = true;
       if (canvasNode) {
         canvasNode.hidden = true;
@@ -1622,13 +1668,15 @@
     selectionNode.style.width = `${selection.width}px`;
     selectionNode.style.height = `${selection.height}px`;
     selectionNode.dataset.moving = dragMode === "moving" ? "true" : "false";
-    sizeNode.textContent = `${Math.round(selection.width)} x ${Math.round(selection.height)}`;
+    sizeNode.textContent = isLongCaptureGuide()
+      ? `${Math.round(selection.width)} x ${Math.round(selection.height)} · 长图区域`
+      : `${Math.round(selection.width)} x ${Math.round(selection.height)}`;
     if (dragMode === "idle") {
       lastSelection = { ...selection };
     }
 
     if (canvasNode) {
-      canvasNode.hidden = false;
+      canvasNode.hidden = isLongCaptureGuide() || isScrollableLongEditor();
     }
 
     renderSelectionDim();
@@ -2931,6 +2979,14 @@
       return;
     }
 
+    if (isLongCaptureGuide()) {
+      // Long capture keeps the selected region as a protective transparent
+      // shield: clicks must never leak through to the page below.
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     noteCapturePointerActivity();
 
     if (isColorMode()) {
@@ -3109,6 +3165,10 @@
   }
 
   function handlePointerMove(event: PointerEvent): void {
+    if (isLongCaptureGuide()) {
+      event.preventDefault();
+      return;
+    }
     noteCapturePointerActivity();
     if (!isEditorMode()) {
       scheduleLoupeUpdate(event.clientX, event.clientY);
@@ -3169,6 +3229,10 @@
   }
 
   function handlePointerUp(event: PointerEvent): void {
+    if (isLongCaptureGuide()) {
+      event.preventDefault();
+      return;
+    }
     if (!overlayRoot || !pointerStart || event.pointerId !== pointerStart.pointerId) {
       return;
     }
@@ -3255,6 +3319,10 @@
   }
 
   function handleDoubleClick(event: MouseEvent): void {
+    if (isLongCaptureGuide()) {
+      event.preventDefault();
+      return;
+    }
     if (committing || !selection || !isValidSelection(selection)) {
       return;
     }
@@ -3464,6 +3532,10 @@
 
       if (event.key === "Escape") {
         event.preventDefault();
+        if (isLongCaptureGuide()) {
+          void window.launcher.liteSnapControlLongCapture("cancel");
+          return;
+        }
         void commitSelection("cancel");
         return;
       }
@@ -3549,6 +3621,14 @@
     overlayRoot.addEventListener(
       "wheel",
       (event) => {
+        if (isLongCaptureGuide()) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (Math.abs(event.deltaY) >= 0.5) {
+            void window.launcher.liteSnapScrollLongCapture?.(event.deltaY);
+          }
+          return;
+        }
         if (!isEditorMode() || !(event.ctrlKey || event.metaKey)) {
           return;
         }
@@ -3599,6 +3679,10 @@
       if (overlayRoot) {
         overlayRoot.style.backgroundImage = "";
         overlayRoot.dataset.ready = "false";
+        overlayRoot.dataset.longCaptureMaskReady = "false";
+      }
+      if (editorViewportNode) {
+        editorViewportNode.hidden = true;
       }
     }
 
@@ -3611,12 +3695,21 @@
       return;
     }
 
+    overlayRoot.dataset.longCaptureGuide = isLongCaptureGuide() ? "true" : "false";
+    overlayRoot.dataset.scrollableLongEditor = isScrollableLongEditor() ? "true" : "false";
+    if (!isScrollableLongEditor() && editorViewportNode) {
+      editorViewportNode.hidden = true;
+    }
+
     if (hintNode) {
       hintNode.textContent = isColorMode()
         ? "取色模式：移动鼠标取样，单击或按 C 复制颜色后退出，Esc 取消。"
         : "拖拽选择区域，松开后可标注。Enter 复制，Esc 取消。";
       if (isEditorMode()) {
         hintNode.textContent = "编辑历史截图：Ctrl + 滚轮缩放，中键拖动平移；添加标注后可复制、保存或贴图，原图不会被覆盖。";
+      }
+      if (isLongCaptureGuide()) {
+        hintNode.hidden = true;
       }
     }
 
@@ -3645,16 +3738,26 @@
     }
 
     if (isEditorMode()) {
-      selection = {
-        x: 0,
-        y: 0,
-        width: state.viewportWidth,
-        height: state.viewportHeight
-      };
+      selection = state.editorSelection
+        ? { ...state.editorSelection }
+        : {
+            x: 0,
+            y: 0,
+            width: state.viewportWidth,
+            height: state.viewportHeight
+          };
       lastSelection = { ...selection };
       selectionCommitted = true;
       dragMode = "idle";
       setActiveTool("select", false);
+    } else if (isLongCaptureGuide() && state.longCaptureSelection) {
+      selection = { ...state.longCaptureSelection };
+      lastSelection = { ...selection };
+      selectionCommitted = true;
+      dragMode = "idle";
+      if (toolbarNode) {
+        toolbarNode.hidden = true;
+      }
     }
     applyEditorViewTransform();
 
@@ -3667,6 +3770,14 @@
     const pendingState = state;
     const dataUrl = state.imageDataUrl;
     const backgroundSize = `${state.viewportWidth}px ${state.viewportHeight}px`;
+    if (isScrollableLongEditor()) {
+      configureScrollableLongEditor(state, dataUrl);
+      root.style.backgroundImage = "none";
+      root.dataset.ready = "true";
+      allowWindowHintAfterReady = false;
+      renderSelection();
+      return;
+    }
     // Decode the screenshot before painting it as the overlay background so the
     // window is only revealed once the image is actually ready. This prevents
     // the first capture (no warmed cache) from flashing the overlay's flat fill
@@ -3690,7 +3801,7 @@
         applyEditorViewTransform();
         root.dataset.ready = "true";
         allowWindowHintAfterReady = false;
-        if (isEditorMode()) {
+        if (isEditorMode() || isLongCaptureGuide()) {
           renderSelection();
         }
       } catch {
@@ -3702,7 +3813,7 @@
         applyEditorViewTransform();
         root.dataset.ready = "true";
         allowWindowHintAfterReady = false;
-        if (isEditorMode()) {
+        if (isEditorMode() || isLongCaptureGuide()) {
           renderSelection();
         }
       }
@@ -3740,6 +3851,20 @@
     overlayRoot.addEventListener("pointercancel", handlePointerUp);
     overlayRoot.addEventListener("pointerleave", handlePointerLeave);
     overlayRoot.addEventListener("dblclick", handleDoubleClick);
+    overlayRoot.addEventListener("contextmenu", (event) => {
+      if (isLongCaptureGuide()) {
+        event.preventDefault();
+      }
+    });
+    if (editorViewportNode) {
+      // The long-image viewport owns pointer and wheel input so normal scrolling
+      // never turns into a new crop or an annotation gesture on the overlay.
+      editorViewportNode.addEventListener("pointerdown", (event) => event.stopPropagation());
+      editorViewportNode.addEventListener("dblclick", (event) => event.stopPropagation());
+      editorViewportNode.addEventListener("wheel", (event) => event.stopPropagation(), {
+        passive: true
+      });
+    }
     bindToolbar();
     bindTextInput();
     bindKeyboard();

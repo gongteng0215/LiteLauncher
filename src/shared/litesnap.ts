@@ -42,7 +42,12 @@ export type LiteSnapLongCapturePhase =
   | "cancelled"
   | "failed";
 
-export type LiteSnapLongCaptureControl = "pause" | "resume" | "finish" | "cancel";
+/**
+ * Scrolling always stays under the user's control. The internal `capture`
+ * action is retained for test simulation; production captures stable changed
+ * frames automatically while the user scrolls manually.
+ */
+export type LiteSnapLongCaptureControl = "capture" | "finish" | "cancel";
 
 export interface LiteSnapLongCaptureProgress {
   phase: LiteSnapLongCapturePhase;
@@ -156,6 +161,10 @@ export interface LiteSnapOverlayState {
   recentColors: string[];
   editorMode?: boolean;
   longCapture?: LiteSnapLongCaptureProgress;
+  /** The original area stays visible as a transparent guide during long capture. */
+  longCaptureSelection?: LiteSnapOverlaySelection;
+  /** Long-capture editing returns to the original selection instead of fullscreen. */
+  editorSelection?: LiteSnapOverlaySelection;
 }
 
 export interface LiteSnapCommitCaptureInput {

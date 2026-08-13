@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,34 @@ type SelectionSnapshot = {
   height: number;
   toolbarVisible: boolean;
 };
+
+type NativeScrollFixtureStatus = {
+  ready: boolean;
+  pid: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  y: number;
+  innerHeight: number;
+  scrollHeight: number;
+};
+
+async function waitForNativeScrollFixture(
+  statusPath: string,
+  timeoutMs = 15000
+): Promise<NativeScrollFixtureStatus> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const value = JSON.parse(await fs.readFile(statusPath, "utf8")) as NativeScrollFixtureStatus;
+      if (value.ready && value.pid > 0 && value.scrollHeight > value.innerHeight) {
+        return value;
+      }
+    } catch {
+      // The fixture writes atomically and may not have published its first state yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for the external native scroll fixture");
+}
 
 async function closeLiteSnapE2ESession(
   session: Awaited<ReturnType<typeof launchE2ESession>>
@@ -60,6 +89,7 @@ async function waitForLongCaptureController(
   while (Date.now() - startedAt < 15000) {
     const controller = session.electronApp
       .windows()
+      .filter((page) => !page.isClosed())
       .find((page) => page.url().includes("litesnap-long-capture.html"));
     if (controller) {
       await controller.waitForLoadState("domcontentloaded");
@@ -68,6 +98,24 @@ async function waitForLongCaptureController(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("LiteSnap long capture controller should open");
+}
+
+async function waitForLongCaptureGuide(
+  session: Awaited<ReturnType<typeof launchE2ESession>>
+) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15000) {
+    const guide = session.electronApp
+      .windows()
+      .filter((page) => !page.isClosed())
+      .find((page) => page.url().includes("litesnap-long-capture-guide.html"));
+    if (guide) {
+      await guide.waitForLoadState("domcontentloaded");
+      return guide;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("LiteSnap long capture selection guide should open");
 }
 
 async function waitForOverlayReady(
@@ -313,6 +361,26 @@ test(
         true,
         "toolbar should appear after the first drag finishes"
       );
+      const ordinaryCaptureVisuals = await overlayPage.evaluate(() => {
+        const root = document.getElementById("litesnap-overlay");
+        const dim = document.getElementById("litesnap-dim");
+        const dimTop = document.getElementById("litesnap-dim-top");
+        const selection = document.getElementById("litesnap-selection");
+        return {
+          ready: root?.dataset.ready,
+          backgroundImage: root ? getComputedStyle(root).backgroundImage : "none",
+          dimVisible: Boolean(dim && !dim.hidden),
+          dimColor: dimTop ? getComputedStyle(dimTop).backgroundColor : "transparent",
+          selectionVisible: Boolean(selection && !selection.hidden),
+          selectionBorder: selection ? getComputedStyle(selection).borderTopWidth : "0px"
+        };
+      });
+      assert.equal(ordinaryCaptureVisuals.ready, "true");
+      assert.notEqual(ordinaryCaptureVisuals.backgroundImage, "none");
+      assert.equal(ordinaryCaptureVisuals.dimVisible, true);
+      assert.notEqual(ordinaryCaptureVisuals.dimColor, "rgba(0, 0, 0, 0)");
+      assert.equal(ordinaryCaptureVisuals.selectionVisible, true);
+      assert.notEqual(ordinaryCaptureVisuals.selectionBorder, "0px");
 
       const moveStart = {
         x: initialSelection.x + initialSelection.width / 2,
@@ -660,7 +728,7 @@ test(
 );
 
 test(
-  "electron smoke: LiteSnap long capture pauses, resumes, finishes, and cancels deterministically",
+  "electron smoke: LiteSnap manually scrolled long capture automatically appends, then finishes and cancels",
   { timeout: 180000 },
   async (t) => {
     if (process.platform !== "win32") {
@@ -668,7 +736,7 @@ test(
     }
 
     const testName =
-      "electron smoke: LiteSnap long capture pauses, resumes, finishes, and cancels deterministically";
+      "electron smoke: LiteSnap manually scrolled long capture automatically appends, then finishes and cancels";
     let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
     let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
 
@@ -678,33 +746,167 @@ test(
       });
       overlayPage = await waitForOverlayWindow(session);
       await waitForOverlayReady(overlayPage);
-      await createOverlaySelection(overlayPage);
+      const longSelection = await createOverlaySelection(overlayPage);
       await clickOverlayToolbarButton(overlayPage, "long");
 
       let controller = await waitForLongCaptureController(session);
+      let guide = await waitForLongCaptureGuide(session);
+      const guideGeometry = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        const guideWindow = windows.find((window) =>
+          window.webContents.getURL().includes("litesnap-long-capture-guide.html")
+        );
+        const overlayWindow = windows.find((window) =>
+          window.webContents.getURL().includes("litesnap-overlay.html")
+        );
+        return {
+          guide: guideWindow?.getBounds() ?? null,
+          overlay: overlayWindow?.getBounds() ?? null
+        };
+      });
+      assert.equal(
+        guideGeometry.guide?.x,
+        (guideGeometry.overlay?.x ?? 0) + longSelection.x - 4,
+        "the guide border must start outside the sampled left edge"
+      );
+      assert.equal(
+        guideGeometry.guide?.y,
+        (guideGeometry.overlay?.y ?? 0) + longSelection.y - 4,
+        "the guide border must start outside the sampled top edge"
+      );
+      // The DOM selection includes resize affordances, whereas the native
+      // capture selection excludes them. The guide must still extend beyond
+      // that visible selection on both axes, placing its dashed edge outside
+      // the sampled image.
+      assert.ok(
+        (guideGeometry.guide?.width ?? 0) > longSelection.width &&
+          (guideGeometry.guide?.height ?? 0) > longSelection.height,
+        "the guide must extend beyond the selected capture rectangle"
+      );
       await session.page.waitForFunction(
         async () => {
           const progress = await window.launcher.liteSnapGetLongCaptureProgress();
-          return (progress?.frameCount ?? 0) >= 2;
+          return progress?.phase === "capturing" && progress.frameCount === 1;
         },
         undefined,
-        { timeout: 15000 }
-      );
-      await controller.locator("#pause").click();
-      await session.page.waitForFunction(
-        async () => (await window.launcher.liteSnapGetLongCaptureProgress())?.phase === "paused",
-        undefined,
         { timeout: 10000 }
       );
-      await controller.locator("#pause").click();
-      await session.page.waitForFunction(
-        async () => (await window.launcher.liteSnapGetLongCaptureProgress())?.phase === "capturing",
-        undefined,
-        { timeout: 10000 }
+      await overlayPage.waitForFunction(() => {
+        const root = document.getElementById("litesnap-overlay");
+        const dim = document.getElementById("litesnap-dim") as HTMLElement | null;
+        return root?.dataset.longCaptureGuide === "true" && Boolean(dim && !dim.hidden);
+      });
+      const maskState = await overlayPage.evaluate(() => {
+        const dim = document.getElementById("litesnap-dim") as HTMLElement | null;
+        const dimTop = document.getElementById("litesnap-dim-top") as HTMLElement | null;
+        const selection = document.getElementById("litesnap-selection") as HTMLElement | null;
+        return {
+          dimVisible: Boolean(dim && !dim.hidden),
+          dimTopHeight: dimTop?.getBoundingClientRect().height ?? 0,
+          selectionDisplay: selection ? getComputedStyle(selection).display : "missing"
+        };
+      });
+      assert.equal(maskState.dimVisible, true, "long capture must keep the outside-area dim mask visible");
+      assert.ok(maskState.dimTopHeight > 0, "the area above the long-capture selection should be dimmed");
+      assert.equal(
+        maskState.selectionDisplay,
+        "none",
+        "the click-through mask must not duplicate the dedicated dashed guide"
       );
+      assert.ok(
+        await guide.evaluate(() => {
+          const event = new PointerEvent("pointerdown", { bubbles: true, cancelable: true });
+          document.querySelector(".guide")?.dispatchEvent(event);
+          return event.defaultPrevented;
+        }),
+        "the dedicated long-capture guide must consume clicks inside the selection"
+      );
+      const guideHitTestSurface = await guide.evaluate(() => {
+        const node = document.querySelector(".guide");
+        return node ? getComputedStyle(node).backgroundColor : "";
+      });
+      assert.notEqual(
+        guideHitTestSurface,
+        "rgba(0, 0, 0, 0)",
+        "the Windows layered guide needs a non-zero alpha hit-test surface to receive wheel events"
+      );
+      await session.page.waitForTimeout(650);
+      const beforeManualAppend = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      assert.equal(beforeManualAppend?.frameCount, 1, "long capture must not scroll or append by itself");
+      assert.equal(
+        await session.page.evaluate(() => window.launcher.liteSnapStartCapture()),
+        true,
+        "retriggering the screenshot shortcut should be consumed by the active long capture"
+      );
+      await session.page.waitForTimeout(250);
+      const afterShortcutRetrigger = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      assert.equal(
+        afterShortcutRetrigger?.phase,
+        "capturing",
+        "retriggering the screenshot shortcut must not dismiss long capture"
+      );
+      assert.equal(
+        afterShortcutRetrigger?.frameCount,
+        1,
+        "retriggering the screenshot shortcut must preserve the current long-capture session"
+      );
+      assert.equal(
+        await controller.locator("#capture").count(),
+        0,
+        "the manual controller must not require a capture button"
+      );
+      // E2E has no real desktop scroll target. The internal bridge advances
+      // the synthetic target frame just as a user scroll would in production.
+      await session.page.evaluate(() => window.launcher.liteSnapControlLongCapture("capture"));
+      await session.page.evaluate(() => window.launcher.liteSnapControlLongCapture("capture"));
+      const pendingBeforeFinish = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      assert.equal(
+        pendingBeforeFinish?.frameCount,
+        3,
+        "each manually advanced viewport should be committed without waiting for another stable frame"
+      );
+      const longCaptureWindowState = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        const guideWindow = windows.find((window) =>
+          window.webContents.getURL().includes("litesnap-long-capture-guide.html")
+        );
+        const controllerWindow = windows.find((window) =>
+          window.webContents.getURL().includes("litesnap-long-capture.html")
+        );
+        const overlayWindow = windows.find((window) =>
+          window.webContents.getURL().includes("litesnap-overlay.html")
+        );
+        return {
+          maskVisible: overlayWindow?.isVisible() ?? false,
+          maskOpacity: overlayWindow?.getOpacity() ?? 0,
+          guideVisible: guideWindow?.isVisible() ?? false,
+          guideAlwaysOnTop: guideWindow?.isAlwaysOnTop() ?? false,
+          controllerVisible: controllerWindow?.isVisible() ?? false,
+          controllerAlwaysOnTop: controllerWindow?.isAlwaysOnTop() ?? false
+        };
+      });
+      assert.deepEqual(
+        longCaptureWindowState,
+        {
+          maskVisible: true,
+          maskOpacity: 1,
+          guideVisible: true,
+          guideAlwaysOnTop: true,
+          controllerVisible: true,
+          controllerAlwaysOnTop: true
+        },
+        "background sampling must keep the selection guide and controller visible above the target"
+      );
+      const finishClickedAt = Date.now();
       await controller.locator("#finish").click();
       try {
-        await waitForOverlayVisibility(session, true);
+        await waitForOverlayVisibility(session, false);
       } catch (error) {
         const snapshot = await session.page.evaluate(async () => ({
           state: await window.launcher.liteSnapGetOverlayState(),
@@ -717,32 +919,41 @@ test(
           }`
         );
       }
-      await waitForOverlayReady(overlayPage);
 
       const completed = await session.page.evaluate(async () => {
         const state = await window.launcher.liteSnapGetOverlayState();
         const diagnostics = await window.launcher.liteSnapGetDiagnostics();
         return { state, diagnostics };
       });
-      assert.equal(completed.state?.editorMode, true);
+      assert.equal(completed.state, null, "finished long capture should save and close without opening an editor");
+      assert.ok(
+        Date.now() - finishClickedAt < 5000,
+        "explicit finish should save verified content promptly without waiting for another frame match"
+      );
       const completeDiagnostic = completed.diagnostics.find(
         (entry) => entry.operation === "long-capture" && entry.status === "success"
       );
       assert.ok(completeDiagnostic, "finished long capture should have a success diagnostic");
       assert.ok(
-        Number(completeDiagnostic.metrics.stitchedHeight) > 0,
-        "long capture diagnostic should include output height"
+        Number(completeDiagnostic.metrics.stitchedHeight) > longSelection.height * 1.5,
+        "finishing immediately must save the already verified stitched content"
       );
-
-      await overlayPage.keyboard.press("Escape");
-      await waitForOverlayVisibility(session, false);
 
       overlayPage = await waitForOverlayWindow(session);
       await waitForOverlayReady(overlayPage);
       await createOverlaySelection(overlayPage);
       await clickOverlayToolbarButton(overlayPage, "long");
       controller = await waitForLongCaptureController(session);
-      await controller.locator("#cancel").click();
+      guide = await waitForLongCaptureGuide(session);
+      // Escape intentionally closes the guide synchronously. Playwright can
+      // therefore observe the target being closed before keyboard.press
+      // resolves; that is the expected outcome, not a test failure.
+      await guide.keyboard.press("Escape").catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/Target page, context or browser has been closed/i.test(message)) {
+          throw error;
+        }
+      });
       await waitForOverlayVisibility(session, false);
 
       const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
@@ -750,7 +961,7 @@ test(
         diagnostics.some(
           (entry) => entry.operation === "long-capture" && entry.status === "cancelled"
         ),
-        "cancelled long capture should persist a cancellation diagnostic"
+        "Escape should cancel the long capture and persist a cancellation diagnostic"
       );
     } catch (error) {
       if (session) {
@@ -767,6 +978,466 @@ test(
       if (session) {
         await closeLiteSnapE2ESession(session);
       }
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap captures both ends after scrolling from the middle up, then down",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap captures both ends after scrolling from the middle up, then down";
+    const saveDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), "litelauncher-litesnap-bidirectional-")
+    );
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession({
+        extraEnv: {
+          LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION: "1",
+          LITELAUNCHER_E2E_LONG_CAPTURE_START_INDEX: "3"
+        }
+      });
+      await session.page.evaluate(async (directory) => {
+        await window.launcher.setLiteSnapSettings({
+          saveDirectory: directory,
+          saveFormat: "png"
+        });
+      }, saveDirectory);
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      const selection = await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "long");
+      const controller = await waitForLongCaptureController(session);
+      await waitForLongCaptureGuide(session);
+      const captureSelection = await overlayPage.evaluate(async () => {
+        const state = await window.launcher.liteSnapGetOverlayState();
+        return state?.longCaptureSelection ?? null;
+      });
+      assert.ok(captureSelection, "long capture should expose its logical selection bounds");
+
+      const relayScroll = async (deltaY: number) => {
+        const scrolled = await session!.page.evaluate(
+          (delta) => window.launcher.liteSnapScrollLongCapture(delta),
+          deltaY
+        );
+        assert.equal(scrolled, true, `synthetic scroll ${deltaY} should move the target`);
+        await session!.page.waitForTimeout(700);
+      };
+
+      for (let index = 0; index < 3; index += 1) {
+        await relayScroll(-120);
+      }
+      for (let index = 0; index < 6; index += 1) {
+        await relayScroll(120);
+      }
+
+      await controller.locator("#finish").click();
+      await waitForOverlayVisibility(session, false);
+      const savedFileName = await waitForLiteSnapSavedFile(saveDirectory);
+      const savedPath = path.join(saveDirectory, savedFileName);
+      const pixels = await session.electronApp.evaluate(
+        ({ nativeImage }, filePath) => {
+          const image = nativeImage.createFromPath(filePath);
+          const size = image.getSize();
+          const bitmap = image.toBitmap();
+          let topMarkerPixels = 0;
+          let bottomMarkerPixels = 0;
+          for (let index = 0; index + 3 < bitmap.length; index += 4) {
+            const blue = bitmap[index] ?? 0;
+            const green = bitmap[index + 1] ?? 0;
+            const red = bitmap[index + 2] ?? 0;
+            if (blue > 190 && green < 80 && red > 190) {
+              topMarkerPixels += 1;
+            }
+            if (blue < 80 && green > 190 && red > 190) {
+              bottomMarkerPixels += 1;
+            }
+          }
+          return { ...size, topMarkerPixels, bottomMarkerPixels };
+        },
+        savedPath
+      );
+      assert.equal(
+        pixels.width,
+        captureSelection.width,
+        "saved long capture should keep the logical selection width"
+      );
+      assert.ok(pixels.height > selection.height * 4, "bidirectional output should contain the full range");
+      assert.ok(pixels.topMarkerPixels > 20, "saved image should contain the synthetic top marker");
+      assert.ok(pixels.bottomMarkerPixels > 20, "saved image should contain the synthetic bottom marker");
+
+      const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
+      const completed = diagnostics.find(
+        (entry) => entry.operation === "long-capture" && entry.status === "success"
+      );
+      assert.ok(completed, "bidirectional capture should write a success diagnostic");
+      assert.ok(
+        Number(completed.metrics.directionSwitches) >= 1,
+        "diagnostics should record the upward-to-downward direction switch"
+      );
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+      await fs.rm(saveDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap scrolls from top to bottom and back up without losing the bottom",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap scrolls from top to bottom and back up without losing the bottom";
+    const saveDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), "litelauncher-litesnap-down-up-")
+    );
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession({
+        extraEnv: { LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION: "1" }
+      });
+      await session.page.evaluate(async (directory) => {
+        await window.launcher.setLiteSnapSettings({
+          saveDirectory: directory,
+          saveFormat: "png"
+        });
+      }, saveDirectory);
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      const selection = await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "long");
+      const controller = await waitForLongCaptureController(session);
+      await waitForLongCaptureGuide(session);
+
+      const relayScroll = async (deltaY: number) => {
+        const scrolled = await session!.page.evaluate(
+          (delta) => window.launcher.liteSnapScrollLongCapture(delta),
+          deltaY
+        );
+        assert.equal(scrolled, true, `synthetic scroll ${deltaY} should move the target`);
+        await session!.page.waitForTimeout(700);
+      };
+
+      for (let index = 0; index < 6; index += 1) {
+        await relayScroll(120);
+      }
+      const atBottom = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      assert.ok(atBottom && atBottom.stitchedHeight > selection.height * 4);
+
+      for (let index = 0; index < 6; index += 1) {
+        await relayScroll(-120);
+      }
+      const backAtTop = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      assert.equal(
+        backAtTop?.stitchedHeight,
+        atBottom.stitchedHeight,
+        "returning upward through captured content must not shrink or replace the saved bottom range"
+      );
+
+      await controller.locator("#finish").click();
+      await waitForOverlayVisibility(session, false);
+      const savedFileName = await waitForLiteSnapSavedFile(saveDirectory);
+      const pixels = await session.electronApp.evaluate(
+        ({ nativeImage }, filePath) => {
+          const image = nativeImage.createFromPath(filePath);
+          const size = image.getSize();
+          const bitmap = image.toBitmap();
+          let topMarkerPixels = 0;
+          let bottomMarkerPixels = 0;
+          for (let index = 0; index + 3 < bitmap.length; index += 4) {
+            const blue = bitmap[index] ?? 0;
+            const green = bitmap[index + 1] ?? 0;
+            const red = bitmap[index + 2] ?? 0;
+            if (blue > 190 && green < 80 && red > 190) topMarkerPixels += 1;
+            if (blue < 80 && green > 190 && red > 190) bottomMarkerPixels += 1;
+          }
+          return { ...size, topMarkerPixels, bottomMarkerPixels };
+        },
+        path.join(saveDirectory, savedFileName)
+      );
+      assert.ok(pixels.height > selection.height * 4);
+      assert.ok(pixels.topMarkerPixels > 20);
+      assert.ok(pixels.bottomMarkerPixels > 20);
+
+      const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
+      const completed = diagnostics.find(
+        (entry) => entry.operation === "long-capture" && entry.status === "success"
+      );
+      assert.ok(Number(completed?.metrics.directionSwitches) >= 1);
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+      await fs.rm(saveDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+);
+
+test(
+  "electron native: LiteSnap captures a real controllable Windows scroll target",
+  { timeout: 240000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap native long capture only runs on Windows");
+      return;
+    }
+    if (process.env.LITELAUNCHER_E2E_REAL_LONG_CAPTURE !== "1") {
+      t.skip("set LITELAUNCHER_E2E_REAL_LONG_CAPTURE=1 to run the real desktop fixture");
+      return;
+    }
+
+    const testName =
+      "electron native: LiteSnap captures a real controllable Windows scroll target";
+    const saveDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), "litelauncher-litesnap-native-scroll-")
+    );
+    const fixtureStatusPath = path.join(saveDirectory, "fixture-status.json");
+    const fixtureControlPath = path.join(saveDirectory, "fixture-control.txt");
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+    let fixtureProcess: ChildProcess | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async (directory) => {
+        await window.launcher.setLiteSnapSettings({
+          saveDirectory: directory,
+          saveFormat: "png"
+        });
+      }, saveDirectory);
+      const fixtureEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        LITELAUNCHER_E2E_SCROLL_FIXTURE_STATUS: fixtureStatusPath,
+        LITELAUNCHER_E2E_SCROLL_FIXTURE_CONTROL: fixtureControlPath
+      };
+      delete fixtureEnv.ELECTRON_RUN_AS_NODE;
+      fixtureProcess = spawn(
+        path.join(process.cwd(), "node_modules", "electron", "dist", "electron.exe"),
+        [path.join(
+          process.cwd(),
+          "src",
+          "test",
+          "fixtures",
+          "litesnap-native-scroll-fixture.cjs"
+        )],
+        {
+          cwd: process.cwd(),
+          env: fixtureEnv,
+          stdio: "ignore",
+          windowsHide: true
+        }
+      );
+      const initialFixtureStatus = await waitForNativeScrollFixture(fixtureStatusPath);
+      // The launcher is created before the external fixture. Explicitly put
+      // the fixture back in front before F1 so the real-desktop test always
+      // selects and captures that window instead of whichever E2E page last
+      // received focus during bootstrap.
+      await fs.writeFile(fixtureControlPath, JSON.stringify({ focus: true }), "utf8");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      const selection = await createOverlaySelection(overlayPage);
+      await clickOverlayToolbarButton(overlayPage, "long");
+      const controller = await waitForLongCaptureController(session);
+      await waitForLongCaptureGuide(session);
+      const captureSelection = await overlayPage.evaluate(async () => {
+        const state = await window.launcher.liteSnapGetOverlayState();
+        return state?.longCaptureSelection ?? null;
+      });
+      assert.ok(captureSelection);
+
+      let reachedBottom = false;
+      let lastScrollY = initialFixtureStatus.y;
+      let nativeScrollAttempts = 0;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const didScroll: boolean = await session.page.evaluate(() =>
+          window.launcher.liteSnapScrollLongCapture(120)
+        );
+        nativeScrollAttempts += 1;
+        await session.page.waitForTimeout(300);
+        let scroll = JSON.parse(
+          await fs.readFile(fixtureStatusPath, "utf8")
+        ) as NativeScrollFixtureStatus;
+        if (!didScroll || scroll.y <= lastScrollY) {
+          await fs.writeFile(
+            fixtureControlPath,
+            JSON.stringify({ scrollBy: 40 }),
+            "utf8"
+          );
+          const controlDeadline = Date.now() + 3000;
+          while (Date.now() < controlDeadline) {
+            await session.page.waitForTimeout(100);
+            scroll = JSON.parse(
+              await fs.readFile(fixtureStatusPath, "utf8")
+            ) as NativeScrollFixtureStatus;
+            if (scroll.y > lastScrollY ||
+              scroll.y + scroll.innerHeight >= scroll.scrollHeight - 2) {
+              break;
+            }
+          }
+        }
+        assert.ok(scroll.y >= lastScrollY, "the controllable target should move downward");
+        lastScrollY = scroll.y;
+        await session.page.waitForTimeout(550);
+        if (scroll.y + scroll.innerHeight >= scroll.scrollHeight - 2) {
+          reachedBottom = true;
+          break;
+        }
+      }
+      assert.equal(
+        reachedBottom,
+        true,
+        `native wheel input should reach the fixture bottom (last scrollY=${lastScrollY})`
+      );
+      await session.page.waitForTimeout(900);
+      const beforeFinish = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetLongCaptureProgress()
+      );
+      if (!controller.isClosed()) {
+        await controller.locator("#finish").click().catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/Target page, context or browser has been closed/i.test(message)) {
+            throw error;
+          }
+        });
+      }
+      try {
+        await waitForOverlayVisibility(session, false);
+      } catch (error) {
+        const snapshot = await session.page.evaluate(async () => ({
+          progress: await window.launcher.liteSnapGetLongCaptureProgress(),
+          diagnostics: await window.launcher.liteSnapGetDiagnostics()
+        }));
+        throw new Error(
+          `native fixture finish failed: before=${JSON.stringify(beforeFinish)} after=${JSON.stringify(snapshot)}; ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+
+      let savedFileName: string;
+      try {
+        savedFileName = await waitForLiteSnapSavedFile(saveDirectory);
+      } catch (error) {
+        const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
+        throw new Error(
+          `native fixture ended without a PNG: before=${JSON.stringify(beforeFinish)} diagnostics=${JSON.stringify(diagnostics)}; ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      const savedPath = path.join(saveDirectory, savedFileName);
+      const nativeDiagnostics = await session.page.evaluate(() =>
+        window.launcher.liteSnapGetDiagnostics()
+      );
+      const pixels = await session.electronApp.evaluate(
+        ({ nativeImage }, filePath) => {
+          const image = nativeImage.createFromPath(filePath);
+          const size = image.getSize();
+          const bitmap = image.toBitmap();
+          let topMarkerPixels = 0;
+          let bottomMarkerPixels = 0;
+          let purpleGuidePixels = 0;
+          for (let index = 0; index + 3 < bitmap.length; index += 4) {
+            const blue = bitmap[index] ?? 0;
+            const green = bitmap[index + 1] ?? 0;
+            const red = bitmap[index + 2] ?? 0;
+            if (blue > 210 && green < 45 && red > 210) topMarkerPixels += 1;
+            if (blue < 45 && green > 210 && red > 210) bottomMarkerPixels += 1;
+            if (blue >= 250 && green >= 94 && green <= 104 && red >= 152 && red <= 162) {
+              purpleGuidePixels += 1;
+            }
+          }
+          return { ...size, topMarkerPixels, bottomMarkerPixels, purpleGuidePixels };
+        },
+        savedPath
+      );
+      assert.equal(pixels.width, captureSelection.width);
+      assert.ok(
+        pixels.height > selection.height * 2,
+        `native passive output should exceed two viewports: before=${JSON.stringify(beforeFinish)} pixels=${JSON.stringify(pixels)} diagnostics=${JSON.stringify(nativeDiagnostics)}`
+      );
+      assert.ok(
+        pixels.topMarkerPixels > 20,
+        `native output should include the top marker: before=${JSON.stringify(beforeFinish)} pixels=${JSON.stringify(pixels)} diagnostics=${JSON.stringify(nativeDiagnostics)}`
+      );
+      assert.ok(
+        pixels.bottomMarkerPixels > 20,
+        `native output should include the bottom marker: before=${JSON.stringify(beforeFinish)} pixels=${JSON.stringify(pixels)} diagnostics=${JSON.stringify(nativeDiagnostics)}`
+      );
+      assert.equal(pixels.purpleGuidePixels, 0, "dashed guide pixels must not enter the saved image");
+      assert.ok(nativeScrollAttempts > 0, "the test should exercise the native scroll bridge");
+      const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
+      const completed = diagnostics.find(
+        (entry) => entry.operation === "long-capture" && entry.status === "success"
+      );
+      assert.equal(
+        completed?.metrics.capturePath,
+        "windows-native-region",
+        "the controllable fixture must still use region-level Windows native capture"
+      );
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (fixtureProcess && !fixtureProcess.killed) {
+        fixtureProcess.kill();
+      }
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+      await fs.rm(saveDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 );

@@ -40,6 +40,20 @@ const captureProviderPath = path.join(
   "litesnap",
   "capture-provider.ts"
 );
+const longCaptureWindowCoordinatorPath = path.join(
+  process.cwd(),
+  "src",
+  "main",
+  "litesnap",
+  "long-capture-window-coordinator.ts"
+);
+const longCaptureCoordinatorPath = path.join(
+  process.cwd(),
+  "src",
+  "main",
+  "litesnap",
+  "long-capture-coordinator.ts"
+);
 const overlayWindowPath = path.join(
   process.cwd(),
   "src",
@@ -85,6 +99,18 @@ const overlayCssPath = path.join(
   "src",
   "renderer",
   "litesnap-overlay.css"
+);
+const longCaptureControllerHtmlPath = path.join(
+  process.cwd(),
+  "src",
+  "renderer",
+  "litesnap-long-capture.html"
+);
+const longCaptureGuideHtmlPath = path.join(
+  process.cwd(),
+  "src",
+  "renderer",
+  "litesnap-long-capture-guide.html"
 );
 const copyAssetsPath = path.join(process.cwd(), "scripts", "copy-assets.cjs");
 const buildNativeScriptPath = path.join(
@@ -211,6 +237,15 @@ test("LiteSnap IPC channels and preload bridge are defined", () => {
 test("LiteSnap main-process runtime scaffolding exists", () => {
   const settingsSource = fs.readFileSync(settingsStorePath, "utf8");
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
+  const captureProviderSource = fs.readFileSync(captureProviderPath, "utf8");
+  const windowCoordinatorSource = fs.readFileSync(
+    longCaptureWindowCoordinatorPath,
+    "utf8"
+  );
+  const longCaptureCoordinatorSource = fs.readFileSync(
+    longCaptureCoordinatorPath,
+    "utf8"
+  );
   const ocrInstallerSource = fs.readFileSync(ocrCapabilityInstallerPath, "utf8");
   const providerSource = fs.readFileSync(captureProviderPath, "utf8");
   const overlaySource = fs.readFileSync(overlayWindowPath, "utf8");
@@ -547,8 +582,18 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     buildNativeSource,
-    /EBUSY[\s\S]*pnpm dev/,
-    "LiteSnap native build helper should explain dev-runner file locks clearly"
+    /litesnap-capture-\$\{sha256\.slice\(0, 16\)\}\.node/,
+    "LiteSnap native build helper should publish immutable content-hash filenames"
+  );
+  assert.match(
+    buildNativeSource,
+    /litesnap-capture-manifest\.json[\s\S]*renameSync/,
+    "LiteSnap native build helper should atomically switch the active manifest"
+  );
+  assert.match(
+    buildNativeSource,
+    /computeBuildFingerprint[\s\S]*WindowsSDKVersion/,
+    "LiteSnap native build helper should skip recompilation only for the same toolchain fingerprint"
   );
   assert.match(
     packageJson.scripts?.build ?? "",
@@ -1634,8 +1679,18 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   const channelsSource = fs.readFileSync(channelsPath, "utf8");
   const ipcSource = fs.readFileSync(ipcPath, "utf8");
   const captureSource = fs.readFileSync(captureManagerPath, "utf8");
-  const providerSource = fs.readFileSync(captureProviderPath, "utf8");
-  const addonSource = fs.readFileSync(nativeAddonSourcePath, "utf8");
+  const captureProviderSource = fs.readFileSync(captureProviderPath, "utf8");
+  const windowCoordinatorSource = fs.readFileSync(
+    longCaptureWindowCoordinatorPath,
+    "utf8"
+  );
+  const longCaptureCoordinatorSource = fs.readFileSync(
+    longCaptureCoordinatorPath,
+    "utf8"
+  );
+  const overlayRendererSource = fs.readFileSync(overlayRendererPath, "utf8");
+  const controllerSource = fs.readFileSync(longCaptureControllerHtmlPath, "utf8");
+  const guideSource = fs.readFileSync(longCaptureGuideHtmlPath, "utf8");
   const panelSource = fs.readFileSync(panelImplsPath, "utf8");
   const databaseSource = fs.readFileSync(
     path.join(process.cwd(), "src", "main", "database.ts"),
@@ -1649,37 +1704,153 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   assert.match(sharedSource, /"long-capture"/);
   assert.match(sharedSource, /"history-edit"/);
   assert.match(sharedSource, /LiteSnapLongCaptureProgress/);
+  assert.match(sharedSource, /LiteSnapLongCaptureControl = "capture" \| "finish" \| "cancel"/);
   assert.match(channelsSource, /liteSnapStartLongCapture/);
+  assert.match(channelsSource, /liteSnapScrollLongCapture/);
   assert.match(channelsSource, /liteSnapControlLongCapture/);
   assert.match(channelsSource, /liteSnapGetLongCaptureProgress/);
   assert.match(channelsSource, /liteSnapGetDiagnostics/);
   assert.match(ipcSource, /startLongCapture/);
   assert.match(ipcSource, /historyEdit/);
   assert.match(captureSource, /matchLiteSnapVerticalFrames/);
-  assert.match(captureSource, /LONG_CAPTURE_MAX_FRAMES = 120/);
-  assert.match(captureSource, /LONG_CAPTURE_MAX_DURATION_MS = 120_000/);
   assert.match(captureSource, /LONG_CAPTURE_MAX_HEIGHT = 30_000/);
   assert.match(captureSource, /session\.historyEdit \? "history-edit"/);
   assert.match(captureSource, /reportLongCaptureFailure/);
   assert.match(captureSource, /LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION/);
-  assert.match(providerSource, /scrollWindowAtPoint/);
+  assert.match(captureSource, /captureObservedLongCaptureFrame/);
+  assert.match(captureSource, /matchLiteSnapVerticalFramesBidirectional/);
+  assert.match(captureSource, /advanceLiteSnapStitchRange/);
+  assert.match(captureSource, /pendingFrame/);
+  assert.match(captureSource, /LONG_CAPTURE_STABILITY_CONFIRM_MS = 80/);
+  assert.doesNotMatch(captureSource, /flushLongCapturePendingFrame/);
+  assert.doesNotMatch(captureSource, /LONG_CAPTURE_FINISH_SETTLE_TIMEOUT_MS/);
+  assert.match(captureSource, /Finish is an explicit user command/);
+  assert.match(captureSource, /longCapture\.samplingBurstRemaining = 0/);
+  assert.match(longCaptureCoordinatorSource, /pollDueAt/);
+  assert.match(longCaptureCoordinatorSource, /resetBaseline/);
+  assert.match(captureSource, /fake[\s\S]*upward scroll/);
+  assert.match(captureSource, /captureInFlight/);
+  assert.match(captureSource, /appendObservedLongCaptureFrame/);
+  assert.match(captureSource, /currentToPending\.direction === pendingToNext\.direction/);
+  assert.match(captureSource, /findLiteSnapQuietSeamRow/);
+  assert.match(longCaptureCoordinatorSource, /trimTop/);
+  assert.match(longCaptureCoordinatorSource, /trimBottom/);
+  assert.match(captureSource, /nextFrames\.unshift/);
+  assert.match(captureSource, /scheduleLongCapturePoll/);
+  assert.match(captureSource, /LONG_CAPTURE_SCROLL_SETTLE_MS = 90/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_SETTLE_CONFIRMATIONS = 3/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_POLLS_PER_SCROLL = 8/);
+  assert.match(captureSource, /LONG_CAPTURE_PASSIVE_POLL_MS = 120/);
+  assert.doesNotMatch(captureSource, /LONG_CAPTURE_MANUAL_POLL_MS/);
+  assert.match(captureSource, /Long capture is wheel-event driven/);
+  assert.match(captureSource, /Some Windows layered-window combinations/);
+  assert.match(captureSource, /Passive observation ignores those/);
+  assert.match(captureSource, /Prefer the last accepted/);
   assert.match(
-    addonSource,
-    /FindExternalWindowAtPoint[\s\S]*WindowFromPoint[\s\S]*EnumWindows\(FindWindowAtPointProc/,
-    "long capture should prefer the app directly under the cursor and only enumerate as a fallback"
+    captureSource,
+    /knownMatch \?\? matchLiteSnapVerticalFramesBidirectional\([\s\S]*?longCapture\.expectedDirection \?\? longCapture\.lastDirection/
+  );
+  assert.match(captureSource, /first post-scroll frame safely matches/);
+  assert.match(captureSource, /longCapture\.expectedDirection = deltaY > 0 \? "down" : "up"/);
+  assert.match(longCaptureCoordinatorSource, /session\.expectedDirection = null/);
+  assert.match(captureSource, /longCapture\.queuedScrollDelta \+ deltaY/);
+  assert.match(captureSource, /void this\.scrollLongCapture\(queuedDelta\)/);
+  assert.match(captureSource, /本轮采样已停止/);
+  assert.match(captureSource, /scrollLongCapture\(deltaY: number\)/);
+  assert.match(captureSource, /LiteSnapLongCaptureWindowCoordinator/);
+  assert.match(windowCoordinatorSource, /showGuide/);
+  assert.match(windowCoordinatorSource, /close\(\)/);
+  assert.match(captureSource, /keepLongCaptureWindowsVisible/);
+  assert.match(windowCoordinatorSource, /revealMask/);
+  assert.match(windowCoordinatorSource, /overlayWindow\.setIgnoreMouseEvents\(true\)/);
+  assert.match(windowCoordinatorSource, /GUIDE_BORDER_OUTSET = 4/);
+  assert.match(windowCoordinatorSource, /setIgnoreMouseEvents\(false\)/);
+  assert.match(windowCoordinatorSource, /STACK_WATCH_INTERVAL_MS = 750/);
+  assert.match(windowCoordinatorSource, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+  assert.match(captureSource, /longCaptureSelection/);
+  assert.match(windowCoordinatorSource, /guide\.showInactive\(\)/);
+  assert.match(
+    fs.readFileSync(overlayWindowPath, "utf8"),
+    /transparent: true[\s\S]*backgroundColor: "#00000000"/
+  );
+  assert.match(captureSource, /longCaptureExportWidth/);
+  assert.match(captureSource, /normalizeLongCaptureExportSize/);
+  assert.match(captureSource, /imageStore\.saveImage\(output, settings\)/);
+  assert.match(captureSource, /recordHistory\(output, "capture-save"\)/);
+  assert.match(captureSource, /includeLayeredWindows: true/);
+  assert.match(fs.readFileSync(overlayWindowPath, "utf8"), /setContentProtection\(true\)/);
+  assert.match(captureSource, /session\.overlayWindow\.setContentProtection\(true\)/);
+  assert.match(captureSource, /showInteractiveOverlay[\s\S]*setContentProtection\(false\)/);
+  assert.match(captureProviderSource, /captureRegionImage/);
+  assert.match(captureProviderSource, /resolveLiteSnapPhysicalCaptureRegion/);
+  assert.match(captureSource, /LONG_CAPTURE_MAX_MEMORY_BYTES/);
+  assert.match(captureSource, /pauseLongCaptureAtSafetyLimit/);
+  assert.match(captureSource, /不会自动完成或保存/);
+  assert.doesNotMatch(
+    captureSource,
+    /finishLongCapture\("已达到长截图安全上限/,
+    "safety limits must never complete or save a capture without an explicit user action"
+  );
+  assert.match(controllerSource, /程序不会判断是否到底，也不会自动完成/);
+  assert.match(captureSource, /A screenshot shortcut pressed while long capture is active/);
+  assert.match(captureSource, /长截图会保持显示并继续重试/);
+  assert.doesNotMatch(
+    captureSource,
+    /目标窗口已关闭或选区已不再属于原窗口，长截图已取消/,
+    "temporary target lookup failures must not dismiss long capture"
+  );
+  assert.match(captureSource, /长截图控制窗口已恢复/);
+  assert.doesNotMatch(
+    captureSource,
+    /长截图辅助窗口意外关闭，本次长截图已取消/,
+    "helper window recovery must not cancel long capture"
+  );
+  assert.match(longCaptureCoordinatorSource, /sampleFrames/);
+  assert.match(longCaptureCoordinatorSource, /acceptedFrames/);
+  assert.match(longCaptureCoordinatorSource, /confirmFinalFrame/);
+  assert.match(longCaptureCoordinatorSource, /estimateMemoryBytes/);
+  assert.match(captureSource, /isCurrentLongCapture/);
+  assert.doesNotMatch(
+    windowCoordinatorSource,
+    /controller\.hide\(\)/,
+    "long capture must keep the controller visible while the user scrolls"
   );
   assert.match(
-    addonSource,
-    /ScrollWindowAtPoint[\s\S]*FindExternalWindowAtPoint[\s\S]*SendInput\(2, inputs/,
-    "long capture should target the underlying application and inject a real wheel event"
+    fs.readFileSync(nativeAddonSourcePath, "utf8"),
+    /include_layered_windows[\s\S]*CAPTUREBLT/,
+    "native capture must be able to omit transparent guide windows"
+  );
+  assert.doesNotMatch(
+    fs.readFileSync(nativeAddonSourcePath, "utf8"),
+    /SetForegroundWindow\(root\)/,
+    "relayed user scrolling must not push the target above the long-capture guide"
   );
   assert.match(
     captureSource,
-    /const LONG_CAPTURE_DELAY_MS = 360/,
-    "long capture should wait for a real application scroll animation to settle"
+    /scrollWindowAtPoint\?\./,
+    "long capture may relay only a real user wheel event through the protective overlay"
+  );
+  assert.match(controllerSource, /可向上或向下滚动/);
+  assert.doesNotMatch(controllerSource, /id="capture"/);
+  assert.match(overlayRendererSource, /isLongCaptureGuide\(\)[\s\S]*clicks must never leak through/);
+  assert.match(
+    overlayRendererSource,
+    /\(!isOverlayBackgroundReady\(\) && !isLongCaptureGuide\(\)\)/,
+    "long-capture dim mask must render after the live background becomes transparent"
+  );
+  assert.match(overlayRendererSource, /liteSnapScrollLongCapture\?\.\(event\.deltaY\)/);
+  assert.match(guideSource, /liteSnapScrollLongCapture\(event\.deltaY\)/);
+  assert.match(guideSource, /liteSnapControlLongCapture\("cancel"\)/);
+  assert.match(guideSource, /background: rgba\(0, 0, 0, \.01\)/);
+  assert.match(guideSource, /fully transparent layered-window pixel is click-through/);
+  assert.doesNotMatch(guideSource, /box-shadow/);
+  assert.match(
+    overlayRendererSource,
+    /event\.key === "Escape"[\s\S]*liteSnapControlLongCapture\("cancel"\)/,
+    "Escape must cancel a long capture"
   );
   assert.match(
-    captureSource,
+    windowCoordinatorSource,
     /controller\.showInactive\(\)/,
     "the long-capture controller must not take focus away from the scroll target"
   );

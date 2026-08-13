@@ -28,7 +28,12 @@ import {
   type LiteSnapSettings,
   normalizeLiteSnapOcrText
 } from "../../shared/litesnap";
-import { matchLiteSnapVerticalFrames } from "../../shared/litesnap-stitch";
+import {
+  advanceLiteSnapStitchRange,
+  findLiteSnapQuietSeamRow,
+  matchLiteSnapVerticalFrames,
+  matchLiteSnapVerticalFramesBidirectional
+} from "../../shared/litesnap-stitch";
 import {
   looksLikeMisrecognizedEnglish,
   scoreLiteSnapOcrText,
@@ -42,7 +47,13 @@ import {
   createLiteSnapCaptureProvider,
   type LiteSnapCaptureProvider
 } from "./capture-provider";
-import { createLiteSnapLongCaptureController, createLiteSnapOverlayWindow } from "./overlay-window";
+import { createLiteSnapOverlayWindow } from "./overlay-window";
+import {
+  LiteSnapLongCaptureCoordinator,
+  type LiteSnapLongCaptureObservedFrame as LongCaptureObservedFrame,
+  type LiteSnapLongCaptureSessionState as LongCaptureSession
+} from "./long-capture-coordinator";
+import { LiteSnapLongCaptureWindowCoordinator } from "./long-capture-window-coordinator";
 import { LiteSnapHistoryStore } from "./history-store";
 import { LiteSnapDiagnosticStore } from "./diagnostic-store";
 import { LiteSnapImageStore } from "./image-store";
@@ -76,31 +87,12 @@ type CaptureSession = {
   displayFollowLocked: boolean;
   editorMode: boolean;
   historyEdit: boolean;
+  /** Logical width of the original selection for a high-DPI long capture. */
+  longCaptureExportWidth: number | null;
+  longCaptureSelection: LiteSnapOverlaySelection | null;
   diagnosticOperation: LiteSnapDiagnosticOperation;
   diagnosticFinalized: boolean;
   startedAt: number;
-};
-
-type LongCaptureFrame = {
-  image: NativeImage;
-  appendFrom: number;
-};
-
-type LongCaptureSession = {
-  selection: LiteSnapOverlaySelection;
-  point: { x: number; y: number };
-  startedAt: number;
-  phase: LiteSnapLongCaptureProgress["phase"];
-  frames: LongCaptureFrame[];
-  stitchedHeight: number;
-  noProgressFrames: number;
-  simulationFrameIndex: number;
-  scrollMs: number;
-  captureMs: number;
-  stitchMs: number;
-  failureReported: boolean;
-  timer: NodeJS.Timeout | null;
-  message: string;
 };
 
 type DisplayFrameCache = {
@@ -118,19 +110,26 @@ const OVERLAY_READY_TIMEOUT_MS = 8000;
 const FRAME_CACHE_REFRESH_MAX_MS = 8000;
 const PREVIEW_JPEG_QUALITY = 92;
 const DISPLAY_FOLLOW_POLL_MS = 50;
-// Real Windows applications often animate a wheel movement. Waiting a little
-// longer keeps the next frame out of the animation and makes overlap matching
-// deterministic instead of treating transient frames as a stitch failure.
-const LONG_CAPTURE_DELAY_MS = 360;
-const LONG_CAPTURE_MAX_FRAMES = 120;
-const LONG_CAPTURE_MAX_DURATION_MS = 120_000;
 const LONG_CAPTURE_MAX_HEIGHT = 30_000;
 const LONG_CAPTURE_MAX_BYTES = 256 * 1024 * 1024;
+const LONG_CAPTURE_MAX_MEMORY_BYTES = 512 * 1024 * 1024;
+// A relayed wheel gesture gets a short trailing capture, rather than waiting
+// for the slower idle poll. This retains overlap for normal manual scrolling.
+const LONG_CAPTURE_SCROLL_SETTLE_MS = 90;
+const LONG_CAPTURE_STABILITY_CONFIRM_MS = 80;
+const LONG_CAPTURE_MAX_SETTLE_CONFIRMATIONS = 3;
+const LONG_CAPTURE_MAX_POLLS_PER_SCROLL = 8;
+// Some Windows layered-window combinations let the underlying application
+// scroll without delivering a wheel event to Electron. Observe the selected
+// pixels at a modest rate as the reliable source of truth. Failed matches are
+// silent and never spawn a faster retry loop.
+const LONG_CAPTURE_PASSIVE_POLL_MS = 120;
 
 export class LiteSnapCaptureSessionManager {
   private session: CaptureSession | null = null;
   private overlayWindow: BrowserWindow | null = null;
-  private longCaptureController: BrowserWindow | null = null;
+  private readonly longCaptureCoordinator = new LiteSnapLongCaptureCoordinator();
+  private readonly longCaptureWindows = new LiteSnapLongCaptureWindowCoordinator();
   private overlayReadyPromise: Promise<void> | null = null;
   private startingCapture = false;
   private switchingDisplay = false;
@@ -143,10 +142,17 @@ export class LiteSnapCaptureSessionManager {
   private frameCacheWarmGeneration = 0;
   private idleFrameCachePaused = false;
   private longCapture: LongCaptureSession | null = null;
-  private lastLongCaptureComposeFailure = "";
+  private recoveringLongCaptureWindows = false;
   private readonly captureProvider: LiteSnapCaptureProvider;
   private readonly e2eLongCaptureSimulation =
     process.env.LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION === "1";
+  private readonly e2eLongCaptureSimulationStartIndex = Math.max(
+    0,
+    Math.min(6, Number.parseInt(
+      process.env.LITELAUNCHER_E2E_LONG_CAPTURE_START_INDEX ?? "0",
+      10
+    ) || 0)
+  );
 
   public constructor(
     private readonly settingsStore: LiteSnapSettingsStore,
@@ -269,6 +275,14 @@ export class LiteSnapCaptureSessionManager {
       return false;
     }
 
+    // A screenshot shortcut pressed while long capture is active must not
+    // replace (and therefore dismiss) the long-capture session. Only the
+    // explicit Finish, Cancel, or Escape controls may end it.
+    if (this.longCapture) {
+      this.keepLongCaptureWindowsVisible(this.longCapture);
+      return true;
+    }
+
     // Guard against rapid re-triggering (e.g. holding the global shortcut).
     // Without this, overlapping startCapture calls each cancel/recreate the
     // session, race on captureId (returning false), and pile up concurrent
@@ -315,6 +329,8 @@ export class LiteSnapCaptureSessionManager {
       displayFollowLocked: mode === "color",
       editorMode: false,
       historyEdit: false,
+      longCaptureExportWidth: null,
+      longCaptureSelection: null,
       diagnosticOperation: "capture",
       diagnosticFinalized: false,
       startedAt: Date.now()
@@ -405,7 +421,12 @@ export class LiteSnapCaptureSessionManager {
       annotationFillShapes: settings.annotationFillShapes,
       recentColors: [...(settings.recentColors ?? [])],
       editorMode: this.session.editorMode,
-      longCapture: this.getLongCaptureProgress() ?? undefined
+      longCapture: this.getLongCaptureProgress() ?? undefined,
+      longCaptureSelection: this.longCapture ? { ...this.longCapture.selection } : undefined,
+      editorSelection:
+        this.session.editorMode && this.session.longCaptureSelection
+          ? { ...this.session.longCaptureSelection }
+          : undefined
     };
   }
 
@@ -436,7 +457,10 @@ export class LiteSnapCaptureSessionManager {
       !session ||
       session.mode !== "capture" ||
       session.editorMode ||
-      this.longCapture
+      this.longCapture ||
+      (!this.e2eLongCaptureSimulation &&
+        (this.captureProvider.supportsLayeredWindowExclusion?.() !== true ||
+          typeof this.captureProvider.captureRegionImage !== "function"))
     ) {
       return false;
     }
@@ -446,17 +470,44 @@ export class LiteSnapCaptureSessionManager {
       return false;
     }
 
-    const croppedInitial = this.cropSelection(session as CaptureSession & { sourceImage: NativeImage }, {
-      action: "copy",
-      selection
-    });
-    const initial = this.e2eLongCaptureSimulation && croppedInitial
-      ? this.createE2ELongCaptureFrame(croppedInitial.getSize().width, croppedInitial.getSize().height, 0)
-      : croppedInitial;
-    if (!initial || initial.isEmpty()) {
-      return false;
+    if (!this.e2eLongCaptureSimulation && !session.overlayWindow.isDestroyed()) {
+      // Only long capture excludes this window from native desktop frames.
+      // Ordinary F1 capture must remain a normal visible overlay with the
+      // screenshot background, selection outline, and outside dimming.
+      session.overlayWindow.setContentProtection(true);
+      session.overlayWindow.setIgnoreMouseEvents(true);
+      session.overlayWindow.setFocusable(false);
+      session.overlayWindow.setOpacity(0);
+      await new Promise<void>((resolve) => setTimeout(resolve, 32));
+      if (this.session !== session || this.longCapture) {
+        return false;
+      }
     }
 
+    const croppedInitial = this.e2eLongCaptureSimulation
+      ? this.cropSelection(session as CaptureSession & { sourceImage: NativeImage }, {
+          action: "copy",
+          selection
+        })
+      : null;
+    const initial = this.e2eLongCaptureSimulation && croppedInitial
+      ? this.createE2ELongCaptureFrame(
+          croppedInitial.getSize().width,
+          croppedInitial.getSize().height,
+          this.e2eLongCaptureSimulationStartIndex
+        )
+      : await this.captureProvider.captureRegionImage?.(
+          session.display,
+          selection,
+          { includeLayeredWindows: true }
+        ) ?? null;
+    if (this.session !== session || this.longCapture) {
+      return false;
+    }
+    if (!initial || initial.isEmpty()) {
+      this.restoreOverlayAfterLongCaptureStartFailure(session);
+      return false;
+    }
     const point = {
       x: selection.x + Math.round(selection.width / 2),
       y: selection.y + Math.round(selection.height / 2)
@@ -465,6 +516,7 @@ export class LiteSnapCaptureSessionManager {
       ? { x: 0, y: 0, width: 1, height: 1 }
       : await this.captureProvider.getWindowRectAtPoint(session.display, point.x, point.y);
     if (!target) {
+      this.restoreOverlayAfterLongCaptureStartFailure(session);
       await this.recordDiagnostic("long-capture", "failed", session.startedAt, "未找到可滚动的目标窗口。");
       this.reportError?.({
         scope: "main",
@@ -477,33 +529,200 @@ export class LiteSnapCaptureSessionManager {
     }
 
     this.stopDisplayFollowWatch();
-    const longCapture: LongCaptureSession = {
+    session.longCaptureSelection = { ...selection };
+    const longCapture = this.longCaptureCoordinator.createSession(
       selection,
-      point,
-      startedAt: Date.now(),
-      phase: "capturing",
-      frames: [{ image: initial, appendFrom: 0 }],
-      stitchedHeight: initial.getSize().height,
-      noProgressFrames: 0,
-      simulationFrameIndex: 0,
-      scrollMs: 0,
-      captureMs: 0,
-      stitchMs: 0,
-      failureReported: false,
-      timer: null,
-      message: "正在自动滚动并拼接…"
-    };
+      initial,
+      "请手动上下滚动；返回已采集区域不会重复，越过边缘后会自动追加。",
+      target
+    );
+    if (!longCapture) {
+      return false;
+    }
+    longCapture.simulationFrameIndex = this.e2eLongCaptureSimulationStartIndex;
     this.longCapture = longCapture;
 
     if (!session.overlayWindow.isDestroyed()) {
+      // Keep a click-through visual mask so the area outside the long-capture
+      // selection remains dimmed just like a normal screenshot. The separate
+      // guide window below protects and scroll-relays only the selected area.
       session.overlayWindow.setIgnoreMouseEvents(true);
       session.overlayWindow.setFocusable(false);
-      session.overlayWindow.hide();
+      session.overlayWindow.setOpacity(0);
     }
-    this.showLongCaptureController(session.display, selection);
+    this.longCaptureWindows.open(session.display, selection, () => {
+      void this.handleLongCaptureAuxiliaryWindowClosed(longCapture.token);
+    });
     await this.emitOverlayStateChanged(await this.getOverlayState());
-    this.scheduleLongCaptureStep(0);
+    longCapture.maskReady = await this.longCaptureWindows.revealMask(
+      session.overlayWindow,
+      () => this.isCurrentLongCapture(longCapture, session) && longCapture.phase === "capturing"
+    );
+    if (!longCapture.maskReady && this.isCurrentLongCapture(longCapture, session)) {
+      longCapture.maskFailureReason = "mask-ready-timeout";
+      longCapture.message = "选区遮罩未能显示，但长截图仍可继续；虚线框和保存结果不受影响。";
+      await this.recordDiagnostic(
+        "long-capture",
+        "failed",
+        longCapture.startedAt,
+        "mask-ready-timeout",
+        this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture)
+      );
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+    }
+    // Establish the stitch baseline only after Windows has applied display
+    // affinity to the mask, guide, and controller. Comparing the pre-overlay
+    // frame with the first protected composite can otherwise look like a fake
+    // upward scroll before the user has moved the page at all.
+    if (!this.e2eLongCaptureSimulation && this.isCurrentLongCapture(longCapture, session)) {
+      const baselineStartedAt = Date.now();
+      const settledBaseline = await this.captureProvider.captureRegionImage?.(
+        session.display,
+        selection,
+        { includeLayeredWindows: true }
+      ) ?? null;
+      longCapture.captureMs += Date.now() - baselineStartedAt;
+      if (
+        settledBaseline &&
+        !settledBaseline.isEmpty() &&
+        this.isCurrentLongCapture(longCapture, session)
+      ) {
+        this.longCaptureCoordinator.resetBaseline(longCapture, settledBaseline);
+      }
+    }
+    this.longCaptureWindows.startWatch(
+      session.overlayWindow,
+      () => this.isCurrentLongCapture(longCapture, session) &&
+        (longCapture.phase === "capturing" || longCapture.phase === "paused"),
+      () => longCapture.scrollRelayInFlight
+    );
+    this.keepLongCaptureWindowsVisible(longCapture);
+    this.scheduleLongCapturePoll(LONG_CAPTURE_PASSIVE_POLL_MS);
     return true;
+  }
+
+  private restoreOverlayAfterLongCaptureStartFailure(session: CaptureSession): void {
+    const overlayWindow = session.overlayWindow;
+    if (this.session !== session || overlayWindow.isDestroyed()) {
+      return;
+    }
+    overlayWindow.setContentProtection(false);
+    overlayWindow.setOpacity(1);
+    overlayWindow.setFocusable(true);
+    overlayWindow.setIgnoreMouseEvents(false);
+    overlayWindow.show();
+    overlayWindow.focus();
+    overlayWindow.moveTop();
+  }
+
+  public async scrollLongCapture(deltaY: number): Promise<boolean> {
+    const session = this.session;
+    const longCapture = this.longCapture;
+    if (
+      !session ||
+      !longCapture ||
+      longCapture.phase !== "capturing" ||
+      !Number.isFinite(deltaY) ||
+      Math.abs(deltaY) < 0.5
+    ) {
+      return false;
+    }
+
+    if (longCapture.scrollRelayInFlight) {
+      // The transparent guide consumes the physical wheel event, so dropping a
+      // concurrent IPC call would also drop the user's scroll. Coalesce rapid
+      // wheel/trackpad events and relay their signed delta as soon as the
+      // current native SendInput call completes.
+      longCapture.queuedScrollDelta = Math.max(
+        -1_440,
+        Math.min(1_440, longCapture.queuedScrollDelta + deltaY)
+      );
+      return true;
+    }
+
+    // DOM wheel deltas are usually pixels while SendInput uses 120-unit
+    // wheel notches. This is a direct relay of the user's wheel gesture, not
+    // an automatic scrolling timer.
+    const magnitude = Math.max(120, Math.min(1_440, Math.round(Math.abs(deltaY) / 120) * 120));
+    const nativeDelta = deltaY > 0 ? -magnitude : magnitude;
+    const point = {
+      x: longCapture.selection.x + Math.round(longCapture.selection.width / 2),
+      y: longCapture.selection.y + Math.round(longCapture.selection.height / 2)
+    };
+    const guideWindow = this.longCaptureWindows.guide;
+    if (!guideWindow || guideWindow.isDestroyed()) {
+      return false;
+    }
+    longCapture.scrollRelayInFlight = true;
+    const startedAt = Date.now();
+    try {
+      // Temporarily release only the hit-test path for the synthetic wheel.
+      // The window stays visible, so there is no flash; restoring it right
+      // after SendInput keeps every click protected by the transparent layer.
+      guideWindow.setIgnoreMouseEvents(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 16));
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return false;
+      }
+      const didScroll = this.e2eLongCaptureSimulation
+        ? (() => {
+            const direction = deltaY > 0 ? 1 : -1;
+            const nextIndex = Math.max(
+              0,
+              Math.min(6, longCapture.simulationFrameIndex + direction)
+            );
+            if (nextIndex === longCapture.simulationFrameIndex) {
+              return false;
+            }
+            longCapture.simulationFrameIndex = nextIndex;
+            return true;
+          })()
+        : await this.captureProvider.scrollWindowAtPoint?.(
+            session.display,
+            point.x,
+            point.y,
+            nativeDelta,
+            {
+              targetWindowId: longCapture.targetWindowId
+            }
+          ) ?? false;
+      longCapture.scrollMs += Date.now() - startedAt;
+      if (didScroll) {
+        longCapture.expectedDirection = deltaY > 0 ? "down" : "up";
+        longCapture.samplingBurstRemaining = LONG_CAPTURE_MAX_POLLS_PER_SCROLL;
+        longCapture.message = "正在等待滚动停止，再自动追加稳定画面。";
+        // Re-arm a short trailing capture after every real user wheel event.
+        // Consecutive wheel events reset the timer, so we sample only once the
+        // target has settled and never initiate an automatic scroll ourselves.
+        this.scheduleLongCapturePoll(LONG_CAPTURE_SCROLL_SETTLE_MS);
+      }
+      return didScroll;
+    } finally {
+      longCapture.scrollRelayInFlight = false;
+      if (this.session === session && !guideWindow.isDestroyed()) {
+        guideWindow.setIgnoreMouseEvents(false);
+        guideWindow.setAlwaysOnTop(true, "screen-saver");
+        guideWindow.showInactive();
+        guideWindow.moveTop();
+      }
+      const controller = this.longCaptureWindows.controller;
+      if (this.isCurrentLongCapture(longCapture, session) && controller && !controller.isDestroyed()) {
+        controller.showInactive();
+        controller.moveTop();
+      }
+      this.keepLongCaptureWindowsVisible(longCapture);
+      const queuedDelta = longCapture.queuedScrollDelta;
+      longCapture.queuedScrollDelta = 0;
+      if (
+        Math.abs(queuedDelta) >= 0.5 &&
+        this.isCurrentLongCapture(longCapture, session) &&
+        longCapture.phase === "capturing"
+      ) {
+        setImmediate(() => {
+          void this.scrollLongCapture(queuedDelta);
+        });
+      }
+    }
   }
 
   public async controlLongCapture(control: LiteSnapLongCaptureControl): Promise<boolean> {
@@ -512,40 +731,62 @@ export class LiteSnapCaptureSessionManager {
       return false;
     }
 
-    if (control === "pause") {
+    if (control === "capture") {
       if (longCapture.phase !== "capturing") {
         return false;
       }
-      this.clearLongCaptureTimer(longCapture);
-      longCapture.phase = "paused";
-      longCapture.message = "已暂停，可继续、完成或取消。";
+      longCapture.message = "正在校验当前帧…";
       await this.emitOverlayStateChanged(await this.getOverlayState());
-      return true;
-    }
-
-    if (control === "resume") {
-      if (longCapture.phase !== "paused") {
-        return false;
+      this.clearLongCapturePoll(longCapture);
+      longCapture.expectedDirection = "down";
+      // This control remains available to the internal E2E bridge to model a
+      // manually scrolled target. The visible controller deliberately has no
+      // "capture" button: normal users only scroll, then the poller captures.
+      await this.runLongCaptureObservation(true);
+      if (this.isCurrentLongCapture(longCapture) && longCapture.phase === "capturing") {
+        this.keepLongCaptureWindowsVisible(longCapture);
+        if (longCapture.pendingFrame) {
+          longCapture.samplingBurstRemaining = Math.max(
+            longCapture.samplingBurstRemaining,
+            LONG_CAPTURE_MAX_SETTLE_CONFIRMATIONS
+          );
+          this.scheduleLongCapturePoll();
+        }
       }
-      longCapture.phase = "capturing";
-      longCapture.message = "正在继续自动滚动并拼接…";
-      await this.emitOverlayStateChanged(await this.getOverlayState());
-      this.scheduleLongCaptureStep(0);
       return true;
     }
 
     if (control === "cancel") {
+      if (longCapture.phase === "finishing") {
+        return false;
+      }
       await this.cancelLongCapture("已取消长截图。", "cancelled");
       await this.cancelCapture();
       return true;
     }
 
-    await this.finishLongCapture("已完成长截图，可继续标注。", "success");
+    if (longCapture.phase !== "capturing" && longCapture.phase !== "paused") {
+      return false;
+    }
+
+    // Finish is an explicit user command. Stop every pending sample and save
+    // the already verified stitched segments immediately. Do not recapture or
+    // rematch a dynamic final viewport here: that made the button appear dead
+    // on animated pages such as WPS and could never improve verified output.
+    this.clearLongCapturePoll(longCapture);
+    longCapture.samplingBurstRemaining = 0;
+    longCapture.pendingFrame = null;
+    longCapture.pendingConfirmationCount = 0;
+    await this.finishLongCapture("已由你手动完成长截图并保存。", "success");
     return true;
   }
 
   public async startHistoryEdit(image: NativeImage): Promise<boolean> {
     if (process.platform !== "win32" || !image || image.isEmpty()) {
+      return false;
+    }
+    if (this.longCapture) {
+      this.keepLongCaptureWindowsVisible(this.longCapture);
       return false;
     }
     if (this.session) {
@@ -575,6 +816,8 @@ export class LiteSnapCaptureSessionManager {
       displayFollowLocked: true,
       editorMode: true,
       historyEdit: true,
+      longCaptureExportWidth: null,
+      longCaptureSelection: null,
       diagnosticOperation: "history-edit",
       diagnosticFinalized: false,
       startedAt: Date.now()
@@ -593,151 +836,569 @@ export class LiteSnapCaptureSessionManager {
     }
     return {
       phase: longCapture.phase,
-      frameCount: longCapture.frames.length,
+      frameCount: Math.max(1, longCapture.acceptedFrameCount + 1),
       stitchedHeight: longCapture.stitchedHeight,
       elapsedMs: Math.max(0, Date.now() - longCapture.startedAt),
       message: longCapture.message
     };
   }
 
-  private scheduleLongCaptureStep(delay: number): void {
+  private scheduleLongCapturePoll(delayMs = LONG_CAPTURE_STABILITY_CONFIRM_MS): void {
     const longCapture = this.longCapture;
     if (!longCapture || longCapture.phase !== "capturing") {
       return;
     }
-    this.clearLongCaptureTimer(longCapture);
-    longCapture.timer = setTimeout(() => {
-      longCapture.timer = null;
-      void this.captureLongCaptureStep();
-    }, delay);
-    longCapture.timer.unref?.();
+    // Wheel events may arrive continuously. Preserve an already-earlier poll
+    // instead of debouncing it forever, otherwise a long gesture can move more
+    // than one viewport before the first intermediate frame is observed.
+    this.longCaptureCoordinator.schedulePoll(longCapture, delayMs, () => {
+      void this.pollLongCapture();
+    });
   }
 
-  private clearLongCaptureTimer(longCapture: LongCaptureSession): void {
-    if (!longCapture.timer) {
+  private clearLongCapturePoll(longCapture: LongCaptureSession): void {
+    this.longCaptureCoordinator.clearPoll(longCapture);
+  }
+
+  private async pollLongCapture(): Promise<void> {
+    const longCapture = this.longCapture;
+    if (!longCapture || longCapture.phase !== "capturing") {
       return;
     }
-    clearTimeout(longCapture.timer);
-    longCapture.timer = null;
+    const activeBurst = longCapture.samplingBurstRemaining > 0;
+    if (activeBurst) {
+      longCapture.samplingBurstRemaining -= 1;
+    }
+    await this.runLongCaptureObservation(false, !activeBurst);
+    if (this.isCurrentLongCapture(longCapture) && longCapture.phase === "capturing") {
+      this.keepLongCaptureWindowsVisible(longCapture);
+      // Long capture is wheel-event driven. A pending changed frame receives a
+      // small, bounded number of settle confirmations; once it is accepted or
+      // rejected, sampling stops completely until the user scrolls again.
+      if (longCapture.pendingFrame && longCapture.samplingBurstRemaining > 0) {
+        this.scheduleLongCapturePoll(LONG_CAPTURE_STABILITY_CONFIRM_MS);
+      } else {
+        this.scheduleLongCapturePoll(LONG_CAPTURE_PASSIVE_POLL_MS);
+      }
+    }
   }
 
-  private async captureLongCaptureStep(): Promise<void> {
+  private async runLongCaptureObservation(
+    forceSimulationAdvance: boolean,
+    passive = false
+  ): Promise<void> {
+    const longCapture = this.longCapture;
+    if (!longCapture || longCapture.phase !== "capturing") {
+      return;
+    }
+    while (longCapture.captureInFlight) {
+      await longCapture.captureInFlight;
+      if (!this.isCurrentLongCapture(longCapture) || longCapture.phase !== "capturing") {
+        return;
+      }
+    }
+    const task = this.captureObservedLongCaptureFrame(forceSimulationAdvance, passive);
+    longCapture.captureInFlight = task;
+    try {
+      await task;
+    } finally {
+      if (longCapture.captureInFlight === task) {
+        longCapture.captureInFlight = null;
+      }
+    }
+  }
+
+  private async captureObservedLongCaptureFrame(
+    forceSimulationAdvance: boolean,
+    passive: boolean
+  ): Promise<void> {
     const session = this.session;
     const longCapture = this.longCapture;
     if (!session || !longCapture || longCapture.phase !== "capturing") {
       return;
     }
-    const elapsed = Date.now() - longCapture.startedAt;
-    if (
-      longCapture.frames.length >= LONG_CAPTURE_MAX_FRAMES ||
-      elapsed >= LONG_CAPTURE_MAX_DURATION_MS ||
-      longCapture.stitchedHeight >= LONG_CAPTURE_MAX_HEIGHT
-    ) {
-      await this.finishLongCapture("已达到长截图安全上限，已保留当前结果。", "success");
-      return;
-    }
 
-    const targetWindow = this.e2eLongCaptureSimulation
-      ? { x: 0, y: 0, width: 1, height: 1 }
-      : await this.captureProvider.getWindowRectAtPoint(
-          session.display,
-          longCapture.point.x,
-          longCapture.point.y
-        );
-    if (!targetWindow) {
-      await this.finishLongCapture("目标窗口已关闭，已保留当前结果。", "success");
-      return;
-    }
-
-    // Approximate one 70%-viewport page of downward movement in standard
-    // Windows wheel deltas. Applications retain their own wheel settings, so
-    // overlap matching remains the source of truth for every appended frame.
-    const wheelNotches = Math.max(
-      1,
-      Math.min(24, Math.round((longCapture.selection.height * 0.7) / 120))
-    );
-    const scrollStartedAt = Date.now();
-    const scrolled = this.e2eLongCaptureSimulation
-      ? true
-      : await this.captureProvider.scrollWindowAtPoint?.(
-          session.display,
-          longCapture.point.x,
-          longCapture.point.y,
-          -120 * wheelNotches
-        ) ?? false;
-    longCapture.scrollMs += Date.now() - scrollStartedAt;
-    if (!scrolled) {
-      await this.pauseLongCapture("无法向目标窗口发送滚动指令，请完成当前结果或取消。", true);
-      return;
-    }
-
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, this.e2eLongCaptureSimulation ? 32 : LONG_CAPTURE_DELAY_MS)
-    );
     const captureStartedAt = Date.now();
+    // The helper windows use Windows display-affinity exclusion, so the native
+    // CAPTUREBLT path sees a live composited target while the mask, guide and
+    // controller remain visible without entering the captured pixels.
     const source = this.e2eLongCaptureSimulation
       ? this.createE2ELongCaptureFrame(
-          longCapture.frames[0]?.image.getSize().width ?? 0,
-          longCapture.frames[0]?.image.getSize().height ?? 0,
-          ++longCapture.simulationFrameIndex
+          longCapture.currentFrame.frame.width,
+          longCapture.currentFrame.frame.height,
+          forceSimulationAdvance
+            ? ++longCapture.simulationFrameIndex
+            : longCapture.simulationFrameIndex
         )
-      : await captureSourceImageWithFallback(this.captureProvider, session.display);
+      : await this.captureProvider.captureRegionImage?.(
+          session.display,
+          longCapture.selection,
+          { includeLayeredWindows: true }
+        ) ?? null;
     longCapture.captureMs += Date.now() - captureStartedAt;
+    if (
+      !this.isCurrentLongCapture(longCapture, session) ||
+      longCapture.phase !== "capturing"
+    ) {
+      return;
+    }
     if (!source || source.isEmpty()) {
-      await this.pauseLongCapture("获取滚动后的画面失败，请完成当前结果或取消。", true);
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "capture-unavailable";
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "获取当前画面失败，未追加。请继续手动滚动后重试，或完成当前结果。";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
       return;
     }
-    const next = this.e2eLongCaptureSimulation
-      ? source
-      : this.cropImageForSelection(source, session.display, longCapture.selection);
-    const previous = longCapture.frames.at(-1)?.image;
-    if (!next || next.isEmpty() || !previous || previous.isEmpty()) {
-      await this.pauseLongCapture("当前滚动区域无效，请完成当前结果或取消。", true);
+    longCapture.sampleCount += 1;
+
+    const previous = longCapture.currentFrame;
+    const sourceSize = source.getSize();
+    const targetWidth = previous.frame.width;
+    const targetHeight = previous.frame.height;
+    if (
+      Math.abs(targetWidth - sourceSize.width) > 1 ||
+      Math.abs(targetHeight - sourceSize.height) > 1
+    ) {
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "region-size-mismatch";
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "选区物理尺寸发生变化，已忽略该帧。请保持显示缩放和选区不变。";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
       return;
     }
+    const normalizedSource =
+      sourceSize.width === targetWidth && sourceSize.height === targetHeight
+        ? source
+        : source.resize({ width: targetWidth, height: targetHeight, quality: "best" });
+    const next = this.longCaptureCoordinator.prepareObservedFrame(normalizedSource);
+    if (!next || !previous) {
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "frame-prepare-failed";
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "当前选区无效，未追加。请完成当前结果或取消。";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+      return;
+    }
+
+    const previousFrame = previous.frame;
+    const nextFrame = next.frame;
+    const nextSize = { width: nextFrame.width, height: nextFrame.height };
+    const unchangedPixels = this.longCaptureCoordinator.framesEqual(previousFrame, nextFrame);
+    if (unchangedPixels) {
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = false;
+      longCapture.noProgressFrames += 1;
+      if (longCapture.noProgressFrames === 1) {
+        longCapture.message = "正在等待你手动滚动；检测到稳定的新内容后会自动追加。";
+        await this.emitOverlayStateChanged(await this.getOverlayState());
+      }
+      return;
+    }
+
+    // A wheel event is the evidence that the viewport may have moved. If the
+    // first post-scroll frame safely matches the current viewport, commit it
+    // immediately. Requiring a second pixel-identical frame loses every WPS
+    // frame whose caret, footer, or page animation keeps changing slightly.
+    const directMatchStartedAt = Date.now();
+    let directMatch = matchLiteSnapVerticalFramesBidirectional(
+      previousFrame,
+      nextFrame,
+      longCapture.expectedDirection ?? longCapture.lastDirection
+    );
+    if (
+      !directMatch.confident &&
+      !longCapture.expectedDirection &&
+      longCapture.lastDirection
+    ) {
+      // Passive observation has no wheel delta. Prefer the last accepted
+      // direction to prevent text-heavy pages from oscillating between two
+      // plausible seams, but unlock it when that direction truly fails so a
+      // deliberate manual reversal can still be detected.
+      directMatch = matchLiteSnapVerticalFramesBidirectional(previousFrame, nextFrame);
+    }
+    longCapture.stitchMs += Date.now() - directMatchStartedAt;
+    longCapture.lastMatchScore = directMatch.score;
+    longCapture.lastMatchOverlap = directMatch.overlap;
+    longCapture.lastMatchAppend = directMatch.appendedHeight;
+    longCapture.lastMatchDirection = directMatch.direction;
+    if (directMatch.confident) {
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      await this.appendObservedLongCaptureFrame(longCapture, next, directMatch);
+      return;
+    }
+
+    if (passive) {
+      // Animated cursors, status bars, and document reflow can change pixels
+      // without representing a scroll. Passive observation ignores those
+      // frames quietly and waits for the next low-rate sample. It must never
+      // create a pending/error loop or alter the verified stitched output.
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = false;
+      longCapture.changedFrameCount += 1;
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "passive-low-match-confidence";
+      return;
+    }
+
+    const pending = longCapture.pendingFrame;
+    if (!pending) {
+      longCapture.changedFrameCount += 1;
+      longCapture.pendingFrame = next;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "检测到画面变化，正在确认滚动已经停止…";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+      return;
+    }
+    const pendingFrame = pending.frame;
+    const stablePixels = this.longCaptureCoordinator.framesEqual(pendingFrame, nextFrame);
+    const stable = stablePixels
+      ? { confident: true, appendedHeight: 0 }
+      : matchLiteSnapVerticalFrames(pendingFrame, nextFrame);
+    if (stable.confident && stable.appendedHeight <= 2) {
+      longCapture.pendingFrame = null;
+      await this.appendObservedLongCaptureFrame(longCapture, next);
+      return;
+    }
+    longCapture.changedFrameCount += 1;
+    longCapture.pendingConfirmationCount += 1;
+
+    // During a continuous manual wheel gesture the page may never remain
+    // pixel-identical for two polls. Keep the prior observed frame as a bridge
+    // when both adjacent overlaps confidently agree on the same direction.
+    // This preserves intermediate rows instead of jumping from the first frame
+    // straight to the bottom and losing overlap.
+    const bridgeStartedAt = Date.now();
+    const currentToPending = matchLiteSnapVerticalFramesBidirectional(
+      previousFrame,
+      pendingFrame,
+      longCapture.expectedDirection
+    );
+    const pendingToNext = matchLiteSnapVerticalFramesBidirectional(
+      pendingFrame,
+      nextFrame,
+      longCapture.expectedDirection
+    );
+    longCapture.stitchMs += Date.now() - bridgeStartedAt;
+    if (
+      currentToPending.confident &&
+      pendingToNext.confident &&
+      currentToPending.direction === pendingToNext.direction
+    ) {
+      longCapture.pendingFrame = null;
+      await this.appendObservedLongCaptureFrame(longCapture, pending, currentToPending);
+      if (this.isCurrentLongCapture(longCapture) && longCapture.phase === "capturing") {
+        longCapture.pendingFrame = next;
+        longCapture.pendingConfirmationCount = 0;
+        longCapture.finalFrameUnsafe = true;
+        longCapture.message = "滚动中已保留一帧连续内容，正在继续确认最新画面…";
+        await this.emitOverlayStateChanged(await this.getOverlayState());
+      }
+      return;
+    }
+
+    if (longCapture.pendingConfirmationCount >= LONG_CAPTURE_MAX_SETTLE_CONFIRMATIONS) {
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "settle-confirmation-limit";
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "页面持续变化，本轮采样已停止；请停止滚动后再小幅滚动一次。";
+    } else {
+      longCapture.pendingFrame = next;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "画面仍在滚动，正在进行有限次数的稳定确认…";
+    }
+    await this.emitOverlayStateChanged(await this.getOverlayState());
+  }
+
+  private async appendObservedLongCaptureFrame(
+    longCapture: LongCaptureSession,
+    next: LongCaptureObservedFrame,
+    knownMatch?: ReturnType<typeof matchLiteSnapVerticalFramesBidirectional>
+  ): Promise<void> {
+    if (!this.isCurrentLongCapture(longCapture) || longCapture.phase !== "capturing") {
+      return;
+    }
+    const previous = longCapture.currentFrame;
+    const previousFrame = previous.frame;
+    const nextFrame = next.frame;
+    const nextSize = { width: nextFrame.width, height: nextFrame.height };
     const stitchStartedAt = Date.now();
-    const match = matchLiteSnapVerticalFrames(
-      { width: previous.getSize().width, height: previous.getSize().height, data: previous.toBitmap() },
-      { width: next.getSize().width, height: next.getSize().height, data: next.toBitmap() }
+    const match = knownMatch ?? matchLiteSnapVerticalFramesBidirectional(
+      previousFrame,
+      nextFrame,
+      longCapture.expectedDirection ?? longCapture.lastDirection
     );
     longCapture.stitchMs += Date.now() - stitchStartedAt;
     if (!match.confident) {
-      await this.pauseLongCapture("无法可靠识别重叠区域，已暂停以避免拼接错位。", true);
+      longCapture.rejectedFrameCount += 1;
+      longCapture.lastRejectReason = "low-match-confidence";
+      longCapture.pendingFrame = null;
+      longCapture.pendingConfirmationCount = 0;
+      longCapture.finalFrameUnsafe = true;
+      longCapture.message = "这次画面没有安全接上，本轮采样已停止；请向回滚一点后再小幅滚动。";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
       return;
     }
+
     if (match.appendedHeight <= 2) {
       longCapture.noProgressFrames += 1;
-      if (longCapture.noProgressFrames >= 2) {
-        await this.finishLongCapture("已到达滚动内容末尾。", "success");
-        return;
+      if (longCapture.noProgressFrames === 1) {
+        longCapture.message = "正在等待你手动滚动；检测到新内容后会自动追加。";
+        await this.emitOverlayStateChanged(await this.getOverlayState());
       }
-    } else {
-      longCapture.noProgressFrames = 0;
-      const nextHeight = longCapture.stitchedHeight + match.appendedHeight;
-      const nextBytes = next.getSize().width * nextHeight * 4;
-      if (nextHeight > LONG_CAPTURE_MAX_HEIGHT || nextBytes > LONG_CAPTURE_MAX_BYTES) {
-        await this.finishLongCapture("已达到长截图安全上限，已保留当前结果。", "success");
-        return;
-      }
-      longCapture.frames.push({ image: next, appendFrom: match.overlap });
-      longCapture.stitchedHeight = nextHeight;
-    }
-    longCapture.message = `正在拼接第 ${longCapture.frames.length} 帧…`;
-    await this.emitOverlayStateChanged(await this.getOverlayState());
-    this.scheduleLongCaptureStep(LONG_CAPTURE_DELAY_MS);
-  }
-
-  private async pauseLongCapture(message: string, terminalFailure: boolean): Promise<void> {
-    const longCapture = this.longCapture;
-    if (!longCapture) {
       return;
     }
-    this.clearLongCaptureTimer(longCapture);
+
+    const rangeAdvance = advanceLiteSnapStitchRange(
+      {
+        currentTop: longCapture.currentTop,
+        capturedTop: longCapture.capturedTop,
+        capturedBottom: longCapture.capturedBottom
+      },
+      match.direction,
+      match.appendedHeight,
+      nextSize.height
+    );
+    const uniqueHeight = rangeAdvance.prependHeight + rangeAdvance.appendHeight;
+    if (uniqueHeight <= 2) {
+      this.longCaptureCoordinator.acceptFrame(
+        longCapture,
+        next,
+        match.direction,
+        rangeAdvance.nextTop
+      );
+      longCapture.message = "当前画面已采集；继续滚动并越过已有内容边缘后会自动追加。";
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+      return;
+    }
+
+    const nextHeight = longCapture.stitchedHeight + uniqueHeight;
+    const nextBytes = nextSize.width * nextHeight * 4;
+    const estimatedMemory = this.longCaptureCoordinator.estimateMemoryBytes(
+      longCapture,
+      next,
+      nextBytes
+    );
+    longCapture.peakMemoryBytes = Math.max(longCapture.peakMemoryBytes, estimatedMemory);
+    if (
+      nextHeight > LONG_CAPTURE_MAX_HEIGHT ||
+      nextBytes > LONG_CAPTURE_MAX_BYTES ||
+      estimatedMemory > LONG_CAPTURE_MAX_MEMORY_BYTES
+    ) {
+      const reason = nextHeight > LONG_CAPTURE_MAX_HEIGHT
+        ? "output-height-limit"
+        : nextBytes > LONG_CAPTURE_MAX_BYTES
+          ? "output-byte-limit"
+          : "memory-limit";
+      await this.pauseLongCaptureAtSafetyLimit(longCapture, reason);
+      return;
+    }
+
+    const nextFrames = longCapture.frames.map((frame) => ({ ...frame }));
+    if (rangeAdvance.prependHeight > 0) {
+      const seam = findLiteSnapQuietSeamRow(
+        nextFrame,
+        rangeAdvance.prependHeight,
+        "up",
+        Math.min(48, nextSize.height - rangeAdvance.prependHeight)
+      );
+      const replaceExistingTop = seam - rangeAdvance.prependHeight;
+      const segment = this.longCaptureCoordinator.createSegment(nextFrame, 0, seam);
+      if (
+        !segment ||
+        !this.longCaptureCoordinator.trimTop(nextFrames, replaceExistingTop)
+      ) {
+        longCapture.rejectedFrameCount += 1;
+        longCapture.lastRejectReason = "prepend-segment-invalid";
+        longCapture.message = "向上拼接像素段生成失败，未追加。";
+        await this.emitOverlayStateChanged(await this.getOverlayState());
+        return;
+      }
+      nextFrames.unshift({ image: segment, appendFrom: 0, appendTo: seam });
+    }
+    if (rangeAdvance.appendHeight > 0) {
+      const exactSeam = nextSize.height - rangeAdvance.appendHeight;
+      const seam = findLiteSnapQuietSeamRow(
+        nextFrame,
+        exactSeam,
+        "down",
+        Math.min(48, exactSeam)
+      );
+      const replaceExistingBottom = exactSeam - seam;
+      const segment = this.longCaptureCoordinator.createSegment(
+        nextFrame,
+        seam,
+        nextSize.height
+      );
+      if (
+        !segment ||
+        !this.longCaptureCoordinator.trimBottom(nextFrames, replaceExistingBottom)
+      ) {
+        longCapture.rejectedFrameCount += 1;
+        longCapture.lastRejectReason = "append-segment-invalid";
+        longCapture.message = "向下拼接像素段生成失败，未追加。";
+        await this.emitOverlayStateChanged(await this.getOverlayState());
+        return;
+      }
+      nextFrames.push({
+        image: segment,
+        appendFrom: 0,
+        appendTo: nextSize.height - seam
+      });
+    }
+    longCapture.frames = nextFrames;
+    longCapture.capturedTop = rangeAdvance.nextTop < longCapture.capturedTop
+      ? rangeAdvance.nextTop
+      : longCapture.capturedTop;
+    longCapture.capturedBottom = rangeAdvance.nextBottom > longCapture.capturedBottom
+      ? rangeAdvance.nextBottom
+      : longCapture.capturedBottom;
+    longCapture.stitchedHeight = nextHeight;
+    this.longCaptureCoordinator.acceptFrame(
+      longCapture,
+      next,
+      match.direction,
+      rangeAdvance.nextTop
+    );
+    longCapture.peakMemoryBytes = Math.max(
+      longCapture.peakMemoryBytes,
+      this.longCaptureCoordinator.estimateMemoryBytes(longCapture)
+    );
+    longCapture.message = `已${match.direction === "up" ? "向上" : "向下"}补充新内容；可继续滚动或反向补齐另一端。`;
+    await this.emitOverlayStateChanged(await this.getOverlayState());
+  }
+
+  private async ensureLongCaptureTargetAvailable(
+    session: CaptureSession,
+    longCapture: LongCaptureSession
+  ): Promise<boolean> {
+    if (this.e2eLongCaptureSimulation || Date.now() - longCapture.lastTargetCheckAt < 750) {
+      return true;
+    }
+    longCapture.lastTargetCheckAt = Date.now();
+    const point = {
+      x: longCapture.selection.x + Math.round(longCapture.selection.width / 2),
+      y: longCapture.selection.y + Math.round(longCapture.selection.height / 2)
+    };
+    const target = await this.captureProvider.getWindowRectAtPoint(
+      session.display,
+      point.x,
+      point.y
+    );
+    if (!this.isCurrentLongCapture(longCapture, session)) {
+      return false;
+    }
+    const targetChanged = Boolean(
+      longCapture.targetWindowId &&
+      target?.windowId &&
+      target.windowId !== longCapture.targetWindowId
+    );
+    if (target && !targetChanged) {
+      longCapture.targetWindowMisses = 0;
+      return true;
+    }
+
+    longCapture.targetWindowMisses += 1;
+    longCapture.pendingFrame = null;
+    longCapture.pendingConfirmationCount = 0;
+    longCapture.finalFrameUnsafe = true;
+    longCapture.lastRejectReason = targetChanged
+      ? "target-window-changed"
+      : "target-window-unavailable";
+    // Window lookup can be transiently obscured by the transparent guide,
+    // system menus, or another topmost window. Never infer that the user has
+    // finished and never dismiss the session. Keep retrying until the original
+    // target returns; the user remains in control of Finish/Cancel/Escape.
+    longCapture.message = targetChanged
+      ? "暂时未识别到原目标窗口，本帧未采集；长截图会保持显示并继续重试。"
+      : "目标窗口暂时不可用，本帧未采集；长截图会保持显示并继续重试。";
+    await this.emitOverlayStateChanged(await this.getOverlayState());
+    return false;
+  }
+
+  private async handleLongCaptureAuxiliaryWindowClosed(token: number): Promise<void> {
+    const longCapture = this.longCapture;
+    if (
+      !longCapture ||
+      longCapture.token !== token ||
+      (longCapture.phase !== "capturing" && longCapture.phase !== "paused") ||
+      this.recoveringLongCaptureWindows
+    ) {
+      return;
+    }
+    const session = this.session;
+    if (!session || session.overlayWindow.isDestroyed()) {
+      return;
+    }
+
+    // An auxiliary guide/controller window may be recreated by Windows after a
+    // display/topmost transition. Recover it instead of treating that as a user
+    // cancellation and making the whole long-capture UI disappear.
+    this.recoveringLongCaptureWindows = true;
+    try {
+      longCapture.message = "长截图控制窗口已恢复；请继续手动滚动，完成后由你点击“完成并保存”。";
+      this.longCaptureWindows.open(session.display, longCapture.selection, () => {
+        void this.handleLongCaptureAuxiliaryWindowClosed(longCapture.token);
+      });
+      await this.emitOverlayStateChanged(await this.getOverlayState());
+      longCapture.maskReady = await this.longCaptureWindows.revealMask(
+        session.overlayWindow,
+        () => this.isCurrentLongCapture(longCapture, session) &&
+          (longCapture.phase === "capturing" || longCapture.phase === "paused")
+      );
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return;
+      }
+      this.longCaptureWindows.startWatch(
+        session.overlayWindow,
+        () => this.isCurrentLongCapture(longCapture, session) &&
+          (longCapture.phase === "capturing" || longCapture.phase === "paused"),
+        () => longCapture.scrollRelayInFlight
+      );
+      this.keepLongCaptureWindowsVisible(longCapture);
+      if (longCapture.phase === "capturing") {
+        this.scheduleLongCapturePoll(LONG_CAPTURE_PASSIVE_POLL_MS);
+      }
+    } finally {
+      this.recoveringLongCaptureWindows = false;
+    }
+  }
+
+  private async pauseLongCaptureAtSafetyLimit(
+    longCapture: LongCaptureSession,
+    reason: string
+  ): Promise<void> {
+    const session = this.session;
+    if (
+      !session ||
+      !this.isCurrentLongCapture(longCapture, session) ||
+      longCapture.phase !== "capturing"
+    ) {
+      return;
+    }
+    this.clearLongCapturePoll(longCapture);
+    longCapture.pendingFrame = null;
+    longCapture.lastRejectReason = reason;
     longCapture.phase = "paused";
-    longCapture.message = message;
-    // Pausing protects the current verified result. The final terminal state
-    // (finish or cancel) is recorded once the user chooses what to do with it.
-    void terminalFailure;
+    longCapture.message = "已达到图片安全容量，采集已暂停；不会自动完成或保存，请由你点击“完成并保存”或“取消”。";
+    this.longCaptureWindows.startWatch(
+      session.overlayWindow,
+      () => this.isCurrentLongCapture(longCapture, session) && longCapture.phase === "paused",
+      () => false
+    );
+    this.keepLongCaptureWindowsVisible(longCapture);
     await this.emitOverlayStateChanged(await this.getOverlayState());
   }
 
@@ -749,17 +1410,16 @@ export class LiteSnapCaptureSessionManager {
     if (!longCapture) {
       return;
     }
-    this.clearLongCaptureTimer(longCapture);
+    this.clearLongCapturePoll(longCapture);
     this.longCapture = null;
-    this.closeLongCaptureController();
-    await this.recordDiagnostic("long-capture", status, longCapture.startedAt, message, {
-      frames: longCapture.frames.length,
-      stitchedHeight: longCapture.stitchedHeight,
-      scrollMs: longCapture.scrollMs,
-      captureMs: longCapture.captureMs,
-      stitchMs: longCapture.stitchMs,
-      capturePath: "windows-native"
-    });
+    this.longCaptureWindows.close();
+    await this.recordDiagnostic(
+      "long-capture",
+      status,
+      longCapture.startedAt,
+      message,
+      this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture)
+    );
     if (this.session) {
       this.session.diagnosticOperation = "long-capture";
       this.session.diagnosticFinalized = true;
@@ -772,102 +1432,93 @@ export class LiteSnapCaptureSessionManager {
     if (!session || !longCapture) {
       return;
     }
-    this.clearLongCaptureTimer(longCapture);
+    this.clearLongCapturePoll(longCapture);
+    this.longCaptureWindows.stopWatch();
     longCapture.phase = "finishing";
     longCapture.message = "正在生成长截图…";
     await this.emitOverlayStateChanged(await this.getOverlayState());
-    const image = this.composeLongCaptureImage(longCapture.frames, longCapture.stitchedHeight);
-    this.longCapture = null;
+    if (!this.isCurrentLongCapture(longCapture, session)) {
+      return;
+    }
+    const composeStartedAt = Date.now();
+    const image = this.longCaptureCoordinator.compose(
+      longCapture.frames,
+      longCapture.stitchedHeight,
+      LONG_CAPTURE_MAX_BYTES
+    );
+    longCapture.composeMs += Date.now() - composeStartedAt;
     if (!image || image.isEmpty()) {
-      await this.recordDiagnostic("long-capture", "failed", longCapture.startedAt, "生成长截图失败。", {
-        frames: longCapture.frames.length,
-        stitchedHeight: longCapture.stitchedHeight,
-        scrollMs: longCapture.scrollMs,
-        captureMs: longCapture.captureMs,
-        stitchMs: longCapture.stitchMs,
-        capturePath: "windows-native",
-        composeReason: this.lastLongCaptureComposeFailure || "unknown"
-      });
+      await this.recordDiagnostic(
+        "long-capture",
+        "failed",
+        longCapture.startedAt,
+        "生成长截图失败。",
+        this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture, {
+          composeReason: this.longCaptureCoordinator.lastComposeFailure || "unknown"
+        })
+      );
       this.reportLongCaptureFailure(longCapture, "compose-failed");
       session.diagnosticOperation = "long-capture";
       session.diagnosticFinalized = true;
-      this.closeLongCaptureController();
+      this.longCapture = null;
+      this.longCaptureWindows.close();
       await this.cancelCapture();
       return;
     }
-    await this.recordDiagnostic("long-capture", status, longCapture.startedAt, message, {
-      frames: longCapture.frames.length,
-      stitchedHeight: image.getSize().height,
-      width: image.getSize().width,
-      scrollMs: longCapture.scrollMs,
-      captureMs: longCapture.captureMs,
-      stitchMs: longCapture.stitchMs,
-      capturePath: "windows-native"
-    });
-    session.diagnosticOperation = "long-capture";
-    session.diagnosticFinalized = true;
-    session.mode = "edit";
-    session.editorMode = true;
-    session.captureId = `long-${Date.now()}`;
-    session.sourceImage = image;
-    session.sourceImageDataUrl = null;
-    const preview = image.resize({
-      width: Math.max(1, Math.round(session.display.bounds.width * session.display.scaleFactor)),
-      height: Math.max(1, Math.round(session.display.bounds.height * session.display.scaleFactor)),
-      quality: "good"
-    });
-    session.previewImage = preview.isEmpty() ? image : preview;
-    session.previewImageDataUrl = this.encodePreviewDataUrl(session.previewImage);
-    await this.emitOverlayStateChanged(await this.getOverlayState());
-    this.closeLongCaptureController();
-    this.activateOverlayWindow(session.overlayWindow, session.display);
-    await this.showInteractiveOverlay(session.overlayWindow);
-  }
-
-  private composeLongCaptureImage(
-    frames: LongCaptureFrame[],
-    stitchedHeight: number
-  ): NativeImage | null {
-    this.lastLongCaptureComposeFailure = "";
-    const first = frames[0]?.image;
-    if (!first || first.isEmpty() || stitchedHeight <= 0) {
-      this.lastLongCaptureComposeFailure = "missing-first-frame";
-      return null;
-    }
-    const width = first.getSize().width;
-    const bytes = width * stitchedHeight * 4;
-    if (bytes <= 0 || bytes > LONG_CAPTURE_MAX_BYTES) {
-      this.lastLongCaptureComposeFailure = "output-byte-limit";
-      return null;
-    }
-    const output = Buffer.allocUnsafe(bytes);
-    let outputRow = 0;
-    for (const frame of frames) {
-      const size = frame.image.getSize();
-      if (size.width !== width || size.height <= frame.appendFrom) {
-        this.lastLongCaptureComposeFailure = `frame-size-mismatch:${size.width}x${size.height}:append=${frame.appendFrom}:expected-width=${width}`;
-        return null;
+    // A completed long capture is intentionally an export-only flow. Reopening
+    // it in the full-screen annotation overlay obscures the application and
+    // makes a long image appear much larger than the original selected region.
+    // Save it immediately using the existing LiteSnap directory and format.
+    session.longCaptureExportWidth = Math.max(1, Math.round(longCapture.selection.width));
+    const exportStartedAt = Date.now();
+    const output = this.normalizeLongCaptureExportSize(session, image);
+    try {
+      const settings = await this.settingsStore.getSettings();
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return;
       }
-      const bitmap = frame.image.toBitmap();
-      const sourceOffset = frame.appendFrom * width * 4;
-      const available = (size.height - frame.appendFrom) * width * 4;
-      if ((outputRow * width * 4) + available > output.length) {
-        this.lastLongCaptureComposeFailure = "output-overflow";
-        return null;
+      const savedPath = await this.imageStore.saveImage(output, settings);
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return;
       }
-      Buffer.from(bitmap).copy(output, outputRow * width * 4, sourceOffset, sourceOffset + available);
-      outputRow += size.height - frame.appendFrom;
+      await this.recordHistory(output, "capture-save");
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return;
+      }
+      longCapture.exportMs += Date.now() - exportStartedAt;
+      await this.recordDiagnostic(
+        "long-capture",
+        status,
+        longCapture.startedAt,
+        message,
+        this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture, {
+          stitchedHeight: output.getSize().height,
+          width: output.getSize().width
+        })
+      );
+      if (!this.isCurrentLongCapture(longCapture, session)) {
+        return;
+      }
+      session.diagnosticOperation = "long-capture";
+      session.diagnosticFinalized = true;
+      this.longCapture = null;
+      this.longCaptureWindows.close();
+      await this.cancelCapture();
+      this.revealSavedCapture(savedPath);
+    } catch (error) {
+      longCapture.exportMs += Date.now() - exportStartedAt;
+      if (this.isCurrentLongCapture(longCapture, session)) {
+        longCapture.phase = "capturing";
+        longCapture.message = "保存长截图失败，请检查保存目录后点击完成重试。";
+        this.longCaptureWindows.startWatch(
+          session.overlayWindow,
+          () => this.isCurrentLongCapture(longCapture, session) && longCapture.phase === "capturing",
+          () => longCapture.scrollRelayInFlight
+        );
+        await this.emitOverlayStateChanged(await this.getOverlayState());
+      }
+      console.warn("[litesnap] long capture save failed", error);
     }
-    if (outputRow !== stitchedHeight) {
-      this.lastLongCaptureComposeFailure = "stitched-height-mismatch";
-      return null;
-    }
-    const image = nativeImage.createFromBitmap(output, { width, height: stitchedHeight });
-    if (image.isEmpty()) {
-      this.lastLongCaptureComposeFailure = "native-image-empty";
-      return null;
-    }
-    return image;
   }
 
   private createE2ELongCaptureFrame(
@@ -880,15 +1531,25 @@ export class LiteSnapCaptureSessionManager {
     }
     const data = Buffer.allocUnsafe(width * height * 4);
     const edge = Math.round(height * 0.12);
-    const offset = frameIndex * Math.max(1, Math.round(height * 0.7));
+    const contentHeight = Math.max(1, height - edge * 2);
+    const step = Math.max(1, Math.round(height * 0.7));
+    const offset = frameIndex * step;
+    const bottomMarkerStart = 6 * step + Math.max(0, contentHeight - 10);
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const index = (y * width + x) * 4;
-        const value =
-          y < edge ? 245 : y >= height - edge ? 12 : ((offset + y - edge) * 37 + x * 17) % 251;
-        data[index] = value;
-        data[index + 1] = (value * 3) % 255;
-        data[index + 2] = (value * 7) % 255;
+        const contentRow = offset + y - edge;
+        const isTopMarker = y >= edge && contentRow >= 4 && contentRow <= 8;
+        const isBottomMarker = y < height - edge &&
+          contentRow >= bottomMarkerStart && contentRow <= bottomMarkerStart + 4;
+        const value = y < edge
+          ? 245
+          : y >= height - edge
+            ? 12
+            : (contentRow * 37 + x * 17) % 251;
+        data[index] = isTopMarker ? 255 : isBottomMarker ? 0 : value;
+        data[index + 1] = isTopMarker ? 0 : isBottomMarker ? 255 : (value * 3) % 255;
+        data[index + 2] = isTopMarker || isBottomMarker ? 255 : (value * 7) % 255;
         data[index + 3] = 255;
       }
     }
@@ -980,10 +1641,13 @@ export class LiteSnapCaptureSessionManager {
     // When the renderer has drawn annotations it sends back a fully composited
     // PNG (cropped selection + annotation layer). Otherwise we crop the
     // high-resolution source image in the main process to keep maximum quality.
-    const cropped = this.resolveCommitImage(
+    const resolvedImage = this.resolveCommitImage(
       session as CaptureSession & { sourceImage: NativeImage },
       input
     );
+    const cropped = resolvedImage
+      ? this.normalizeLongCaptureExportSize(session, resolvedImage)
+      : null;
     if (!cropped || cropped.isEmpty()) {
       return {
         ok: false,
@@ -1368,13 +2032,16 @@ export class LiteSnapCaptureSessionManager {
     this.switchingDisplay = false;
     const longCapture = this.longCapture;
     if (longCapture) {
-      this.clearLongCaptureTimer(longCapture);
+      this.clearLongCapturePoll(longCapture);
       this.longCapture = null;
-      this.closeLongCaptureController();
-      await this.recordDiagnostic("long-capture", "cancelled", longCapture.startedAt, "已取消长截图。", {
-        frames: longCapture.frames.length,
-        stitchedHeight: longCapture.stitchedHeight
-      });
+      this.longCaptureWindows.close();
+      await this.recordDiagnostic(
+        "long-capture",
+        "cancelled",
+        longCapture.startedAt,
+        "已取消长截图。",
+        this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture)
+      );
     }
     const session = this.session;
     this.session = null;
@@ -1527,6 +2194,20 @@ export class LiteSnapCaptureSessionManager {
         this.overlayWindow = null;
       }
       if (this.session?.overlayWindow === overlayWindow) {
+        const longCapture = this.longCapture;
+        if (longCapture) {
+          this.clearLongCapturePoll(longCapture);
+          this.longCapture = null;
+          this.longCaptureWindows.close();
+          this.reportLongCaptureFailure(longCapture, "overlay-window-closed");
+          void this.recordDiagnostic(
+            "long-capture",
+            "failed",
+            longCapture.startedAt,
+            "长截图遮罩窗口意外关闭。",
+            this.longCaptureCoordinator.buildDiagnosticMetrics(longCapture)
+          );
+        }
         this.session = null;
       }
     });
@@ -1535,60 +2216,27 @@ export class LiteSnapCaptureSessionManager {
     return overlayWindow;
   }
 
-  private showLongCaptureController(
-    display: Display,
-    selection: LiteSnapOverlaySelection
-  ): void {
-    let controller = this.longCaptureController;
-    if (!controller || controller.isDestroyed()) {
-      controller = createLiteSnapLongCaptureController(display);
-      this.longCaptureController = controller;
-      controller.on("closed", () => {
-        if (this.longCaptureController === controller) {
-          this.longCaptureController = null;
-        }
-      });
+  private keepLongCaptureWindowsVisible(longCapture: LongCaptureSession): void {
+    if (
+      !this.isCurrentLongCapture(longCapture) ||
+      (longCapture.phase !== "capturing" && longCapture.phase !== "paused")
+    ) {
+      return;
     }
-    const width = 360;
-    const height = 112;
-    const padding = 12;
-    const selectionBounds = {
-      x: display.bounds.x + selection.x,
-      y: display.bounds.y + selection.y,
-      width: selection.width,
-      height: selection.height
-    };
-    const candidates = [
-      { x: selectionBounds.x + Math.round((selectionBounds.width - width) / 2), y: selectionBounds.y + selectionBounds.height + padding },
-      { x: selectionBounds.x + Math.round((selectionBounds.width - width) / 2), y: selectionBounds.y - height - padding },
-      { x: selectionBounds.x + selectionBounds.width + padding, y: selectionBounds.y + Math.round((selectionBounds.height - height) / 2) },
-      { x: selectionBounds.x - width - padding, y: selectionBounds.y + Math.round((selectionBounds.height - height) / 2) }
-    ];
-    const minX = display.workArea.x + padding;
-    const minY = display.workArea.y + padding;
-    const maxX = display.workArea.x + display.workArea.width - width - padding;
-    const maxY = display.workArea.y + display.workArea.height - height - padding;
-    const candidate = candidates.find(
-      (item) => item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY
-    ) ?? candidates[0];
-    controller.setBounds({
-      x: Math.max(minX, Math.min(maxX, candidate.x)),
-      y: Math.max(minY, Math.min(maxY, candidate.y)),
-      width,
-      height
-    });
-    // Do not steal focus from the scroll target. A click on the controller
-    // can still pause/finish/cancel; resuming re-activates the target natively.
-    controller.showInactive();
-    controller.moveTop();
+    const mask = this.session?.overlayWindow;
+    if (mask && !mask.isDestroyed()) {
+      this.longCaptureWindows.ensureStack(mask, !longCapture.scrollRelayInFlight);
+    }
   }
 
-  private closeLongCaptureController(): void {
-    const controller = this.longCaptureController;
-    this.longCaptureController = null;
-    if (controller && !controller.isDestroyed()) {
-      controller.close();
-    }
+  private isCurrentLongCapture(
+    longCapture: LongCaptureSession,
+    session?: CaptureSession
+  ): boolean {
+    const current = this.longCapture;
+    return current === longCapture &&
+      current.token === longCapture.token &&
+      (!session || this.session === session);
   }
 
   private activateOverlayWindow(
@@ -1603,6 +2251,7 @@ export class LiteSnapCaptureSessionManager {
   }
 
   private parkOverlayWindow(overlayWindow: BrowserWindow): void {
+    overlayWindow.setContentProtection(false);
     overlayWindow.setIgnoreMouseEvents(true);
     overlayWindow.setAlwaysOnTop(false);
     overlayWindow.setVisibleOnAllWorkspaces(false);
@@ -1743,7 +2392,7 @@ export class LiteSnapCaptureSessionManager {
     if (overlay && !overlay.isDestroyed() && !overlay.webContents.isDestroyed()) {
       overlay.webContents.send(IPC_CHANNELS.liteSnapOverlayStateChanged, state);
     }
-    const controller = this.longCaptureController;
+    const controller = this.longCaptureWindows.controller;
     if (controller && !controller.isDestroyed() && !controller.webContents.isDestroyed()) {
       const controllerState = state
         ? { ...state, imageDataUrl: null, sourceImageDataUrl: null }
@@ -1759,6 +2408,7 @@ export class LiteSnapCaptureSessionManager {
       return;
     }
 
+    overlayWindow.setContentProtection(false);
     overlayWindow.setIgnoreMouseEvents(false);
     overlayWindow.setFocusable(true);
     overlayWindow.show();
@@ -1999,7 +2649,42 @@ export class LiteSnapCaptureSessionManager {
       }
     }
 
+    // The long-capture editor deliberately keeps the original selection frame
+    // on screen as a viewport. With no extra annotations, saving that viewport
+    // must still export the complete stitched image rather than only its first
+    // screenful.
+    if (session.longCaptureExportWidth) {
+      return session.sourceImage;
+    }
+
     return this.cropSelection(session, input);
+  }
+
+  private normalizeLongCaptureExportSize(
+    session: CaptureSession,
+    image: NativeImage
+  ): NativeImage {
+    const targetWidth = session.longCaptureExportWidth;
+    const sourceSize = image.getSize();
+    if (
+      !targetWidth ||
+      sourceSize.width <= 0 ||
+      sourceSize.height <= 0 ||
+      Math.abs(sourceSize.width - targetWidth) <= 1
+    ) {
+      return image;
+    }
+
+    const targetHeight = Math.max(
+      1,
+      Math.round((sourceSize.height * targetWidth) / sourceSize.width)
+    );
+    const resized = image.resize({
+      width: targetWidth,
+      height: targetHeight,
+      quality: "best"
+    });
+    return resized.isEmpty() ? image : resized;
   }
 
   private cropSelection(

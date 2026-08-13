@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   liteSnapHistoryPin: "launcher:litesnap-history-pin",
   liteSnapHistoryEdit: "launcher:litesnap-history-edit",
   liteSnapStartLongCapture: "launcher:litesnap-start-long-capture",
+  liteSnapScrollLongCapture: "launcher:litesnap-scroll-long-capture",
   liteSnapControlLongCapture: "launcher:litesnap-control-long-capture",
   liteSnapGetLongCaptureProgress: "launcher:litesnap-get-long-capture-progress",
   liteSnapGetDiagnostics: "launcher:litesnap-get-diagnostics",

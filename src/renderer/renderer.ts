@@ -375,6 +375,7 @@ interface LauncherApi {
   liteSnapHistoryPin(id: string): Promise<boolean>;
   liteSnapHistoryEdit(id: string): Promise<boolean>;
   liteSnapStartLongCapture(input: import("../shared/litesnap").LiteSnapLongCaptureStartInput): Promise<boolean>;
+  liteSnapScrollLongCapture(deltaY: number): Promise<boolean>;
   liteSnapControlLongCapture(
     control: import("../shared/litesnap").LiteSnapLongCaptureControl
   ): Promise<boolean>;

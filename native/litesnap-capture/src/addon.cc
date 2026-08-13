@@ -38,6 +38,7 @@ struct CaptureRequest {
   int32_t capture_height;
   int32_t output_width;
   int32_t output_height;
+  bool include_layered_windows;
 };
 
 struct RectResult {
@@ -90,6 +91,29 @@ bool ReadInt32Property(
   return napi_get_value_int32(env, property, value) == napi_ok;
 }
 
+bool ReadOptionalBoolProperty(
+    napi_env env,
+    napi_value object,
+    const char* key,
+    bool fallback,
+    bool* value) {
+  if (value == nullptr) {
+    return false;
+  }
+  bool has_property = false;
+  if (napi_has_named_property(env, object, key, &has_property) != napi_ok ||
+      !has_property) {
+    *value = fallback;
+    return true;
+  }
+
+  napi_value property;
+  if (napi_get_named_property(env, object, key, &property) != napi_ok) {
+    return false;
+  }
+  return napi_get_value_bool(env, property, value) == napi_ok;
+}
+
 bool ParseCaptureRequest(
     napi_env env,
     napi_value input,
@@ -99,7 +123,13 @@ bool ParseCaptureRequest(
          ReadInt32Property(env, input, "captureWidth", &request->capture_width) &&
          ReadInt32Property(env, input, "captureHeight", &request->capture_height) &&
          ReadInt32Property(env, input, "outputWidth", &request->output_width) &&
-         ReadInt32Property(env, input, "outputHeight", &request->output_height);
+         ReadInt32Property(env, input, "outputHeight", &request->output_height) &&
+         ReadOptionalBoolProperty(
+             env,
+             input,
+             "includeLayeredWindows",
+             true,
+             &request->include_layered_windows);
 }
 
 void CleanupCaptureObjects(
@@ -268,6 +298,11 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
   }
 
   SetStretchBltMode(memory_dc, COLORONCOLOR);
+  // Transparent Electron overlays and floating controls are layered windows.
+  // Long capture can intentionally omit them, keeping the on-screen guide
+  // stable while sampling the application below it.
+  const DWORD raster_operation =
+      SRCCOPY | (request.include_layered_windows ? CAPTUREBLT : 0);
 
   const BOOL copied =
       request.capture_width == request.output_width &&
@@ -281,7 +316,7 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
                 screen_dc,
                 request.x,
                 request.y,
-                SRCCOPY | CAPTUREBLT)
+                raster_operation)
           : StretchBlt(
                 memory_dc,
                 0,
@@ -293,7 +328,7 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
                 request.y,
                 request.capture_width,
                 request.capture_height,
-                SRCCOPY | CAPTUREBLT);
+                raster_operation);
 
   if (!copied) {
     CleanupCaptureObjects(screen_dc, memory_dc, bitmap, old_bitmap);
@@ -330,6 +365,13 @@ napi_value CaptureDisplayRect(napi_env env, napi_callback_info info) {
       request.output_height,
       pixels);
   return result == nullptr ? CreateNull(env) : result;
+}
+
+napi_value SupportsLayeredWindowExclusion(napi_env env, napi_callback_info info) {
+  (void)info;
+  napi_value result;
+  napi_get_boolean(env, true, &result);
+  return result;
 }
 
 napi_value CaptureDisplayFrames(napi_env env, napi_callback_info info) {
@@ -592,12 +634,16 @@ napi_value GetWindowRectAtPoint(napi_env env, napi_callback_info info) {
   napi_set_named_property(env, result, "width", value);
   napi_create_int32(env, height, &value);
   napi_set_named_property(env, result, "height", value);
+  const std::string window_id = std::to_string(
+      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(hwnd)));
+  napi_create_string_utf8(env, window_id.c_str(), NAPI_AUTO_LENGTH, &value);
+  napi_set_named_property(env, result, "windowId", value);
   return result;
 }
 
 napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
-  size_t argc = 3;
-  napi_value args[3];
+  size_t argc = 4;
+  napi_value args[4];
   if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok ||
       argc < 3) {
     return CreateNull(env);
@@ -615,18 +661,50 @@ napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
   const POINT point{ x, y };
   // Resolve the selected application's top-level window. The resolver avoids
   // LiteSnap's floating controller when it happens to overlap the selection.
-  HWND root = FindExternalWindowAtPoint(point);
+  HWND root = nullptr;
+  if (argc >= 4) {
+    size_t target_id_length = 0;
+    if (napi_get_value_string_utf8(
+            env,
+            args[3],
+            nullptr,
+            0,
+            &target_id_length) == napi_ok &&
+        target_id_length > 0 && target_id_length < 32) {
+      char target_id[32]{};
+      if (napi_get_value_string_utf8(
+              env,
+              args[3],
+              target_id,
+              sizeof(target_id),
+              &target_id_length) == napi_ok) {
+        try {
+          HWND requested = reinterpret_cast<HWND>(
+              static_cast<uintptr_t>(std::stoull(target_id)));
+          if (IsUsableExternalWindow(requested, GetCurrentProcessId())) {
+            root = requested;
+          }
+        } catch (...) {
+          root = nullptr;
+        }
+      }
+    }
+  }
+  if (root == nullptr) {
+    root = FindExternalWindowAtPoint(point);
+  }
   if (root == nullptr) {
     napi_value result;
     napi_get_boolean(env, false, &result);
     return result;
   }
-
   // SendInput follows the same route as a physical wheel. Chromium, Office
   // and many custom controls ignore a synthetic WM_MOUSEWHEEL message, so a
   // successful SendMessageTimeout is not evidence that the content moved.
+  // The LiteSnap overlay has temporarily released hit testing before this
+  // call, so the wheel reaches the target under the cursor without forcing
+  // that window to the foreground (which could hide the selection guide).
   // Keep the user's cursor position unchanged after the queued input.
-  SetForegroundWindow(root);
   const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
   const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
   const int virtual_width = (std::max)(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
@@ -1219,6 +1297,20 @@ napi_value Init(napi_env env, napi_value exports) {
       nullptr,
       &capture_fn);
   napi_set_named_property(env, exports, "captureDisplayRect", capture_fn);
+
+  napi_value layered_window_exclusion_fn;
+  napi_create_function(
+      env,
+      "supportsLayeredWindowExclusion",
+      NAPI_AUTO_LENGTH,
+      SupportsLayeredWindowExclusion,
+      nullptr,
+      &layered_window_exclusion_fn);
+  napi_set_named_property(
+      env,
+      exports,
+      "supportsLayeredWindowExclusion",
+      layered_window_exclusion_fn);
 
   napi_value capture_frames_fn;
   napi_create_function(

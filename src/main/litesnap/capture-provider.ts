@@ -22,9 +22,31 @@ export interface LiteSnapRecognizeTextOptions {
   languagePreference?: LiteSnapOcrLanguagePreference;
 }
 
+export interface LiteSnapSourceCaptureOptions {
+  /** Omit transparent/layered helper windows from a Windows screen capture. */
+  includeLayeredWindows?: boolean;
+}
+
+export type LiteSnapTargetWindowRect = Rectangle & {
+  /** Opaque per-process window identity. Never persisted in diagnostics. */
+  windowId?: string;
+};
+
+export type LiteSnapTargetWindowOptions = {
+  targetWindowId?: string;
+};
+
 export interface LiteSnapCaptureProvider {
   capturePreviewImage(display: Display): Promise<NativeImage | null>;
-  captureSourceImage(display: Display): Promise<NativeImage | null>;
+  captureSourceImage(
+    display: Display,
+    options?: LiteSnapSourceCaptureOptions
+  ): Promise<NativeImage | null>;
+  captureRegionImage?(
+    display: Display,
+    region: Rectangle,
+    options?: LiteSnapSourceCaptureOptions
+  ): Promise<NativeImage | null>;
   captureDisplayFrames(
     display: Display
   ): Promise<{ previewImage: NativeImage; sourceImage: NativeImage } | null>;
@@ -32,12 +54,14 @@ export interface LiteSnapCaptureProvider {
     display: Display,
     x: number,
     y: number
-  ): Promise<Rectangle | null>;
+  ): Promise<LiteSnapTargetWindowRect | null>;
+  supportsLayeredWindowExclusion?(): boolean;
   scrollWindowAtPoint?(
     display: Display,
     x: number,
     y: number,
-    delta: number
+    delta: number,
+    options?: LiteSnapTargetWindowOptions
   ): Promise<boolean>;
   recognizeText(
     image: NativeImage,
@@ -53,6 +77,7 @@ type NativeLiteSnapCaptureRequest = {
   captureHeight: number;
   outputWidth: number;
   outputHeight: number;
+  includeLayeredWindows?: boolean;
 };
 
 type NativeLiteSnapCaptureResult = {
@@ -85,8 +110,14 @@ type NativeLiteSnapCaptureAddon = {
   getWindowRectAtPoint?(
     x: number,
     y: number
-  ): Rectangle | null;
-  scrollWindowAtPoint?(x: number, y: number, delta: number): boolean;
+  ): LiteSnapTargetWindowRect | null;
+  scrollWindowAtPoint?(
+    x: number,
+    y: number,
+    delta: number,
+    targetWindowId?: string
+  ): boolean;
+  supportsLayeredWindowExclusion?(): boolean;
   recognizeText?(request: {
     data: Buffer;
     width: number;
@@ -139,7 +170,10 @@ export class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider 
     });
   }
 
-  public async captureSourceImage(display: Display): Promise<NativeImage | null> {
+  public async captureSourceImage(
+    display: Display,
+    _options?: LiteSnapSourceCaptureOptions
+  ): Promise<NativeImage | null> {
     return this.captureDisplayImage(display, {
       thumbnailWidth: Math.max(
         1,
@@ -150,6 +184,12 @@ export class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider 
         Math.round(display.bounds.height * display.scaleFactor)
       )
     });
+  }
+
+  public async captureRegionImage(): Promise<NativeImage | null> {
+    // desktopCapturer cannot reliably exclude our layered guide/mask windows.
+    // Long capture therefore never uses this fallback path.
+    return null;
   }
 
   public async captureDisplayFrames(
@@ -220,8 +260,36 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     return this.captureDisplayImage(display, false);
   }
 
-  public async captureSourceImage(display: Display): Promise<NativeImage | null> {
-    return this.captureDisplayImage(display, true);
+  public async captureSourceImage(
+    display: Display,
+    options?: LiteSnapSourceCaptureOptions
+  ): Promise<NativeImage | null> {
+    return this.captureDisplayImage(display, true, options);
+  }
+
+  public async captureRegionImage(
+    display: Display,
+    region: Rectangle,
+    options?: LiteSnapSourceCaptureOptions
+  ): Promise<NativeImage | null> {
+    const physicalRegion = resolveLiteSnapPhysicalCaptureRegion(
+      display,
+      region,
+      (screen as ScreenWithDipTransforms | undefined)?.dipToScreenRect?.bind(screen, null)
+    );
+    if (physicalRegion.width <= 0 || physicalRegion.height <= 0) {
+      return null;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return createNativeImageFromResult(this.addon.captureDisplayRect({
+      x: physicalRegion.x,
+      y: physicalRegion.y,
+      captureWidth: physicalRegion.width,
+      captureHeight: physicalRegion.height,
+      outputWidth: physicalRegion.width,
+      outputHeight: physicalRegion.height,
+      includeLayeredWindows: options?.includeLayeredWindows
+    }));
   }
 
   public async captureDisplayFrames(
@@ -262,8 +330,8 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
   public async getWindowRectAtPoint(
     display: Display,
     x: number,
-    y: number
-  ): Promise<Rectangle | null> {
+    y: number,
+  ): Promise<LiteSnapTargetWindowRect | null> {
     if (typeof this.addon.getWindowRectAtPoint !== "function") {
       return null;
     }
@@ -274,25 +342,41 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
       return null;
     }
 
-    return toDisplayDipRect(display, rect);
+    return {
+      ...toDisplayDipRect(display, rect),
+      ...(typeof rect.windowId === "string" && rect.windowId
+        ? { windowId: rect.windowId }
+        : {})
+    };
   }
 
   public async scrollWindowAtPoint(
     display: Display,
     x: number,
     y: number,
-    delta: number
+    delta: number,
+    options?: LiteSnapTargetWindowOptions
   ): Promise<boolean> {
     if (typeof this.addon.scrollWindowAtPoint !== "function") {
       return false;
     }
     const screenPoint = toPhysicalDisplayPoint(display, x, y);
     try {
-      return Boolean(this.addon.scrollWindowAtPoint(screenPoint.x, screenPoint.y, delta));
+      return Boolean(this.addon.scrollWindowAtPoint(
+        screenPoint.x,
+        screenPoint.y,
+        delta,
+        options?.targetWindowId ?? ""
+      ));
     } catch (error) {
       console.warn("[litesnap] native scroll failed", error);
       return false;
     }
+  }
+
+  public supportsLayeredWindowExclusion(): boolean {
+    return typeof this.addon.supportsLayeredWindowExclusion === "function" &&
+      this.addon.supportsLayeredWindowExclusion() === true;
   }
 
   public async recognizeText(
@@ -331,7 +415,8 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
 
   private async captureDisplayImage(
     display: Display,
-    highResolution: boolean
+    highResolution: boolean,
+    options?: LiteSnapSourceCaptureOptions
   ): Promise<NativeImage | null> {
     const physicalBounds = toPhysicalDisplayBounds(display);
     const previewSize = resolvePreviewOutputSize(display);
@@ -345,7 +430,8 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
         : previewSize.width,
       outputHeight: highResolution
         ? Math.max(1, physicalBounds.height)
-        : previewSize.height
+        : previewSize.height,
+      includeLayeredWindows: options?.includeLayeredWindows
     };
 
     const result = this.addon.captureDisplayRect(request);
@@ -364,6 +450,37 @@ function toPhysicalDisplayBounds(display: Display): Rectangle {
     y: Math.round(display.bounds.y * display.scaleFactor),
     width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
     height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor))
+  };
+}
+
+export function resolveLiteSnapPhysicalCaptureRegion(
+  display: Display,
+  region: Rectangle,
+  dipToScreenRect?: (rect: Rectangle) => Rectangle
+): Rectangle {
+  const absoluteDipRect = {
+    x: display.bounds.x + Math.round(region.x),
+    y: display.bounds.y + Math.round(region.y),
+    width: Math.max(1, Math.round(region.width)),
+    height: Math.max(1, Math.round(region.height))
+  };
+  if (dipToScreenRect) {
+    const transformed = dipToScreenRect(absoluteDipRect);
+    return {
+      x: Math.round(transformed.x),
+      y: Math.round(transformed.y),
+      width: Math.max(1, Math.round(transformed.width)),
+      height: Math.max(1, Math.round(transformed.height))
+    };
+  }
+  const scale = Number.isFinite(display.scaleFactor) && display.scaleFactor > 0
+    ? display.scaleFactor
+    : 1;
+  return {
+    x: Math.round((display.bounds.x + region.x) * scale),
+    y: Math.round((display.bounds.y + region.y) * scale),
+    width: Math.max(1, Math.round(region.width * scale)),
+    height: Math.max(1, Math.round(region.height * scale))
   };
 }
 
@@ -407,6 +524,13 @@ function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
 }
 
 function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
+  const requiredHashedAddonExports: Array<keyof NativeLiteSnapCaptureAddon> = [
+    "captureDisplayRect",
+    "supportsLayeredWindowExclusion",
+    "getWindowRectAtPoint",
+    "scrollWindowAtPoint",
+    "recognizeText"
+  ];
   for (const candidate of resolveLiteSnapNativeAddonCandidates()) {
     if (!fs.existsSync(candidate)) {
       continue;
@@ -415,6 +539,17 @@ function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
     try {
       const addon = require(candidate) as NativeLiteSnapCaptureAddon;
       if (addon && typeof addon.captureDisplayRect === "function") {
+        if (/litesnap-capture-[a-f0-9]{16}\.node$/i.test(candidate)) {
+          const missing = requiredHashedAddonExports.filter(
+            (name) => typeof addon[name] !== "function"
+          );
+          if (missing.length > 0) {
+            console.warn(
+              `[litesnap] active native addon is missing required exports: ${missing.join(", ")}`
+            );
+            continue;
+          }
+        }
         return addon;
       }
     } catch (error) {
@@ -494,9 +629,10 @@ export async function captureDisplayFramesWithFallback(
 
 export async function captureSourceImageWithFallback(
   provider: LiteSnapCaptureProvider,
-  display: Display
+  display: Display,
+  options?: LiteSnapSourceCaptureOptions
 ): Promise<NativeImage | null> {
-  const primary = await provider.captureSourceImage(display);
+  const primary = await provider.captureSourceImage(display, options);
   if (primary && !primary.isEmpty()) {
     return primary;
   }
@@ -505,10 +641,16 @@ export async function captureSourceImageWithFallback(
     return null;
   }
 
+  if (options?.includeLayeredWindows === false) {
+    // The Electron fallback cannot omit our transparent guide, so returning a
+    // frame here would bake it into the saved long screenshot.
+    return null;
+  }
+
   console.warn(
     "[litesnap] primary source capture failed, falling back to desktopCapturer"
   );
-  const fallback = await electronFallbackProvider.captureSourceImage(display);
+  const fallback = await electronFallbackProvider.captureSourceImage(display, options);
   return fallback && !fallback.isEmpty() ? fallback : null;
 }
 

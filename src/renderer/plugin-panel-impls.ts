@@ -15554,9 +15554,35 @@ async function hydrateLiteSnapHistory(): Promise<void> {
   }
 }
 
+const LITESNAP_DIAGNOSTIC_METRIC_LABELS: Record<string, string> = {
+  sampleFrames: "采样帧数",
+  changedFrames: "变化帧数",
+  acceptedFrames: "接受帧数",
+  rejectedFrames: "拒绝帧数",
+  lastRejectReason: "最近拒绝原因",
+  outputSegments: "输出片段数",
+  directionSwitches: "方向切换次数",
+  targetWindowMisses: "目标窗口连续丢失次数",
+  stitchedHeight: "拼接高度",
+  width: "输出宽度",
+  physicalWidth: "选区物理宽度",
+  physicalHeight: "选区物理高度",
+  peakMemoryBytes: "峰值内存估算",
+  finishSettleMs: "终帧等待耗时",
+  scrollMs: "滚动转发耗时",
+  captureMs: "采集耗时",
+  stitchMs: "匹配耗时",
+  composeMs: "合成耗时",
+  exportMs: "保存耗时",
+  maskReady: "遮罩已就绪",
+  maskState: "遮罩状态",
+  capturePath: "截图路径",
+  composeReason: "合成失败原因"
+};
+
 function formatLiteSnapDiagnostic(entry: (typeof liteSnapDiagnostics)[number]): string {
   const metrics = Object.entries(entry.metrics)
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, value]) => `${LITESNAP_DIAGNOSTIC_METRIC_LABELS[key] ?? key}=${value}`)
     .join(" · ");
   return [
     `${entry.operation} / ${entry.status}`,
@@ -15578,9 +15604,9 @@ async function formatLiteSnapDiagnosticsForClipboard(): Promise<string> {
   }
   const system = navigator.userAgent.replace(/\s+/g, " ").trim();
   return [
-    "LiteSnap diagnostics",
-    `version=${version}`,
-    `system=${system}`,
+    "LiteSnap 诊断",
+    `应用版本=${version}`,
+    `系统信息=${system}`,
     ...liteSnapDiagnostics.map((entry) => `${new Date(entry.createdAt).toISOString()} ${formatLiteSnapDiagnostic(entry).replace(/\n/g, " | ")}`)
   ].join("\n");
 }
