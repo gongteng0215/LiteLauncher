@@ -6291,6 +6291,12 @@ body {
   padding: 1px 6px;
 }
 
+.cashflow-ai-personality {
+  color: rgba(186, 230, 253, 0.78);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .cashflow-ai-stats {
   font-size: 11px;
   color: rgba(233, 242, 255, 0.84);
@@ -10082,6 +10088,32 @@ body {
   background: rgba(14, 116, 144, 0.12);
 }
 
+.cashflow-review-picker {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.cashflow-review-picker-label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  color: rgba(233, 242, 255, 0.76);
+  font-size: 12px;
+}
+
+.cashflow-review-picker-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.cashflow-review-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .cashflow-review-score {
   font-size: 20px;
   font-weight: 700;
@@ -10097,11 +10129,28 @@ body {
   display: grid;
   gap: 8px;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
 }
 
 .cashflow-review-timeline-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.3);
   line-height: 1.45;
+}
+
+.cashflow-review-timeline-head {
+  color: rgba(125, 211, 252, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cashflow-review-timeline-message {
+  color: rgba(233, 242, 255, 0.82);
 }
 
 .cashflow-review-ai-list {
@@ -10113,7 +10162,8 @@ body {
 
 @media (max-width: 860px) {
   .webtools-json-schema-editors,
-  .webtools-data-mask-fake-row {
+  .webtools-data-mask-fake-row,
+  .cashflow-review-metrics {
     grid-template-columns: minmax(0, 1fr);
   }
 }

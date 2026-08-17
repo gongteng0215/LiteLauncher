@@ -800,6 +800,10 @@ body.mode-cashflow .cashflow-ai-card {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.28);
   background: rgba(var(--ll-accent-rgb), 0.08);
 }
+body.mode-plugin .cashflow-ai-personality,
+body.mode-cashflow .cashflow-ai-personality {
+  color: rgba(var(--ll-accent-soft-rgb), 0.78);
+}
 body.mode-plugin .cashflow-ai-decision,
 body.mode-cashflow .cashflow-ai-decision {
   color: var(--ll-text-accent);
@@ -1176,4 +1180,8 @@ body.mode-plugin .cashflow-panel-review .cashflow-review-summary,
 body.mode-cashflow .cashflow-panel-review .cashflow-review-summary {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.25);
   background: rgba(var(--ll-accent-deep-rgb), 0.12);
+}
+body.mode-plugin .cashflow-review-timeline-head,
+body.mode-cashflow .cashflow-review-timeline-head {
+  color: rgba(var(--ll-accent-rgb), 0.92);
 }

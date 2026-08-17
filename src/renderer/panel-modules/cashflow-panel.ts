@@ -401,6 +401,102 @@ namespace RendererPanelRuntime {
     };
   }
 
+  export function parseCashflowReviewDecision(value: unknown): CashflowReviewDecision | null {
+    const record = toRecord(value);
+    if (
+      !record ||
+      typeof record.turn !== "number" ||
+      typeof record.action !== "string" ||
+      typeof record.message !== "string" ||
+      typeof record.createdAt !== "number"
+    ) {
+      return null;
+    }
+    return {
+      turn: record.turn,
+      action: record.action,
+      message: record.message,
+      createdAt: record.createdAt
+    };
+  }
+
+  export function parseCashflowReviewCheckpoint(value: unknown): CashflowReviewCheckpoint | null {
+    const record = toRecord(value);
+    if (
+      !record ||
+      typeof record.turn !== "number" ||
+      typeof record.passiveIncome !== "number" ||
+      typeof record.cash !== "number" ||
+      typeof record.monthlyNet !== "number" ||
+      typeof record.netWorth !== "number" ||
+      typeof record.createdAt !== "number"
+    ) {
+      return null;
+    }
+    return {
+      turn: record.turn,
+      passiveIncome: record.passiveIncome,
+      cash: record.cash,
+      monthlyNet: record.monthlyNet,
+      netWorth: record.netWorth,
+      createdAt: record.createdAt
+    };
+  }
+
+  export function parseCashflowReviewGame(value: unknown): CashflowReviewGame | null {
+    const record = toRecord(value);
+    if (
+      !record ||
+      typeof record.id !== "number" ||
+      typeof record.status !== "string" ||
+      typeof record.role !== "string" ||
+      typeof record.currentTurn !== "number" ||
+      typeof record.won !== "boolean" ||
+      typeof record.lost !== "boolean" ||
+      (record.lossReason !== null && typeof record.lossReason !== "string") ||
+      typeof record.createdAt !== "number" ||
+      typeof record.updatedAt !== "number" ||
+      !Array.isArray(record.decisions) ||
+      !Array.isArray(record.checkpoints)
+    ) {
+      return null;
+    }
+    const state = parseCashflowState(record.state);
+    if (!state) {
+      return null;
+    }
+    const decisions: CashflowReviewDecision[] = [];
+    for (const item of record.decisions) {
+      const decision = parseCashflowReviewDecision(item);
+      if (!decision) {
+        return null;
+      }
+      decisions.push(decision);
+    }
+    const checkpoints: CashflowReviewCheckpoint[] = [];
+    for (const item of record.checkpoints) {
+      const checkpoint = parseCashflowReviewCheckpoint(item);
+      if (!checkpoint) {
+        return null;
+      }
+      checkpoints.push(checkpoint);
+    }
+    return {
+      id: record.id,
+      status: record.status,
+      role: record.role,
+      currentTurn: record.currentTurn,
+      won: record.won,
+      lost: record.lost,
+      lossReason: record.lossReason,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      state,
+      decisions,
+      checkpoints
+    };
+  }
+
   export function extractCashflowState(result: ExecuteResult): CashflowState | null {
     const data = toRecord(result.data);
     if (!data) {
@@ -436,6 +532,22 @@ namespace RendererPanelRuntime {
       jobs.push(parsed);
     }
     return jobs;
+  }
+
+  export function extractCashflowReviewHistory(result: ExecuteResult): CashflowReviewGame[] | null {
+    const data = toRecord(result.data);
+    if (!data || !Array.isArray(data.cashflowReviewHistory)) {
+      return null;
+    }
+    const history: CashflowReviewGame[] = [];
+    for (const item of data.cashflowReviewHistory) {
+      const game = parseCashflowReviewGame(item);
+      if (!game) {
+        return null;
+      }
+      history.push(game);
+    }
+    return history;
   }
 
   export function buildCashflowTarget(
@@ -476,10 +588,11 @@ namespace RendererPanelRuntime {
     } else if (state.lost) {
       outcomeBonus = -0.15;
     }
-    const debtPenalty =
-      reports && reports.balanceSheet.debtsTotal > 0
-        ? Math.min(0.2, reports.metrics.debtRatio * 0.2)
-        : 0;
+    const assetValue = state.assets.reduce((sum, asset) => sum + asset.totalCost, 0);
+    const debtRatio = reports
+      ? reports.metrics.debtRatio
+      : state.debt / Math.max(1, state.cash + assetValue);
+    const debtPenalty = state.debt > 0 ? Math.min(0.2, Math.max(0, debtRatio) * 0.2) : 0;
     const raw =
       freedomRatio * 55 + assetScore * 20 + turnPenalty * 10 + outcomeBonus * 100 - debtPenalty * 100;
     return Math.max(0, Math.min(100, Math.round(raw)));
@@ -503,7 +616,50 @@ namespace RendererPanelRuntime {
     return "开局阶段建议先稳定现金流，避免过早加杠杆；每回合都记录机会成本，再决定是否买入。";
   }
 
+  export function cashflowReviewOutcomeLabel(game: CashflowReviewGame): string {
+    if (game.won) {
+      return "胜利";
+    }
+    if (game.lost) {
+      return "失败";
+    }
+    return game.status === "archived" ? "已归档" : "进行中";
+  }
+
+  export function cashflowReviewActionLabel(action: string): string {
+    const labels: Record<string, string> = {
+      open: "进入对局",
+      reset: "开始新局",
+      "next-turn": "下一回合",
+      buy: "现金买入",
+      "buy-loan": "贷款买入",
+      skip: "跳过机会",
+      ai: "开启 AI",
+      log: "游戏记录"
+    };
+    return labels[action] ?? action;
+  }
+
+  export function cashflowReviewDateLabel(timestamp: number): string {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      return "当前对局";
+    }
+    return new Date(timestamp).toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+  }
+
   export function renderCashflowReviewPanelView(state: CashflowState, reports: CashflowReports | null): void {
+    const selectedGame =
+      cashflowReviewHistory.find((game) => game.id === cashflowReviewSelectedGameId) ??
+      cashflowReviewHistory[0] ??
+      null;
+    const reviewState = selectedGame?.state ?? state;
+    const reviewReports = selectedGame ? null : reports;
     const panelItem = document.createElement("li");
     panelItem.className = "settings-panel-item";
 
@@ -516,9 +672,37 @@ namespace RendererPanelRuntime {
 
     const description = document.createElement("p");
     description.className = "settings-description";
-    description.textContent = "按时间线回顾本局关键决策，并查看结算总结。";
+    description.textContent = "切换最近对局，按时间线回顾关键决策、资产变化和最终结果。";
 
-    const score = buildCashflowReviewScore(state, reports);
+    const picker = document.createElement("div");
+    picker.className = "cashflow-review-picker";
+    const pickerLabel = document.createElement("label");
+    pickerLabel.className = "cashflow-review-picker-label";
+    pickerLabel.textContent = "选择对局";
+    const pickerSelect = document.createElement("select");
+    pickerSelect.className = "settings-input cashflow-review-picker-select";
+    pickerSelect.setAttribute("aria-label", "选择要复盘的现金流对局");
+    for (const game of cashflowReviewHistory) {
+      const option = document.createElement("option");
+      option.value = String(game.id);
+      option.selected = game.id === selectedGame?.id;
+      option.textContent =
+        `${cashflowReviewOutcomeLabel(game)} · ${game.role} · 第 ${game.currentTurn} 回合 · ` +
+        cashflowReviewDateLabel(game.updatedAt);
+      pickerSelect.appendChild(option);
+    }
+    pickerSelect.disabled = cashflowReviewHistory.length <= 1;
+    pickerSelect.addEventListener("change", () => {
+      const selectedId = Number(pickerSelect.value);
+      if (Number.isFinite(selectedId)) {
+        cashflowReviewSelectedGameId = selectedId;
+        renderList();
+      }
+    });
+    pickerLabel.appendChild(pickerSelect);
+    picker.appendChild(pickerLabel);
+
+    const score = buildCashflowReviewScore(reviewState, reviewReports);
     const summaryCard = document.createElement("section");
     summaryCard.className = "cashflow-review-summary";
     const summaryTitle = document.createElement("h4");
@@ -529,13 +713,47 @@ namespace RendererPanelRuntime {
     scoreNode.textContent = `综合评分 ${score} / 100`;
     const adviceNode = document.createElement("p");
     adviceNode.className = "cashflow-review-advice";
-    adviceNode.textContent = buildCashflowReviewAdvice(state, score);
+    adviceNode.textContent = buildCashflowReviewAdvice(reviewState, score);
     const metaNode = document.createElement("div");
     metaNode.className = "cashflow-review-meta";
+    const outcomeLabel = selectedGame
+      ? cashflowReviewOutcomeLabel(selectedGame)
+      : reviewState.won
+      ? "胜利"
+      : reviewState.lost
+      ? "失败"
+      : "进行中";
     metaNode.textContent =
-      `${state.role} · 第 ${state.turn} 回合 · ${cashflowPhaseLabel(state.phase)} · ` +
-      `被动收入 ${formatMoney(state.passiveIncome)}/月 · 现金 ${formatMoney(state.cash)}`;
+      `${outcomeLabel} · ` +
+      `${reviewState.role} · 第 ${reviewState.turn} 回合 · ${cashflowPhaseLabel(reviewState.phase)} · ` +
+      `被动收入 ${formatMoney(reviewState.passiveIncome)}/月 · 现金 ${formatMoney(reviewState.cash)}`;
     summaryCard.append(summaryTitle, scoreNode, adviceNode, metaNode);
+
+    const checkpoints = selectedGame?.checkpoints ?? [];
+    const firstCheckpoint = checkpoints[0];
+    const lastCheckpoint = checkpoints[checkpoints.length - 1];
+    const highestNetWorth = checkpoints.reduce(
+      (highest, checkpoint) => Math.max(highest, checkpoint.netWorth),
+      lastCheckpoint?.netWorth ?? reviewState.cash
+    );
+    const metricGrid = document.createElement("div");
+    metricGrid.className = "cashflow-review-metrics";
+    metricGrid.append(
+      createCashflowStat(
+        "现金变化",
+        `${formatMoney(firstCheckpoint?.cash ?? reviewState.cash)} → ${formatMoney(lastCheckpoint?.cash ?? reviewState.cash)}`
+      ),
+      createCashflowStat(
+        "被动收入增长",
+        formatMoney(
+          (lastCheckpoint?.passiveIncome ?? reviewState.passiveIncome) -
+            (firstCheckpoint?.passiveIncome ?? reviewState.passiveIncome)
+        ),
+        true
+      ),
+      createCashflowStat("最高净资产", formatMoney(highestNetWorth)),
+      createCashflowStat("记录决策", String(selectedGame?.decisions.length ?? reviewState.logs.length))
+    );
 
     const timelineBlock = document.createElement("section");
     timelineBlock.className = "cashflow-block cashflow-block-review-timeline";
@@ -546,11 +764,26 @@ namespace RendererPanelRuntime {
 
     const timelineList = document.createElement("ol");
     timelineList.className = "cashflow-review-timeline";
-    const timelineEntries = [...state.logs].reverse();
+    const decisions = selectedGame?.decisions ?? [];
+    const timelineEntries =
+      decisions.length > 0
+        ? decisions
+        : [...reviewState.logs].reverse().map((message) => ({
+            turn: reviewState.turn,
+            action: "log",
+            message,
+            createdAt: 0
+          }));
     for (const entry of timelineEntries) {
       const item = document.createElement("li");
       item.className = "cashflow-review-timeline-item";
-      item.textContent = entry;
+      const head = document.createElement("div");
+      head.className = "cashflow-review-timeline-head";
+      head.textContent = `第 ${entry.turn} 回合 · ${cashflowReviewActionLabel(entry.action)}`;
+      const message = document.createElement("div");
+      message.className = "cashflow-review-timeline-message";
+      message.textContent = entry.message;
+      item.append(head, message);
       timelineList.appendChild(item);
     }
     if (timelineEntries.length === 0) {
@@ -562,7 +795,7 @@ namespace RendererPanelRuntime {
       timelineBlock.appendChild(timelineList);
     }
 
-    if (state.aiEnabled && state.aiPlayers.length > 0) {
+    if (reviewState.aiEnabled && reviewState.aiPlayers.length > 0) {
       const aiBlock = document.createElement("section");
       aiBlock.className = "cashflow-block";
       const aiTitle = document.createElement("h4");
@@ -571,17 +804,18 @@ namespace RendererPanelRuntime {
       aiBlock.appendChild(aiTitle);
       const aiList = document.createElement("ul");
       aiList.className = "cashflow-review-ai-list";
-      for (const aiPlayer of state.aiPlayers) {
+      for (const aiPlayer of reviewState.aiPlayers) {
         const item = document.createElement("li");
         item.textContent =
-          `${aiPlayer.name} · 现金 ${formatMoney(aiPlayer.cash)} · 被动收入 ${formatMoney(aiPlayer.passiveIncome)}/月 · ` +
+          `${aiPlayer.name} · ${aiPlayer.profileDescription} · 现金 ${formatMoney(aiPlayer.cash)} · ` +
+          `被动收入 ${formatMoney(aiPlayer.passiveIncome)}/月 · ` +
           `最近决策：${aiPlayer.lastDecision ?? "暂无"}`;
         aiList.appendChild(item);
       }
       aiBlock.appendChild(aiList);
-      panel.append(title, description, summaryCard, timelineBlock, aiBlock);
+      panel.append(title, description, picker, summaryCard, metricGrid, timelineBlock, aiBlock);
     } else {
-      panel.append(title, description, summaryCard, timelineBlock);
+      panel.append(title, description, picker, summaryCard, metricGrid, timelineBlock);
     }
 
     const actions = document.createElement("div");
@@ -599,7 +833,7 @@ namespace RendererPanelRuntime {
     refreshButton.className = "settings-btn settings-btn-secondary";
     refreshButton.textContent = "刷新复盘";
     refreshButton.addEventListener("click", () => {
-      void refreshStandaloneCashflowPanel().then((ok) => {
+      void refreshCashflowReviewPanel().then((ok) => {
         if (ok) {
           renderList();
         }
@@ -653,6 +887,16 @@ namespace RendererPanelRuntime {
     const nextJobs = extractCashflowJobs(result);
     if (nextJobs) {
       cashflowJobs = nextJobs;
+    }
+    const nextReviewHistory = extractCashflowReviewHistory(result);
+    if (nextReviewHistory !== null) {
+      cashflowReviewHistory = nextReviewHistory;
+      const selectedStillExists = cashflowReviewHistory.some(
+        (game) => game.id === cashflowReviewSelectedGameId
+      );
+      if (!selectedStillExists) {
+        cashflowReviewSelectedGameId = cashflowReviewHistory[0]?.id ?? null;
+      }
     }
 
     if (result.message) {
@@ -977,7 +1221,7 @@ namespace RendererPanelRuntime {
       const emptyAi = document.createElement("div");
       emptyAi.className = "cashflow-empty";
       emptyAi.textContent =
-        "\u5f53\u524d\u4e3a\u5355\u4eba\u6a21\u5f0f\uff0c\u53ef\u5728\u4e0b\u65b9\u6309\u94ae\u5f00\u542f AI \u5bf9\u6218\u3002";
+        "\u5f53\u524d\u4e3a\u5355\u4eba\u6a21\u5f0f\uff0c\u53ef\u5728\u4e0b\u65b9\u5f00\u542f\u7a33\u5065\u3001\u5747\u8861\u3001\u8fdb\u53d6\u4e09\u79cd AI \u7b56\u7565\u3002";
       aiBlock.appendChild(emptyAi);
     } else {
       const aiList = document.createElement("div");
@@ -995,6 +1239,10 @@ namespace RendererPanelRuntime {
         phaseNode.className = "cashflow-ai-phase";
         phaseNode.textContent = cashflowPhaseLabel(aiPlayer.phase);
         head.append(nameNode, phaseNode);
+
+        const personality = document.createElement("div");
+        personality.className = "cashflow-ai-personality";
+        personality.textContent = aiPlayer.profileDescription;
 
         const totalExpensesAi = aiPlayer.expenses + aiPlayer.debtPayment;
         const salaryAfterTaxAi = Math.max(
@@ -1024,7 +1272,7 @@ namespace RendererPanelRuntime {
           decision.textContent = `\u6700\u8fd1\u51b3\u7b56\uff1a${aiPlayer.lastDecision ?? "\u6682\u65e0"}`;
         }
 
-        card.append(head, stats, decision);
+        card.append(head, personality, stats, decision);
         aiList.appendChild(card);
       }
       aiBlock.appendChild(aiList);
@@ -1312,7 +1560,7 @@ namespace RendererPanelRuntime {
     const aiButton = document.createElement("button");
     aiButton.type = "button";
     aiButton.className = "settings-btn settings-btn-secondary";
-    aiButton.textContent = state.aiEnabled ? "AI \u5df2\u5f00\u542f" : "\u5f00\u542f AI \u5bf9\u6218";
+    aiButton.textContent = state.aiEnabled ? "AI \u7b56\u7565\u5df2\u5f00\u542f" : "\u5f00\u542f 3 \u79cd AI \u7b56\u7565";
     aiButton.disabled = state.aiEnabled;
     aiButton.addEventListener("click", () => {
       void executeCashflowAction("ai").then((result) => {
@@ -1335,6 +1583,11 @@ namespace RendererPanelRuntime {
     return Boolean(result || cashflowState);
   }
 
+  export async function refreshCashflowReviewPanel(): Promise<boolean> {
+    const result = await executeCashflowAction("review-data");
+    return Boolean(result || cashflowReviewHistory.length > 0);
+  }
+
   export async function openStandaloneCashflowPanel(
     reset = false,
     options?: { reviewMode?: boolean }
@@ -1343,6 +1596,8 @@ namespace RendererPanelRuntime {
     setMode("cashflow");
     if (reset) {
       await executeCashflowAction("reset");
+    } else if (cashflowReviewMode) {
+      await executeCashflowAction("review-data");
     } else {
       await executeCashflowAction("state");
       if (cashflowState?.lost) {

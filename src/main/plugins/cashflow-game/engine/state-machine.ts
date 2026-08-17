@@ -48,6 +48,11 @@ const AI_PROFILE_BY_KEY = new Map<string, CashflowAiProfile>(
 const AI_LOG_LIMIT = 8;
 const AI_NAME_FALLBACK = "AI 玩家";
 
+type CashflowAiDecision = {
+  action: "buy" | "buy-loan" | "skip";
+  reason: string;
+};
+
 function randomIndex(max: number): number {
   if (max <= 0) {
     return 0;
@@ -67,6 +72,14 @@ function formatSignedMoney(value: number): string {
     return `-${formatMoney(Math.abs(value))}`;
   }
   return formatMoney(0);
+}
+
+function aiActionLabel(action: CashflowAiDecision["action"]): string {
+  return action === "buy"
+    ? "现金买入"
+    : action === "buy-loan"
+    ? "贷款买入"
+    : "跳过机会";
 }
 
 function cloneState(state: CashflowState): CashflowState {
@@ -659,14 +672,35 @@ export class CashflowStateMachine {
       return;
     }
 
-    if (state.aiPlayers.length > 0) {
-      return;
+    const uniquePlayers: CashflowAiPlayer[] = [];
+    const existingProfileKeys = new Set<string>();
+    for (const player of state.aiPlayers) {
+      if (existingProfileKeys.has(player.profileKey)) {
+        continue;
+      }
+      existingProfileKeys.add(player.profileKey);
+      uniquePlayers.push(player);
     }
 
-    const profile = this.getAiProfile();
-    const player = this.createAiPlayer(profile, 1);
-    state.aiPlayers = [player];
-    this.appendLog(state, `AI 玩家加入：${player.name}（${player.role}）`);
+    const addedPlayers: CashflowAiPlayer[] = [];
+    for (const profile of CASHFLOW_AI_PROFILES) {
+      if (existingProfileKeys.has(profile.key)) {
+        continue;
+      }
+      const player = this.createAiPlayer(profile, uniquePlayers.length + 1);
+      existingProfileKeys.add(profile.key);
+      uniquePlayers.push(player);
+      addedPlayers.push(player);
+    }
+    state.aiPlayers = uniquePlayers;
+    if (addedPlayers.length > 0) {
+      this.appendLog(
+        state,
+        `AI 玩家加入：${addedPlayers
+          .map((player) => `${player.name}（${player.role}）`)
+          .join("、")}`
+      );
+    }
   }
 
   private applyOpportunityToPortfolio(
@@ -763,10 +797,10 @@ export class CashflowStateMachine {
   private decideAiAction(
     player: CashflowAiPlayer,
     profile: CashflowAiProfile
-  ): "buy" | "buy-loan" | "skip" {
+  ): CashflowAiDecision {
     const opportunity = player.currentOpportunity;
     if (!opportunity) {
-      return "skip";
+      return { action: "skip", reason: "当前没有可评估的机会" };
     }
 
     const actor = player as unknown as CashflowState;
@@ -801,7 +835,28 @@ export class CashflowStateMachine {
       }
     }
 
-    return bestAction;
+    const reserveCash = totalExpenses * profile.minCashReserveMonths;
+    if (bestAction === "buy") {
+      return {
+        action: bestAction,
+        reason: `现金储备充足，${opportunity.cashflow > 0 ? "回报可提升被动收入" : "机会符合当前组合"}`
+      };
+    }
+    if (bestAction === "buy-loan") {
+      return {
+        action: bestAction,
+        reason: `预计贷款后月净现金流 ${formatSignedMoney(projectedNetWithLoan)}，符合进取阈值`
+      };
+    }
+    return {
+      action: bestAction,
+      reason:
+        player.cash < reserveCash
+          ? `优先保留 ${profile.minCashReserveMonths.toFixed(1)} 个月现金安全垫`
+          : opportunity.dealClass === "big-deal" && profile.riskTolerance < 0.5
+          ? "大机会风险超过当前性格承受范围"
+          : "当前回报未达到策略买入阈值"
+    };
   }
 
   private applyAiDecision(
@@ -959,14 +1014,15 @@ export class CashflowStateMachine {
     }
 
     const profile = this.getAiProfile(player.profileKey);
-    const action = this.decideAiAction(player, profile);
-    const decisionSummary = this.applyAiDecision(player, profile, action);
+    const decision = this.decideAiAction(player, profile);
+    const decisionSummary = this.applyAiDecision(player, profile, decision.action);
+    player.lastDecision = `${player.lastDecision ?? aiActionLabel(decision.action)} · ${decision.reason}`;
 
     const eventText = eventResult
       ? `（${eventCategoryLabel(eventResult.category)} ${eventResult.title}）`
       : "";
     this.trimAiLogs(player);
-    return `${decisionSummary}${eventText}`;
+    return `${decisionSummary}（${decision.reason}）${eventText}`;
   }
 
   private advanceAiPlayers(state: CashflowState): string[] {

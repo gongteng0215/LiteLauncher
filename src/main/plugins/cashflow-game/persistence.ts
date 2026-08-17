@@ -13,10 +13,42 @@ export type PersistCashflowStateInput = {
   archivePreviousActiveGame?: boolean;
 };
 
+export type CashflowReviewDecision = {
+  turn: number;
+  action: string;
+  message: string;
+  createdAt: number;
+};
+
+export type CashflowReviewCheckpoint = {
+  turn: number;
+  passiveIncome: number;
+  cash: number;
+  monthlyNet: number;
+  netWorth: number;
+  createdAt: number;
+};
+
+export type CashflowReviewGame = {
+  id: number;
+  status: string;
+  role: string;
+  currentTurn: number;
+  won: boolean;
+  lost: boolean;
+  lossReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+  state: CashflowState;
+  decisions: CashflowReviewDecision[];
+  checkpoints: CashflowReviewCheckpoint[];
+};
+
 export interface CashflowGamePersistence {
   loadState(): Promise<CashflowState | null>;
   saveState(input: PersistCashflowStateInput): Promise<void>;
   getStats(): Promise<CashflowStatsSummary>;
+  getReviewHistory?(): Promise<CashflowReviewGame[]>;
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -339,5 +371,35 @@ export class CashflowDatabasePersistence implements CashflowGamePersistence {
 
   public async getStats(): Promise<CashflowStatsSummary> {
     return this.db.getCashflowStatsSummary();
+  }
+
+  public async getReviewHistory(): Promise<CashflowReviewGame[]> {
+    const records = await this.db.getCashflowReviewHistory();
+    const history: CashflowReviewGame[] = [];
+    for (const record of records) {
+      try {
+        const state = parseState(JSON.parse(record.snapshotJson));
+        if (!state) {
+          continue;
+        }
+        history.push({
+          id: record.id,
+          status: record.status,
+          role: record.role,
+          currentTurn: record.currentTurn,
+          won: record.won,
+          lost: state.lost,
+          lossReason: state.lossReason,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          state,
+          decisions: record.decisions,
+          checkpoints: record.checkpoints
+        });
+      } catch {
+        continue;
+      }
+    }
+    return history;
   }
 }

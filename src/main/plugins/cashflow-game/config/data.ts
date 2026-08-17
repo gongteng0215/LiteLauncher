@@ -113,11 +113,31 @@ export const CASHFLOW_AI_PROFILES: CashflowAiProfile[] = [
     key: "steady-financier",
     name: "AI 阿稳",
     description: "稳健型：重视现金安全垫，偏好中小机会，谨慎使用贷款。",
-    preferredJobKeys: ["programmer", "operator", "designer"],
-    riskTolerance: 0.42,
-    loanTolerance: 0.36,
-    minCashReserveMonths: 2.2,
-    roiWeight: 1.15
+    preferredJobKeys: ["operator", "designer", "cleaner"],
+    riskTolerance: 0.24,
+    loanTolerance: 0.12,
+    minCashReserveMonths: 3,
+    roiWeight: 1
+  },
+  {
+    key: "balanced-allocator",
+    name: "AI 小衡",
+    description: "均衡型：兼顾回报与现金储备，在现金流改善明确时适度贷款。",
+    preferredJobKeys: ["programmer", "product-manager", "operator"],
+    riskTolerance: 0.52,
+    loanTolerance: 0.5,
+    minCashReserveMonths: 1.8,
+    roiWeight: 1.18
+  },
+  {
+    key: "growth-chaser",
+    name: "AI 阿冲",
+    description: "进取型：追求高回报和大机会，愿意用更高杠杆换取被动收入增长。",
+    preferredJobKeys: ["doctor", "product-manager", "designer"],
+    riskTolerance: 0.9,
+    loanTolerance: 0.92,
+    minCashReserveMonths: 0.6,
+    roiWeight: 1.45
   }
 ];
 export const CASHFLOW_OPPORTUNITIES: CashflowOpportunityTemplate[] = [

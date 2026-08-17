@@ -2,6 +2,7 @@
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { CashflowStateMachine } from "./engine";
 import {
+  CashflowReviewGame,
   CashflowGamePersistence,
   PersistCashflowStateInput
 } from "./persistence";
@@ -21,6 +22,7 @@ const ACTION_SKIP = "skip";
 const ACTION_RESET = "reset";
 const ACTION_STAT = "stat";
 const ACTION_REVIEW = "review";
+const ACTION_REVIEW_DATA = "review-data";
 const ACTION_AI = "ai";
 
 const ICON_FILENAMES = [
@@ -46,6 +48,7 @@ type CashflowAction =
   | typeof ACTION_RESET
   | typeof ACTION_STAT
   | typeof ACTION_REVIEW
+  | typeof ACTION_REVIEW_DATA
   | typeof ACTION_AI;
 
 interface CashflowCommand {
@@ -89,6 +92,7 @@ const VALID_ACTIONS = new Set<CashflowAction>([
   ACTION_RESET,
   ACTION_STAT,
   ACTION_REVIEW,
+  ACTION_REVIEW_DATA,
   ACTION_AI
 ]);
 
@@ -424,7 +428,7 @@ function createQueryItems(query: string): LaunchItem[] {
         id: `plugin:${PLUGIN_ID}:ai`,
         type: "command",
         title: "\u73b0\u91d1\u6d41 AI \u5bf9\u5c40",
-        subtitle: "\u5f00\u542f AI \u73a9\u5bb6\u5e76\u884c\u63a8\u8fdb\uff0c\u5bf9\u6bd4\u8d44\u4ea7\u4e0e\u51b3\u7b56\u53d8\u5316",
+        subtitle: "\u5f00\u542f\u7a33\u5065\u3001\u5747\u8861\u3001\u8fdb\u53d6\u4e09\u79cd AI \u6027\u683c\uff0c\u5bf9\u6bd4\u8d44\u4ea7\u4e0e\u51b3\u7b56\u53d8\u5316",
         target: buildTarget(ACTION_AI),
         iconPath: CASHFLOW_ICON_PATH,
         keywords: ["plugin", "cashflow", "cash", "ai", "bot", "\u5bf9\u6218"]
@@ -516,6 +520,53 @@ async function ensureHydrated(): Promise<void> {
 
 function defaultStatMessage(): string {
   return "\u6682\u65e0\u5bf9\u5c40\u7edf\u8ba1\u6570\u636e";
+}
+
+function createFallbackReviewHistory(
+  state: PersistCashflowStateInput["state"]
+): CashflowReviewGame[] {
+  const now = Date.now();
+  const assetValue = state.assets.reduce((sum, asset) => sum + asset.totalCost, 0);
+  return [
+    {
+      id: 0,
+      status: "active",
+      role: state.role,
+      currentTurn: state.turn,
+      won: state.won,
+      lost: state.lost,
+      lossReason: state.lossReason,
+      createdAt: now,
+      updatedAt: now,
+      state,
+      decisions: [...state.logs].reverse().map((message) => ({
+        turn: state.turn,
+        action: "log",
+        message,
+        createdAt: now
+      })),
+      checkpoints: [
+        {
+          turn: state.turn,
+          passiveIncome: state.passiveIncome,
+          cash: state.cash,
+          monthlyNet:
+            state.salary + state.passiveIncome - state.expenses - state.debtPayment,
+          netWorth: state.cash + assetValue - state.debt,
+          createdAt: now
+        }
+      ]
+    }
+  ];
+}
+
+async function getReviewHistory(
+  state: PersistCashflowStateInput["state"]
+): Promise<CashflowReviewGame[]> {
+  const persisted = await persistence?.getReviewHistory?.();
+  return persisted && persisted.length > 0
+    ? persisted
+    : createFallbackReviewHistory(state);
 }
 
 function createResponseData(
@@ -613,25 +664,29 @@ async function execute(
     };
   }
 
-  if (command.action === ACTION_REVIEW) {
+  if (command.action === ACTION_REVIEW || command.action === ACTION_REVIEW_DATA) {
     const baseOutcome = stateMachine.getState();
     const reportOutcome = stateMachine.getReports();
-    context.window.webContents.send(IPC_CHANNELS.openPanel, {
-      panel: "cashflow",
-      reset: false,
-      review: true
-    });
+    const reviewHistory = await getReviewHistory(baseOutcome.state);
+    if (command.action === ACTION_REVIEW) {
+      context.window.webContents.send(IPC_CHANNELS.openPanel, {
+        panel: "cashflow",
+        reset: false,
+        review: true
+      });
+    }
 
     return {
       ok: true,
       keepOpen: true,
-      message: "\u5df2\u8fdb\u5165\u590d\u76d8\u6a21\u5f0f\uff0c\u53ef\u67e5\u770b\u51b3\u7b56\u65f6\u95f4\u7ebf",
+      message: `\u5df2\u52a0\u8f7d\u6700\u8fd1 ${reviewHistory.length} \u5c40\u590d\u76d8\u6570\u636e`,
       data: createResponseData(
         baseOutcome.state,
         reportOutcome.reports,
         context.selectedItem.id,
         {
-          cashflowReviewMode: true
+          cashflowReviewMode: true,
+          cashflowReviewHistory: reviewHistory
         }
       )
     };

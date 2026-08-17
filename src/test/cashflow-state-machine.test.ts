@@ -253,15 +253,82 @@ test("buying big deal can trigger downside settlement", async () => {
   assert.ok(after.logs.some((line) => line.includes("Big Deal")));
 });
 
-test("enable ai mode creates at least one ai player", () => {
+test("enable ai mode creates the steady, balanced, and aggressive profiles", () => {
   const machine = new CashflowStateMachine();
   machine.reset("programmer");
 
   const outcome = machine.enableAiMode();
 
   assert.equal(outcome.state.aiEnabled, true);
-  assert.ok(outcome.state.aiPlayers.length >= 1);
+  assert.equal(outcome.state.aiPlayers.length, 3);
+  assert.deepEqual(
+    outcome.state.aiPlayers.map((player) => player.profileKey),
+    ["steady-financier", "balanced-allocator", "growth-chaser"]
+  );
   assert.equal(outcome.state.aiPlayers[0]?.turn, outcome.state.turn);
+});
+
+test("hydrating an old single-profile AI save fills missing personalities once", () => {
+  const machine = new CashflowStateMachine();
+  const aiState = machine.enableAiMode().state;
+  machine.hydrate({
+    ...aiState,
+    aiPlayers: aiState.aiPlayers.slice(0, 1)
+  });
+
+  const hydrated = machine.getState().state;
+  assert.equal(hydrated.aiPlayers.length, 3);
+  assert.equal(new Set(hydrated.aiPlayers.map((player) => player.profileKey)).size, 3);
+});
+
+test("AI personalities choose different actions for the same leveraged big deal", async () => {
+  const machine = new CashflowStateMachine();
+  const baseState = machine.reset("cleaner").state;
+  const aiOpened = machine.enableAiMode().state;
+  const sharedOpportunity = {
+    id: "personality-big-deal-1",
+    key: "personality_big_deal",
+    tier: "big" as const,
+    dealClass: "big-deal" as const,
+    title: "高杠杆测试机会",
+    description: "用于验证不同 AI 性格的确定性选择",
+    cost: 10000,
+    cashflow: 2500
+  };
+  machine.hydrate({
+    ...baseState,
+    aiEnabled: true,
+    aiPlayers: aiOpened.aiPlayers.map((player) => ({
+      ...player,
+      salary: 2000,
+      taxRate: 0,
+      expenses: 1000,
+      passiveIncome: 0,
+      debt: 0,
+      debtPayment: 0,
+      cash: 1000,
+      currentOpportunity: { ...sharedOpportunity },
+      assets: [],
+      logs: [],
+      won: false,
+      lost: false,
+      lossReason: null,
+      lastDecision: null
+    }))
+  });
+
+  const outcome = await withMockRandom([0.99], () => machine.nextTurn());
+  const byProfile = new Map(
+    outcome.state.aiPlayers.map((player) => [player.profileKey, player] as const)
+  );
+  assert.match(byProfile.get("steady-financier")?.lastDecision ?? "", /跳过/);
+  assert.match(byProfile.get("steady-financier")?.lastDecision ?? "", /安全垫|风险/);
+  assert.match(byProfile.get("balanced-allocator")?.lastDecision ?? "", /贷款买入/);
+  assert.match(byProfile.get("growth-chaser")?.lastDecision ?? "", /贷款买入/);
+  assert.notEqual(
+    byProfile.get("steady-financier")?.lastDecision,
+    byProfile.get("growth-chaser")?.lastDecision
+  );
 });
 
 test("next turn advances ai player and records ai decision", async () => {

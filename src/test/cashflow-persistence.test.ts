@@ -130,6 +130,17 @@ test("archiving previous active game loads the latest snapshot", async () => {
     assert.equal(stats.latestRole, second.role);
     assert.equal(stats.latestTurn, second.turn);
     assert.deepEqual(stats.commonLossReasons, []);
+
+    const reviewHistory = await persistence.getReviewHistory();
+    assert.equal(reviewHistory.length, 2);
+    assert.equal(reviewHistory[0]?.state.role, second.role);
+    assert.equal(reviewHistory[0]?.status, "active");
+    assert.equal(reviewHistory[1]?.state.role, first.role);
+    assert.equal(reviewHistory[1]?.status, "archived");
+    assert.equal(reviewHistory[0]?.decisions.length, 1);
+    assert.equal(reviewHistory[0]?.decisions[0]?.message, "第二局");
+    assert.equal(reviewHistory[0]?.checkpoints.length, 1);
+    assert.equal(reviewHistory[0]?.checkpoints[0]?.cash, second.cash);
   });
 });
 

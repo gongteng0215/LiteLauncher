@@ -195,11 +195,19 @@ test("cashflow ai action enables ai mode and returns ai players", async () => {
 
   const data = (result.data ?? {}) as Record<string, unknown>;
   const state = data.cashflowState as
-    | { aiEnabled?: boolean; aiPlayers?: unknown[] }
+    | {
+        aiEnabled?: boolean;
+        aiPlayers?: Array<{ profileKey?: string; profileDescription?: string }>;
+      }
     | undefined;
   assert.equal(state?.aiEnabled, true);
   assert.ok(Array.isArray(state?.aiPlayers));
-  assert.ok((state?.aiPlayers?.length ?? 0) >= 1);
+  assert.equal(state?.aiPlayers?.length, 3);
+  assert.deepEqual(
+    state?.aiPlayers?.map((player) => player.profileKey),
+    ["steady-financier", "balanced-allocator", "growth-chaser"]
+  );
+  assert.ok(state?.aiPlayers?.every((player) => Boolean(player.profileDescription)));
 });
 
 test("cashflow review action opens review mode with timeline flag", async () => {
@@ -222,4 +230,19 @@ test("cashflow review action opens review mode with timeline flag", async () => 
   const data = (result.data ?? {}) as Record<string, unknown>;
   assert.equal(data.cashflowReviewMode, true);
   assert.ok(data.cashflowState);
+  const reviewHistory = data.cashflowReviewHistory as unknown[] | undefined;
+  assert.ok(Array.isArray(reviewHistory));
+  assert.equal(reviewHistory?.length, 1);
+
+  const refreshWindow = createMockWindow();
+  const refreshResult = await executePluginCommand(
+    "cashflow-game?action=review-data",
+    refreshWindow.window as never,
+    selectedItem
+  );
+  assert.equal(refreshResult.ok, true);
+  assert.equal(refreshWindow.sent.length, 0);
+  assert.ok(
+    Array.isArray((refreshResult.data as Record<string, unknown>).cashflowReviewHistory)
+  );
 });

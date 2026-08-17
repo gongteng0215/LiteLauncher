@@ -346,3 +346,69 @@ test(
     }
   }
 );
+
+test(
+  "electron smoke: cashflow review switches persisted games and refreshes without reopening",
+  { timeout: 120000 },
+  async () => {
+    const testName =
+      "electron smoke: cashflow review switches persisted games and refreshes without reopening";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    try {
+      session = await launchE2ESession();
+      const { page } = session;
+
+      await openCashflowFromSearch(page);
+      await page.getByRole("button", { name: "开启 3 种 AI 策略" }).click();
+      const aiCards = page.locator(".cashflow-ai-card");
+      await aiCards.first().waitFor({ state: "visible", timeout: 10000 });
+      assert.equal(await aiCards.count(), 3);
+      assert.equal(await page.locator(".cashflow-ai-personality").count(), 3);
+      await page.locator(".cashflow-action-main").click();
+      await page.locator(".cashflow-panel").getByRole("button", { name: "新开一局" }).click();
+      await page.locator(".cashflow-action-main").click();
+
+      await page.keyboard.press("Escape");
+      await waitForMode(page, "search");
+      const searchInput = page.locator("#search-input");
+      await searchInput.fill("cash review");
+      const reviewResult = page
+        .locator(".command-result")
+        .filter({ hasText: "现金流复盘" })
+        .first();
+      await reviewResult.waitFor({ state: "visible", timeout: 10000 });
+      await reviewResult.click();
+
+      await waitForMode(page, "cashflow");
+      const reviewPanel = page.locator(".cashflow-panel-review");
+      await reviewPanel.waitFor({ state: "visible", timeout: 10000 });
+      const picker = reviewPanel.locator(".cashflow-review-picker-select");
+      const optionCount = await picker.locator("option").count();
+      assert.ok(optionCount >= 2, "review should include the active and archived game");
+      await picker.selectOption({ index: optionCount - 1 });
+      await reviewPanel.locator(".cashflow-review-summary").waitFor({ state: "visible" });
+      assert.equal(await reviewPanel.locator(".cashflow-review-metrics .cashflow-stat").count(), 4);
+      assert.ok(await reviewPanel.locator(".cashflow-review-timeline-item").count());
+      assert.equal(await reviewPanel.locator(".cashflow-review-ai-list li").count(), 3);
+
+      await reviewPanel.getByRole("button", { name: "刷新复盘" }).click();
+      await reviewPanel.waitFor({ state: "visible", timeout: 10000 });
+      assert.equal(await picker.locator("option").count(), optionCount);
+    } catch (error) {
+      if (session) {
+        const artifactDir = await captureE2EFailureArtifacts(
+          session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+        console.error(`[e2e] failure artifacts saved to ${artifactDir}`);
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await session.close();
+      }
+    }
+  }
+);

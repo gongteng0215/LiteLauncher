@@ -64,6 +64,35 @@ export type CashflowStatsSummary = {
   }>;
 };
 
+export type CashflowReviewDecisionRecord = {
+  turn: number;
+  action: string;
+  message: string;
+  createdAt: number;
+};
+
+export type CashflowReviewCheckpointRecord = {
+  turn: number;
+  passiveIncome: number;
+  cash: number;
+  monthlyNet: number;
+  netWorth: number;
+  createdAt: number;
+};
+
+export type CashflowReviewGameRecord = {
+  id: number;
+  status: string;
+  role: string;
+  currentTurn: number;
+  won: boolean;
+  snapshotJson: string;
+  createdAt: number;
+  updatedAt: number;
+  decisions: CashflowReviewDecisionRecord[];
+  checkpoints: CashflowReviewCheckpointRecord[];
+};
+
 export class LiteDatabase {
   private readonly db: DatabaseSync;
   // Reused across calls so hot paths (e.g. saveItems looping over many rows)
@@ -640,6 +669,67 @@ export class LiteDatabase {
       latestCash: latest?.cash ?? 0,
       commonLossReasons
     };
+  }
+
+  public async getCashflowReviewHistory(limit = 12): Promise<CashflowReviewGameRecord[]> {
+    const safeLimit = Math.max(1, Math.min(20, Math.round(limit)));
+    const games = await this.all<{
+      id: number;
+      status: string;
+      role: string;
+      currentTurn: number;
+      won: number;
+      snapshotJson: string;
+      createdAt: number;
+      updatedAt: number;
+    }>(
+      `SELECT id, status, role, currentTurn, won, snapshotJson, createdAt, updatedAt
+       FROM cashflow_games
+       ORDER BY updatedAt DESC, id DESC
+       LIMIT ?`,
+      [safeLimit]
+    );
+
+    const history: CashflowReviewGameRecord[] = [];
+    for (const game of games) {
+      const decisions = await this.all<CashflowReviewDecisionRecord>(
+        `SELECT turn, action, message, createdAt
+         FROM (
+           SELECT id, turn, action, message, createdAt
+           FROM cashflow_decisions
+           WHERE gameId = ?
+           ORDER BY id DESC
+           LIMIT 160
+         )
+         ORDER BY id ASC`,
+        [game.id]
+      );
+      const checkpoints = await this.all<CashflowReviewCheckpointRecord>(
+        `SELECT turn, passiveIncome, cash, monthlyNet, netWorth, createdAt
+         FROM (
+           SELECT id, turn, passiveIncome, cash, monthlyNet, netWorth, createdAt
+           FROM cashflow_stats
+           WHERE gameId = ?
+           ORDER BY id DESC
+           LIMIT 120
+         )
+         ORDER BY id ASC`,
+        [game.id]
+      );
+      history.push({
+        id: game.id,
+        status: game.status,
+        role: game.role,
+        currentTurn: game.currentTurn,
+        won: game.won === 1,
+        snapshotJson: game.snapshotJson,
+        createdAt: game.createdAt,
+        updatedAt: game.updatedAt,
+        decisions,
+        checkpoints
+      });
+    }
+    return history;
   }
 
   public async saveItems(items: LaunchItem[]): Promise<void> {

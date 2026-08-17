@@ -553,6 +553,37 @@ interface CashflowAiPlayer {
   lastDecision: string | null;
 }
 
+interface CashflowReviewDecision {
+  turn: number;
+  action: string;
+  message: string;
+  createdAt: number;
+}
+
+interface CashflowReviewCheckpoint {
+  turn: number;
+  passiveIncome: number;
+  cash: number;
+  monthlyNet: number;
+  netWorth: number;
+  createdAt: number;
+}
+
+interface CashflowReviewGame {
+  id: number;
+  status: string;
+  role: string;
+  currentTurn: number;
+  won: boolean;
+  lost: boolean;
+  lossReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+  state: CashflowState;
+  decisions: CashflowReviewDecision[];
+  checkpoints: CashflowReviewCheckpoint[];
+}
+
 type CashflowAction =
   | "open"
   | "state"
@@ -562,7 +593,9 @@ type CashflowAction =
   | "buy-loan"
   | "skip"
   | "reset"
-  | "ai";
+  | "ai"
+  | "review"
+  | "review-data";
 
 interface CashflowIncomeReportItem {
   name: string;

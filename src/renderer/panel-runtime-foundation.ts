@@ -414,6 +414,10 @@ namespace RendererPanelRuntime {
 
   export let cashflowReviewMode = false;
 
+  export let cashflowReviewHistory: CashflowReviewGame[] = [];
+
+  export let cashflowReviewSelectedGameId: number | null = null;
+
   export let cashflowJobs: CashflowJobOption[] = [];
 
 }

@@ -12,7 +12,7 @@ const {
 } = require("../dist/test/e2e-test-utils.js");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.15-candidate";
+const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.16-candidate";
 const OUTPUT_ROOT = path.join(PROJECT_ROOT, "artifacts", "ui-review", REVIEW_LABEL);
 const VIEWPORTS = [
   { label: "1440x900", width: 1440, height: 900 },
@@ -74,6 +74,63 @@ async function openPanel(page, panel) {
     );
   }
   await settle(page);
+}
+
+async function executeCashflowAction(page, action) {
+  const result = await page.evaluate(async (cashflowAction) => {
+    return window.launcher.execute({
+      id: `plugin:cashflow-game:${cashflowAction}`,
+      type: "command",
+      title: "Cashflow",
+      subtitle: "Cashflow UI review",
+      target: `command:plugin:cashflow-game?action=${cashflowAction}`,
+      keywords: ["plugin", "cashflow", cashflowAction]
+    });
+  }, action);
+  if (!result || result.ok !== true) {
+    throw new Error(`failed to execute cashflow action ${action}: ${JSON.stringify(result)}`);
+  }
+  await waitForMode(page, "cashflow");
+  await settle(page);
+}
+
+async function captureCashflowStates(page, viewport, records) {
+  const panel = PANELS.find((candidate) => candidate.id === "cashflow-game");
+  if (!panel) throw new Error("cashflow panel is missing from UI review configuration");
+
+  await openPanel(page, panel);
+  await capture(page, viewport, "cashflow-game", records);
+
+  await executeCashflowAction(page, "ai");
+  const aiCards = page.locator(".cashflow-ai-card");
+  await aiCards.first().waitFor({ state: "visible", timeout: 10_000 });
+  if ((await aiCards.count()) !== 3) {
+    throw new Error(`expected 3 Cashflow AI cards, got ${await aiCards.count()}`);
+  }
+  await aiCards.first().scrollIntoViewIfNeeded();
+  await settle(page);
+  await capture(page, viewport, "cashflow-ai", records);
+
+  await executeCashflowAction(page, "next-turn");
+  await executeCashflowAction(page, "reset");
+  await executeCashflowAction(page, "next-turn");
+  await executeCashflowAction(page, "review");
+
+  const reviewPanel = page.locator(".cashflow-panel-review");
+  await reviewPanel.waitFor({ state: "visible", timeout: 10_000 });
+  const picker = reviewPanel.locator(".cashflow-review-picker-select");
+  const optionCount = await picker.locator("option").count();
+  let selectedAiReview = (await reviewPanel.locator(".cashflow-review-ai-list li").count()) === 3;
+  for (let index = 1; index < optionCount && !selectedAiReview; index += 1) {
+    await picker.selectOption({ index });
+    await settle(page);
+    selectedAiReview = (await reviewPanel.locator(".cashflow-review-ai-list li").count()) === 3;
+  }
+  if (!selectedAiReview) {
+    throw new Error("Cashflow review history does not include the 3-AI game created by UI review");
+  }
+  await capture(page, viewport, "cashflow-review", records);
+  await returnToSearch(page);
 }
 
 async function auditPage(page, label) {
@@ -179,11 +236,12 @@ async function main() {
       await capture(page, viewport, "settings", records);
       await closeSettings(page);
 
-      for (const panel of PANELS) {
+      for (const panel of PANELS.filter((candidate) => candidate.id !== "cashflow-game")) {
         await openPanel(page, panel);
         await capture(page, viewport, panel.id, records);
         await returnToSearch(page);
       }
+      await captureCashflowStates(page, viewport, records);
     }
 
     await page.evaluate(() => {
