@@ -8,6 +8,7 @@ import { LauncherPlugin } from "../types";
 
 type HttpMockAction = "open" | "start" | "stop" | "status";
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+type HttpMockPhase = "stopped" | "starting" | "running" | "stopping" | "error";
 
 interface HttpMockCommand {
   action: HttpMockAction;
@@ -21,6 +22,7 @@ interface HttpMockCommand {
 
 interface HttpMockRuntimeState {
   running: boolean;
+  phase: HttpMockPhase;
   url: string;
   port: number;
   method: HttpMethod;
@@ -29,6 +31,7 @@ interface HttpMockRuntimeState {
   contentType: string;
   body: string;
   requestCount: number;
+  lastError: string;
 }
 
 const PLUGIN_ID = "webtools-http-mock";
@@ -51,6 +54,10 @@ const QUERY_ALIASES = ["wt-mock", "http-mock", "mock", "mock server", "接口模
 
 let mockServer: http.Server | null = null;
 let requestCount = 0;
+let runtimePhase: HttpMockPhase = "stopped";
+let lastRuntimeError = "";
+let lifecycleQueue: Promise<void> = Promise.resolve();
+let lifecycleEpoch = 0;
 let currentConfig: HttpMockCommand = {
   action: "start",
   port: DEFAULT_PORT,
@@ -133,10 +140,11 @@ function parseCommand(optionsText: string | undefined): HttpMockCommand {
 }
 
 function runtimeState(): HttpMockRuntimeState {
-  const running = mockServer !== null;
+  const running = mockServer?.listening === true && runtimePhase === "running";
   const url = `http://127.0.0.1:${currentConfig.port}${currentConfig.path}`;
   return {
     running,
+    phase: runtimePhase,
     url,
     port: currentConfig.port,
     method: currentConfig.method,
@@ -144,8 +152,44 @@ function runtimeState(): HttpMockRuntimeState {
     statusCode: currentConfig.statusCode,
     contentType: currentConfig.contentType,
     body: currentConfig.body,
-    requestCount
+    requestCount,
+    lastError: lastRuntimeError
   };
+}
+
+function sameRuntimeConfig(command: HttpMockCommand): boolean {
+  return (
+    command.port === currentConfig.port &&
+    command.path === currentConfig.path &&
+    command.method === currentConfig.method &&
+    command.statusCode === currentConfig.statusCode &&
+    command.contentType === currentConfig.contentType &&
+    command.body === currentConfig.body
+  );
+}
+
+function formatListenError(error: unknown, port: number): string {
+  const errorCode =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : "";
+  if (errorCode === "EADDRINUSE") {
+    return `端口 ${port} 已被占用，请更换端口后重试`;
+  }
+  if (errorCode === "EACCES") {
+    return `没有权限监听端口 ${port}，请更换 1024–65535 范围内的端口`;
+  }
+  const detail = error instanceof Error ? error.message.trim() : "未知错误";
+  return `无法监听端口 ${port}：${detail || "未知错误"}`;
+}
+
+function enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+  const result = lifecycleQueue.then(operation, operation);
+  lifecycleQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
 }
 
 function buildTarget(command: HttpMockCommand): string {
@@ -178,7 +222,7 @@ function createCatalogItem(): LaunchItem {
     id: `plugin:${PLUGIN_ID}`,
     type: "command",
     title: "HTTP Mock Server",
-    subtitle: "本地临时接口模拟（MVP）",
+    subtitle: "本地临时接口模拟，仅监听 127.0.0.1",
     iconPath: getWebtoolsIconDataUrl(PLUGIN_ID),
     target: buildTarget(openCommand),
     keywords: ["plugin", "webtools", "http", "mock", "api", "接口", "模拟"]
@@ -243,31 +287,159 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   res.end(replaceDynamicBodyTokens(currentConfig.body));
 }
 
-async function stopServer(): Promise<void> {
-  if (!mockServer) {
-    return;
+async function stopServerNow(): Promise<boolean> {
+  const server = mockServer;
+  if (!server) {
+    runtimePhase = "stopped";
+    lastRuntimeError = "";
+    return false;
   }
 
-  await new Promise<void>((resolve) => {
-    mockServer?.close(() => {
-      resolve();
-    });
-  });
+  runtimePhase = "stopping";
   mockServer = null;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      server.closeAllConnections?.();
+      finish();
+    }, 1200);
+    timeout.unref();
+
+    try {
+      server.close(() => {
+        clearTimeout(timeout);
+        finish();
+      });
+      server.closeIdleConnections?.();
+    } catch {
+      clearTimeout(timeout);
+      finish();
+    }
+  });
+  runtimePhase = "stopped";
+  lastRuntimeError = "";
+  return true;
 }
 
-async function startServer(command: HttpMockCommand): Promise<void> {
-  await stopServer();
+async function startServerNow(
+  command: HttpMockCommand,
+  expectedEpoch: number
+): Promise<{ reused: boolean }> {
+  if (
+    mockServer?.listening === true &&
+    runtimePhase === "running" &&
+    sameRuntimeConfig(command)
+  ) {
+    return { reused: true };
+  }
+
+  await stopServerNow();
+  if (expectedEpoch !== lifecycleEpoch) {
+    throw new Error("HTTP Mock 启动操作已取消");
+  }
+
   requestCount = 0;
   currentConfig = { ...command, action: "start" };
+  runtimePhase = "starting";
+  lastRuntimeError = "";
 
-  mockServer = http.createServer(handleRequest);
-  await new Promise<void>((resolve, reject) => {
-    mockServer?.once("error", reject);
-    mockServer?.listen(currentConfig.port, "127.0.0.1", () => {
-      mockServer?.off("error", reject);
-      resolve();
+  const candidate = http.createServer(handleRequest);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const handleListenError = (error: Error) => {
+        candidate.off("listening", handleListening);
+        reject(error);
+      };
+      const handleListening = () => {
+        candidate.off("error", handleListenError);
+        resolve();
+      };
+      candidate.once("error", handleListenError);
+      candidate.once("listening", handleListening);
+      candidate.listen(currentConfig.port, "127.0.0.1");
     });
+  } catch (error) {
+    mockServer = null;
+    runtimePhase = "error";
+    lastRuntimeError = formatListenError(error, currentConfig.port);
+    try {
+      candidate.close();
+    } catch {
+      // A failed listen has no active handle to close.
+    }
+    throw new Error(lastRuntimeError);
+  }
+
+  if (expectedEpoch !== lifecycleEpoch) {
+    try {
+      candidate.close();
+      candidate.closeAllConnections?.();
+    } catch {
+      // The session is already being torn down.
+    }
+    runtimePhase = "stopped";
+    throw new Error("HTTP Mock 启动操作已取消");
+  }
+
+  mockServer = candidate;
+  runtimePhase = "running";
+  candidate.on("close", () => {
+    if (mockServer === candidate) {
+      mockServer = null;
+      runtimePhase = "stopped";
+    }
+  });
+  return { reused: false };
+}
+
+function stopServer(): Promise<boolean> {
+  return enqueueLifecycle(stopServerNow);
+}
+
+function startServer(command: HttpMockCommand): Promise<{ reused: boolean }> {
+  const expectedEpoch = lifecycleEpoch;
+  return enqueueLifecycle(() => startServerNow(command, expectedEpoch));
+}
+
+export function disposeWebtoolsHttpMockServer(): Promise<void> {
+  lifecycleEpoch += 1;
+  const server = mockServer;
+  mockServer = null;
+  runtimePhase = "stopped";
+  lastRuntimeError = "";
+  requestCount = 0;
+  if (!server) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    const timeout = setTimeout(finish, 500);
+    timeout.unref();
+    try {
+      server.close(() => {
+        clearTimeout(timeout);
+        finish();
+      });
+      server.closeIdleConnections?.();
+      server.closeAllConnections?.();
+    } catch {
+      clearTimeout(timeout);
+      finish();
+    }
   });
 }
 
@@ -311,6 +483,9 @@ function createActionItems(base: HttpMockCommand): LaunchItem[] {
 export const webtoolsHttpMockPlugin: LauncherPlugin = {
   id: PLUGIN_ID,
   name: "HTTP Mock Server",
+  dispose() {
+    return disposeWebtoolsHttpMockServer();
+  },
   createCatalogItems() {
     return [createCatalogItem()];
   },
@@ -331,7 +506,7 @@ export const webtoolsHttpMockPlugin: LauncherPlugin = {
         panel: "plugin",
         pluginId: PLUGIN_ID,
         title: "HTTP Mock Server",
-        subtitle: "MVP：先支持启动/停止/状态，面板编辑后续补齐",
+        subtitle: "配置本地临时接口；仅监听当前电脑的 127.0.0.1",
         data: {
           ...state
         }
@@ -342,7 +517,7 @@ export const webtoolsHttpMockPlugin: LauncherPlugin = {
         keepOpen: true,
         message: state.running
           ? `Mock 运行中：${state.method} ${state.url}`
-          : "已打开 HTTP Mock（可先用搜索动作启动）",
+          : "已打开 HTTP Mock，可在面板配置并启动",
         data: { ...state }
       };
     }
@@ -360,31 +535,34 @@ export const webtoolsHttpMockPlugin: LauncherPlugin = {
     }
 
     if (command.action === "stop") {
-      await stopServer();
+      const stopped = await stopServer();
       const state = runtimeState();
       return {
         ok: true,
         keepOpen: true,
-        message: "Mock 已停止",
+        message: stopped ? "Mock 已停止" : "Mock 当前未启动",
         data: { ...state }
       };
     }
 
     try {
-      await startServer(command);
+      const { reused } = await startServer(command);
       const state = runtimeState();
       return {
         ok: true,
         keepOpen: true,
-        message: `Mock 已启动：${state.method} ${state.url}`,
+        message: reused
+          ? `Mock 已在运行：${state.method} ${state.url}`
+          : `Mock 已启动：${state.method} ${state.url}`,
         data: { ...state }
       };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "启动失败";
+      const reason =
+        lastRuntimeError || (error instanceof Error ? error.message : "启动失败");
       return {
         ok: false,
         keepOpen: true,
-        message: `Mock 启动失败: ${reason}`,
+        message: `Mock 启动失败：${reason}`,
         data: { ...runtimeState() }
       };
     }

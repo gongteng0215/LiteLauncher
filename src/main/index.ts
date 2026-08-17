@@ -85,6 +85,7 @@ import {
   setCashflowGamePersistence
 } from "./plugins/cashflow-game";
 import {
+  disposePlugins,
   getDefaultVisiblePluginIds,
   getAllPluginCatalogItems,
   getPluginCatalogItems,
@@ -3073,6 +3074,7 @@ app.on("activate", () => {
 
 app.on("will-quit", () => {
   appQuitting = true;
+  void disposePlugins();
   closeDevRendererWatchers();
   globalShortcut.unregisterAll();
   destroyAppTray();

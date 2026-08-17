@@ -329,6 +329,8 @@ namespace RendererPanelRuntime {
 
   export let webtoolsHttpMockRequestToken = 0;
 
+  export let webtoolsHttpMockBusy = false;
+
   export function parseKeyValueText(text: string): WebtoolsApiKvRow[] {
     const rows: WebtoolsApiKvRow[] = [];
     const lines = text.split(/\r?\n/);
@@ -847,6 +849,7 @@ namespace RendererPanelRuntime {
   }
 
   export function refreshWebtoolsHttpMockPanelInForm(form: HTMLFormElement): void {
+    form.setAttribute("aria-busy", webtoolsHttpMockBusy ? "true" : "false");
     const methodNode = form.elements.namedItem("webtoolsHttpMockMethod");
     if (methodNode instanceof HTMLSelectElement) {
       methodNode.value = webtoolsHttpMockMethod;
@@ -894,6 +897,20 @@ namespace RendererPanelRuntime {
         : webtoolsHttpMockRunning
           ? "ok"
           : "idle";
+    }
+
+    form
+      .querySelectorAll<HTMLButtonElement>(
+        "[data-webtools-http-mock-start], [data-webtools-http-mock-status], [data-webtools-http-mock-stop]"
+      )
+      .forEach((button) => {
+        button.disabled = webtoolsHttpMockBusy;
+      });
+    const startButton = form.querySelector<HTMLButtonElement>(
+      "[data-webtools-http-mock-start]"
+    );
+    if (startButton) {
+      startButton.textContent = webtoolsHttpMockBusy ? "处理中…" : "启动";
     }
   }
 
@@ -952,10 +969,35 @@ namespace RendererPanelRuntime {
       keywords: ["plugin", "http", "mock", "api"]
     };
 
-    const result = await launcher.execute(item);
+    webtoolsHttpMockBusy = true;
+    if (form) {
+      refreshWebtoolsHttpMockPanelInForm(form);
+    }
+    let result: {
+      ok: boolean;
+      message?: string;
+      data?: Record<string, unknown>;
+    };
+    try {
+      result = await launcher.execute(item);
+    } catch (error) {
+      if (requestToken !== webtoolsHttpMockRequestToken) {
+        return;
+      }
+      webtoolsHttpMockBusy = false;
+      webtoolsHttpMockError = error instanceof Error ? error.message : "HTTP Mock 执行失败";
+      webtoolsHttpMockInfo = webtoolsHttpMockError;
+      setStatus(webtoolsHttpMockError);
+      if (form) {
+        refreshWebtoolsHttpMockPanelInForm(form);
+      }
+      return;
+    }
     if (requestToken !== webtoolsHttpMockRequestToken) {
       return;
     }
+
+    webtoolsHttpMockBusy = false;
 
     const data = toRecord(result.data);
     if (typeof data?.running === "boolean") {

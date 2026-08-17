@@ -150,6 +150,20 @@ export function setVisiblePluginIds(pluginIds: string[]): string[] {
   return normalized;
 }
 
+export async function disposePlugins(): Promise<void> {
+  const results = await Promise.allSettled(
+    ALL_PLUGINS.map((plugin) => Promise.resolve(plugin.dispose?.()))
+  );
+  for (const [index, result] of results.entries()) {
+    if (result.status === "rejected") {
+      console.warn(
+        `[plugin] failed to dispose ${ALL_PLUGINS[index]?.id ?? "unknown"}`,
+        result.reason
+      );
+    }
+  }
+}
+
 function normalizePluginId(value: string): string {
   return value.trim().toLowerCase();
 }

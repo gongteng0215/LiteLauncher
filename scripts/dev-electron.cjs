@@ -1,4 +1,5 @@
 const fs = require("fs");
+const net = require("net");
 const path = require("path");
 const { spawn } = require("child_process");
 
@@ -30,6 +31,16 @@ let distWatcher = null;
 let restartInFlight = null;
 let restartRequested = false;
 let queuedRestartReason = "";
+let runnerLockServer = null;
+const requestedRunnerLockPort = Number(
+  process.env.LITELAUNCHER_DEV_ELECTRON_LOCK_PORT ?? ""
+);
+const DEV_ELECTRON_LOCK_PORT =
+  Number.isInteger(requestedRunnerLockPort) &&
+  requestedRunnerLockPort >= 1024 &&
+  requestedRunnerLockPort <= 65535
+    ? requestedRunnerLockPort
+    : 41972;
 const terminationTasks = new WeakMap();
 
 function isBundleReady() {
@@ -44,6 +55,91 @@ function isBundleReady() {
 
 function log(message) {
   console.info(`[dev-electron] ${message}`);
+}
+
+function wait(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function handleRunnerLockConnection(socket) {
+  socket.setEncoding("utf8");
+  socket.setTimeout(1000, () => socket.destroy());
+  socket.once("data", (data) => {
+    if (String(data).trim() !== "replace") {
+      socket.end(`active:${process.pid}`);
+      return;
+    }
+
+    log(`replacement requested by a new dev runner; stopping pid=${process.pid}`);
+    socket.end(`replacing:${process.pid}`);
+    setTimeout(() => {
+      void shutdown().finally(() => process.exit(0));
+    }, 20);
+  });
+}
+
+function tryListenRunnerLock() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer(handleRunnerLockConnection);
+    const handleError = (error) => {
+      server.removeAllListeners();
+      try {
+        server.close();
+      } catch {
+        // A failed listen has no active server handle.
+      }
+      reject(error);
+    };
+    server.once("error", handleError);
+    server.listen(DEV_ELECTRON_LOCK_PORT, "127.0.0.1", () => {
+      server.off("error", handleError);
+      resolve(server);
+    });
+  });
+}
+
+function requestExistingRunnerReplacement() {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(
+      { host: "127.0.0.1", port: DEV_ELECTRON_LOCK_PORT },
+      () => socket.end("replace\n")
+    );
+    const finish = () => resolve();
+    socket.setTimeout(1200, () => {
+      socket.destroy();
+      finish();
+    });
+    socket.once("error", finish);
+    socket.once("close", finish);
+  });
+}
+
+async function acquireRunnerLock() {
+  // Keep the replacement process alive while the old owner closes its socket.
+  // On Windows there can be a brief handle-free gap between the client socket
+  // closing and the next listen attempt.
+  const acquisitionKeepAlive = setInterval(() => undefined, 1000);
+  try {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      try {
+        runnerLockServer = await tryListenRunnerLock();
+        log(`runner lock acquired on 127.0.0.1:${DEV_ELECTRON_LOCK_PORT}`);
+        return;
+      } catch (error) {
+        if (!error || error.code !== "EADDRINUSE") {
+          throw error;
+        }
+        if (attempt === 0) {
+          log("another Electron dev runner is active; requesting a clean replacement");
+          await requestExistingRunnerReplacement();
+        }
+        await wait(100);
+      }
+    }
+    throw new Error("timed out while replacing the previous Electron dev runner");
+  } finally {
+    clearInterval(acquisitionKeepAlive);
+  }
 }
 
 function terminateProcessTree(child) {
@@ -239,6 +335,10 @@ async function shutdown() {
     distWatcher.close();
     distWatcher = null;
   }
+  if (runnerLockServer) {
+    await new Promise((resolve) => runnerLockServer.close(() => resolve()));
+    runnerLockServer = null;
+  }
   if (electronProcess) {
     await terminateProcessTree(electronProcess);
     electronProcess = null;
@@ -253,5 +353,16 @@ process.on("SIGTERM", () => {
   void shutdown().finally(() => process.exit(0));
 });
 
-startWatchingDist();
-startReadinessLoop();
+void acquireRunnerLock()
+  .then(() => {
+    if (process.env.LITELAUNCHER_DEV_RUNNER_LOCK_ONLY === "1") {
+      log("runner lock test mode active; Electron launch is disabled");
+      return;
+    }
+    startWatchingDist();
+    startReadinessLoop();
+  })
+  .catch((error) => {
+    console.error(`[dev-electron] failed to acquire runner lock: ${error.message}`);
+    process.exit(1);
+  });

@@ -12,7 +12,7 @@ const {
 } = require("../dist/test/e2e-test-utils.js");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.14-candidate";
+const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.15-candidate";
 const OUTPUT_ROOT = path.join(PROJECT_ROOT, "artifacts", "ui-review", REVIEW_LABEL);
 const VIEWPORTS = [
   { label: "1440x900", width: 1440, height: 900 },
@@ -107,11 +107,15 @@ async function auditPage(page, label) {
       focusIndicator = style.outlineStyle !== "none" || style.boxShadow !== "none";
     }
     const rootStyle = getComputedStyle(document.documentElement);
+    const pageText = document.body.innerText || "";
+    const suspiciousTextFragments = ["\uFFFD", "Ã", "Â", "â€", "锛", "銆", "鈥", "闁"]
+      .filter((fragment) => pageText.includes(fragment));
     return {
       mode: document.body.dataset.mode || "unknown",
       activePluginId: document.body.dataset.activePluginId || null,
       rootOverflow,
       clippedControls,
+      suspiciousTextFragments,
       focusIndicator,
       theme: {
         accent: rootStyle.getPropertyValue("--ll-accent").trim(),
@@ -123,6 +127,9 @@ async function auditPage(page, label) {
   const failures = [];
   if (result.rootOverflow > 1) failures.push(`页面横向溢出 ${result.rootOverflow}px`);
   if (result.clippedControls.length > 0) failures.push(`控件文字裁切: ${result.clippedControls.join(" / ")}`);
+  if (result.suspiciousTextFragments.length > 0) {
+    failures.push(`疑似乱码: ${result.suspiciousTextFragments.join(" / ")}`);
+  }
   if (!result.focusIndicator) failures.push("首个可聚焦控件没有焦点样式");
   if (!result.theme.accent || result.theme.controlHeight !== "36px" || result.theme.radiusCard !== "12px") {
     failures.push(`主题变量未生效: ${JSON.stringify(result.theme)}`);

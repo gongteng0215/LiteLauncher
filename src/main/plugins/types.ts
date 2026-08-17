@@ -12,6 +12,7 @@ export interface LauncherPlugin {
   name: string;
   createCatalogItems(): LaunchItem[];
   getQueryItems?(query: string): LaunchItem[];
+  dispose?(): void | Promise<void>;
   execute(
     optionsText: string | undefined,
     context: PluginExecuteContext

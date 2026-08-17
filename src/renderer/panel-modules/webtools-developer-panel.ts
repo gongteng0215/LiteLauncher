@@ -1360,7 +1360,7 @@ namespace RendererPanelRuntime {
       const description = document.createElement("p");
       description.className = "settings-description";
       description.textContent =
-        activePluginPanel?.subtitle || "本地临时接口模拟（MVP 第二阶段）";
+        activePluginPanel?.subtitle || "配置本地临时接口；仅监听当前电脑的 127.0.0.1";
 
       const row = document.createElement("div");
       row.className = "webtools-url-parts-grid";
@@ -1390,6 +1390,8 @@ namespace RendererPanelRuntime {
       portInput.className = "settings-value webtools-tool-input";
       portInput.name = "webtoolsHttpMockPort";
       portInput.type = "number";
+      portInput.min = "1024";
+      portInput.max = "65535";
       portField.append(portLabel, portInput);
 
       const pathField = document.createElement("label");
@@ -1412,6 +1414,8 @@ namespace RendererPanelRuntime {
       statusInput.className = "settings-value webtools-tool-input";
       statusInput.name = "webtoolsHttpMockStatusCode";
       statusInput.type = "number";
+      statusInput.min = "100";
+      statusInput.max = "599";
       statusField.append(statusLabel, statusInput);
 
       const contentTypeField = document.createElement("label");

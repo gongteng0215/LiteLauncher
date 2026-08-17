@@ -26,6 +26,7 @@ export interface LaunchE2ESessionOptions {
   executablePath?: string;
   workingDirectory?: string;
   enableRealBlurHandling?: boolean;
+  deviceScaleFactor?: number;
   extraEnv?: Record<string, string>;
 }
 
@@ -156,9 +157,13 @@ export async function launchE2ESession(
   const cleanupUserDataDir = options.cleanupUserDataDir !== false;
   const executablePath = options.executablePath?.trim() || undefined;
   const launchCwd = options.workingDirectory ?? PROJECT_ROOT;
-  const launchArgs = executablePath ? [] : ["."];
+  const launchArgs: string[] = [];
   const env = buildElectronEnv(userDataDir);
   Object.assign(env, options.extraEnv ?? {});
+  const deviceScaleFactor = options.deviceScaleFactor;
+  if (!executablePath) {
+    launchArgs.push(".");
+  }
   if (options.enableRealBlurHandling) {
     env.LITELAUNCHER_E2E_REAL_BLUR = "1";
   }
@@ -170,6 +175,19 @@ export async function launchE2ESession(
   });
 
   const page = await waitForLauncherPage(electronApp);
+  if (
+    typeof deviceScaleFactor === "number" &&
+    Number.isFinite(deviceScaleFactor) &&
+    deviceScaleFactor >= 1 &&
+    deviceScaleFactor <= 4
+  ) {
+    await electronApp.evaluate(({ BrowserWindow }, scaleFactor) => {
+      const launcherWindow = BrowserWindow.getAllWindows().find((window) =>
+        window.webContents.getURL().includes("/renderer/index.html")
+      );
+      launcherWindow?.webContents.setZoomFactor(scaleFactor);
+    }, deviceScaleFactor);
+  }
   await page.bringToFront();
   await waitForRendererBootstrap(page);
   await waitForMode(page, "search");

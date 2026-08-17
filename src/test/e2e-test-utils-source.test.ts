@@ -54,6 +54,22 @@ test("e2e test utils can opt into real blur handling for window-hide policy veri
   );
 });
 
+test("e2e test utils can launch at an explicit Windows DPI scale", () => {
+  const source = readE2EUtilsSource();
+
+  assert.match(source, /deviceScaleFactor\?: number;/);
+  assert.match(
+    source,
+    /launcherWindow\?\.webContents\.setZoomFactor\(scaleFactor\);/,
+    "the requested DPI scale should be applied to the real Electron renderer"
+  );
+  assert.match(
+    source,
+    /deviceScaleFactor >= 1[\s\S]*deviceScaleFactor <= 4/,
+    "DPI test scale should be validated before it becomes an Electron argument"
+  );
+});
+
 test("e2e test utils can open plugins from both classic and Command Center search results", () => {
   const source = readE2EUtilsSource();
 

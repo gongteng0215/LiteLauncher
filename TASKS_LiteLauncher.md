@@ -1,6 +1,6 @@
 # LiteLauncher 开发任务清单
 
-更新时间：2026-08-13
+更新时间：2026-08-17
 来源：`PRD_LiteLauncher.md`
 
 状态：`待办` / `进行中` / `阻塞` / `完成`  
@@ -41,6 +41,7 @@
 | [x] | LL-029 | Windows 命令 / StartApps / WindowsApps 命中 | P0 | 完成 | 典型场景：`codex` |
 | [x] | LL-030 | 同目标结果去重与图标优先策略 | P1 | 完成 | 同一 target 合并，优先保留完整项 |
 | [x] | LL-031 | 面板态防隐藏 | P1 | 完成 | 文件选择 / 下载期间暂停自动隐藏；`plugin / settings / cashflow` 面板失焦后保持可见，仅通过 `Esc` / 返回 / 显式隐藏退出 |
+| [x] | LL-032 | 开发 Electron runner 单实例接管 | P0 | 完成 | `pnpm dev` 保留项目级互斥；Electron runner 增加独立本地接管锁，孤立旧 runner 会先关闭其 Electron 进程树再由新 runner 接手，避免重复进程和快捷键占用 |
 
 ## 2. 插件任务
 
@@ -85,7 +86,7 @@
 | [ ] | LL-207 | Cashflow 复盘功能实装 | P1 | 待办 | `cash review` 仍是占位 |
 | [ ] | LL-208 | Cashflow AI 多性格策略 | P1 | 待办 | 当前为基础策略 |
 | [x] | LL-210 | 插件面板注册器收敛 | P0 | 完成 | 已建立 `RendererPanelModuleRegistry` 与显式 Host，默认可见插件均通过分组模块注册；重复 ID、缺失实现和 Host 未配置均有恢复或开发期报错 |
-| [ ] | LL-232 | WebTools HTTP Mock Server（MVP） | P0 | 进行中 | 已补面板编辑、Enter 启动动作与 E2E（启动 -> 命中 -> 停止）；已转默认可见，默认目录仅保留单入口，后续补生命周期健壮性与更多断言 |
+| [x] | LL-232 | WebTools HTTP Mock Server（MVP） | P0 | 完成 | 已具备面板编辑、启动/状态/停止、同配置幂等启动、端口冲突恢复和退出释放监听；源码与 Electron 回归覆盖启动、命中、冲突、重复启动及应用退出 |
 | [x] | LL-236 | LiteSnap 截图贴图插件首版 | P0 | 完成 | 已具备普通截图、标注、贴图、OCR、历史、诊断、二次编辑和 Windows 手动长截图；首版任务关闭，后续只做回归与体验优化 |
 | [x] | LL-237 | 面板实现模块化 | P0 | 完成 | LiteSnap、CodeAgent、Cashflow、Hardware、Clipboard 与其余 WebTools 已按功能组拆分，单个实现模块不超过约 3,500 行，兼容门面仅保留分发入口 |
 | [x] | LL-238 | LiteSnap 会话服务拆分 | P0 | 完成 | 帧缓存、OCR、图片合成、提交导出、诊断和 overlay 生命周期已抽为独立服务，会话管理器控制在 1,800 行以内且 IPC 不变 |
@@ -100,8 +101,8 @@
 | [x] | LL-303 | Cashflow 布局紧凑化 | P1 | 完成 | 减少空白 |
 | [x] | LL-304 | Cashflow 滚动样式统一 | P1 | 完成 | 深色风格一致 |
 | [x] | LL-306 | 主搜索窗口动态尺寸 | P1 | 完成 | 按显示器限幅 |
-| [ ] | LL-305 | 全量 UI 文案一致性巡检 | P1 | 进行中 | 文档编码检查通过；Hardware / File Hash / Port Helper 范围 mojibake 扫描未命中；更新说明 HTML 直出已修复，仍需继续巡检其它历史面板 |
-| [ ] | LL-307 | 插件面板小屏自适应 | P0 | 进行中 | 已补多批小屏 smoke 断言；Hardware / File Hash / Port Helper 已加入窄窗 E2E，Crypto / JWT 已补主流程 smoke，后续继续补高 DPI 回归 |
+| [x] | LL-305 | 全量 UI 文案一致性巡检 | P1 | 完成 | 源码编码与过时占位文案扫描通过；HTTP Mock 说明已更新，UI 审查新增运行时疑似乱码断言；v1.1.15 候选截图已完成用户验收 |
+| [x] | LL-307 | 插件面板小屏自适应 | P0 | 完成 | 多批 960×720 smoke 已覆盖；真实 Electron 渲染窗口 125%/150% 缩放回归覆盖首页、设置、HTTP Mock 与 LiteSnap，并保留系统 DPI 手工抽查流程 |
 | [x] | LL-308 | 多行输入 Enter 行为统一 | P1 | 完成 | 多行输入换行，`Ctrl+Enter` 执行 |
 | [x] | LL-309 | 搜索首页分区紧凑自适应 | P1 | 完成 | 最近 / 置顶 / 插件统一固定小卡片，按实际宽度自适应列数，标题最多两行 |
 | [x] | LL-310 | 全应用统一界面基础 | P0 | 完成 | 已建立 4/8/12/16/24px 间距、8/12px 圆角、36px 控件和公共页面/卡片/状态/操作区样式；960×720 下双栏收为单栏并禁止页面级横向滚动 |
@@ -129,14 +130,14 @@
 | [x] | LL-502 | Cashflow 持久化测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-503 | Cashflow 插件合约测试 | P2 | 完成 | 自用阶段降级，已接入 |
 | [x] | LL-504 | Cashflow 性能基线测试 | P2 | 完成 | 自用阶段降级，已接入 |
-| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 自用阶段降级；已覆盖搜索首页布局、Windows Codex 搜索/置顶/跨重启恢复、Hardware / File Hash / Port Helper、Crypto / JWT、HTTP Mock 启动/命中/停止、多项 WebTools 小屏断言，以及设置页“更新诊断 / 置顶失败摘要 / 复制日志反馈” smoke，另已补 plugin / settings / cashflow 面板失焦保持可见、`Esc` 回退，以及 `search` 模式真实 blur 自动隐藏 smoke |
+| [ ] | LL-505 | E2E 自动化（搜索 + 插件 + 设置） | P2 | 进行中 | 已覆盖搜索首页布局、Windows Codex 搜索/置顶/跨重启恢复、多项 WebTools、设置页诊断与窗口失焦策略；HTTP Mock 新增端口冲突恢复、重复启动和退出释放监听，界面新增 125%/150% 缩放 smoke；继续按实际缺陷补充，不追求一次覆盖全部桌面环境 |
 | [x] | LL-506 | WebTools 可见插件回归脚本 | P2 | 完成 | 自用阶段降级，`test:plugins-visible` 已覆盖当前默认可见插件 |
 | [x] | LL-507 | Windows 应用别名回归 | P2 | 完成 | 自用阶段降级，已补 `test:windows-alias`，覆盖 catalog / dynamic search / AppsFolder 启动 |
 
 ## 6. 下一步建议
 
-1. 先运行模块化源码回归、构建和定向 Electron 测试，再生成两种窗口尺寸的 UI 审查截图。
-2. 用户检查候选版截图和实际操作；通过前不修改版本号、不打包、不提交发布版本。
-3. 继续推进 `LL-305`：以 UI 审查索引巡检历史页面文案和编码问题。
-4. 继续推进 `LL-307`：补 100%、125%、150% DPI 的手工回归记录。
-5. 用户明确确认后，再分别按发布门禁收口 v1.1.13 与 v1.1.14。
+1. v1.1.15 的界面、HTTP Mock、开发 runner、完整回归、Windows 打包和原位升级均已通过验收并进入正式发布。
+2. 跟踪 GitHub Release 的 Windows、macOS 与更新元数据资产，确认 v1.1.15 被标记为 Latest。
+3. 后续 NSIS 原位升级只允许在明确的一次性 Windows 环境中运行；普通本机由脚本硬门禁拒绝。
+4. 观察 HTTP Mock 端口冲突恢复和应用退出释放在实际使用中的稳定性，按真实缺陷补充回归。
+5. 下一版优先处理用户反馈与稳定性问题，不默认引入新的大型功能。

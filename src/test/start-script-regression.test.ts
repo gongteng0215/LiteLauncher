@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -6,6 +7,11 @@ import test from "node:test";
 const packageJsonPath = path.join(process.cwd(), "package.json");
 const startElectronScriptPath = path.join(process.cwd(), "scripts", "start-electron.cjs");
 const devElectronScriptPath = path.join(process.cwd(), "scripts", "dev-electron.cjs");
+const verifyNsisUpgradeScriptPath = path.join(
+  process.cwd(),
+  "scripts",
+  "verify-nsis-upgrade.cjs"
+);
 
 type SpawnOptions = {
   cwd?: string;
@@ -138,6 +144,14 @@ test("dev-electron only restarts for main-process bundle changes", () => {
   assert.match(source, /const terminationTasks = new WeakMap\(\)/);
   assert.match(source, /if \(restartInFlight\)/);
   assert.match(source, /restartRequested = true/);
+  assert.match(source, /DEV_ELECTRON_LOCK_PORT/);
+  assert.match(source, /requestExistingRunnerReplacement/);
+  assert.match(source, /replacement requested by a new dev runner/);
+  assert.match(
+    source,
+    /runnerLockServer\.close/,
+    "the Electron runner lock should close during a clean shutdown"
+  );
 });
 
 test("dev runner refuses a duplicate project watcher", () => {
@@ -145,4 +159,21 @@ test("dev runner refuses a duplicate project watcher", () => {
   assert.match(source, /DEV_LOCK_PORT/);
   assert.match(source, /EADDRINUSE/);
   assert.match(source, /another LiteLauncher dev runner is already active/);
+});
+
+test("NSIS upgrade verification refuses an ordinary local Windows session", () => {
+  const env = { ...process.env };
+  delete env.LITELAUNCHER_NSIS_UPGRADE_ISOLATED;
+  const result = spawnSync(process.execPath, [verifyNsisUpgradeScriptPath], {
+    cwd: process.cwd(),
+    env,
+    encoding: "utf8",
+    windowsHide: true
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    `${result.stdout}\n${result.stderr}`,
+    /refusing to run NSIS upgrade verification on an ordinary Windows session/
+  );
 });

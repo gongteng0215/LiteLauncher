@@ -9,19 +9,68 @@ const { launchE2ESession } = require("../dist/test/e2e-test-utils.js");
 const projectRoot = path.resolve(__dirname, "..");
 const baselineInstaller = path.resolve(
   process.argv[2] ||
-    path.join(projectRoot, "artifacts", "release-baseline", "v1.1.12", "LiteLauncher-Setup-1.1.12.exe")
+    path.join(projectRoot, "artifacts", "release-baseline", "v1.1.14", "LiteLauncher-Setup-1.1.14.exe")
 );
 const candidateInstaller = path.resolve(
-  process.argv[3] || path.join(projectRoot, "release", "LiteLauncher-Setup-1.1.14.exe")
+  process.argv[3] || path.join(projectRoot, "release", "LiteLauncher-Setup-1.1.15.exe")
 );
-const baselineVersion = process.argv[4] || "1.1.12";
-const candidateVersion = process.argv[5] || "1.1.14";
-const disposableRoot = fs.mkdtempSync(path.join(os.tmpdir(), "litelauncher-nsis-upgrade-"));
-const installDir = path.join(disposableRoot, "app");
-const userDataDir = path.join(disposableRoot, "user-data");
-const executablePath = path.join(installDir, "LiteLauncher.exe");
+const baselineVersion = process.argv[4] || "1.1.14";
+const candidateVersion = process.argv[5] || "1.1.15";
 const reportDir = path.join(projectRoot, "artifacts", "nsis-upgrade");
 const reportPath = path.join(reportDir, `v${baselineVersion}-to-v${candidateVersion}.json`);
+let disposableRoot = "";
+let installDir = "";
+let userDataDir = "";
+let executablePath = "";
+
+function assertDisposableWindowsEnvironment() {
+  assert.equal(process.platform, "win32", "NSIS upgrade verification only supports Windows");
+  assert.equal(
+    process.env.LITELAUNCHER_NSIS_UPGRADE_ISOLATED,
+    "1",
+    [
+      "refusing to run NSIS upgrade verification on an ordinary Windows session",
+      "the installers share LiteLauncher's production app identity and may replace or uninstall the local copy",
+      "run only in a disposable Windows VM/account with LITELAUNCHER_NSIS_UPGRADE_ISOLATED=1"
+    ].join("; ")
+  );
+
+  const defaultExecutable = path.join(
+    process.env.LOCALAPPDATA || "",
+    "Programs",
+    "LiteLauncher",
+    "LiteLauncher.exe"
+  );
+  assert.equal(
+    Boolean(process.env.LOCALAPPDATA && fs.existsSync(defaultExecutable)),
+    false,
+    `refusing to replace an existing LiteLauncher installation: ${defaultExecutable}`
+  );
+
+  const registryProbe = spawnSync(
+    "reg.exe",
+    [
+      "query",
+      "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+      "/s",
+      "/f",
+      "LiteLauncher"
+    ],
+    { encoding: "utf8", windowsHide: true }
+  );
+  assert.notEqual(
+    registryProbe.status,
+    0,
+    "refusing to run while a LiteLauncher uninstall registration exists for the current user"
+  );
+}
+
+function initializeDisposablePaths() {
+  disposableRoot = fs.mkdtempSync(path.join(os.tmpdir(), "litelauncher-nsis-upgrade-"));
+  installDir = path.join(disposableRoot, "app");
+  userDataDir = path.join(disposableRoot, "user-data");
+  executablePath = path.join(installDir, "LiteLauncher.exe");
+}
 
 function runInstaller(installerPath) {
   assert.ok(fs.existsSync(installerPath), `missing installer: ${installerPath}`);
@@ -149,6 +198,7 @@ async function verifyCandidate(expectedHistoryId) {
 }
 
 function cleanupDisposableInstall() {
+  if (!disposableRoot) return;
   const normalizedTemp = path.resolve(os.tmpdir()) + path.sep;
   const normalizedRoot = path.resolve(disposableRoot);
   assert.ok(
@@ -172,6 +222,8 @@ async function main() {
   let baseline = null;
   let candidate = null;
   try {
+    assertDisposableWindowsEnvironment();
+    initializeDisposablePaths();
     runInstaller(baselineInstaller);
     baseline = await seedBaseline();
     assert.equal(baseline.version, baselineVersion);
