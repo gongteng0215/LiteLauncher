@@ -923,6 +923,36 @@ body {
   overflow-wrap: anywhere;
 }
 
+.litesnap-tool-width-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 10px;
+  width: 100%;
+}
+
+.litesnap-tool-width-field {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.litesnap-tool-width-field > span {
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.litesnap-tool-width-field .settings-number {
+  width: 72px;
+  min-width: 0;
+}
+
 .litesnap-form .litesnap-ocr-textarea {
   min-height: 120px;
 }

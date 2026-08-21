@@ -930,18 +930,18 @@ test("LiteSnap renderer panel actions call the preload bridge for capture and pi
   );
   assert.match(
     panelImplsSource,
-    /annotationColor[\s\S]*annotationLineWidth[\s\S]*annotationTextSize[\s\S]*annotationFillShapes/,
+    /annotationColor[\s\S]*annotationLineWidth[\s\S]*annotationLineWidths[\s\S]*annotationTextSize[\s\S]*annotationFillShapes/,
     "LiteSnap settings page should expose editable annotation defaults"
   );
   assert.match(
     settingsSource,
-    /annotationLineWidth:[\s\S]*base\.annotationLineWidth,[\s\S]*1,[\s\S]*60/,
-    "LiteSnap settings should allow a 1–60 px default annotation line width"
+    /function normalizeAnnotationLineWidths[\s\S]*LITESNAP_ANNOTATION_WIDTH_TOOLS[\s\S]*1, 60/,
+    "LiteSnap settings should normalize every tool width to the 1–60 px range"
   );
   assert.match(
     panelImplsSource,
-    /"annotationLineWidth",[\s\S]*annotationLineWidth,[\s\S]*1,[\s\S]*60/,
-    "LiteSnap settings panel should allow a 1–60 px default annotation line width"
+    /LITESNAP_PANEL_WIDTH_TOOLS[\s\S]*`annotationLineWidth\.\$\{id\}`[\s\S]*values\[id\][\s\S]*1,[\s\S]*60/,
+    "LiteSnap settings panel should expose a 1–60 px input for every width-aware tool"
   );
   assert.match(
     overlayRendererSource,
@@ -957,6 +957,11 @@ test("LiteSnap renderer panel actions call the preload bridge for capture and pi
     stylesSource,
     /\.litesnap-fields-grid \.litesnap-settings-field \{[\s\S]*display: flex;[\s\S]*flex-direction: column;/,
     "LiteSnap settings fields should stack labels, controls, and hints within each grid card"
+  );
+  assert.match(
+    stylesSource,
+    /\.litesnap-tool-width-grid \{[\s\S]*grid-template-columns: repeat\(auto-fit, minmax\(120px, 1fr\)\)/,
+    "LiteSnap per-tool width settings should use a responsive grid"
   );
 });
 
@@ -1316,8 +1321,28 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     overlayRendererSource,
-    /setLiteSnapSettings\(\{[\s\S]*annotationColor:[\s\S]*annotationLineWidth:[\s\S]*annotationTool:[\s\S]*annotationFillShapes:/,
+    /setLiteSnapSettings\(\{[\s\S]*annotationColor:[\s\S]*annotationLineWidth:[\s\S]*annotationLineWidths:[\s\S]*annotationTool:[\s\S]*annotationFillShapes:/,
     "LiteSnap overlay should persist annotation style and last-tool changes back to settings"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function setActiveTool[\s\S]*isAnnotationWidthTool\(tool\)[\s\S]*activeLineWidth = annotationLineWidths\[tool\][\s\S]*syncWidthControl\(tool\)/,
+    "LiteSnap should restore the selected tool's independent width"
+  );
+  assert.match(
+    overlayRendererSource,
+    /function setActiveLineWidth[\s\S]*annotationLineWidths\[activeWidthTool\] = activeLineWidth/,
+    "LiteSnap width changes should update only the active width-aware tool"
+  );
+  assert.match(
+    overlayRendererSource,
+    /const showWidth = isAnnotationWidthTool\(activeTool\)[\s\S]*widthsNode\.hidden = !showWidth/,
+    "LiteSnap should hide the width control for text and number tools"
+  );
+  assert.match(
+    captureSource,
+    /annotationLineWidths:\s*\{ \.\.\.settings\.annotationLineWidths \}/,
+    "LiteSnap overlay state should include all independent tool widths"
   );
   assert.match(
     overlayRendererSource,
@@ -1336,7 +1361,7 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
   );
   assert.match(
     settingsSource,
-    /annotationTool:[\s\S]*annotationFillShapes:/,
+    /annotationTool,[\s\S]*annotationFillShapes:/,
     "LiteSnap settings should remember the last annotation tool and fill state"
   );
   assert.match(
@@ -1853,9 +1878,19 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
     "relayed user scrolling must not push the target above the long-capture guide"
   );
   assert.match(
+    fs.readFileSync(nativeAddonSourcePath, "utf8"),
+    /INPUT inputs\[3\][\s\S]*MOUSEEVENTF_WHEEL[\s\S]*SendInput\(3, inputs/,
+    "native wheel relay must queue cursor restoration after the wheel event"
+  );
+  assert.match(
     captureSource,
     /scrollWindowAtPoint\?\./,
     "long capture may relay only a real user wheel event through the protective overlay"
+  );
+  assert.match(
+    windowCoordinatorSource,
+    /beginScrollRelay[\s\S]*setFocusable\(false\)[\s\S]*endScrollRelay[\s\S]*setFocusable\(true\)/,
+    "wheel relay must temporarily return foreground input routing to the selected application"
   );
   assert.match(controllerSource, /可向上或向下滚动/);
   assert.doesNotMatch(controllerSource, /id="capture"/);

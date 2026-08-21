@@ -273,12 +273,25 @@ test("hydrating an old single-profile AI save fills missing personalities once",
   const aiState = machine.enableAiMode().state;
   machine.hydrate({
     ...aiState,
-    aiPlayers: aiState.aiPlayers.slice(0, 1)
+    aiPlayers: [aiState.aiPlayers[0]!, { ...aiState.aiPlayers[0]!, id: "legacy-duplicate" }]
   });
 
-  const hydrated = machine.getState().state;
-  assert.equal(hydrated.aiPlayers.length, 3);
-  assert.equal(new Set(hydrated.aiPlayers.map((player) => player.profileKey)).size, 3);
+  const firstHydrated = machine.getState().state;
+  assert.equal(firstHydrated.aiPlayers.length, 3);
+  assert.equal(new Set(firstHydrated.aiPlayers.map((player) => player.profileKey)).size, 3);
+  const migrationLogCount = firstHydrated.logs.filter((line) => line.includes("AI 玩家加入")).length;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    machine.hydrate(machine.getState().state);
+    const rehydrated = machine.getState().state;
+    assert.equal(rehydrated.aiPlayers.length, 3);
+    assert.equal(new Set(rehydrated.aiPlayers.map((player) => player.profileKey)).size, 3);
+    assert.equal(
+      rehydrated.logs.filter((line) => line.includes("AI 玩家加入")).length,
+      migrationLogCount,
+      "repeated hydration must not append duplicate migration logs"
+    );
+  }
 });
 
 test("AI personalities choose different actions for the same leveraged big deal", async () => {

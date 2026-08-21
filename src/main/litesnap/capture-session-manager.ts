@@ -368,6 +368,7 @@ export class LiteSnapCaptureSessionManager {
       selectionMinSize: 24,
       annotationColor: settings.annotationColor,
       annotationLineWidth: settings.annotationLineWidth,
+      annotationLineWidths: { ...settings.annotationLineWidths },
       annotationTextSize: settings.annotationTextSize,
       annotationTool: settings.annotationTool,
       annotationFillShapes: settings.annotationFillShapes,
@@ -601,17 +602,14 @@ export class LiteSnapCaptureSessionManager {
       x: longCapture.selection.x + Math.round(longCapture.selection.width / 2),
       y: longCapture.selection.y + Math.round(longCapture.selection.height / 2)
     };
-    const guideWindow = this.longCaptureWindows.guide;
-    if (!guideWindow || guideWindow.isDestroyed()) {
+    const guideWindow = this.longCaptureWindows.beginScrollRelay();
+    if (!guideWindow) {
       return false;
     }
     longCapture.scrollRelayInFlight = true;
     const startedAt = Date.now();
     try {
-      // Temporarily release only the hit-test path for the synthetic wheel.
-      // The window stays visible, so there is no flash; restoring it right
-      // after SendInput keeps every click protected by the transparent layer.
-      guideWindow.setIgnoreMouseEvents(true);
+      // Keep the guide visible while its coordinator yields input routing.
       await new Promise<void>((resolve) => setTimeout(resolve, 16));
       if (!this.isCurrentLongCapture(longCapture, session)) {
         return false;
@@ -638,8 +636,12 @@ export class LiteSnapCaptureSessionManager {
               targetWindowId: longCapture.targetWindowId
             }
           ) ?? false;
+      if (!this.e2eLongCaptureSimulation) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 24));
+      }
       longCapture.scrollMs += Date.now() - startedAt;
       if (didScroll) {
+        this.longCaptureCoordinator.recordInputDirection(longCapture, deltaY > 0 ? "down" : "up");
         longCapture.expectedDirection = deltaY > 0 ? "down" : "up";
         longCapture.samplingBurstRemaining = LONG_CAPTURE_MAX_POLLS_PER_SCROLL;
         longCapture.message = "正在等待滚动停止，再自动追加稳定画面。";
@@ -651,11 +653,8 @@ export class LiteSnapCaptureSessionManager {
       return didScroll;
     } finally {
       longCapture.scrollRelayInFlight = false;
-      if (this.session === session && !guideWindow.isDestroyed()) {
-        guideWindow.setIgnoreMouseEvents(false);
-        guideWindow.setAlwaysOnTop(true, "screen-saver");
-        guideWindow.showInactive();
-        guideWindow.moveTop();
+      if (this.session === session) {
+        this.longCaptureWindows.endScrollRelay(guideWindow);
       }
       const controller = this.longCaptureWindows.controller;
       if (this.isCurrentLongCapture(longCapture, session) && controller && !controller.isDestroyed()) {

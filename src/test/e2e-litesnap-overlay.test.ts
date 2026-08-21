@@ -490,6 +490,113 @@ test(
 );
 
 test(
+  "electron smoke: LiteSnap remembers independent widths for each annotation tool",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap remembers independent widths for each annotation tool";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async () => {
+        const current = await window.launcher.getLiteSnapSettings();
+        await window.launcher.setLiteSnapSettings({
+          annotationTool: "arrow",
+          annotationLineWidth: 14,
+          annotationLineWidths: {
+            ...current.annotationLineWidths,
+            arrow: 14,
+            rect: 2
+          }
+        });
+      });
+
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      await createOverlaySelection(overlayPage);
+
+      const readWidthControl = async (): Promise<{
+        value: string | null;
+        label: string | null;
+        hidden: boolean;
+      }> =>
+        overlayPage!.evaluate(() => {
+          const slider = document.getElementById("litesnap-width-slider") as HTMLInputElement | null;
+          const widths = document.getElementById("litesnap-widths");
+          return {
+            value: slider?.value ?? null,
+            label: document.querySelector(".litesnap-overlay__width-value")?.textContent ?? null,
+            hidden: Boolean(widths?.hidden)
+          };
+        });
+
+      assert.deepEqual(await readWidthControl(), {
+        value: "14",
+        label: "箭头粗细 14",
+        hidden: false
+      });
+
+      await overlayPage.locator('[data-tool="rect"]').click();
+      assert.deepEqual(await readWidthControl(), {
+        value: "2",
+        label: "矩形粗细 2",
+        hidden: false
+      });
+      await overlayPage.locator("#litesnap-width-slider").evaluate((node) => {
+        const slider = node as HTMLInputElement;
+        slider.value = "5";
+        slider.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      await overlayPage.locator('[data-tool="arrow"]').click();
+      assert.equal((await readWidthControl()).value, "14");
+      await overlayPage.locator('[data-tool="rect"]').click();
+      assert.deepEqual(await readWidthControl(), {
+        value: "5",
+        label: "矩形粗细 5",
+        hidden: false
+      });
+
+      await overlayPage.locator('[data-tool="text"]').click();
+      assert.equal((await readWidthControl()).hidden, true);
+      await overlayPage.locator('[data-tool="number"]').click();
+      assert.equal((await readWidthControl()).hidden, true);
+
+      await overlayPage.waitForTimeout(550);
+      const savedWidths = await session.page.evaluate(async () => {
+        const settings = await window.launcher.getLiteSnapSettings();
+        return settings.annotationLineWidths;
+      });
+      assert.equal(savedWidths.arrow, 14);
+      assert.equal(savedWidths.rect, 5);
+
+      await overlayPage.keyboard.press("Escape").catch(() => undefined);
+      await waitForOverlayVisibility(session, false);
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+    }
+  }
+);
+
+test(
   "electron smoke: LiteSnap double click copies the current selection",
   { timeout: 180000 },
   async (t) => {
@@ -1292,6 +1399,7 @@ test(
       let reachedBottom = false;
       let lastScrollY = initialFixtureStatus.y;
       let nativeScrollAttempts = 0;
+      let nativeScrollMoves = 0;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         const didScroll: boolean = await session.page.evaluate(() =>
           window.launcher.liteSnapScrollLongCapture(120)
@@ -1301,7 +1409,9 @@ test(
         let scroll = JSON.parse(
           await fs.readFile(fixtureStatusPath, "utf8")
         ) as NativeScrollFixtureStatus;
-        if (!didScroll || scroll.y <= lastScrollY) {
+        if (didScroll && scroll.y > lastScrollY) {
+          nativeScrollMoves += 1;
+        } else {
           await fs.writeFile(
             fixtureControlPath,
             JSON.stringify({ scrollBy: 40 }),
@@ -1332,6 +1442,48 @@ test(
         true,
         `native wheel input should reach the fixture bottom (last scrollY=${lastScrollY})`
       );
+
+      let reversedUpward = false;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const previousScrollY = lastScrollY;
+        const didScroll: boolean = await session.page.evaluate(() =>
+          window.launcher.liteSnapScrollLongCapture(-120)
+        );
+        nativeScrollAttempts += 1;
+        await session.page.waitForTimeout(650);
+        const scroll = JSON.parse(
+          await fs.readFile(fixtureStatusPath, "utf8")
+        ) as NativeScrollFixtureStatus;
+        if (didScroll && scroll.y < previousScrollY) {
+          nativeScrollMoves += 1;
+          lastScrollY = scroll.y;
+          reversedUpward = true;
+          break;
+        }
+      }
+      assert.equal(reversedUpward, true, "native wheel input should move upward after reaching bottom");
+
+      let returnedToBottom = false;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const previousScrollY = lastScrollY;
+        const didScroll: boolean = await session.page.evaluate(() =>
+          window.launcher.liteSnapScrollLongCapture(120)
+        );
+        nativeScrollAttempts += 1;
+        await session.page.waitForTimeout(650);
+        const scroll = JSON.parse(
+          await fs.readFile(fixtureStatusPath, "utf8")
+        ) as NativeScrollFixtureStatus;
+        if (didScroll && scroll.y > previousScrollY) {
+          nativeScrollMoves += 1;
+        }
+        lastScrollY = scroll.y;
+        if (scroll.y + scroll.innerHeight >= scroll.scrollHeight - 2) {
+          returnedToBottom = true;
+          break;
+        }
+      }
+      assert.equal(returnedToBottom, true, "native wheel input should return to the fixture bottom");
       await session.page.waitForTimeout(900);
       const beforeFinish = await session.page.evaluate(() =>
         window.launcher.liteSnapGetLongCaptureProgress()
@@ -1410,6 +1562,10 @@ test(
       );
       assert.equal(pixels.purpleGuidePixels, 0, "dashed guide pixels must not enter the saved image");
       assert.ok(nativeScrollAttempts > 0, "the test should exercise the native scroll bridge");
+      assert.ok(
+        nativeScrollMoves >= 3,
+        `the native scroll bridge must move the fixture in both directions (moves=${nativeScrollMoves})`
+      );
       const diagnostics = await session.page.evaluate(() => window.launcher.liteSnapGetDiagnostics());
       const completed = diagnostics.find(
         (entry) => entry.operation === "long-capture" && entry.status === "success"
@@ -1418,6 +1574,10 @@ test(
         completed?.metrics.capturePath,
         "windows-native-region",
         "the controllable fixture must still use region-level Windows native capture"
+      );
+      assert.ok(
+        Number(completed?.metrics.directionSwitches) >= 1,
+        "the real fixture should record the downward-to-upward direction switch"
       );
     } catch (error) {
       if (session) {

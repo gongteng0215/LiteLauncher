@@ -207,3 +207,75 @@ test("stats summary includes top loss reasons", async () => {
     assert.deepEqual(stats.commonLossReasons[1], { reason: lossReasonB, count: 1 });
   });
 });
+
+test("old single-AI snapshots stay deduplicated across persistence round trips", async () => {
+  await withTempPersistence(async (persistence) => {
+    const machine = new CashflowStateMachine();
+    const aiState = machine.enableAiMode(false, "programmer").state;
+    const legacyState: CashflowState = {
+      ...aiState,
+      aiPlayers: [aiState.aiPlayers[0]!, { ...aiState.aiPlayers[0]!, id: "legacy-copy" }]
+    };
+    await persistence.saveState({
+      state: legacyState,
+      action: "legacy-save",
+      message: "旧单 AI 存档",
+      archivePreviousActiveGame: true
+    });
+
+    for (let round = 0; round < 3; round += 1) {
+      const loaded = await persistence.loadState();
+      assert.ok(loaded);
+      machine.hydrate(loaded);
+      const migrated = machine.getState().state;
+      assert.equal(migrated.aiPlayers.length, 3);
+      assert.equal(new Set(migrated.aiPlayers.map((player) => player.profileKey)).size, 3);
+      await persistence.saveState({
+        state: migrated,
+        action: `migration-round-${round + 1}`,
+        message: "AI 性格兼容迁移",
+        archivePreviousActiveGame: false
+      });
+    }
+
+    const finalState = await persistence.loadState();
+    assert.ok(finalState);
+    assert.equal(finalState.aiPlayers.length, 3);
+    assert.equal(new Set(finalState.aiPlayers.map((player) => player.profileKey)).size, 3);
+    const reviewHistory = await persistence.getReviewHistory();
+    assert.equal(reviewHistory.length, 1, "migration saves must update the active game in place");
+  });
+});
+
+test("review history returns only the newest twelve games without losing lifetime stats", async () => {
+  await withTempPersistence(async (persistence) => {
+    const machine = new CashflowStateMachine();
+    const base = machine.reset("cleaner").state;
+
+    for (let index = 1; index <= 14; index += 1) {
+      const state: CashflowState = {
+        ...base,
+        turn: index,
+        cash: base.cash + index * 100,
+        logs: [`第 ${index} 局`]
+      };
+      await persistence.saveState({
+        state,
+        action: `game-${index}`,
+        message: `第 ${index} 局`,
+        archivePreviousActiveGame: true
+      });
+    }
+
+    const history = await persistence.getReviewHistory();
+    assert.equal(history.length, 12);
+    assert.equal(history[0]?.currentTurn, 14);
+    assert.equal(history[0]?.status, "active");
+    assert.equal(history[11]?.currentTurn, 3);
+    assert.ok(history.slice(1).every((game) => game.status === "archived"));
+    assert.equal(new Set(history.map((game) => game.id)).size, 12);
+
+    const stats = await persistence.getStats();
+    assert.equal(stats.totalGames, 14, "review limit must not delete lifetime game statistics");
+  });
+});

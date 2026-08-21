@@ -293,7 +293,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 120px;
+  min-width: 190px;
 }
 
 .litesnap-overlay__width-slider {
@@ -305,7 +305,7 @@ body {
 }
 
 .litesnap-overlay__width-value {
-  min-width: 18px;
+  min-width: 90px;
   color: #e2e8f0;
   font-size: 11px;
   text-align: right;
@@ -381,7 +381,9 @@ body {
 }
 
 .litesnap-overlay__group--fill[hidden],
-.litesnap-overlay__divider--fill[hidden] {
+.litesnap-overlay__divider--fill[hidden],
+.litesnap-overlay__widths[hidden],
+#litesnap-width-divider[hidden] {
   display: none !important;
 }
 

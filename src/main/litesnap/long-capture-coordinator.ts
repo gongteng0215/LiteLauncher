@@ -46,6 +46,7 @@ export type LiteSnapLongCaptureSessionState = {
   lastMatchAppend: number;
   lastMatchDirection: LiteSnapStitchDirection | "";
   directionSwitches: number;
+  lastInputDirection: LiteSnapStitchDirection | null;
   lastDirection: LiteSnapStitchDirection | null;
   expectedDirection: LiteSnapStitchDirection | null;
   finishSettleMs: number;
@@ -125,6 +126,7 @@ export class LiteSnapLongCaptureCoordinator {
       lastMatchAppend: 0,
       lastMatchDirection: "",
       directionSwitches: 0,
+      lastInputDirection: null,
       lastDirection: null,
       expectedDirection: null,
       finishSettleMs: 0,
@@ -207,6 +209,7 @@ export class LiteSnapLongCaptureCoordinator {
     session.lastMatchAppend = 0;
     session.lastMatchDirection = "";
     session.directionSwitches = 0;
+    session.lastInputDirection = null;
     session.lastDirection = null;
     session.expectedDirection = null;
     session.noProgressFrames = 0;
@@ -291,9 +294,6 @@ export class LiteSnapLongCaptureCoordinator {
     direction: LiteSnapStitchDirection,
     nextTop: number
   ): void {
-    if (session.lastDirection && session.lastDirection !== direction) {
-      session.directionSwitches += 1;
-    }
     session.lastDirection = direction;
     // A wheel-derived direction only applies to the frame produced by that
     // gesture. Keeping it after an accepted frame prevents a later manual
@@ -307,6 +307,16 @@ export class LiteSnapLongCaptureCoordinator {
     session.noProgressFrames = 0;
     session.pendingConfirmationCount = 0;
     session.finalFrameUnsafe = false;
+  }
+
+  public recordInputDirection(
+    session: LiteSnapLongCaptureSessionState,
+    direction: LiteSnapStitchDirection
+  ): void {
+    if (session.lastInputDirection && session.lastInputDirection !== direction) {
+      session.directionSwitches += 1;
+    }
+    session.lastInputDirection = direction;
   }
 
   public createSegment(

@@ -717,7 +717,12 @@ napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
         static_cast<long long>((std::max)(1, span - 1));
     return static_cast<LONG>(std::clamp(scaled, 0LL, 65535LL));
   };
-  INPUT inputs[2]{};
+  // Queue the cursor restore behind the wheel event in the same SendInput
+  // batch. Restoring with SetCursorPos immediately after SendInput can race
+  // the input queue: Windows may resolve the wheel target after the cursor has
+  // already jumped back, so the call reports success while the selected
+  // window never scrolls (especially visible when reversing at the bottom).
+  INPUT inputs[3]{};
   inputs[0].type = INPUT_MOUSE;
   inputs[0].mi.dx = to_absolute(x, virtual_left, virtual_width);
   inputs[0].mi.dy = to_absolute(y, virtual_top, virtual_height);
@@ -726,11 +731,18 @@ napi_value ScrollWindowAtPoint(napi_env env, napi_callback_info info) {
   inputs[1].type = INPUT_MOUSE;
   inputs[1].mi.mouseData = static_cast<DWORD>(delta);
   inputs[1].mi.dwFlags = MOUSEEVENTF_WHEEL;
-  const UINT injected = SendInput(2, inputs, sizeof(INPUT));
-  SetCursorPos(original_point.x, original_point.y);
+  inputs[2].type = INPUT_MOUSE;
+  inputs[2].mi.dx = to_absolute(original_point.x, virtual_left, virtual_width);
+  inputs[2].mi.dy = to_absolute(original_point.y, virtual_top, virtual_height);
+  inputs[2].mi.dwFlags =
+      MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+  const UINT injected = SendInput(3, inputs, sizeof(INPUT));
+  if (injected != 3) {
+    SetCursorPos(original_point.x, original_point.y);
+  }
 
   napi_value result;
-  napi_get_boolean(env, injected == 2, &result);
+  napi_get_boolean(env, injected == 3, &result);
   return result;
 }
 

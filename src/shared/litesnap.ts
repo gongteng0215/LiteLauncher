@@ -88,6 +88,37 @@ export type LiteSnapAnnotationTool =
   | "blur"
   | "highlight";
 
+export const LITESNAP_ANNOTATION_WIDTH_TOOLS = [
+  "rect",
+  "ellipse",
+  "line",
+  "arrow",
+  "pen",
+  "highlight",
+  "mosaic",
+  "blur"
+] as const;
+
+export type LiteSnapAnnotationWidthTool =
+  (typeof LITESNAP_ANNOTATION_WIDTH_TOOLS)[number];
+
+export type LiteSnapAnnotationLineWidths = Record<LiteSnapAnnotationWidthTool, number>;
+
+export function createDefaultLiteSnapAnnotationLineWidths(
+  width = 3
+): LiteSnapAnnotationLineWidths {
+  return {
+    rect: width,
+    ellipse: width,
+    line: width,
+    arrow: width,
+    pen: width,
+    highlight: width,
+    mosaic: width,
+    blur: width
+  };
+}
+
 export interface LiteSnapSettings {
   screenshotShortcut: string;
   pinShortcut: string;
@@ -97,7 +128,9 @@ export interface LiteSnapSettings {
   saveFormat: "png" | "jpg";
   postCaptureBehavior: "toolbar" | "copy" | "save" | "pin";
   annotationColor: string;
+  /** Legacy fallback for older LiteLauncher builds. */
   annotationLineWidth: number;
+  annotationLineWidths: LiteSnapAnnotationLineWidths;
   annotationTextSize: number;
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
@@ -154,7 +187,9 @@ export interface LiteSnapOverlayState {
   viewportHeight: number;
   selectionMinSize: number;
   annotationColor: string;
+  /** Legacy fallback for older LiteLauncher builds. */
   annotationLineWidth: number;
+  annotationLineWidths: LiteSnapAnnotationLineWidths;
   annotationTextSize: number;
   annotationTool: LiteSnapAnnotationTool;
   annotationFillShapes: boolean;
@@ -308,6 +343,7 @@ export function createDefaultLiteSnapSettings(): LiteSnapSettings {
     postCaptureBehavior: "toolbar",
     annotationColor: "#ff3b30",
     annotationLineWidth: 3,
+    annotationLineWidths: createDefaultLiteSnapAnnotationLineWidths(),
     annotationTextSize: 16,
     annotationTool: "select",
     annotationFillShapes: false,

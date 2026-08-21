@@ -1,5 +1,32 @@
 namespace RendererPanelRuntime {
 
+  export const LITESNAP_PANEL_WIDTH_TOOLS = [
+    { id: "rect", label: "矩形" },
+    { id: "ellipse", label: "椭圆" },
+    { id: "line", label: "直线" },
+    { id: "arrow", label: "箭头" },
+    { id: "pen", label: "画笔" },
+    { id: "highlight", label: "荧光笔" },
+    { id: "mosaic", label: "马赛克" },
+    { id: "blur", label: "模糊" }
+  ] as const;
+
+  export type LiteSnapPanelWidthTool = (typeof LITESNAP_PANEL_WIDTH_TOOLS)[number]["id"];
+  export type LiteSnapPanelLineWidths = Record<LiteSnapPanelWidthTool, number>;
+
+  export function createLiteSnapPanelLineWidths(width = 3): LiteSnapPanelLineWidths {
+    return {
+      rect: width,
+      ellipse: width,
+      line: width,
+      arrow: width,
+      pen: width,
+      highlight: width,
+      mosaic: width,
+      blur: width
+    };
+  }
+
   export interface LiteSnapPanelData {
     settings: {
       screenshotShortcut: string;
@@ -11,6 +38,7 @@ namespace RendererPanelRuntime {
       postCaptureBehavior: "toolbar" | "copy" | "save" | "pin";
       annotationColor: string;
       annotationLineWidth: number;
+      annotationLineWidths: LiteSnapPanelLineWidths;
       annotationTextSize: number;
       annotationTool: string;
       annotationFillShapes: boolean;
@@ -33,6 +61,7 @@ namespace RendererPanelRuntime {
       postCaptureBehavior: "toolbar",
       annotationColor: "#ff3b30",
       annotationLineWidth: 3,
+      annotationLineWidths: createLiteSnapPanelLineWidths(),
       annotationTextSize: 16,
       annotationTool: "select",
       annotationFillShapes: false,
@@ -44,7 +73,12 @@ namespace RendererPanelRuntime {
   };
 
   export let liteSnapPanelData: LiteSnapPanelData = {
-    settings: { ...DEFAULT_LITESNAP_PANEL_DATA.settings },
+    settings: {
+      ...DEFAULT_LITESNAP_PANEL_DATA.settings,
+      annotationLineWidths: {
+        ...DEFAULT_LITESNAP_PANEL_DATA.settings.annotationLineWidths
+      }
+    },
     statusMessage: DEFAULT_LITESNAP_PANEL_DATA.statusMessage
   };
 
@@ -512,6 +546,22 @@ namespace RendererPanelRuntime {
       typeof settingsRecord?.historyMaxItems === "number"
         ? settingsRecord.historyMaxItems
         : DEFAULT_LITESNAP_PANEL_DATA.settings.historyMaxItems;
+    const annotationLineWidthRaw =
+      typeof settingsRecord?.annotationLineWidth === "number"
+        ? settingsRecord.annotationLineWidth
+        : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationLineWidth;
+    const annotationLineWidth = Number.isFinite(annotationLineWidthRaw)
+      ? Math.min(60, Math.max(1, Math.round(annotationLineWidthRaw)))
+      : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationLineWidth;
+    const annotationLineWidthsRecord = toRecord(settingsRecord?.annotationLineWidths);
+    const annotationLineWidths = createLiteSnapPanelLineWidths(annotationLineWidth);
+    for (const { id } of LITESNAP_PANEL_WIDTH_TOOLS) {
+      const rawWidth = annotationLineWidthsRecord?.[id];
+      annotationLineWidths[id] =
+        typeof rawWidth === "number" && Number.isFinite(rawWidth)
+          ? Math.min(60, Math.max(1, Math.round(rawWidth)))
+          : annotationLineWidth;
+    }
 
     return {
       settings: {
@@ -544,10 +594,8 @@ namespace RendererPanelRuntime {
           typeof settingsRecord?.annotationColor === "string"
             ? settingsRecord.annotationColor
             : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationColor,
-        annotationLineWidth:
-          typeof settingsRecord?.annotationLineWidth === "number"
-            ? settingsRecord.annotationLineWidth
-            : DEFAULT_LITESNAP_PANEL_DATA.settings.annotationLineWidth,
+        annotationLineWidth,
+        annotationLineWidths,
         annotationTextSize:
           typeof settingsRecord?.annotationTextSize === "number"
             ? settingsRecord.annotationTextSize
@@ -852,6 +900,37 @@ namespace RendererPanelRuntime {
     return input;
   }
 
+  export function createLiteSnapLineWidthsControl(
+    values: LiteSnapPanelLineWidths
+  ): HTMLDivElement {
+    const grid = document.createElement("div");
+    grid.id = "litesnap-annotation-line-widths";
+    grid.className = "litesnap-tool-width-grid";
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "各工具默认粗细");
+
+    for (const { id, label } of LITESNAP_PANEL_WIDTH_TOOLS) {
+      const item = document.createElement("label");
+      item.className = "litesnap-tool-width-field";
+      item.htmlFor = `litesnap-annotation-line-width-${id}`;
+
+      const name = document.createElement("span");
+      name.textContent = label;
+      const input = createLiteSnapNumberInput(
+        `litesnap-annotation-line-width-${id}`,
+        `annotationLineWidth.${id}`,
+        values[id],
+        1,
+        60
+      );
+
+      item.append(name, input);
+      grid.appendChild(item);
+    }
+
+    return grid;
+  }
+
   export function createLiteSnapSelect(
     id: string,
     name: string,
@@ -1071,6 +1150,15 @@ namespace RendererPanelRuntime {
     const historyMaxItems = Number.isFinite(historyMaxItemsRaw)
       ? Math.min(50, Math.max(5, Math.round(historyMaxItemsRaw)))
       : DEFAULT_LITESNAP_PANEL_DATA.settings.historyMaxItems;
+    const annotationLineWidths = {
+      ...liteSnapPanelData.settings.annotationLineWidths
+    };
+    for (const { id } of LITESNAP_PANEL_WIDTH_TOOLS) {
+      const rawWidth = Number(formData.get(`annotationLineWidth.${id}`));
+      annotationLineWidths[id] = Number.isFinite(rawWidth)
+        ? Math.min(60, Math.max(1, Math.round(rawWidth)))
+        : liteSnapPanelData.settings.annotationLineWidths[id];
+    }
 
     const patch = {
       screenshotShortcut,
@@ -1087,7 +1175,8 @@ namespace RendererPanelRuntime {
           ? formData.get("postCaptureBehavior")
           : "toolbar",
       annotationColor: String(formData.get("annotationColor") ?? "").trim(),
-      annotationLineWidth: Number(formData.get("annotationLineWidth")),
+      annotationLineWidth: liteSnapPanelData.settings.annotationLineWidth,
+      annotationLineWidths,
       annotationTextSize: Number(formData.get("annotationTextSize")),
       annotationFillShapes: formData.get("annotationFillShapes") === "on",
       historyEnabled: formData.get("historyEnabled") === "on",
@@ -1937,17 +2026,17 @@ namespace RendererPanelRuntime {
             ),
             "点击色块选择默认标注颜色"
           ),
-          createLiteSnapFieldRow(
-            "默认线宽",
-            createLiteSnapNumberInput(
-              "litesnap-annotation-line-width",
-              "annotationLineWidth",
-              liteSnapPanelData.settings.annotationLineWidth,
-              1,
-              60
-            ),
-            "范围 1–60 px；截图标注会自动记住最后使用的粗细"
-          ),
+          (() => {
+            const row = createLiteSnapFieldRow(
+              "各工具默认粗细",
+              createLiteSnapLineWidthsControl(
+                liteSnapPanelData.settings.annotationLineWidths
+              ),
+              "范围 1–60 px；八种工具分别保存，切换工具时自动恢复"
+            );
+            row.classList.add("litesnap-fields-grid-item--wide");
+            return row;
+          })(),
           createLiteSnapFieldRow(
             "文字大小",
             createLiteSnapNumberInput(
@@ -2305,8 +2394,8 @@ namespace RendererPanelRuntime {
           ),
           createLiteSnapInfoRow(
             "标注预设",
-            `${liteSnapPanelData.settings.annotationColor} / ${liteSnapPanelData.settings.annotationLineWidth}px / ${liteSnapPanelData.settings.annotationTextSize}px`,
-            "颜色、线宽、字号和填充会自动记住；框选后恢复上次标注工具"
+            `${liteSnapPanelData.settings.annotationColor} / 文字 ${liteSnapPanelData.settings.annotationTextSize}px / 八种工具粗细已分别保存`,
+            "颜色、各工具粗细、字号和填充会自动记住；框选后恢复上次标注工具"
           )
         ];
 

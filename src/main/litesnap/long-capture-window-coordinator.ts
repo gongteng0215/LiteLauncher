@@ -153,6 +153,26 @@ export class LiteSnapLongCaptureWindowCoordinator {
     }
   }
 
+  public beginScrollRelay(): BrowserWindow | null {
+    const guide = this.guideWindow;
+    if (!guide || guide.isDestroyed()) return null;
+    // The guide owns focus for Esc. Yield foreground input routing while the
+    // native wheel batch runs, otherwise Windows can send it back to the guide.
+    guide.setIgnoreMouseEvents(true);
+    guide.setFocusable(false);
+    return guide;
+  }
+
+  public endScrollRelay(guide: BrowserWindow): void {
+    if (guide !== this.guideWindow || guide.isDestroyed()) return;
+    guide.setFocusable(true);
+    guide.setIgnoreMouseEvents(false);
+    guide.setAlwaysOnTop(true, "screen-saver");
+    guide.show();
+    guide.focus();
+    guide.moveTop();
+  }
+
   public stopWatch(): void {
     if (this.stackWatchTimer) {
       clearInterval(this.stackWatchTimer);

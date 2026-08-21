@@ -1,6 +1,10 @@
 import {
+  createDefaultLiteSnapAnnotationLineWidths,
   createDefaultLiteSnapSettings,
+  LITESNAP_ANNOTATION_WIDTH_TOOLS,
+  LiteSnapAnnotationLineWidths,
   LiteSnapAnnotationTool,
+  LiteSnapAnnotationWidthTool,
   LiteSnapSettings,
   normalizeLiteSnapRecentColors,
   LITESNAP_HISTORY_MAX_ITEMS_MAX,
@@ -22,6 +26,9 @@ const LITESNAP_ANNOTATION_TOOLS = new Set<LiteSnapAnnotationTool>([
   "blur",
   "highlight"
 ]);
+const LITESNAP_ANNOTATION_WIDTH_TOOL_SET = new Set<LiteSnapAnnotationWidthTool>(
+  LITESNAP_ANNOTATION_WIDTH_TOOLS
+);
 
 function clampNumber(
   value: unknown,
@@ -51,10 +58,72 @@ function normalizeShortcut(
   return trimmed;
 }
 
+function hasOwn(value: unknown, key: PropertyKey): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, key)
+  );
+}
+
+function normalizeAnnotationLineWidths(
+  value: Partial<LiteSnapSettings> | null | undefined,
+  base: LiteSnapSettings,
+  legacyLineWidth: number
+): LiteSnapAnnotationLineWidths {
+  const baseLineWidths =
+    base.annotationLineWidths ??
+    createDefaultLiteSnapAnnotationLineWidths(base.annotationLineWidth);
+  const input =
+    value?.annotationLineWidths && typeof value.annotationLineWidths === "object"
+      ? (value.annotationLineWidths as Partial<LiteSnapAnnotationLineWidths>)
+      : null;
+
+  if (!input && hasOwn(value, "annotationLineWidth")) {
+    return createDefaultLiteSnapAnnotationLineWidths(legacyLineWidth);
+  }
+
+  const normalized = { ...baseLineWidths };
+  for (const tool of LITESNAP_ANNOTATION_WIDTH_TOOLS) {
+    normalized[tool] = clampNumber(input?.[tool], baseLineWidths[tool], 1, 60);
+  }
+  return normalized;
+}
+
+function cloneLiteSnapSettings(settings: LiteSnapSettings): LiteSnapSettings {
+  return {
+    ...settings,
+    annotationLineWidths: { ...settings.annotationLineWidths },
+    recentColors: [...settings.recentColors]
+  };
+}
+
 export function normalizeLiteSnapSettings(
   value: Partial<LiteSnapSettings> | null | undefined,
   base: LiteSnapSettings = createDefaultLiteSnapSettings()
 ): LiteSnapSettings {
+  const annotationTool =
+    typeof value?.annotationTool === "string" &&
+    LITESNAP_ANNOTATION_TOOLS.has(value.annotationTool)
+      ? value.annotationTool
+      : base.annotationTool;
+  const submittedLegacyLineWidth = clampNumber(
+    value?.annotationLineWidth,
+    base.annotationLineWidth,
+    1,
+    60
+  );
+  const annotationLineWidths = normalizeAnnotationLineWidths(
+    value,
+    base,
+    submittedLegacyLineWidth
+  );
+  const annotationLineWidth = LITESNAP_ANNOTATION_WIDTH_TOOL_SET.has(
+    annotationTool as LiteSnapAnnotationWidthTool
+  )
+    ? annotationLineWidths[annotationTool as LiteSnapAnnotationWidthTool]
+    : submittedLegacyLineWidth;
+
   return {
     screenshotShortcut: normalizeShortcut(
       value?.screenshotShortcut,
@@ -82,23 +151,15 @@ export function normalizeLiteSnapSettings(
       typeof value?.annotationColor === "string" && value.annotationColor.trim()
         ? value.annotationColor.trim()
         : base.annotationColor,
-    annotationLineWidth: clampNumber(
-      value?.annotationLineWidth,
-      base.annotationLineWidth,
-      1,
-      60
-    ),
+    annotationLineWidth,
+    annotationLineWidths,
     annotationTextSize: clampNumber(
       value?.annotationTextSize,
       base.annotationTextSize,
       8,
       72
     ),
-    annotationTool:
-      typeof value?.annotationTool === "string" &&
-      LITESNAP_ANNOTATION_TOOLS.has(value.annotationTool)
-        ? value.annotationTool
-        : base.annotationTool,
+    annotationTool,
     annotationFillShapes:
       typeof value?.annotationFillShapes === "boolean"
         ? value.annotationFillShapes
@@ -127,7 +188,7 @@ export class LiteSnapSettingsStore {
 
   public async getSettings(): Promise<LiteSnapSettings> {
     if (this.cachedSettings) {
-      return { ...this.cachedSettings, recentColors: [...this.cachedSettings.recentColors] };
+      return cloneLiteSnapSettings(this.cachedSettings);
     }
 
     const fallback = createDefaultLiteSnapSettings();
@@ -135,7 +196,7 @@ export class LiteSnapSettingsStore {
     if (!raw) {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
       this.cachedSettings = fallback;
-      return { ...fallback, recentColors: [...fallback.recentColors] };
+      return cloneLiteSnapSettings(fallback);
     }
 
     try {
@@ -148,11 +209,11 @@ export class LiteSnapSettingsStore {
         );
       }
       this.cachedSettings = normalized;
-      return { ...normalized, recentColors: [...normalized.recentColors] };
+      return cloneLiteSnapSettings(normalized);
     } catch {
       await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(fallback));
       this.cachedSettings = fallback;
-      return { ...fallback, recentColors: [...fallback.recentColors] };
+      return cloneLiteSnapSettings(fallback);
     }
   }
 
@@ -163,6 +224,6 @@ export class LiteSnapSettingsStore {
     const next = normalizeLiteSnapSettings(patch, current);
     await this.db.setSetting(LITESNAP_SETTINGS_KEY, JSON.stringify(next));
     this.cachedSettings = next;
-    return { ...next, recentColors: [...next.recentColors] };
+    return cloneLiteSnapSettings(next);
   }
 }

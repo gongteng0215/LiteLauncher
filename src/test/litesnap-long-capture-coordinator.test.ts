@@ -67,6 +67,24 @@ test("long-capture coordinator releases the wheel direction after accepting a fr
   assert.equal(session.expectedDirection, null);
 });
 
+test("long-capture coordinator records successful user input direction changes", () => {
+  const coordinator = new LiteSnapLongCaptureCoordinator();
+  const session = coordinator.createSession(
+    { x: 0, y: 0, width: 100, height: 80 },
+    fakeImage(100, 80),
+    "input-direction"
+  );
+  assert.ok(session);
+
+  coordinator.recordInputDirection(session, "down");
+  coordinator.recordInputDirection(session, "down");
+  coordinator.recordInputDirection(session, "up");
+  coordinator.recordInputDirection(session, "down");
+
+  assert.equal(session.directionSwitches, 2);
+  assert.equal(session.lastInputDirection, "down");
+});
+
 test("long-capture coordinator confirms the final stable frame before completion", async () => {
   const coordinator = new LiteSnapLongCaptureCoordinator();
   const session = coordinator.createSession(

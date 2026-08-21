@@ -23,6 +23,18 @@
     | "mosaic"
     | "blur";
 
+  type AnnotationWidthTool =
+    | "rect"
+    | "ellipse"
+    | "line"
+    | "arrow"
+    | "pen"
+    | "highlight"
+    | "mosaic"
+    | "blur";
+
+  type AnnotationLineWidths = Record<AnnotationWidthTool, number>;
+
   type OverlayState = {
     captureId: string;
     mode?: "capture" | "color" | "edit";
@@ -33,6 +45,7 @@
     selectionMinSize: number;
     annotationColor: string;
     annotationLineWidth: number;
+    annotationLineWidths?: Partial<AnnotationLineWidths>;
     annotationTextSize: number;
     annotationTool: AnnotationTool;
     annotationFillShapes: boolean;
@@ -134,6 +147,27 @@
   ];
   const MIN_ANNOTATION_LINE_WIDTH = 1;
   const MAX_ANNOTATION_LINE_WIDTH = 60;
+  const ANNOTATION_WIDTH_TOOLS: readonly AnnotationWidthTool[] = [
+    "rect",
+    "ellipse",
+    "line",
+    "arrow",
+    "pen",
+    "highlight",
+    "mosaic",
+    "blur"
+  ];
+  const ANNOTATION_WIDTH_TOOL_SET = new Set<AnnotationWidthTool>(ANNOTATION_WIDTH_TOOLS);
+  const ANNOTATION_WIDTH_TOOL_LABELS: Record<AnnotationWidthTool, string> = {
+    rect: "矩形",
+    ellipse: "椭圆",
+    line: "直线",
+    arrow: "箭头",
+    pen: "画笔",
+    highlight: "荧光笔",
+    mosaic: "马赛克",
+    blur: "模糊"
+  };
   const VALID_TOOLS = new Set<AnnotationTool>([
     "select",
     "rect",
@@ -171,6 +205,7 @@
   const statusNode = document.getElementById("litesnap-status");
   const colorsNode = document.getElementById("litesnap-colors");
   const widthsNode = document.getElementById("litesnap-widths");
+  const widthDividerNode = document.getElementById("litesnap-width-divider");
   const textInput = document.getElementById(
     "litesnap-text-input"
   ) as HTMLTextAreaElement | null;
@@ -193,6 +228,7 @@
   let lastAnnotationTool: AnnotationTool = "select";
   let activeColor = "#ff3b30";
   let activeLineWidth = 3;
+  let annotationLineWidths = createAnnotationLineWidths(3);
   let textSize = 16;
   let annotations: Annotation[] = [];
   let redoAnnotations: Annotation[] = [];
@@ -453,6 +489,41 @@
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function normalizeAnnotationLineWidth(value: unknown, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value)
+      ? Math.round(clamp(value, MIN_ANNOTATION_LINE_WIDTH, MAX_ANNOTATION_LINE_WIDTH))
+      : fallback;
+  }
+
+  function createAnnotationLineWidths(width: number): AnnotationLineWidths {
+    const normalized = normalizeAnnotationLineWidth(width, 3);
+    return {
+      rect: normalized,
+      ellipse: normalized,
+      line: normalized,
+      arrow: normalized,
+      pen: normalized,
+      highlight: normalized,
+      mosaic: normalized,
+      blur: normalized
+    };
+  }
+
+  function isAnnotationWidthTool(tool: AnnotationTool): tool is AnnotationWidthTool {
+    return ANNOTATION_WIDTH_TOOL_SET.has(tool as AnnotationWidthTool);
+  }
+
+  function normalizeAnnotationLineWidths(
+    widths: Partial<AnnotationLineWidths> | undefined,
+    legacyWidth: number
+  ): AnnotationLineWidths {
+    const normalized = createAnnotationLineWidths(legacyWidth);
+    for (const tool of ANNOTATION_WIDTH_TOOLS) {
+      normalized[tool] = normalizeAnnotationLineWidth(widths?.[tool], normalized[tool]);
+    }
+    return normalized;
   }
 
   function getViewportWidth(): number {
@@ -1146,6 +1217,7 @@
       void window.launcher.setLiteSnapSettings({
         annotationColor: activeColor,
         annotationLineWidth: activeLineWidth,
+        annotationLineWidths: { ...annotationLineWidths },
         annotationTextSize: textSize,
         annotationTool: lastAnnotationTool,
         annotationFillShapes: fillShapes
@@ -1234,6 +1306,10 @@
 
   function setActiveTool(tool: AnnotationTool, persist = true): void {
     activeTool = tool;
+    if (isAnnotationWidthTool(tool)) {
+      activeLineWidth = annotationLineWidths[tool];
+      syncWidthControl(tool);
+    }
     if (tool !== "select") {
       lastAnnotationTool = tool;
     }
@@ -1270,8 +1346,15 @@
 
   function syncToolbarStyleRow(): void {
     const showStyle = activeTool !== "select";
+    const showWidth = isAnnotationWidthTool(activeTool);
     if (toolbarStyleNode) {
       toolbarStyleNode.hidden = !showStyle;
+    }
+    if (widthsNode) {
+      widthsNode.hidden = !showWidth;
+    }
+    if (widthDividerNode) {
+      widthDividerNode.hidden = !showWidth;
     }
     const showFill = activeTool === "rect" || activeTool === "ellipse";
     if (fillGroupNode) {
@@ -3393,16 +3476,12 @@
     slider.max = String(MAX_ANNOTATION_LINE_WIDTH);
     slider.step = "1";
     slider.value = String(activeLineWidth);
-    slider.title = "拖动调整粗细";
-    slider.setAttribute("aria-label", "拖动调整标注粗细");
 
     const value = document.createElement("span");
     value.className = "litesnap-overlay__width-value";
-    value.textContent = String(activeLineWidth);
 
     slider.addEventListener("input", () => {
       const next = Number(slider.value);
-      value.textContent = String(next);
       setActiveLineWidth(next);
     });
 
@@ -3411,6 +3490,19 @@
     widthsNode.appendChild(wrap);
     widthSliderNode = slider;
     widthValueNode = value;
+    syncWidthControl(isAnnotationWidthTool(activeTool) ? activeTool : null);
+  }
+
+  function syncWidthControl(tool: AnnotationWidthTool | null): void {
+    const label = tool ? ANNOTATION_WIDTH_TOOL_LABELS[tool] : "标注";
+    if (widthSliderNode) {
+      widthSliderNode.value = String(activeLineWidth);
+      widthSliderNode.title = `拖动调整${label}粗细`;
+      widthSliderNode.setAttribute("aria-label", `${label}粗细`);
+    }
+    if (widthValueNode) {
+      widthValueNode.textContent = `${label}粗细 ${activeLineWidth}`;
+    }
   }
 
   function setActiveColor(color: string, persist = true): void {
@@ -3427,13 +3519,12 @@
   }
 
   function setActiveLineWidth(width: number, persist = true): void {
-    activeLineWidth = clamp(width, MIN_ANNOTATION_LINE_WIDTH, MAX_ANNOTATION_LINE_WIDTH);
-    if (widthSliderNode) {
-      widthSliderNode.value = String(activeLineWidth);
+    activeLineWidth = normalizeAnnotationLineWidth(width, activeLineWidth);
+    const activeWidthTool = isAnnotationWidthTool(activeTool) ? activeTool : null;
+    if (activeWidthTool) {
+      annotationLineWidths[activeWidthTool] = activeLineWidth;
     }
-    if (widthValueNode) {
-      widthValueNode.textContent = String(activeLineWidth);
-    }
+    syncWidthControl(activeWidthTool);
     const selected =
       selectedAnnotationIndex !== null ? annotations[selectedAnnotationIndex] : null;
     if (selected && "lineWidth" in selected) {
@@ -3441,7 +3532,7 @@
       rebuildVectorLayer();
       renderAnnotations();
     }
-    if (persist) {
+    if (persist && activeWidthTool) {
       schedulePersistAnnotationSettings();
     }
   }
@@ -3644,9 +3735,19 @@
 
   function applyAnnotationDefaults(state: OverlayState): void {
     activeColor = state.annotationColor || activeColor;
-    activeLineWidth = state.annotationLineWidth || activeLineWidth;
+    const legacyLineWidth = normalizeAnnotationLineWidth(
+      state.annotationLineWidth,
+      activeLineWidth
+    );
+    annotationLineWidths = normalizeAnnotationLineWidths(
+      state.annotationLineWidths,
+      legacyLineWidth
+    );
     textSize = state.annotationTextSize || textSize;
     lastAnnotationTool = state.annotationTool;
+    activeLineWidth = isAnnotationWidthTool(lastAnnotationTool)
+      ? annotationLineWidths[lastAnnotationTool]
+      : legacyLineWidth;
     setActiveColor(activeColor, false);
     setActiveLineWidth(activeLineWidth, false);
     setFillShapes(Boolean(state.annotationFillShapes), false);
