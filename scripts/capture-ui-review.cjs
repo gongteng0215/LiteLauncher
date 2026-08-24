@@ -12,7 +12,7 @@ const {
 } = require("../dist/test/e2e-test-utils.js");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.16-candidate";
+const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.18-candidate";
 const OUTPUT_ROOT = path.join(PROJECT_ROOT, "artifacts", "ui-review", REVIEW_LABEL);
 const VIEWPORTS = [
   { label: "1440x900", width: 1440, height: 900 },

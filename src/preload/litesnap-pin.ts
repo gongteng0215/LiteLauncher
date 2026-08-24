@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-const PIN_VISUAL_STATE_CHANNEL = "litesnap-pin:visual-state";
+const PIN_SET_OPACITY_CHANNEL = "litesnap-pin:set-opacity";
+const PIN_RESET_SIZE_CHANNEL = "litesnap-pin:reset-size";
 const PIN_COPY_CHANNEL = "litesnap-pin:copy";
 const PIN_SAVE_CHANNEL = "litesnap-pin:save";
 const PIN_DRAG_BEGIN_CHANNEL = "litesnap-pin:drag-begin";
@@ -12,12 +13,15 @@ const PIN_IMAGE_UPDATED_CHANNEL = "litesnap-pin:image-updated";
 const PIN_CLICK_THROUGH_CHANGED_CHANNEL = "litesnap-pin:click-through-changed";
 
 contextBridge.exposeInMainWorld("liteSnapPin", {
-  setVisualState(scale: number, opacity: number): void {
-    if (!Number.isFinite(scale) || !Number.isFinite(opacity)) {
+  setOpacity(opacity: number): void {
+    if (!Number.isFinite(opacity)) {
       return;
     }
 
-    ipcRenderer.send(PIN_VISUAL_STATE_CHANNEL, scale, opacity);
+    ipcRenderer.send(PIN_SET_OPACITY_CHANNEL, opacity);
+  },
+  resetSize(): void {
+    ipcRenderer.send(PIN_RESET_SIZE_CHANNEL);
   },
   copyToClipboard(): void {
     ipcRenderer.send(PIN_COPY_CHANNEL);

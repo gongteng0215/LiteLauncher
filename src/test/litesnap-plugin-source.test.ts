@@ -368,8 +368,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /PIN_DRAG_END_CHANNEL[\s\S]*getDisplayMatching[\s\S]*rebakePinImageForDisplay/,
-    "LiteSnap pin windows should rebake pixels when dragged onto a different-scale display"
+    /PIN_DRAG_END_CHANNEL[\s\S]*syncPinWindowConstraints[\s\S]*schedulePinImageRebake/,
+    "LiteSnap pin windows should refresh constraints and rebake pixels after cross-display drags"
   );
   assert.match(
     pinSource,
@@ -413,8 +413,13 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /wheel[\s\S]*dragging[\s\S]*deltaX[\s\S]*deltaY[\s\S]*event\.ctrlKey[\s\S]*opacity[\s\S]*scale/,
-    "LiteSnap pinned images should support wheel zoom and Ctrl+wheel opacity without horizontal-pan zoom"
+    /pinApi\?\.setOpacity\(opacity\)/,
+    "LiteSnap pinned images should keep opacity control without percentage zoom"
+  );
+  assert.doesNotMatch(
+    pinSource,
+    /data-command="zoom-in"|data-command="zoom-out"|addEventListener\("wheel"/,
+    "LiteSnap pinned images should not expose button or wheel percentage zoom"
   );
   assert.match(
     pinSource,
@@ -433,8 +438,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /PIN_MOVE_CHANNEL[\s\S]*resolvePinWindowSize[\s\S]*window\.setBounds\(|applyPinnedWindowBounds[\s\S]*resolvePinWindowSize[\s\S]*setBounds/,
-    "LiteSnap pin windows should move through IPC with size locked to avoid HiDPI growth"
+    /function applyPinnedWindowBounds\([\s\S]*const bounds = window\.getBounds\(\)[\s\S]*width: bounds\.width[\s\S]*height: bounds\.height/,
+    "LiteSnap pin windows should preserve their manually resized bounds while moving"
   );
   assert.match(
     pinSource,
@@ -453,8 +458,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /ipcMain\.on\(PIN_SAVE_CHANNEL[\s\S]*pinSaveImageProvider\(image\)/,
-    "LiteSnap pin manager should save pinned images via the injected provider"
+    /ipcMain\.on\(PIN_SAVE_CHANNEL[\s\S]*pinSaveImageProvider\(meta\.sourceImage\)/,
+    "LiteSnap pin manager should save the original pinned image via the injected provider"
   );
   assert.match(
     pinSource,
@@ -493,8 +498,8 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /pinApi\?\.setVisualState\(scale, opacity\)/,
-    "LiteSnap pin zoom and opacity should resize the native window instead of CSS transforms"
+    /setAspectRatio\(aspectRatio\)[\s\S]*setMinimumSize\([\s\S]*setMaximumSize\(/,
+    "LiteSnap pin windows should constrain native resizing to the source aspect and display work area"
   );
   assert.match(
     pinSource,
@@ -503,8 +508,13 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /resizable: false[\s\S]*backgroundThrottling: false/,
-    "LiteSnap pin windows should avoid resize chrome and background throttling during drag"
+    /resizable: true[\s\S]*thickFrame: true[\s\S]*backgroundThrottling: false/,
+    "LiteSnap pin windows should expose native edge and corner resizing"
+  );
+  assert.match(
+    pinSource,
+    /nativeResizeMargin[\s\S]*isInNativeResizeZone\(event\)[\s\S]*return;[\s\S]*dragging = true/,
+    "LiteSnap pin native resize margins should never start the custom window drag"
   );
   assert.match(
     pinSource,
@@ -528,8 +538,28 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /requestAnimationFrame[\s\S]*setVisualState\(scale, opacity\)/,
-    "LiteSnap pin zoom should coalesce visual state updates per animation frame"
+    /schedulePinImageRebake\([\s\S]*setTimeout[\s\S]*rebakePinImageForWindow/,
+    "LiteSnap pin resize should delay DPI-aware bitmap rebakes until native resizing settles"
+  );
+  assert.match(
+    pinSource,
+    /clipboard\.writeImage\(meta\.sourceImage\)[\s\S]*pinSaveImageProvider\(meta\.sourceImage\)/,
+    "LiteSnap pin copy and save should retain the original source resolution"
+  );
+  assert.match(
+    pinSource,
+    /object-fit: contain/,
+    "LiteSnap pin display should fit the whole image without local cropping or distortion"
+  );
+  assert.match(
+    pinSource,
+    /data-command="reset-size"[\s\S]*恢复初始大小/,
+    "LiteSnap pin menu should restore the initial native window size"
+  );
+  assert.match(
+    pinSource,
+    /if \(enabled\) \{[\s\S]*setResizable\(false\)[\s\S]*setIgnoreMouseEvents\(true[\s\S]*setResizable\(true\)/,
+    "LiteSnap pin windows should disable native resizing only while click-through is active"
   );
 });
 
@@ -1140,6 +1170,36 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     "LiteSnap overlay should let users drag annotation handles to scale objects"
   );
   assert.match(
+    overlayHtmlSource,
+    /data-handle="n" data-annotation-handle="n"[\s\S]*data-handle="se" data-annotation-handle="se"/,
+    "LiteSnap annotations should expose eight independently positioned box handles"
+  );
+  assert.match(
+    overlayHtmlSource,
+    /data-annotation-handle="start"[\s\S]*data-annotation-handle="end"/,
+    "LiteSnap line-like annotations should expose dedicated endpoint handles"
+  );
+  assert.match(
+    overlayCssSource,
+    /annotation-frame \.[\s\S]*handle[\s\S]*pointer-events: auto[\s\S]*annotation-frame\[data-linear="true"\]/,
+    "LiteSnap annotation handles should stay individually hittable and switch to endpoint mode"
+  );
+  assert.match(
+    overlayRendererSource,
+    /A selected annotation owns its handles and body before the outer crop[\s\S]*beginAnnotationResize[\s\S]*beginAnnotationMove[\s\S]*beginSelectionResize/,
+    "LiteSnap should prioritize editing the selected annotation over resizing the crop frame"
+  );
+  assert.match(
+    overlayRendererSource,
+    /if \(activeTool !== "select"\)[\s\S]*beginDraftAnnotation/,
+    "LiteSnap should keep the drawing tool active so blank-space drags create another annotation"
+  );
+  assert.match(
+    overlayRendererSource,
+    /scaleAnnotationToBounds[\s\S]*result\.lineWidth = annotation\.lineWidth/,
+    "LiteSnap annotation resizing should preserve the selected tool line width"
+  );
+  assert.match(
     overlayRendererSource,
     /litesnap-width-slider|width-slider/,
     "LiteSnap overlay should expose a draggable width slider instead of fixed presets"
@@ -1178,6 +1238,26 @@ test("LiteSnap overlay renderer assets and copy-assets support are present", () 
     fs.readFileSync(overlayHtmlPath, "utf8"),
     /<textarea[\s\S]*id="litesnap-text-input"/,
     "LiteSnap text editor should be a multiline textarea"
+  );
+  assert.match(
+    overlayRendererSource,
+    /type TextEditSession[\s\S]*textEditSessionSequence[\s\S]*finishTextInput\(commit: boolean, expectedSessionId\?: number\)/,
+    "LiteSnap text editing should reject stale blur callbacks with an input session token"
+  );
+  assert.match(
+    overlayRendererSource,
+    /compositionstart[\s\S]*compositionend[\s\S]*pendingTextBlurSessionId/,
+    "LiteSnap text editing should defer blur commits during IME composition"
+  );
+  assert.match(
+    overlayRendererSource,
+    /handleDoubleClick[\s\S]*annotation\?\.type === "text"[\s\S]*openTextInput\(annotation\.position, annotationIndex\)/,
+    "LiteSnap should reopen an existing text annotation for double-click editing"
+  );
+  assert.match(
+    overlayRendererSource,
+    /const insertAt = Math\.min\(session\.annotationIndex, annotations\.length\)[\s\S]*!commit \? session\.original/,
+    "LiteSnap should replace edited text in place and restore it when editing is cancelled"
   );
   assert.match(
     overlayRendererSource,

@@ -1,6 +1,7 @@
 (() => {
   type OverlayAction = "copy" | "save" | "pin" | "cancel" | "ocr" | "translate" | "long";
   type ResizeHandle = "n" | "s" | "w" | "e" | "nw" | "ne" | "sw" | "se";
+  type AnnotationResizeHandle = ResizeHandle | "start" | "end";
   type DragMode =
     | "idle"
     | "selecting"
@@ -121,12 +122,22 @@
     | NumberAnnotation
     | RegionEffectAnnotation;
 
+  type TextEditSession = {
+    id: number;
+    position: Point;
+    annotationIndex: number | null;
+    original: TextAnnotation | null;
+    color: string;
+    fontSize: number;
+    maxWidth: number;
+  };
+
   type PointerStartState = {
     pointerId: number;
     x: number;
     y: number;
     selection: SelectionRect | null;
-    handle: ResizeHandle | null;
+    handle: AnnotationResizeHandle | null;
     annotationIndex?: number;
     annotationSnapshot?: Annotation;
     annotationBoundsSnapshot?: SelectionRect;
@@ -209,6 +220,9 @@
   const textInput = document.getElementById(
     "litesnap-text-input"
   ) as HTMLTextAreaElement | null;
+  const undoButton = document.getElementById("litesnap-undo") as HTMLButtonElement | null;
+  const redoButton = document.getElementById("litesnap-redo") as HTMLButtonElement | null;
+  const deleteButton = document.getElementById("litesnap-delete") as HTMLButtonElement | null;
   const fillToggleNode = document.getElementById("litesnap-fill-toggle");
   const fillGroupNode = document.getElementById("litesnap-fill-group");
   const fillDividerNode = document.getElementById("litesnap-fill-divider");
@@ -237,7 +251,12 @@
   let compositeImage: HTMLImageElement | null = null;
   let compositeImageSource = "";
   let editingText = false;
-  let pendingTextPosition: Point | null = null;
+  let textEditSession: TextEditSession | null = null;
+  let textEditSessionSequence = 0;
+  let focusedTextSessionId: number | null = null;
+  let composingTextSessionId: number | null = null;
+  let pendingTextBlurSessionId: number | null = null;
+  let pendingTextOpenRequest: { point: Point; annotationIndex: number | null } | null = null;
   let toolbarSize = { width: 0, height: 0 };
   let numberSequence = 1;
   let fillShapes = false;
@@ -274,6 +293,7 @@
   let pooledBlurCtx: CanvasRenderingContext2D | null = null;
   let editorZoom = 1;
   let editorPan = { x: 0, y: 0 };
+  let hasShownAnnotationEditHint = false;
 
   const WINDOW_PROBE_DEBOUNCE_MS = 80;
   const WINDOW_PROBE_MIN_MOVE_PX = 8;
@@ -864,10 +884,35 @@
     if (!isRegionEffectAnnotation(annotation)) {
       bakeVectorAnnotationOntoLayer(annotation);
     }
+    syncToolbarCommandState();
+    if (
+      !hasShownAnnotationEditHint &&
+      annotation.type !== "mosaic" &&
+      annotation.type !== "blur"
+    ) {
+      hasShownAnnotationEditHint = true;
+      showStatus("拖动标注可移动，拖动控制点可调整大小。", false);
+    }
   }
 
   function cloneAnnotation(annotation: Annotation): Annotation {
     return JSON.parse(JSON.stringify(annotation)) as Annotation;
+  }
+
+  function isLinearAnnotation(
+    annotation: Annotation
+  ): annotation is ShapeAnnotation | HighlightAnnotation {
+    return (
+      annotation.type === "line" ||
+      annotation.type === "arrow" ||
+      annotation.type === "highlight"
+    );
+  }
+
+  function isBoxResizeHandle(
+    handle: AnnotationResizeHandle | null
+  ): handle is ResizeHandle {
+    return Boolean(handle && handle !== "start" && handle !== "end");
   }
 
   function scaleAnnotationToBounds(
@@ -877,7 +922,7 @@
   ): Annotation {
     const scaleX = newBounds.width / Math.max(1, oldBounds.width);
     const scaleY = newBounds.height / Math.max(1, oldBounds.height);
-    const strokeScale = Math.min(scaleX, scaleY);
+    const sizeScale = Math.min(scaleX, scaleY);
     const result = cloneAnnotation(annotation);
 
     if (result.type === "pen" && annotation.type === "pen") {
@@ -885,11 +930,7 @@
         x: newBounds.x + (point.x - oldBounds.x) * scaleX,
         y: newBounds.y + (point.y - oldBounds.y) * scaleY
       }));
-      result.lineWidth = clamp(
-        annotation.lineWidth * strokeScale,
-        MIN_ANNOTATION_LINE_WIDTH,
-        MAX_ANNOTATION_LINE_WIDTH
-      );
+      result.lineWidth = annotation.lineWidth;
       return result;
     }
 
@@ -898,7 +939,7 @@
         x: newBounds.x + (annotation.position.x - oldBounds.x) * scaleX,
         y: newBounds.y + (annotation.position.y - oldBounds.y) * scaleY
       };
-      result.fontSize = Math.max(10, annotation.fontSize * strokeScale);
+      result.fontSize = Math.max(10, annotation.fontSize * sizeScale);
       if (annotation.maxWidth) {
         result.maxWidth = Math.max(20, annotation.maxWidth * scaleX);
       }
@@ -910,7 +951,7 @@
         x: newBounds.x + (annotation.position.x - oldBounds.x) * scaleX,
         y: newBounds.y + (annotation.position.y - oldBounds.y) * scaleY
       };
-      result.fontSize = Math.max(10, annotation.fontSize * strokeScale);
+      result.fontSize = Math.max(10, annotation.fontSize * sizeScale);
       return result;
     }
 
@@ -932,11 +973,7 @@
         x: newBounds.x + (annotation.end.x - oldBounds.x) * scaleX,
         y: newBounds.y + (annotation.end.y - oldBounds.y) * scaleY
       };
-      result.lineWidth = clamp(
-        annotation.lineWidth * strokeScale,
-        MIN_ANNOTATION_LINE_WIDTH,
-        MAX_ANNOTATION_LINE_WIDTH
-      );
+      result.lineWidth = annotation.lineWidth;
       return result;
     }
 
@@ -949,11 +986,7 @@
         x: newBounds.x + (annotation.end.x - oldBounds.x) * scaleX,
         y: newBounds.y + (annotation.end.y - oldBounds.y) * scaleY
       };
-      result.lineWidth = clamp(
-        annotation.lineWidth * strokeScale,
-        MIN_ANNOTATION_LINE_WIDTH,
-        MAX_ANNOTATION_LINE_WIDTH
-      );
+      result.lineWidth = annotation.lineWidth;
       return result;
     }
 
@@ -1235,6 +1268,31 @@
         button.disabled = disabled;
       }
     });
+    if (!disabled) {
+      syncToolbarCommandState();
+    }
+  }
+
+  function syncToolbarCommandState(): void {
+    if (committing) {
+      return;
+    }
+    if (undoButton) {
+      undoButton.disabled = annotations.length === 0 && !editingText;
+    }
+    if (redoButton) {
+      redoButton.disabled = redoAnnotations.length === 0;
+    }
+    if (deleteButton) {
+      const hasSelected =
+        selectedAnnotationIndex !== null &&
+        selectedAnnotationIndex >= 0 &&
+        selectedAnnotationIndex < annotations.length;
+      deleteButton.disabled = !hasSelected && annotations.length === 0 && !editingText;
+      const label = hasSelected ? "删除选中标注" : "删除最后一个标注";
+      deleteButton.title = label;
+      deleteButton.setAttribute("aria-label", label);
+    }
   }
 
   function showStatus(message: string, persistent = false): void {
@@ -1377,6 +1435,7 @@
   }
 
   function resetSelectionUi(): void {
+    finishTextInput(false);
     selection = null;
     lastSelection = null;
     selectionCommitted = false;
@@ -1391,7 +1450,6 @@
     draftAnnotation = null;
     numberSequence = 1;
     clearWindowHint();
-    finishTextInput(true);
     setToolbarDisabled(false);
     setActiveTool("select", false);
     cancelScheduledOverlayRender();
@@ -1579,6 +1637,7 @@
     if (shouldShowToolbar()) {
       toolbarNode.hidden = false;
       syncToolbarStyleRow();
+      syncToolbarCommandState();
       return;
     }
     toolbarNode.hidden = true;
@@ -2037,26 +2096,6 @@
     }
   }
 
-  function drawSelectedAnnotationBounds(ctx: CanvasRenderingContext2D): void {
-    if (selectedAnnotationIndex === null || selectedAnnotationIndex < 0) {
-      return;
-    }
-    const annotation = annotations[selectedAnnotationIndex];
-    if (!annotation) {
-      return;
-    }
-    const bounds = getAnnotationBounds(annotation);
-    if (!bounds) {
-      return;
-    }
-    ctx.save();
-    ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = "rgba(125, 211, 252, 0.95)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    ctx.restore();
-  }
-
   function renderAnnotations(): void {
     const ctx = ensureCanvasSize();
     if (!ctx || !canvasNode) {
@@ -2108,15 +2147,15 @@
       drawAnnotation(ctx, draftAnnotation, compositeImage);
     }
 
-    drawSelectedAnnotationBounds(ctx);
     updateAnnotationFrame();
+    syncToolbarCommandState();
   }
 
   function updateAnnotationFrame(): void {
     if (!annotationFrameNode) {
       return;
     }
-    if (selectedAnnotationIndex === null || activeTool !== "select") {
+    if (selectedAnnotationIndex === null) {
       annotationFrameNode.hidden = true;
       return;
     }
@@ -2125,12 +2164,33 @@
       annotationFrameNode.hidden = true;
       return;
     }
+    if (isLinearAnnotation(annotation)) {
+      annotationFrameNode.hidden = false;
+      annotationFrameNode.dataset.linear = "true";
+      annotationFrameNode.style.left = "0px";
+      annotationFrameNode.style.top = "0px";
+      annotationFrameNode.style.width = "0px";
+      annotationFrameNode.style.height = "0px";
+      for (const endpoint of ["start", "end"] as const) {
+        const handle = annotationFrameNode.querySelector<HTMLElement>(
+          `[data-annotation-handle="${endpoint}"]`
+        );
+        const point = annotation[endpoint];
+        if (handle) {
+          handle.style.left = `${point.x - 7}px`;
+          handle.style.top = `${point.y - 7}px`;
+          handle.title = endpoint === "start" ? "调整起点" : "调整终点";
+        }
+      }
+      return;
+    }
     const bounds = getAnnotationBounds(annotation);
     if (!bounds || bounds.width < 1 || bounds.height < 1) {
       annotationFrameNode.hidden = true;
       return;
     }
     annotationFrameNode.hidden = false;
+    annotationFrameNode.dataset.linear = "false";
     annotationFrameNode.style.left = `${bounds.x}px`;
     annotationFrameNode.style.top = `${bounds.y}px`;
     annotationFrameNode.style.width = `${bounds.width}px`;
@@ -2207,24 +2267,50 @@
       return;
     }
 
+    if (
+      (pointerStart.handle === "start" || pointerStart.handle === "end") &&
+      isLinearAnnotation(pointerStart.annotationSnapshot)
+    ) {
+      const next = clampPointToSelection(nextX, nextY);
+      const resized = cloneAnnotation(
+        pointerStart.annotationSnapshot
+      ) as ShapeAnnotation | HighlightAnnotation;
+      resized[pointerStart.handle] = next;
+      annotations[pointerStart.annotationIndex] = resized;
+      updateAnnotationFrame();
+      return;
+    }
+
+    if (!isBoxResizeHandle(pointerStart.handle)) {
+      return;
+    }
+
     const minSize = 12;
     const base = pointerStart.annotationBoundsSnapshot;
+    const limitLeft = selection?.x ?? 0;
+    const limitTop = selection?.y ?? 0;
+    const limitRight = selection
+      ? selection.x + selection.width
+      : getViewportWidth();
+    const limitBottom = selection
+      ? selection.y + selection.height
+      : getViewportHeight();
     let left = base.x;
     let top = base.y;
     let right = base.x + base.width;
     let bottom = base.y + base.height;
 
     if (pointerStart.handle.includes("n")) {
-      top = clamp(nextY, 0, bottom - minSize);
+      top = clamp(nextY, limitTop, bottom - minSize);
     }
     if (pointerStart.handle.includes("s")) {
-      bottom = clamp(nextY, top + minSize, getViewportHeight());
+      bottom = clamp(nextY, top + minSize, limitBottom);
     }
     if (pointerStart.handle.includes("w")) {
-      left = clamp(nextX, 0, right - minSize);
+      left = clamp(nextX, limitLeft, right - minSize);
     }
     if (pointerStart.handle.includes("e")) {
-      right = clamp(nextX, left + minSize, getViewportWidth());
+      right = clamp(nextX, left + minSize, limitRight);
     }
 
     const newBounds: SelectionRect = {
@@ -2243,7 +2329,7 @@
   }
 
   function applyResize(nextX: number, nextY: number): void {
-    if (!pointerStart?.selection || !pointerStart.handle) {
+    if (!pointerStart?.selection || !isBoxResizeHandle(pointerStart.handle)) {
       return;
     }
 
@@ -2294,6 +2380,19 @@
       return value;
     }
     return null;
+  }
+
+  function getAnnotationHandleFromTarget(
+    target: EventTarget | null
+  ): AnnotationResizeHandle | null {
+    if (!(target instanceof HTMLElement)) {
+      return null;
+    }
+    const value = target.dataset.annotationHandle;
+    if (value === "start" || value === "end") {
+      return value;
+    }
+    return getHandleFromTarget(target);
   }
 
   function getEdgeHandleAtPoint(
@@ -2350,12 +2449,25 @@
     return getEdgeHandleAtPoint(x, y, selection);
   }
 
-  function getAnnotationEdgeHandleAtPoint(x: number, y: number): ResizeHandle | null {
-    if (selectedAnnotationIndex === null || activeTool !== "select") {
+  function getAnnotationEdgeHandleAtPoint(
+    x: number,
+    y: number
+  ): AnnotationResizeHandle | null {
+    if (selectedAnnotationIndex === null) {
       return null;
     }
     const annotation = annotations[selectedAnnotationIndex];
     if (!annotation || annotation.type === "mosaic" || annotation.type === "blur") {
+      return null;
+    }
+    if (isLinearAnnotation(annotation)) {
+      const endpointSlop = 12;
+      if (Math.hypot(x - annotation.start.x, y - annotation.start.y) <= endpointSlop) {
+        return "start";
+      }
+      if (Math.hypot(x - annotation.end.x, y - annotation.end.y) <= endpointSlop) {
+        return "end";
+      }
       return null;
     }
     const bounds = getAnnotationBounds(annotation);
@@ -2366,7 +2478,7 @@
   }
 
   function beginAnnotationResize(
-    handle: ResizeHandle,
+    handle: AnnotationResizeHandle,
     pointerId: number,
     x: number,
     y: number,
@@ -2388,6 +2500,30 @@
       annotationSnapshot: cloneAnnotation(annotation),
       annotationBoundsSnapshot: bounds
     };
+  }
+
+  function beginAnnotationMove(
+    annotationIndex: number,
+    pointerId: number,
+    x: number,
+    y: number
+  ): void {
+    const annotation = annotations[annotationIndex];
+    if (!annotation || annotation.type === "mosaic" || annotation.type === "blur") {
+      return;
+    }
+    selectedAnnotationIndex = annotationIndex;
+    dragMode = "annotation-moving";
+    pointerStart = {
+      pointerId,
+      x,
+      y,
+      selection: null,
+      handle: null,
+      annotationIndex,
+      annotationSnapshot: cloneAnnotation(annotation)
+    };
+    renderAnnotations();
   }
 
   function beginSelectionResize(handle: ResizeHandle, pointerId: number, x: number, y: number): void {
@@ -2924,71 +3060,139 @@
     if (!textInput || textInput.hidden) {
       return;
     }
+    const inputFontSize = textEditSession?.fontSize ?? textSize;
     textInput.style.height = "auto";
-    textInput.style.height = `${Math.max(textSize * 1.35, textInput.scrollHeight)}px`;
+    textInput.style.height = `${Math.max(inputFontSize * 1.35, textInput.scrollHeight)}px`;
   }
 
-  function openTextInput(point: Point): void {
+  function openTextInput(point: Point, annotationIndex: number | null = null): void {
     if (!textInput) {
       return;
     }
+    if (
+      textEditSession &&
+      composingTextSessionId === textEditSession.id
+    ) {
+      pendingTextOpenRequest = { point, annotationIndex };
+      pendingTextBlurSessionId = textEditSession.id;
+      textInput.blur();
+      return;
+    }
     finishTextInput(true);
-    pendingTextPosition = point;
-    editingText = true;
+    const existing =
+      annotationIndex !== null && annotations[annotationIndex]?.type === "text"
+        ? (cloneAnnotation(annotations[annotationIndex]) as TextAnnotation)
+        : null;
+    if (existing && annotationIndex !== null) {
+      annotations.splice(annotationIndex, 1);
+      rebuildVectorLayer();
+    }
+
+    const position = existing ? { ...existing.position } : point;
+    const inputFontSize = existing?.fontSize ?? textSize;
+    const inputColor = existing?.color ?? activeColor;
     const maxWidth = Math.max(
       80,
-      (selection ? selection.x + selection.width : getViewportWidth()) - point.x - 8
+      existing?.maxWidth ??
+        (selection ? selection.x + selection.width : getViewportWidth()) - position.x - 8
     );
+    const sessionId = ++textEditSessionSequence;
+    textEditSession = {
+      id: sessionId,
+      position,
+      annotationIndex: existing ? annotationIndex : null,
+      original: existing,
+      color: inputColor,
+      fontSize: inputFontSize,
+      maxWidth
+    };
+    editingText = true;
+    selectedAnnotationIndex = null;
+    pendingTextBlurSessionId = null;
     textInput.hidden = false;
-    textInput.value = "";
-    textInput.style.left = `${point.x}px`;
-    textInput.style.top = `${point.y}px`;
-    textInput.style.color = activeColor;
-    textInput.style.fontSize = `${textSize}px`;
+    textInput.value = existing?.text ?? "";
+    textInput.style.left = `${position.x}px`;
+    textInput.style.top = `${position.y}px`;
+    textInput.style.color = inputColor;
+    textInput.style.fontSize = `${inputFontSize}px`;
     textInput.style.lineHeight = "1.25";
     textInput.style.width = `${maxWidth}px`;
     textInput.style.maxWidth = `${maxWidth}px`;
-    textInput.style.height = `${textSize * 1.35}px`;
+    textInput.style.height = `${inputFontSize * 1.35}px`;
+    renderAnnotations();
+    syncToolbarCommandState();
     window.setTimeout(() => {
+      if (!textEditSession || textEditSession.id !== sessionId || textInput.hidden) {
+        return;
+      }
+      focusedTextSessionId = sessionId;
       textInput.focus();
+      const caret = textInput.value.length;
+      textInput.setSelectionRange(caret, caret);
       syncTextInputLayout();
     }, 0);
   }
 
-  function finishTextInput(commit: boolean): void {
-    if (!textInput || !editingText) {
+  function finishTextInput(commit: boolean, expectedSessionId?: number): void {
+    const session = textEditSession;
+    if (!textInput || !editingText || !session) {
       if (textInput) {
         textInput.hidden = true;
       }
       editingText = false;
-      pendingTextPosition = null;
+      textEditSession = null;
+      focusedTextSessionId = null;
+      composingTextSessionId = null;
+      pendingTextBlurSessionId = null;
+      pendingTextOpenRequest = null;
+      return;
+    }
+    if (expectedSessionId !== undefined && session.id !== expectedSessionId) {
+      return;
+    }
+    if (commit && composingTextSessionId === session.id) {
+      pendingTextBlurSessionId = session.id;
       return;
     }
 
     const value = textInput.value.replace(/\s+$/g, "");
-    if (commit && value && pendingTextPosition) {
-      const maxWidth = Math.max(
-        40,
-        Number.parseFloat(textInput.style.maxWidth || "") ||
-          (selection
-            ? selection.x + selection.width - pendingTextPosition.x - 8
-            : getViewportWidth() - pendingTextPosition.x - 8)
-      );
-      addAnnotation({
+    let replacement: TextAnnotation | null = null;
+    if (commit && value) {
+      replacement = {
         type: "text",
-        color: activeColor,
-        fontSize: textSize,
-        position: pendingTextPosition,
+        color: session.color,
+        fontSize: session.fontSize,
+        position: session.position,
         text: value,
-        maxWidth
-      });
+        maxWidth: session.maxWidth
+      };
+    }
+
+    if (session.annotationIndex !== null) {
+      const insertAt = Math.min(session.annotationIndex, annotations.length);
+      const annotation = replacement ?? (!commit ? session.original : null);
+      if (annotation) {
+        annotations.splice(insertAt, 0, annotation);
+        selectedAnnotationIndex = insertAt;
+      } else {
+        selectedAnnotationIndex = null;
+      }
+      redoAnnotations = [];
+      rebuildVectorLayer();
+    } else if (replacement) {
+      addAnnotation(replacement);
     }
 
     textInput.hidden = true;
     textInput.value = "";
     editingText = false;
-    pendingTextPosition = null;
+    textEditSession = null;
+    focusedTextSessionId = null;
+    composingTextSessionId = null;
+    pendingTextBlurSessionId = null;
+    pendingTextOpenRequest = null;
     renderAnnotations();
+    syncToolbarCommandState();
   }
 
   function undoLastAnnotation(): void {
@@ -3083,6 +3287,9 @@
     if (toolbarNode && !toolbarNode.hidden && toolbarNode.contains(event.target as Node)) {
       return;
     }
+    if (textInput && textInput.contains(event.target as Node)) {
+      return;
+    }
 
     if (isEditorMode() && event.button === 1) {
       event.preventDefault();
@@ -3102,8 +3309,44 @@
     const pointY = point.y;
     updateBrushPreview(pointX, pointY, event.target);
 
+    // A selected annotation owns its handles and body before the outer crop
+    // frame. This keeps objects near the crop edge editable instead of
+    // unexpectedly resizing the screenshot selection.
+    const annotationHandle =
+      (event.target instanceof HTMLElement &&
+      event.target.closest("#litesnap-annotation-frame")
+        ? getAnnotationHandleFromTarget(event.target)
+        : null) ?? getAnnotationEdgeHandleAtPoint(pointX, pointY);
+    if (
+      annotationHandle &&
+      selectedAnnotationIndex !== null &&
+      selection &&
+      containsPoint(selection, pointX, pointY)
+    ) {
+      beginAnnotationResize(
+        annotationHandle,
+        event.pointerId,
+        pointX,
+        pointY,
+        selectedAnnotationIndex
+      );
+      renderAnnotations();
+      syncDisplayFollowLock();
+      return;
+    }
+
+    if (selectedAnnotationIndex !== null) {
+      const selected = annotations[selectedAnnotationIndex];
+      const selectedBounds = selected ? getAnnotationBounds(selected) : null;
+      if (selectedBounds && containsPoint(selectedBounds, pointX, pointY)) {
+        beginAnnotationMove(selectedAnnotationIndex, event.pointerId, pointX, pointY);
+        syncDisplayFollowLock();
+        return;
+      }
+    }
+
     // Allow resizing the crop frame from handles/edges even while an annotation
-    // tool is active (WeChat-style).
+    // tool is active, after giving the selected object first chance.
     const handle = isEditorMode()
       ? null
       : getHandleFromTarget(event.target) ?? getSelectionEdgeHandleAtPoint(pointX, pointY);
@@ -3114,31 +3357,6 @@
       return;
     }
 
-    if (activeTool === "select") {
-      const annotationHandle =
-        (event.target instanceof HTMLElement &&
-        event.target.closest("#litesnap-annotation-frame")
-          ? getHandleFromTarget(event.target)
-          : null) ?? getAnnotationEdgeHandleAtPoint(pointX, pointY);
-      if (
-        annotationHandle &&
-        selectedAnnotationIndex !== null &&
-        selection &&
-        containsPoint(selection, pointX, pointY)
-      ) {
-        beginAnnotationResize(
-          annotationHandle,
-          event.pointerId,
-          pointX,
-          pointY,
-          selectedAnnotationIndex
-        );
-        renderAnnotations();
-        syncDisplayFollowLock();
-        return;
-      }
-    }
-
     if (activeTool !== "select") {
       if (!isValidSelection(selection) || !containsPoint(selection, pointX, pointY)) {
         hideBrushPreview();
@@ -3146,6 +3364,7 @@
       }
 
       const point = clampPointToSelection(pointX, pointY);
+      selectedAnnotationIndex = null;
       if (activeTool === "text") {
         openTextInput(point);
         return;
@@ -3180,22 +3399,7 @@
       hideBrushPreview();
       const annotationIndex = hitTestAnnotation({ x: pointX, y: pointY });
       if (annotationIndex !== null) {
-        selectedAnnotationIndex = annotationIndex;
-        const picked = annotations[annotationIndex];
-        if (picked && "lineWidth" in picked) {
-          setActiveLineWidth(picked.lineWidth, false);
-        }
-        dragMode = "annotation-moving";
-        pointerStart = {
-          pointerId: event.pointerId,
-          x: pointX,
-          y: pointY,
-          selection: null,
-          handle: null,
-          annotationIndex,
-          annotationSnapshot: cloneAnnotation(annotations[annotationIndex])
-        };
-        renderAnnotations();
+        beginAnnotationMove(annotationIndex, event.pointerId, pointX, pointY);
         return;
       }
       selectedAnnotationIndex = null;
@@ -3413,6 +3617,9 @@
     if (toolbarNode && !toolbarNode.hidden && toolbarNode.contains(event.target as Node)) {
       return;
     }
+    if (textInput && textInput.contains(event.target as Node)) {
+      return;
+    }
 
     const point = screenToEditorPoint(event.clientX, event.clientY);
     if (!containsPoint(selection, point.x, point.y)) {
@@ -3420,6 +3627,13 @@
     }
 
     event.preventDefault();
+    const annotationIndex = hitTestAnnotation(point);
+    const annotation =
+      annotationIndex !== null ? annotations[annotationIndex] : null;
+    if (annotation?.type === "text" && annotationIndex !== null) {
+      openTextInput(annotation.position, annotationIndex);
+      return;
+    }
     void commitSelection("copy");
   }
 
@@ -3512,6 +3726,9 @@
     });
     if (editingText && textInput) {
       textInput.style.color = color;
+      if (textEditSession) {
+        textEditSession.color = color;
+      }
     }
     if (persist) {
       schedulePersistAnnotationSettings();
@@ -3599,6 +3816,27 @@
     textInput.addEventListener("input", () => {
       syncTextInputLayout();
     });
+    textInput.addEventListener("focus", () => {
+      focusedTextSessionId = textEditSession?.id ?? null;
+    });
+    textInput.addEventListener("compositionstart", () => {
+      composingTextSessionId = textEditSession?.id ?? focusedTextSessionId;
+    });
+    textInput.addEventListener("compositionend", () => {
+      const sessionId = composingTextSessionId;
+      composingTextSessionId = null;
+      if (sessionId !== null && pendingTextBlurSessionId === sessionId) {
+        const openRequest = pendingTextOpenRequest;
+        pendingTextOpenRequest = null;
+        pendingTextBlurSessionId = null;
+        window.setTimeout(() => {
+          finishTextInput(true, sessionId);
+          if (!textEditSession && openRequest) {
+            openTextInput(openRequest.point, openRequest.annotationIndex);
+          }
+        }, 0);
+      }
+    });
     textInput.addEventListener("keydown", (event) => {
       event.stopPropagation();
       if (event.key === "Escape") {
@@ -3612,7 +3850,20 @@
         finishTextInput(true);
       }
     });
-    textInput.addEventListener("blur", () => finishTextInput(true));
+    textInput.addEventListener("blur", () => {
+      const sessionId = focusedTextSessionId;
+      focusedTextSessionId = null;
+      if (sessionId === null) {
+        return;
+      }
+      window.setTimeout(() => {
+        if (composingTextSessionId === sessionId) {
+          pendingTextBlurSessionId = sessionId;
+          return;
+        }
+        finishTextInput(true, sessionId);
+      }, 0);
+    });
   }
 
   function bindKeyboard(): void {

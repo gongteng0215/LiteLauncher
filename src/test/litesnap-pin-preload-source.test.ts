@@ -5,7 +5,7 @@ import test from "node:test";
 
 const pinPreloadPath = path.join(process.cwd(), "src", "preload", "litesnap-pin.ts");
 
-test("LiteSnap pin preload exposes visual state bridge", () => {
+test("LiteSnap pin preload exposes native resize support bridge", () => {
   const source = fs.readFileSync(pinPreloadPath, "utf8");
 
   assert.match(
@@ -15,13 +15,23 @@ test("LiteSnap pin preload exposes visual state bridge", () => {
   );
   assert.match(
     source,
-    /setVisualState\(scale: number, opacity: number\)/,
-    "LiteSnap pin preload should resize the native window for zoom and opacity changes"
+    /setOpacity\(opacity: number\)/,
+    "LiteSnap pin preload should expose opacity without a percentage zoom state"
   );
   assert.match(
     source,
-    /ipcRenderer\.send\(PIN_VISUAL_STATE_CHANNEL, scale, opacity\)/,
-    "LiteSnap pin preload should send visual state updates to the main process"
+    /ipcRenderer\.send\(PIN_SET_OPACITY_CHANNEL, opacity\)/,
+    "LiteSnap pin preload should send opacity updates to the main process"
+  );
+  assert.match(
+    source,
+    /resetSize\(\): void[\s\S]*ipcRenderer\.send\(PIN_RESET_SIZE_CHANNEL\)/,
+    "LiteSnap pin preload should restore the native window to its initial size"
+  );
+  assert.doesNotMatch(
+    source,
+    /setVisualState|VISUAL_STATE|scale: number/,
+    "LiteSnap pin preload should no longer expose percentage zoom"
   );
   assert.match(
     source,

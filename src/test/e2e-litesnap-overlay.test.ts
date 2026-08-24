@@ -82,6 +82,24 @@ async function waitForOverlayWindow(
   throw new Error("LiteSnap overlay window should open");
 }
 
+async function waitForPinWindow(
+  session: Awaited<ReturnType<typeof launchE2ESession>>
+) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15000) {
+    const pinPage = session.electronApp
+      .windows()
+      .filter((page) => !page.isClosed())
+      .find((page) => page.url().includes("/pin.html"));
+    if (pinPage) {
+      await pinPage.waitForLoadState("domcontentloaded");
+      return pinPage;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("LiteSnap pin window should open");
+}
+
 async function waitForLongCaptureController(
   session: Awaited<ReturnType<typeof launchE2ESession>>
 ) {
@@ -597,6 +615,251 @@ test(
 );
 
 test(
+  "electron smoke: LiteSnap directly moves and resizes a selected shape while keeping its drawing tool",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap directly moves and resizes a selected shape while keeping its drawing tool";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async () => {
+        await window.launcher.setLiteSnapSettings({ annotationTool: "rect" });
+      });
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      const selection = await createOverlaySelection(overlayPage);
+
+      const firstStart = { x: selection.x + 55, y: selection.y + 45 };
+      const firstEnd = { x: firstStart.x + 120, y: firstStart.y + 78 };
+      await dispatchOverlayDrag(overlayPage, firstStart, firstEnd);
+      await overlayPage.locator("#litesnap-annotation-frame").waitFor({ state: "visible" });
+
+      const readFrame = () =>
+        overlayPage!.evaluate(() => {
+          const root = document.getElementById("litesnap-overlay");
+          const frame = document.getElementById("litesnap-annotation-frame");
+          const deleteButton = document.getElementById(
+            "litesnap-delete"
+          ) as HTMLButtonElement | null;
+          if (!frame || frame.hidden) {
+            return null;
+          }
+          const rect = frame.getBoundingClientRect();
+          const handles = Array.from(
+            frame.querySelectorAll<HTMLElement>("[data-handle]")
+          ).map((handle) => {
+            const bounds = handle.getBoundingClientRect();
+            return {
+              handle: handle.dataset.handle,
+              x: Math.round(bounds.x),
+              y: Math.round(bounds.y),
+              display: getComputedStyle(handle).display
+            };
+          });
+          return {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            tool: root?.dataset.tool,
+            handles,
+            deleteDisabled: deleteButton?.disabled,
+            deleteLabel: deleteButton?.getAttribute("aria-label")
+          };
+        });
+
+      const initialFrame = await readFrame();
+      assert.ok(initialFrame, "a newly drawn rectangle should remain selected");
+      assert.equal(initialFrame.tool, "rect", "drawing a rectangle must keep the rectangle tool active");
+      assert.equal(initialFrame.handles.length, 8);
+      assert.equal(
+        new Set(initialFrame.handles.map((handle) => `${handle.x}:${handle.y}`)).size,
+        8,
+        "all eight resize handles should occupy distinct positions"
+      );
+      assert.ok(initialFrame.handles.every((handle) => handle.display !== "none"));
+      assert.equal(initialFrame.deleteDisabled, false);
+      assert.equal(initialFrame.deleteLabel, "删除选中标注");
+
+      await dispatchOverlayDrag(
+        overlayPage,
+        {
+          x: initialFrame.x + initialFrame.width / 2,
+          y: initialFrame.y + initialFrame.height / 2
+        },
+        {
+          x: initialFrame.x + initialFrame.width / 2 + 38,
+          y: initialFrame.y + initialFrame.height / 2 + 26
+        }
+      );
+      const movedFrame = await readFrame();
+      assert.ok(movedFrame);
+      assert.ok(movedFrame.x > initialFrame.x + 20, "dragging the selected shape body should move it");
+      assert.ok(movedFrame.y > initialFrame.y + 10, "dragging the selected shape body should move it");
+      assert.equal(movedFrame.tool, "rect");
+
+      const resizeHandle = overlayPage.locator(
+        '#litesnap-annotation-frame [data-annotation-handle="se"]'
+      );
+      const handleBounds = await resizeHandle.boundingBox();
+      assert.ok(handleBounds, "the south-east shape handle should be hittable");
+      await overlayPage.mouse.move(
+        handleBounds.x + handleBounds.width / 2,
+        handleBounds.y + handleBounds.height / 2
+      );
+      await overlayPage.mouse.down();
+      await overlayPage.mouse.move(
+        handleBounds.x + handleBounds.width / 2 + 42,
+        handleBounds.y + handleBounds.height / 2 + 30
+      );
+      await overlayPage.mouse.up();
+
+      const resizedFrame = await readFrame();
+      assert.ok(resizedFrame);
+      assert.ok(resizedFrame.width > movedFrame.width + 20, "dragging a handle should widen the shape");
+      assert.ok(resizedFrame.height > movedFrame.height + 12, "dragging a handle should heighten the shape");
+      assert.equal(resizedFrame.tool, "rect");
+
+      const secondStart = {
+        x: selection.x + selection.width - 150,
+        y: selection.y + 42
+      };
+      await dispatchOverlayDrag(overlayPage, secondStart, {
+        x: secondStart.x + 92,
+        y: secondStart.y + 62
+      });
+      const secondFrame = await readFrame();
+      assert.ok(secondFrame);
+      assert.ok(
+        secondFrame.x > resizedFrame.x + resizedFrame.width,
+        "dragging blank space should create a second rectangle instead of moving the first"
+      );
+      assert.equal(secondFrame.tool, "rect");
+
+      await overlayPage.keyboard.press("Escape").catch(() => undefined);
+      await waitForOverlayVisibility(session, false);
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap text input survives rapid focus changes and supports in-place editing",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap overlay regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap text input survives rapid focus changes and supports in-place editing";
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let overlayPage: Awaited<ReturnType<typeof waitForOverlayWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async () => {
+        await window.launcher.setLiteSnapSettings({ annotationTool: "text" });
+      });
+      overlayPage = await waitForOverlayWindow(session);
+      await waitForOverlayReady(overlayPage);
+      const selection = await createOverlaySelection(overlayPage);
+      const input = overlayPage.locator("#litesnap-text-input");
+      const points = [
+        { x: selection.x + 42, y: selection.y + 38 },
+        { x: selection.x + 42, y: selection.y + 102 },
+        { x: selection.x + 42, y: selection.y + 166 }
+      ];
+
+      await overlayPage.mouse.click(points[0].x, points[0].y);
+      await input.waitFor({ state: "visible" });
+      await input.fill("第一段");
+      await overlayPage.mouse.click(points[1].x, points[1].y);
+      await input.waitFor({ state: "visible" });
+      assert.equal(await input.inputValue(), "", "a second blank click should immediately open a new input");
+      await input.fill("第二段");
+      await overlayPage.mouse.click(points[2].x, points[2].y);
+      assert.equal(await input.inputValue(), "", "late blur from the first input must not close the third input");
+      await input.fill("第三段");
+      await input.press("Control+Enter");
+      await input.waitFor({ state: "hidden" });
+
+      await overlayPage.locator('[data-tool="select"]').click();
+      await overlayPage.mouse.dblclick(points[0].x + 12, points[0].y + 10);
+      await input.waitFor({ state: "visible" });
+      assert.equal(await input.inputValue(), "第一段");
+      await input.fill("不应保留的修改");
+      await input.press("Escape");
+      await input.waitFor({ state: "hidden" });
+
+      await overlayPage.mouse.dblclick(points[0].x + 12, points[0].y + 10);
+      await input.waitFor({ state: "visible" });
+      assert.equal(await input.inputValue(), "第一段", "Escape should restore the original text annotation");
+      await input.fill("第一段（已修改）");
+      await input.press("Control+Enter");
+      await input.waitFor({ state: "hidden" });
+      await overlayPage.mouse.dblclick(points[0].x + 12, points[0].y + 10);
+      assert.equal(await input.inputValue(), "第一段（已修改）", "text edits should replace the original annotation in place");
+      await input.press("Escape");
+
+      await overlayPage.locator('[data-tool="text"]').click();
+      const imeStart = { x: selection.x + selection.width - 210, y: selection.y + 52 };
+      const imeNext = { x: imeStart.x, y: imeStart.y + 68 };
+      await overlayPage.mouse.click(imeStart.x, imeStart.y);
+      await input.fill("中文输入");
+      await input.evaluate((node) => {
+        node.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "中文" }));
+      });
+      await overlayPage.mouse.click(imeNext.x, imeNext.y);
+      await input.evaluate((node) => {
+        node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "中文输入" }));
+      });
+      await input.waitFor({ state: "visible" });
+      await overlayPage.waitForFunction(() => document.activeElement?.id === "litesnap-text-input");
+      assert.equal(await input.inputValue(), "", "IME completion should commit old text and open the requested next input");
+      await input.press("Escape");
+
+      await overlayPage.keyboard.press("Escape").catch(() => undefined);
+      await waitForOverlayVisibility(session, false);
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(
+          overlayPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+    }
+  }
+);
+
+test(
   "electron smoke: LiteSnap double click copies the current selection",
   { timeout: 180000 },
   async (t) => {
@@ -656,6 +919,214 @@ test(
       if (session) {
         await closeLiteSnapE2ESession(session);
       }
+    }
+  }
+);
+
+test(
+  "electron smoke: LiteSnap pin uses native whole-window sizing and preserves source exports",
+  { timeout: 180000 },
+  async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("LiteSnap pin regression only runs on Windows");
+    }
+
+    const testName =
+      "electron smoke: LiteSnap pin uses native whole-window sizing and preserves source exports";
+    const saveDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), "litelauncher-litesnap-pin-save-")
+    );
+    let session: Awaited<ReturnType<typeof launchE2ESession>> | null = null;
+    let pinPage: Awaited<ReturnType<typeof waitForPinWindow>> | null = null;
+
+    try {
+      session = await launchE2ESession();
+      await session.page.evaluate(async (directory) => {
+        await window.launcher.setLiteSnapSettings({
+          saveDirectory: directory,
+          saveFormat: "png"
+        });
+      }, saveDirectory);
+      await session.electronApp.evaluate(({ clipboard, nativeImage }) => {
+        const width = 400;
+        const height = 200;
+        const bitmap = Buffer.alloc(width * height * 4);
+        for (let offset = 0; offset < bitmap.length; offset += 4) {
+          bitmap[offset] = 32;
+          bitmap[offset + 1] = 112;
+          bitmap[offset + 2] = 224;
+          bitmap[offset + 3] = 255;
+        }
+        clipboard.writeImage(
+          nativeImage.createFromBitmap(bitmap, { width, height, scaleFactor: 1 })
+        );
+      });
+
+      assert.equal(
+        await session.page.evaluate(() => window.launcher.liteSnapPinClipboard()),
+        true,
+        "F3 pinning should accept the clipboard image"
+      );
+      pinPage = await waitForPinWindow(session);
+      const initial = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) =>
+          candidate.webContents.getURL().includes("/pin.html")
+        );
+        return window
+          ? { bounds: window.getBounds(), resizable: window.isResizable() }
+          : null;
+      });
+      assert.ok(initial);
+      assert.equal(initial.bounds.width / initial.bounds.height, 2);
+      assert.equal(initial.resizable, true, "pin edges and corners should be natively resizable");
+
+      await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) =>
+          candidate.webContents.getURL().includes("/pin.html")
+        );
+        if (!window) {
+          throw new Error("pin window missing");
+        }
+        const bounds = window.getBounds();
+        window.setBounds({ ...bounds, width: 600, height: 300 }, false);
+      });
+      await pinPage.waitForTimeout(250);
+      const displayState = await pinPage.evaluate(() => {
+        const image = document.querySelector<HTMLImageElement>(".pin-shell img");
+        const rect = image?.getBoundingClientRect();
+        return {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          imageWidth: rect?.width ?? 0,
+          imageHeight: rect?.height ?? 0,
+          objectFit: image ? getComputedStyle(image).objectFit : "",
+          hasZoomCommand: Boolean(document.querySelector('[data-command^="zoom-"]'))
+        };
+      });
+      assert.deepEqual(displayState, {
+        innerWidth: 600,
+        innerHeight: 300,
+        imageWidth: 600,
+        imageHeight: 300,
+        objectFit: "contain",
+        hasZoomCommand: false
+      });
+
+      const pointerRouting = await pinPage.evaluate(() => {
+        const shell = document.getElementById("pin-shell") as HTMLElement | null;
+        if (!shell) {
+          throw new Error("pin shell missing");
+        }
+        shell.setPointerCapture = () => undefined;
+        shell.releasePointerCapture = () => undefined;
+        const dispatch = (type: string, clientX: number, clientY: number) => {
+          shell.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 41,
+              pointerType: "mouse",
+              isPrimary: true,
+              button: type === "pointerdown" ? 0 : -1,
+              buttons: type === "pointerup" ? 0 : 1,
+              clientX,
+              clientY,
+              screenX: 500 + clientX,
+              screenY: 400 + clientY
+            })
+          );
+        };
+        dispatch("pointerdown", 2, window.innerHeight / 2);
+        const edgeStartedContentDrag = shell.classList.contains("is-dragging");
+        dispatch("pointerup", 2, window.innerHeight / 2);
+        dispatch("pointerdown", window.innerWidth / 2, window.innerHeight / 2);
+        const centerStartedContentDrag = shell.classList.contains("is-dragging");
+        dispatch("pointerup", window.innerWidth / 2, window.innerHeight / 2);
+        return { edgeStartedContentDrag, centerStartedContentDrag };
+      });
+      assert.deepEqual(pointerRouting, {
+        edgeStartedContentDrag: false,
+        centerStartedContentDrag: true
+      });
+
+      await pinPage.evaluate(() => {
+        (window as unknown as { liteSnapPin: { copyToClipboard(): void } }).liteSnapPin.copyToClipboard();
+      });
+      await pinPage.waitForTimeout(120);
+      const copiedSize = await session.electronApp.evaluate(({ clipboard }) =>
+        clipboard.readImage().getSize()
+      );
+      assert.deepEqual(copiedSize, { width: 400, height: 200 });
+
+      await pinPage.evaluate(() => {
+        (window as unknown as { liteSnapPin: { saveToFile(): void } }).liteSnapPin.saveToFile();
+      });
+      const savedFile = await waitForLiteSnapSavedFile(saveDirectory);
+      const savedSize = await session.electronApp.evaluate(
+        ({ nativeImage }, imagePath) => nativeImage.createFromPath(imagePath).getSize(),
+        path.join(saveDirectory, savedFile)
+      );
+      assert.deepEqual(savedSize, { width: 400, height: 200 });
+
+      await pinPage.evaluate(() => {
+        (window as unknown as { liteSnapPin: { resetSize(): void } }).liteSnapPin.resetSize();
+      });
+      await pinPage.waitForTimeout(180);
+      const resetBounds = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) =>
+          candidate.webContents.getURL().includes("/pin.html")
+        );
+        return window?.getBounds() ?? null;
+      });
+      assert.ok(resetBounds);
+      assert.deepEqual(
+        { width: resetBounds.width, height: resetBounds.height },
+        { width: initial.bounds.width, height: initial.bounds.height }
+      );
+
+      await pinPage.evaluate(() => {
+        (window as unknown as { liteSnapPin: { setClickThrough(enabled: boolean): void } }).liteSnapPin.setClickThrough(true);
+      });
+      await pinPage.waitForTimeout(100);
+      assert.equal(
+        await session.electronApp.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find((candidate) =>
+            candidate.webContents.getURL().includes("/pin.html")
+          );
+          return window?.isResizable() ?? true;
+        }),
+        false,
+        "click-through should temporarily disable native resize handles"
+      );
+      await pinPage.evaluate(() => {
+        (window as unknown as { liteSnapPin: { setClickThrough(enabled: boolean): void } }).liteSnapPin.setClickThrough(false);
+      });
+      await pinPage.waitForTimeout(100);
+      assert.equal(
+        await session.electronApp.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find((candidate) =>
+            candidate.webContents.getURL().includes("/pin.html")
+          );
+          return window?.isResizable() ?? false;
+        }),
+        true,
+        "leaving click-through should restore native resize handles"
+      );
+    } catch (error) {
+      if (session) {
+        await captureE2EFailureArtifacts(
+          pinPage ?? session.page,
+          testName,
+          error,
+          session.electronApp
+        );
+      }
+      throw error;
+    } finally {
+      if (session) {
+        await closeLiteSnapE2ESession(session);
+      }
+      await fs.rm(saveDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 );

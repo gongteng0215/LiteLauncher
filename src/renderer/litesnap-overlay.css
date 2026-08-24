@@ -212,35 +212,49 @@ body {
 .litesnap-overlay__handle {
   display: block;
   position: absolute;
-  width: 14px;
-  height: 14px;
-  border: 2px solid #9d63ff;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: transparent;
+  z-index: 2;
+}
+
+.litesnap-overlay__handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  border: 1px solid #9d63ff;
   border-radius: 999px;
   background: #f8fafc;
   box-shadow: 0 1px 2px rgba(2, 6, 23, 0.45);
-  z-index: 2;
+  pointer-events: none;
 }
 
 .litesnap-overlay__handle[data-handle="n"] {
   top: -8px;
-  left: calc(50% - 7px);
+  left: calc(50% - 8px);
   cursor: ns-resize;
 }
 
 .litesnap-overlay__handle[data-handle="s"] {
   bottom: -8px;
-  left: calc(50% - 7px);
+  left: calc(50% - 8px);
   cursor: ns-resize;
 }
 
 .litesnap-overlay__handle[data-handle="w"] {
-  top: calc(50% - 7px);
+  top: calc(50% - 8px);
   left: -8px;
   cursor: ew-resize;
 }
 
 .litesnap-overlay__handle[data-handle="e"] {
-  top: calc(50% - 7px);
+  top: calc(50% - 8px);
   right: -8px;
   cursor: ew-resize;
 }
@@ -275,7 +289,7 @@ body {
 
 .litesnap-overlay__annotation-frame {
   position: absolute;
-  border: 1.5px dashed rgba(157, 99, 255, 0.92);
+  border: 1.5px dashed rgba(125, 211, 252, 0.98);
   background: transparent;
   pointer-events: none;
   z-index: 12;
@@ -287,6 +301,35 @@ body {
 
 .litesnap-overlay__annotation-frame .litesnap-overlay__handle {
   pointer-events: auto;
+}
+
+.litesnap-overlay__annotation-frame .litesnap-overlay__handle::after {
+  border-radius: 2px;
+  border-color: rgba(14, 116, 144, 0.96);
+  background: #e0f2fe;
+  box-shadow: 0 0 0 1px rgba(2, 6, 23, 0.72);
+}
+
+.litesnap-overlay__annotation-frame[data-linear="true"] {
+  width: 0 !important;
+  height: 0 !important;
+  border: 0;
+}
+
+.litesnap-overlay__annotation-frame[data-linear="true"]
+  .litesnap-overlay__handle[data-handle] {
+  display: none;
+}
+
+.litesnap-overlay__annotation-frame:not([data-linear="true"])
+  .litesnap-overlay__handle--endpoint {
+  display: none;
+}
+
+.litesnap-overlay__handle--endpoint {
+  top: 0;
+  left: 0;
+  cursor: crosshair;
 }
 
 .litesnap-overlay__width-slider-wrap {

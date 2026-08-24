@@ -44,14 +44,16 @@
         <div class="litesnap-overlay__handle" data-handle="se"></div>
       </div>
       <div class="litesnap-overlay__annotation-frame" id="litesnap-annotation-frame" hidden>
-        <div class="litesnap-overlay__handle" data-annotation-handle="n"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="s"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="w"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="e"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="nw"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="ne"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="sw"></div>
-        <div class="litesnap-overlay__handle" data-annotation-handle="se"></div>
+        <div class="litesnap-overlay__handle" data-handle="n" data-annotation-handle="n"></div>
+        <div class="litesnap-overlay__handle" data-handle="s" data-annotation-handle="s"></div>
+        <div class="litesnap-overlay__handle" data-handle="w" data-annotation-handle="w"></div>
+        <div class="litesnap-overlay__handle" data-handle="e" data-annotation-handle="e"></div>
+        <div class="litesnap-overlay__handle" data-handle="nw" data-annotation-handle="nw"></div>
+        <div class="litesnap-overlay__handle" data-handle="ne" data-annotation-handle="ne"></div>
+        <div class="litesnap-overlay__handle" data-handle="sw" data-annotation-handle="sw"></div>
+        <div class="litesnap-overlay__handle" data-handle="se" data-annotation-handle="se"></div>
+        <div class="litesnap-overlay__handle litesnap-overlay__handle--endpoint" data-annotation-handle="start"></div>
+        <div class="litesnap-overlay__handle litesnap-overlay__handle--endpoint" data-annotation-handle="end"></div>
       </div>
       <textarea
         class="litesnap-overlay__text-input"
@@ -64,7 +66,7 @@
       <div class="litesnap-overlay__toolbar" id="litesnap-toolbar" hidden>
         <div class="litesnap-overlay__toolbar-row litesnap-overlay__toolbar-row--main">
           <div class="litesnap-overlay__group litesnap-overlay__group--tools" role="group" aria-label="标注工具">
-            <button type="button" class="litesnap-overlay__tool" data-tool="select" title="选择/调整" aria-label="选择">
+            <button type="button" class="litesnap-overlay__tool" data-tool="select" title="选择、移动或缩放标注" aria-label="选择、移动或缩放标注">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 4 6 16 2.5-6.5L20 11Z"/></svg>
             </button>
             <button type="button" class="litesnap-overlay__tool" data-tool="rect" title="矩形" aria-label="矩形">
@@ -100,13 +102,13 @@
           </div>
           <div class="litesnap-overlay__divider"></div>
           <div class="litesnap-overlay__group" role="group" aria-label="操作">
-            <button type="button" class="litesnap-overlay__tool" data-command="undo" title="撤销" aria-label="撤销">
+            <button type="button" class="litesnap-overlay__tool" id="litesnap-undo" data-command="undo" title="撤销" aria-label="撤销">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5"/><path d="M4 12h11a5 5 0 0 1 0 10h-1"/></svg>
             </button>
-            <button type="button" class="litesnap-overlay__tool" data-command="redo" title="重做" aria-label="重做">
+            <button type="button" class="litesnap-overlay__tool" id="litesnap-redo" data-command="redo" title="重做" aria-label="重做">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/></svg>
             </button>
-            <button type="button" class="litesnap-overlay__tool" data-command="delete" title="删除最后一个标注" aria-label="删除最后一个标注">
+            <button type="button" class="litesnap-overlay__tool" id="litesnap-delete" data-command="delete" title="删除最后一个标注" aria-label="删除最后一个标注">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 7l1 13h6l1-13"/><path d="M9 7V4h6v3"/></svg>
             </button>
           </div>
