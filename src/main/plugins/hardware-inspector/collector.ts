@@ -95,6 +95,7 @@ export interface HardwareInspectorGpu {
   name: string | null;
   manufacturer: string | null;
   adapterRam: number | null;
+  adapterRamSource: HardwareInspectorGpuMemorySource;
   driverVersion: string | null;
   driverDate: string | null;
   videoProcessor: string | null;
@@ -105,6 +106,18 @@ export interface HardwareInspectorGpu {
   pnpDeviceId: string | null;
   temperatureCelsius: number | null;
   temperatureSource: string | null;
+}
+
+export type HardwareInspectorGpuMemorySource =
+  | "registry-qword"
+  | "nvidia-smi"
+  | "wmi-uint32"
+  | "wmi-uint32-limited"
+  | null;
+
+export interface HardwareInspectorGpuMemory {
+  adapterRam: number | null;
+  adapterRamSource: HardwareInspectorGpuMemorySource;
 }
 
 export interface HardwareInspectorVolume {
@@ -219,6 +232,43 @@ function Get-NullableDouble {
   } catch {
     return $null
   }
+}
+
+function Get-NullableUInt64 {
+  param($Value)
+
+  try {
+    if ($null -eq $Value -or $Value -eq '') {
+      return $null
+    }
+
+    if ($Value -is [byte[]]) {
+      if ($Value.Length -lt 8) {
+        return $null
+      }
+      $number = [BitConverter]::ToUInt64($Value, 0)
+    } else {
+      $number = [uint64]$Value
+    }
+
+    if ($number -le 0) {
+      return $null
+    }
+
+    return $number
+  } catch {
+    return $null
+  }
+}
+
+function Get-GpuPciMatchKey {
+  param([string]$Value)
+
+  if (-not $Value -or $Value -notmatch '(?i)VEN_([0-9A-F]{4}).*DEV_([0-9A-F]{4})') {
+    return $null
+  }
+
+  return ('VEN_{0}&DEV_{1}' -f $Matches[1], $Matches[2]).ToUpperInvariant()
 }
 
 function Convert-TenthsKelvinToCelsius {
@@ -394,6 +444,47 @@ foreach ($cpu in @(Get-CimInstance Win32_Processor |
   }
 }
 
+$gpuMemoryByPciId = @{}
+try {
+  foreach ($videoKey in @(Get-ChildItem -Path 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Video' -Recurse -ErrorAction Stop |
+    Where-Object { $_.PSChildName -match '^000[0-9]$' })) {
+    try {
+      $videoProperties = Get-ItemProperty -Path $videoKey.PSPath -ErrorAction Stop
+      $pciKey = Get-GpuPciMatchKey ([string]$videoProperties.MatchingDeviceId)
+      $memoryBytes = Get-NullableUInt64 $videoProperties.'HardwareInformation.qwMemorySize'
+      if ($pciKey -and $null -ne $memoryBytes) {
+        if (-not $gpuMemoryByPciId.ContainsKey($pciKey) -or $memoryBytes -gt $gpuMemoryByPciId[$pciKey]) {
+          $gpuMemoryByPciId[$pciKey] = $memoryBytes
+        }
+      }
+    } catch {
+      # Ignore individual display registry entries that are inaccessible or incomplete.
+    }
+  }
+} catch {
+  # Older or restricted Windows installations may not expose the display registry tree.
+}
+
+$nvidiaMemoryByName = @{}
+try {
+  $nvidiaSmi = Get-Command 'nvidia-smi.exe' -ErrorAction SilentlyContinue
+  if ($nvidiaSmi) {
+    foreach ($line in @(& $nvidiaSmi.Source '--query-gpu=name,memory.total' '--format=csv,noheader,nounits' 2>$null)) {
+      $parts = @($line -split ',')
+      if ($parts.Count -lt 2) {
+        continue
+      }
+      $nameKey = Get-NormalizedMatchKey $parts[0]
+      $memoryMib = Get-NullableDouble $parts[$parts.Count - 1]
+      if ($nameKey -and $null -ne $memoryMib -and $memoryMib -gt 0) {
+        $nvidiaMemoryByName[$nameKey] = [uint64][math]::Round($memoryMib * 1MB)
+      }
+    }
+  }
+} catch {
+  # NVIDIA tooling is optional; registry/WMI collection continues without it.
+}
+
 $gpus = @()
 foreach ($gpu in @(Get-CimInstance Win32_VideoController |
   Select-Object Name, AdapterCompatibility, AdapterRAM, DriverVersion, DriverDate,
@@ -406,10 +497,26 @@ foreach ($gpu in @(Get-CimInstance Win32_VideoController |
   $gpuPreferred = @('GPU CORE', 'GPU', 'HOTSPOT', 'EDGE') + @(Get-MatchKeywords $gpu.Name)
   $gpuSensor = Find-MonitorTemperatureSensor -Sensors $monitorTemperatureSensors -Needles $gpuNeedles -PreferredNeedles $gpuPreferred
 
+  $dedicatedVideoMemory = $null
+  $dedicatedVideoMemorySource = $null
+  $gpuPciKey = Get-GpuPciMatchKey $gpu.PNPDeviceID
+  if ($gpuPciKey -and $gpuMemoryByPciId.ContainsKey($gpuPciKey)) {
+    $dedicatedVideoMemory = $gpuMemoryByPciId[$gpuPciKey]
+    $dedicatedVideoMemorySource = 'registry-qword'
+  } else {
+    $gpuNameKey = Get-NormalizedMatchKey $gpu.Name
+    if ($gpuNameKey -and $nvidiaMemoryByName.ContainsKey($gpuNameKey)) {
+      $dedicatedVideoMemory = $nvidiaMemoryByName[$gpuNameKey]
+      $dedicatedVideoMemorySource = 'nvidia-smi'
+    }
+  }
+
   $gpus += [pscustomobject]@{
     Name = $gpu.Name
     AdapterCompatibility = $gpu.AdapterCompatibility
     AdapterRAM = $gpu.AdapterRAM
+    DedicatedVideoMemory = $dedicatedVideoMemory
+    DedicatedVideoMemorySource = $dedicatedVideoMemorySource
     DriverVersion = $gpu.DriverVersion
     DriverDate = $gpu.DriverDate
     VideoProcessor = $gpu.VideoProcessor
@@ -822,6 +929,37 @@ function normalizeTemperature(value: unknown): number | null {
   return raw;
 }
 
+const WMI_GPU_MEMORY_LIMIT_FLOOR = 0xfff00000;
+
+export function normalizeHardwareInspectorGpuMemory(
+  dedicatedVideoMemory: unknown,
+  dedicatedVideoMemorySource: unknown,
+  legacyAdapterRam: unknown
+): HardwareInspectorGpuMemory {
+  const dedicated = toNullableNumber(dedicatedVideoMemory);
+  const rawSource = cleanText(dedicatedVideoMemorySource);
+  if (dedicated !== null && dedicated > 0) {
+    return {
+      adapterRam: dedicated,
+      adapterRamSource: rawSource === "nvidia-smi" ? "nvidia-smi" : "registry-qword"
+    };
+  }
+
+  const legacy = toNullableNumber(legacyAdapterRam);
+  if (legacy === null || legacy <= 0) {
+    return { adapterRam: null, adapterRamSource: null };
+  }
+
+  // Win32_VideoController.AdapterRAM is uint32. Values close to 4 GiB are
+  // commonly a saturated/truncated result for modern GPUs, so never present
+  // that boundary as exact capacity when no 64-bit source was available.
+  if (legacy >= WMI_GPU_MEMORY_LIMIT_FLOOR) {
+    return { adapterRam: null, adapterRamSource: "wmi-uint32-limited" };
+  }
+
+  return { adapterRam: legacy, adapterRamSource: "wmi-uint32" };
+}
+
 function normalizeWearPercentage(value: unknown): number | null {
   const raw = toNullableNumber(value);
   if (raw === null || raw < 0 || raw > 100) {
@@ -900,21 +1038,29 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
       formFactor: normalizeFormFactor(item.FormFactor),
       memoryType: normalizeMemoryType(item.SMBIOSMemoryType)
     })),
-    gpus: toRecordList(raw.gpus).map((item) => ({
-      name: cleanText(item.Name),
-      manufacturer: cleanText(item.AdapterCompatibility),
-      adapterRam: toNullableNumber(item.AdapterRAM),
-      driverVersion: cleanText(item.DriverVersion),
-      driverDate: cleanText(item.DriverDate),
-      videoProcessor: cleanText(item.VideoProcessor),
-      horizontalResolution: toNullableNumber(item.CurrentHorizontalResolution),
-      verticalResolution: toNullableNumber(item.CurrentVerticalResolution),
-      refreshRate: toNullableNumber(item.CurrentRefreshRate),
-      status: cleanText(item.Status),
-      pnpDeviceId: cleanText(item.PNPDeviceID),
-      temperatureCelsius: normalizeTemperature(item.TemperatureCelsius),
-      temperatureSource: cleanText(item.TemperatureSource)
-    })),
+    gpus: toRecordList(raw.gpus).map((item) => {
+      const memory = normalizeHardwareInspectorGpuMemory(
+        item.DedicatedVideoMemory,
+        item.DedicatedVideoMemorySource,
+        item.AdapterRAM
+      );
+      return {
+        name: cleanText(item.Name),
+        manufacturer: cleanText(item.AdapterCompatibility),
+        adapterRam: memory.adapterRam,
+        adapterRamSource: memory.adapterRamSource,
+        driverVersion: cleanText(item.DriverVersion),
+        driverDate: cleanText(item.DriverDate),
+        videoProcessor: cleanText(item.VideoProcessor),
+        horizontalResolution: toNullableNumber(item.CurrentHorizontalResolution),
+        verticalResolution: toNullableNumber(item.CurrentVerticalResolution),
+        refreshRate: toNullableNumber(item.CurrentRefreshRate),
+        status: cleanText(item.Status),
+        pnpDeviceId: cleanText(item.PNPDeviceID),
+        temperatureCelsius: normalizeTemperature(item.TemperatureCelsius),
+        temperatureSource: cleanText(item.TemperatureSource)
+      };
+    }),
     disks: toRecordList(raw.disks).map((item) => ({
       index: toNullableNumber(item.index),
       deviceId: cleanText(item.deviceId),
@@ -1014,4 +1160,3 @@ export async function collectHardwareInspectorSnapshot(
   cachedAt = Date.now();
   return snapshot;
 }
-

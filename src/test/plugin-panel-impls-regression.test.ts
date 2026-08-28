@@ -7,6 +7,12 @@ import { readRendererSourceBundle } from "./renderer-source-bundle";
 const rendererPath = path.join(process.cwd(), "src", "renderer", "renderer.ts");
 const rendererHtmlPath = path.join(process.cwd(), "src", "renderer", "index.html");
 const rendererStylesPath = path.join(process.cwd(), "src", "renderer", "styles.css");
+const commonPanelStylesPath = path.join(
+  process.cwd(),
+  "src",
+  "renderer",
+  "styles-common-panels.css"
+);
 const sharedImagePromptBuilderPath = path.join(
   process.cwd(),
   "src",
@@ -85,6 +91,10 @@ function readRendererHtmlSource(): string {
 
 function readRendererStylesSource(): string {
   return fs.readFileSync(rendererStylesPath, "utf8");
+}
+
+function readCommonPanelStylesSource(): string {
+  return fs.readFileSync(commonPanelStylesPath, "utf8");
 }
 
 function readCopyAssetsSource(): string {
@@ -1394,7 +1404,44 @@ test("core webtools panel handlers use plugin-panel-impls without renderer deleg
 
 test("shared webtools layouts stay compact instead of stretching cards edge to edge", () => {
   const stylesSource = readRendererStylesSource();
+  const commonPanelStylesSource = readCommonPanelStylesSource();
   const panelImplsSource = readPanelImplsSource();
+
+  assert.match(
+    commonPanelStylesSource,
+    /Keep plugin operations compact/,
+    "plugin panels should share one compact operation-density layer"
+  );
+  assert.match(
+    commonPanelStylesSource,
+    /\.webtools-config-bar\s*\{[\s\S]*padding:\s*7px 8px;/,
+    "large conversion toolbars should use compact padding"
+  );
+  assert.match(
+    commonPanelStylesSource,
+    /\.hardware-inspector-actions/,
+    "complex non-webtools plugins should participate in compact action sizing"
+  );
+  assert.match(
+    panelImplsSource,
+    /hardware-inspector-action-select/,
+    "hardware export and copy variants should use compact selection controls"
+  );
+  assert.match(
+    commonPanelStylesSource,
+    /\.codeagent-switch-list-switch-actions/,
+    "CodeAgent list actions should participate in compact action sizing"
+  );
+  assert.match(
+    panelImplsSource,
+    /toolbarHead\.appendChild\(toolbarStats\)/,
+    "Clipboard Workbench should keep compact metrics beside its title instead of reserving another toolbar row"
+  );
+  assert.match(
+    stylesSource,
+    /\.clipboard-workbench-toolbar-controls\s*\{[\s\S]*grid-template-columns:\s*minmax\(280px,\s*1fr\)\s+auto;/,
+    "Clipboard Workbench search and common actions should share one wide-screen row"
+  );
 
   assert.match(
     stylesSource,
@@ -1561,10 +1608,20 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     /webtools-strings-section/,
     "string tool should split case conversion and UUID generation into separate sections"
   );
-  assert.match(
+  assert.doesNotMatch(
     panelImplsSource,
     /webtools-strings-button-grid/,
-    "string tool should expose bounded case action buttons instead of a bare select"
+    "string tool should not expand mutually exclusive case formats into a full button deck"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-strings-case-select-field/,
+    "string tool should keep case formats in a labeled compact select"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-strings-case-select\s*\{[\s\S]*display:\s*block;[\s\S]*width:\s*min\(260px,\s*100%\)/,
+    "string case selection should stay visible and bounded instead of consuming a button row"
   );
   assert.match(
     panelImplsSource,
@@ -1777,14 +1834,19 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     "password tool should treat presets as a toolbar strip instead of a stacked card block"
   );
   assert.match(
-    stylesSource,
-    /\.webtools-password-preset-grid\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/,
-    "password preset buttons should flow like compact quick actions instead of rigid tiles"
+    panelImplsSource,
+    /webtools-password-preset-select/,
+    "password presets should use one compact selection control instead of a button deck"
+  );
+  assert.doesNotMatch(
+    panelImplsSource,
+    /webtools-password-preset-grid/,
+    "password presets should not render an expanded button grid"
   );
   assert.match(
     stylesSource,
-    /\.webtools-password-preset\s*\{[\s\S]*display:\s*inline-flex;[\s\S]*border-radius:\s*999px;[\s\S]*min-height:\s*30px;/,
-    "password preset buttons should render as pill actions to lower the top deck"
+    /\.webtools-password-preset-select\s*\{[\s\S]*min-height:\s*30px;/,
+    "password preset selection should retain a compact control height"
   );
   assert.match(
     stylesSource,
@@ -1893,6 +1955,21 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     panelImplsSource,
+    /webtoolsJsonRoutePreset/,
+    "JSON/CSV tool should compact common conversion routes into a select"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtoolsJsonSample/,
+    "JSON/CSV tool should compact quick samples into a select"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtoolsJsonCleanAction/,
+    "JSON/CSV tool should compact cleaning actions into a select"
+  );
+  assert.match(
+    panelImplsSource,
     /webtools-json-route-presets/,
     "JSON/CSV tool should expose one-click route presets for common conversions"
   );
@@ -1911,10 +1988,10 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
     /webtools-json-use-output-btn/,
     "JSON/CSV tool should support using the output as the next input"
   );
-  assert.match(
+  assert.doesNotMatch(
     panelImplsSource,
     /webtools-json-structure-card/,
-    "JSON/CSV tool should render a structure preview section for parsed payloads"
+    "JSON/CSV tool should not reserve editor space for the removed structure preview"
   );
   assert.match(
     panelImplsSource,
@@ -1933,6 +2010,11 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     panelImplsSource,
+    /webtools-json-field-picker/,
+    "JSON/CSV field extraction should use a compact dropdown instead of an expanded chip deck"
+  );
+  assert.match(
+    panelImplsSource,
     /webtools-json-sync/,
     "JSON/CSV tool should refresh compact stats when auto-conversion updates the result"
   );
@@ -1943,13 +2025,18 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     stylesSource,
-    /\.webtools-json-control-panel\s*\{[\s\S]*grid-template-columns:\s*minmax\(340px,\s*400px\)\s+minmax\(260px,\s*1\.1fr\)\s+minmax\(220px,\s*0\.95fr\)/,
-    "JSON/CSV controls should use a three-part top deck so the width is filled by converter, routes, and samples"
+    /\.webtools-json-control-panel\s*\{[\s\S]*"converter routes samples clean fields"/,
+    "JSON/CSV controls should keep converter, routes, samples, cleaning, and field extraction on one wide row"
   );
   assert.match(
     stylesSource,
     /\.webtools-json-lab\s*\{[\s\S]*grid-template-rows:\s*auto\s+auto\s+minmax\(0,\s*1fr\)\s+auto;/,
     "JSON/CSV form should reserve the remaining height for the editor workspace"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-compact-action\s*\{[\s\S]*display:\s*flex;/,
+    "JSON/CSV dropdown actions should keep their select and action button aligned"
   );
   assert.match(
     stylesSource,
@@ -1963,12 +2050,17 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     stylesSource,
-    /\.webtools-json-sample-grid\s*\{[\s\S]*repeat\(auto-fit,\s*minmax\(116px,\s*148px\)\)/,
-    "JSON/CSV sample buttons should use a denser card width that better fills the top deck"
+    /\.webtools-json-compact-select\s*\{[\s\S]*min-height:\s*30px;/,
+    "JSON/CSV compact operation selects should keep a consistent control height"
   );
   assert.match(
     stylesSource,
-    /\.webtools-json-textarea\s*\{[\s\S]*flex:\s*1\s+1\s+auto;[\s\S]*min-height:\s*clamp\(240px,\s*46vh,\s*460px\)/,
+    /\.webtools-json-field-picker-menu\s*\{[\s\S]*position:\s*absolute;/,
+    "JSON/CSV field choices should open without increasing the operation row height"
+  );
+  assert.match(
+    stylesSource,
+    /\.webtools-json-textarea\s*\{[\s\S]*flex:\s*1\s+1\s+auto;[\s\S]*min-height:\s*clamp\(260px,\s*50vh,\s*500px\)/,
     "JSON/CSV textareas should expand like an editor and fill more of the lower panel"
   );
   assert.match(
@@ -2102,6 +2194,7 @@ test("Cron panel keeps editing on the left, results on the right, and syntax hel
 test("Cron panel exposes editable template list with save, update, delete, and reset flows", () => {
   const panelImplsSource = readPanelImplsSource();
   const stylesSource = readRendererStylesSource();
+  const commonPanelStylesSource = readCommonPanelStylesSource();
 
   assert.match(
     panelImplsSource,
@@ -2132,6 +2225,11 @@ test("Cron panel exposes editable template list with save, update, delete, and r
     stylesSource,
     /\.webtools-cron-template-editor-row\s*\{/,
     "Cron template editor row should have dedicated styling"
+  );
+  assert.match(
+    commonPanelStylesSource,
+    /body\.mode-plugin \.webtools-cron-template-chip,[\s\S]*body\.mode-plugin \.webtools-cron-template-delete\s*\{[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.06\);[\s\S]*color:\s*var\(--ll-text-accent\);/,
+    "Cron template buttons should provide a dark themed surface instead of falling back to native white buttons"
   );
 });
 
@@ -4466,6 +4564,11 @@ test("image prompt panel render/apply lives in plugin-panel-impls", () => {
     panelImplsSource,
     /webtoolsImagePromptStyleGroup/,
     "Image Prompt panel should render broad style group switching controls"
+  );
+  assert.match(
+    panelImplsSource,
+    /webtools-image-prompt-preset-group-select/,
+    "Image Prompt style groups should use a compact select"
   );
   assert.match(
     panelImplsSource,

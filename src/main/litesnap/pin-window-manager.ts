@@ -23,6 +23,8 @@ type PinDragOrigin = {
   startScreenY: number;
   originX: number;
   originY: number;
+  width: number;
+  height: number;
 };
 
 type PinWindowMeta = {
@@ -103,17 +105,19 @@ function ensurePinSaveHandler(): void {
 function applyPinnedWindowBounds(
   window: BrowserWindow,
   x: number,
-  y: number
+  y: number,
+  width: number,
+  height: number
 ): void {
-  const bounds = window.getBounds();
-  // Preserve the user's current manual size while moving. Position must be
-  // absolute (not delta+getBounds) or IPC backlog drops motion and leaves ghosts.
+  // Preserve the size captured at drag start. Reading getBounds() for every
+  // move can inherit a concurrent Windows native-resize frame and turn a move
+  // gesture into continuous growth.
   window.setBounds(
     {
       x: Math.round(x),
       y: Math.round(y),
-      width: bounds.width,
-      height: bounds.height
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height))
     },
     false
   );
@@ -145,8 +149,15 @@ function ensurePinDragBeginHandler(): void {
       startScreenX: screenX,
       startScreenY: screenY,
       originX: bounds.x,
-      originY: bounds.y
+      originY: bounds.y,
+      width: bounds.width,
+      height: bounds.height
     };
+    // A content drag and the frameless native resize border must never remain
+    // active together. Restore resizing when the pointer is released.
+    if (!meta.clickThrough) {
+      window.setResizable(false);
+    }
   });
 }
 
@@ -177,15 +188,22 @@ function ensurePinMoveHandler(): void {
         startScreenX: screenX,
         startScreenY: screenY,
         originX: bounds.x,
-        originY: bounds.y
+        originY: bounds.y,
+        width: bounds.width,
+        height: bounds.height
       };
+      if (!meta.clickThrough) {
+        window.setResizable(false);
+      }
     }
 
     const origin = meta.dragOrigin;
     applyPinnedWindowBounds(
       window,
       origin.originX + (screenX - origin.startScreenX),
-      origin.originY + (screenY - origin.startScreenY)
+      origin.originY + (screenY - origin.startScreenY),
+      origin.width,
+      origin.height
     );
   });
 }
@@ -309,6 +327,10 @@ function ensurePinDragEndHandler(): void {
     }
 
     meta.dragOrigin = null;
+
+    if (!meta.clickThrough) {
+      window.setResizable(true);
+    }
 
     syncPinWindowConstraints(window, meta);
     schedulePinImageRebake(window, meta, 0);
@@ -936,13 +958,16 @@ function buildPinWindowHtml(
           pinApi?.moveTo?.(pendingScreenX, pendingScreenY);
         }
         shell?.classList.remove("is-dragging");
-        shell?.releasePointerCapture?.(event.pointerId);
+        if (event && Number.isFinite(event.pointerId)) {
+          shell?.releasePointerCapture?.(event.pointerId);
+        }
         pinApi?.notifyDragEnd?.();
       }
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("pointercancel", endDrag);
       window.addEventListener("blur", function () {
         hideMenu();
+        endDrag(null);
       });
       menu?.addEventListener("click", function (event) {
         const target = event.target;
@@ -1279,6 +1304,9 @@ export class LiteSnapPinWindowManager {
     window.on("moved", () => {
       const current = pinWindowMeta.get(window.id);
       if (current) {
+        if (current.dragOrigin) {
+          return;
+        }
         syncPinWindowConstraints(window, current);
         schedulePinImageRebake(window, current, 0);
       }

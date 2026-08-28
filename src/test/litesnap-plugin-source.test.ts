@@ -438,8 +438,18 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /function applyPinnedWindowBounds\([\s\S]*const bounds = window\.getBounds\(\)[\s\S]*width: bounds\.width[\s\S]*height: bounds\.height/,
-    "LiteSnap pin windows should preserve their manually resized bounds while moving"
+    /type PinDragOrigin[\s\S]*width: number;[\s\S]*height: number;[\s\S]*applyPinnedWindowBounds\([\s\S]*origin\.width[\s\S]*origin\.height/,
+    "LiteSnap pin windows should lock their drag-start size instead of inheriting concurrent resize frames"
+  );
+  assert.match(
+    pinSource,
+    /PIN_DRAG_BEGIN_CHANNEL[\s\S]*window\.setResizable\(false\)[\s\S]*PIN_DRAG_END_CHANNEL[\s\S]*window\.setResizable\(true\)/,
+    "LiteSnap content dragging should suspend native resizing until the drag ends"
+  );
+  assert.match(
+    pinSource,
+    /window\.addEventListener\("blur"[\s\S]*endDrag\(null\)/,
+    "LiteSnap pin drag should restore native resize state even when the window loses focus"
   );
   assert.match(
     pinSource,

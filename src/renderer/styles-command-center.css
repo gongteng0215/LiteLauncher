@@ -2072,8 +2072,6 @@ body.mode-plugin .webtools-crypto-primary {
 }
 
 body.mode-plugin .webtools-crypto-picker-option:hover,
-body.mode-plugin .webtools-password-preset[data-active="true"],
-body.mode-plugin .webtools-json-chip-btn[data-active="true"],
 body.mode-plugin .webtools-unit-tab[data-active="true"],
 body.mode-plugin .webtools-api-tab[data-active="true"] {
   background: rgba(var(--ll-accent-strong-rgb), 0.28);

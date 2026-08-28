@@ -70,7 +70,7 @@ namespace RendererPanelRuntime {
       inputField.append(inputLabel, input);
 
       const caseType = document.createElement("select");
-      caseType.className = "webtools-strings-case-select";
+      caseType.className = "settings-value webtools-strings-case-select";
       caseType.name = "webtoolsStringsCaseType";
       const caseOptions = [
         { value: "camel", label: "camelCase" },
@@ -87,31 +87,16 @@ namespace RendererPanelRuntime {
         opt.selected = webtoolsStringsCaseType === value;
         caseType.appendChild(opt);
       });
-
-      const caseButtonGrid = document.createElement("div");
-      caseButtonGrid.className = "webtools-strings-button-grid";
-      const caseButtons: Array<{ value: string; button: HTMLButtonElement }> = [];
-      const syncCaseButtons = (): void => {
-        caseButtons.forEach(({ value, button }) => {
-          const active = caseType.value === value;
-          button.className = `settings-btn ${active ? "settings-btn-primary" : "settings-btn-secondary"} webtools-strings-case-btn`;
-          button.dataset.active = String(active);
-          button.setAttribute("aria-pressed", String(active));
-        });
-      };
-      caseOptions.forEach(({ value, label }) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = label;
-        button.addEventListener("click", () => {
-          caseType.value = value;
-          webtoolsStringsCaseType = value;
-          syncCaseButtons();
-        });
-        caseButtons.push({ value, button });
-        caseButtonGrid.appendChild(button);
+      caseType.addEventListener("change", () => {
+        webtoolsStringsCaseType = caseType.value;
       });
-      syncCaseButtons();
+
+      const caseSelectField = document.createElement("label");
+      caseSelectField.className = "webtools-strings-case-select-field";
+      const caseSelectLabel = document.createElement("span");
+      caseSelectLabel.className = "settings-row-label";
+      caseSelectLabel.textContent = "目标格式";
+      caseSelectField.append(caseSelectLabel, caseType);
 
       const convertActions = document.createElement("div");
       convertActions.className = "settings-actions";
@@ -146,6 +131,10 @@ namespace RendererPanelRuntime {
 
       convertActions.append(convert, copyConverted);
 
+      const caseControls = document.createElement("div");
+      caseControls.className = "webtools-strings-case-controls";
+      caseControls.append(caseSelectField, convertActions);
+
       const outputField = document.createElement("label");
       outputField.className = "webtools-strings-field";
       const outputLabel = document.createElement("span");
@@ -159,7 +148,7 @@ namespace RendererPanelRuntime {
       output.spellcheck = false;
       outputField.append(outputLabel, output);
 
-      caseBox.append(inputField, caseType, caseButtonGrid, convertActions, outputField);
+      caseBox.append(inputField, caseControls, outputField);
       caseSection.append(caseSectionTitle, caseSectionDescription, caseBox);
 
       const divider = document.createElement("div");

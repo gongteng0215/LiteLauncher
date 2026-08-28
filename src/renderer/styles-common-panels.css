@@ -49,3 +49,291 @@ body.mode-password .settings-form {
   border-radius: var(--ll-radius-control);
   color: var(--ll-text-muted);
 }
+
+/* Keep plugin operations compact so the input and result surfaces remain dominant. */
+:where(body.mode-plugin, body.mode-cashflow, body.mode-password)
+  :where(
+    .settings-actions,
+    .settings-inline-actions,
+    .settings-group-actions,
+    .webtools-toolbar,
+    .webtools-tool-toolbar,
+    .webtools-timestamp-controls,
+    .webtools-image-base64-toolbar,
+    .webtools-qrcode-actions,
+    .webtools-markdown-toolbar,
+    .webtools-crypto-toolbar,
+    .webtools-crypto-key-actions,
+    .webtools-jwt-toolbar,
+    .webtools-config-toolbar,
+    .webtools-config-pane-actions,
+    .webtools-sql-pane-actions,
+    .webtools-ua-actions,
+    .webtools-image-prompt-actions,
+    .webtools-cron-toolbar-actions,
+    .webtools-cron-template-editor-actions,
+    .webtools-password-action-row,
+    .webtools-password-results-actions,
+    .litesnap-action-row,
+    .litesnap-history-row-actions,
+    .litesnap-ocr-help-actions,
+    .cashflow-actions,
+    .cashflow-opportunity-actions,
+    .hardware-inspector-actions,
+    .hardware-inspector-card-actions,
+    .hardware-inspector-preview-actions,
+    .clipboard-workbench-toolbar-actions,
+    .clipboard-workbench-detail-actions,
+    .clipboard-workbench-bulk-actions,
+    .codeagent-switch-inline-actions,
+    .codeagent-switch-current-actions,
+    .codeagent-switch-empty-actions,
+    .codeagent-switch-list-switch-actions,
+    .codeagent-switch-detail-hero-actions,
+    .codeagent-switch-detail-actions,
+    .dictionary-favorite-note-actions
+  ) {
+  gap: 6px;
+  margin-top: 0;
+}
+
+:where(body.mode-plugin, body.mode-cashflow, body.mode-password)
+  :where(
+    .settings-actions,
+    .settings-inline-actions,
+    .settings-group-actions,
+    .webtools-toolbar,
+    .webtools-tool-toolbar,
+    .webtools-timestamp-controls,
+    .webtools-image-base64-toolbar,
+    .webtools-qrcode-actions,
+    .webtools-markdown-toolbar,
+    .webtools-crypto-toolbar,
+    .webtools-crypto-key-actions,
+    .webtools-jwt-toolbar,
+    .webtools-config-toolbar,
+    .webtools-config-pane-actions,
+    .webtools-sql-pane-actions,
+    .webtools-ua-actions,
+    .webtools-image-prompt-actions,
+    .webtools-cron-toolbar-actions,
+    .webtools-cron-template-editor-actions,
+    .webtools-password-action-row,
+    .webtools-password-results-actions,
+    .litesnap-action-row,
+    .litesnap-history-row-actions,
+    .litesnap-ocr-help-actions,
+    .cashflow-actions,
+    .cashflow-opportunity-actions,
+    .hardware-inspector-actions,
+    .hardware-inspector-card-actions,
+    .hardware-inspector-preview-actions,
+    .clipboard-workbench-toolbar-actions,
+    .clipboard-workbench-detail-actions,
+    .clipboard-workbench-bulk-actions,
+    .codeagent-switch-inline-actions,
+    .codeagent-switch-current-actions,
+    .codeagent-switch-empty-actions,
+    .codeagent-switch-list-switch-actions,
+    .codeagent-switch-detail-hero-actions,
+    .codeagent-switch-detail-actions,
+    .dictionary-favorite-note-actions
+  )
+  .settings-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+body.mode-plugin .webtools-tool-panel {
+  gap: 8px;
+}
+
+body.mode-plugin :where(.webtools-tool-header, .webtools-tool-toolbar) {
+  gap: 6px;
+}
+
+body.mode-plugin .webtools-tool-bar {
+  gap: 6px 8px;
+  padding: 7px 8px;
+  border-radius: var(--ll-radius-control);
+}
+
+body.mode-plugin .webtools-tool-bar-group {
+  gap: 6px;
+}
+
+body.mode-plugin .webtools-tool-toggle {
+  min-height: 30px;
+  gap: 6px;
+}
+
+body.mode-plugin :where(.webtools-qrcode-header, .webtools-markdown-header, .webtools-crypto-header, .webtools-jwt-header) {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+body.mode-plugin :where(.webtools-colors-header, .webtools-image-base64-header) {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+body.mode-plugin :where(.webtools-strings-form, .webtools-config-form, .webtools-ua-form) {
+  gap: 10px;
+}
+
+body.mode-plugin :where(.webtools-strings-title, .webtools-config-title, .webtools-ua-title) {
+  font-size: 20px;
+}
+
+body.mode-plugin .webtools-strings-section-title {
+  padding-left: 7px;
+  border-left-width: 3px;
+  font-size: 14px;
+}
+
+body.mode-plugin .webtools-crypto-picker-trigger {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+body.mode-plugin .webtools-jwt-mode-tabs {
+  gap: 2px;
+  padding: 2px;
+}
+
+body.mode-plugin .webtools-jwt-mode-btn {
+  padding: 4px 8px;
+}
+
+body.mode-plugin :where(.webtools-jwt-jws-controls, .webtools-jwt-jwe-controls) .settings-number {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+body.mode-plugin .webtools-qrcode-setup {
+  gap: 8px;
+  padding: 10px;
+}
+
+body.mode-plugin .webtools-qrcode-color-control {
+  min-height: 34px;
+  padding: 5px 8px;
+}
+
+body.mode-plugin .webtools-qrcode-color-picker {
+  width: 34px;
+  height: 24px;
+}
+
+body.mode-plugin .webtools-config-bar {
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--ll-radius-control);
+}
+
+body.mode-plugin .webtools-config-select-wrap {
+  gap: 6px;
+}
+
+body.mode-plugin .webtools-config-swap {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+}
+
+body.mode-plugin :where(.webtools-cron-section, .webtools-image-prompt-field, .webtools-image-prompt-smart-section) {
+  gap: 6px;
+  padding: 8px;
+}
+
+body.mode-plugin :where(.webtools-cron-workspace, .webtools-cron-column) {
+  gap: 8px;
+}
+
+body.mode-plugin :where(.webtools-strings-section, .webtools-strings-field) {
+  gap: 8px;
+}
+
+body.mode-plugin :where(.webtools-strings-case-box, .webtools-strings-uuid-box) {
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--ll-radius-control);
+}
+
+:where(body.mode-plugin, body.mode-password) .webtools-password-flags {
+  gap: 6px 10px;
+}
+
+body.mode-plugin .webtools-qrcode-logo-section {
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--ll-radius-control);
+}
+
+body.mode-plugin .webtools-cron-toolbar-actions .settings-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
+/* Cron template chips intentionally do not use a generic button variant because
+   the active chip owns its own accent state. Give the inactive/delete buttons a
+   complete themed surface so they never fall back to the native white button. */
+body.mode-plugin .webtools-cron-template-chip,
+body.mode-plugin .webtools-cron-template-delete {
+  border-color: var(--ll-line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ll-text-accent);
+}
+
+body.mode-plugin .webtools-cron-template-chip:hover,
+body.mode-plugin .webtools-cron-template-delete:hover {
+  border-color: var(--ll-line-strong);
+  background: var(--ll-surface-raised);
+}
+
+body.mode-plugin .webtools-cron-template-delete:hover {
+  color: #fecaca;
+}
+
+body.mode-plugin .webtools-image-prompt-preset-chip {
+  min-height: 40px;
+  padding: 5px 7px;
+}
+
+body.mode-plugin :where(.webtools-unit-card, .webtools-ua-card) {
+  gap: 6px;
+  padding: 8px;
+}
+
+@media (max-width: 960px) {
+  :where(body.mode-plugin, body.mode-cashflow, body.mode-password)
+    :where(
+      .settings-actions,
+      .webtools-tool-toolbar,
+      .webtools-timestamp-controls,
+      .webtools-qrcode-actions,
+      .webtools-crypto-toolbar,
+      .webtools-jwt-toolbar,
+      .hardware-inspector-actions,
+      .codeagent-switch-inline-actions
+    ) {
+    justify-content: flex-start;
+  }
+
+  body.mode-plugin .webtools-config-bar {
+    width: 100%;
+    margin: 0;
+  }
+
+  body.mode-plugin .clipboard-workbench-toolbar-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.mode-plugin .clipboard-workbench-toolbar-stats {
+    flex-wrap: wrap;
+  }
+}

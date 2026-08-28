@@ -827,28 +827,30 @@ namespace RendererPanelRuntime {
       presetStripHint.className = "webtools-password-strip-hint";
       presetStripHint.textContent = "按场景切换组合。";
       presetStripCopy.append(presetStripLabel, presetStripHint);
-      const presetGrid = document.createElement("div");
-      presetGrid.className = "webtools-password-preset-grid";
-      const presetButtons: HTMLButtonElement[] = [];
+      const presetSelect = document.createElement("select");
+      presetSelect.className = "settings-value webtools-password-preset-select";
+      presetSelect.name = "webtoolsPasswordPreset";
+      presetSelect.setAttribute("aria-label", "快捷预设");
+      const customPresetOption = document.createElement("option");
+      customPresetOption.value = "";
+      customPresetOption.textContent = "自定义配置";
+      presetSelect.appendChild(customPresetOption);
       passwordPresets.forEach((preset) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "webtools-password-preset";
-        button.dataset.presetId = preset.id;
-        button.title = preset.usage;
-
-        const title = document.createElement("strong");
-        title.textContent = preset.label;
-        button.appendChild(title);
-        button.addEventListener("click", () => {
-          applyOptionsToForm(preset.options);
-          syncPasswordWorkbench();
-          setStatus(`已切换到 ${preset.label}`);
-        });
-        presetButtons.push(button);
-        presetGrid.appendChild(button);
+        const option = document.createElement("option");
+        option.value = preset.id;
+        option.textContent = `${preset.label} · ${preset.usage}`;
+        presetSelect.appendChild(option);
       });
-      presetStrip.append(presetStripCopy, presetGrid);
+      presetSelect.addEventListener("change", () => {
+        const preset = passwordPresets.find((item) => item.id === presetSelect.value);
+        if (!preset) {
+          return;
+        }
+        applyOptionsToForm(preset.options);
+        syncPasswordWorkbench();
+        setStatus(`已切换到 ${preset.label}`);
+      });
+      presetStrip.append(presetStripCopy, presetSelect);
 
       const controlsGrid = document.createElement("div");
       controlsGrid.className =
@@ -1396,10 +1398,7 @@ namespace RendererPanelRuntime {
           button.dataset.active = button.textContent === String(normalized.length) ? "true" : "false";
         });
 
-        presetButtons.forEach((button) => {
-          button.dataset.active =
-            button.dataset.presetId === matchedPreset?.id ? "true" : "false";
-        });
+        presetSelect.value = matchedPreset?.id ?? "";
       };
 
       [

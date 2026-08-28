@@ -230,22 +230,6 @@ body.mode-plugin .webtools-password-block,
 body.mode-cashflow .webtools-password-block {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.14);
 }
-body.mode-plugin .webtools-password-preset,
-body.mode-cashflow .webtools-password-preset {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.18);
-  color: var(--ll-text);
-}
-body.mode-plugin .webtools-password-preset:hover,
-body.mode-cashflow .webtools-password-preset:hover {
-  border-color: rgba(var(--ll-accent-rgb), 0.38);
-  background: rgba(var(--ll-accent-rgb), 0.08);
-}
-body.mode-plugin .webtools-password-preset[data-active="true"],
-body.mode-cashflow .webtools-password-preset[data-active="true"] {
-  border-color: rgba(var(--ll-accent-rgb), 0.56);
-  background: rgba(var(--ll-accent-strong-rgb), 0.18);
-  box-shadow: inset 0 0 0 1px rgba(var(--ll-accent-rgb), 0.18);
-}
 body.mode-plugin .webtools-password-flag-card,
 body.mode-cashflow .webtools-password-flag-card {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.16);
@@ -310,57 +294,23 @@ body.mode-cashflow .webtools-textarea:focus {
   border-color: rgba(var(--ll-accent-rgb), 0.8);
   box-shadow: 0 0 0 2px rgba(var(--ll-accent-rgb), 0.2);
 }
-body.mode-plugin .webtools-json-route,
-body.mode-cashflow .webtools-json-route {
-  color: rgba(var(--ll-accent-rgb), 0.84);
-}
-body.mode-plugin .webtools-json-chip-btn,
-body.mode-cashflow .webtools-json-chip-btn {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.16);
-}
-body.mode-plugin .webtools-json-chip-btn:hover,
-body.mode-cashflow .webtools-json-chip-btn:hover,
-body.mode-plugin .webtools-json-chip-btn[data-active="true"],
-body.mode-cashflow .webtools-json-chip-btn[data-active="true"] {
-  border-color: rgba(var(--ll-accent-rgb), 0.48);
-  background: rgba(var(--ll-accent-strong-rgb), 0.16);
-  color: var(--ll-text);
-}
-body.mode-plugin .webtools-json-sample-btn,
-body.mode-cashflow .webtools-json-sample-btn {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.15);
-  color: var(--ll-text);
-}
-body.mode-plugin .webtools-json-sample-btn:hover,
-body.mode-cashflow .webtools-json-sample-btn:hover {
-  border-color: rgba(var(--ll-accent-rgb), 0.34);
-  background: rgba(var(--ll-accent-rgb), 0.09);
-}
-body.mode-plugin .webtools-json-structure-card,
-body.mode-cashflow .webtools-json-structure-card,
 body.mode-plugin .webtools-json-clean-actions,
 body.mode-cashflow .webtools-json-clean-actions,
 body.mode-plugin .webtools-json-fields-card,
 body.mode-cashflow .webtools-json-fields-card {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.14);
 }
-body.mode-plugin .webtools-json-inline-pill,
-body.mode-cashflow .webtools-json-inline-pill {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.16);
+body.mode-plugin .webtools-json-field-picker-summary:focus-visible,
+body.mode-cashflow .webtools-json-field-picker-summary:focus-visible {
+  outline: 2px solid rgba(var(--ll-accent-rgb), 0.55);
 }
-body.mode-plugin .webtools-json-structure-sample,
-body.mode-cashflow .webtools-json-structure-sample {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.12);
+body.mode-plugin .webtools-json-field-picker-menu,
+body.mode-cashflow .webtools-json-field-picker-menu {
+  border: 1px solid rgba(var(--ll-accent-rgb), 0.26);
 }
-body.mode-plugin .webtools-json-field-chip,
-body.mode-cashflow .webtools-json-field-chip {
-  border: 1px solid rgba(var(--ll-accent-rgb), 0.16);
-}
-body.mode-plugin .webtools-json-field-chip[data-active="true"],
-body.mode-cashflow .webtools-json-field-chip[data-active="true"] {
-  border-color: rgba(var(--ll-accent-rgb), 0.48);
-  background: rgba(var(--ll-accent-strong-rgb), 0.16);
-  color: var(--ll-text);
+body.mode-plugin .webtools-json-field-picker-option:hover,
+body.mode-cashflow .webtools-json-field-picker-option:hover {
+  background: rgba(var(--ll-accent-rgb), 0.09);
 }
 body.mode-plugin .webtools-json-stat,
 body.mode-cashflow .webtools-json-stat {
@@ -1042,16 +992,6 @@ body.mode-cashflow .hardware-inspector-volume-title {
 body.mode-plugin .webtools-image-prompt-preset-section,
 body.mode-cashflow .webtools-image-prompt-preset-section {
   border: 1px solid rgba(var(--ll-accent-rgb), 0.14);
-}
-body.mode-plugin .webtools-image-prompt-preset-group:hover,
-body.mode-cashflow .webtools-image-prompt-preset-group:hover {
-  border-color: rgba(var(--ll-accent-rgb), 0.46);
-  background: rgba(var(--ll-accent-rgb), 0.1);
-}
-body.mode-plugin .webtools-image-prompt-preset-group[data-selected="true"],
-body.mode-cashflow .webtools-image-prompt-preset-group[data-selected="true"] {
-  border-color: rgba(var(--ll-accent-rgb), 0.72);
-  background: rgba(var(--ll-accent-strong-rgb), 0.18);
 }
 body.mode-plugin .webtools-image-prompt-preset-chip:hover,
 body.mode-cashflow .webtools-image-prompt-preset-chip:hover {

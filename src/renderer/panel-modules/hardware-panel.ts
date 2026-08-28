@@ -17,6 +17,28 @@ namespace RendererPanelRuntime {
     return `${size.toFixed(digits)} ${units[index]}`;
   }
 
+  export function formatHardwareInspectorGpuMemory(gpu: HardwareInspectorGpu): string {
+    if (gpu.adapterRamSource === "wmi-uint32-limited") {
+      return "无法准确读取（旧接口 4 GB 上限）";
+    }
+    return formatHardwareInspectorBytes(gpu.adapterRam);
+  }
+
+  export function formatHardwareInspectorGpuMemorySource(gpu: HardwareInspectorGpu): string {
+    switch (gpu.adapterRamSource) {
+      case "registry-qword":
+        return "Windows 驱动 64 位数据";
+      case "nvidia-smi":
+        return "NVIDIA 驱动";
+      case "wmi-uint32":
+        return "Windows WMI 兼容值";
+      case "wmi-uint32-limited":
+        return "Windows WMI 32 位字段（已忽略截断值）";
+      default:
+        return "不可用";
+    }
+  }
+
   export function formatHardwareInspectorClockMhz(value: number | null | undefined): string {
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
       return "未知";
@@ -577,7 +599,7 @@ namespace RendererPanelRuntime {
 
   export function formatHardwareInspectorResolution(gpu: HardwareInspectorGpu): string {
     if (!gpu.horizontalResolution || !gpu.verticalResolution) {
-      return "未知";
+      return "未提供（可能未直连显示器）";
     }
 
     const base = `${gpu.horizontalResolution} × ${gpu.verticalResolution}`;
@@ -1184,86 +1206,74 @@ namespace RendererPanelRuntime {
         void executeHardwareInspectorRefresh();
       });
 
-      const exportMarkdownButton = document.createElement("button");
-      exportMarkdownButton.type = "button";
-      exportMarkdownButton.className = "settings-btn settings-btn-secondary";
-      exportMarkdownButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出 MD";
-      exportMarkdownButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
-      exportMarkdownButton.addEventListener("click", () => {
-        void executeHardwareInspectorExportReport("markdown");
+      const exportGroup = document.createElement("div");
+      exportGroup.className = "hardware-inspector-action-cluster";
+      const exportFormat = document.createElement("select");
+      exportFormat.className = "settings-value hardware-inspector-action-select";
+      exportFormat.setAttribute("aria-label", "导出格式");
+      [
+        { value: "markdown", label: "Markdown" },
+        { value: "html", label: "HTML" },
+        { value: "image-compact", label: "精简图" },
+        { value: "image", label: "完整长图" }
+      ].forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.value;
+        option.textContent = entry.label;
+        exportFormat.appendChild(option);
       });
-
-      const exportHtmlButton = document.createElement("button");
-      exportHtmlButton.type = "button";
-      exportHtmlButton.className = "settings-btn settings-btn-secondary";
-      exportHtmlButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出 HTML";
-      exportHtmlButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
-      exportHtmlButton.addEventListener("click", () => {
-        void executeHardwareInspectorExportReport("html");
+      exportFormat.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "settings-btn settings-btn-secondary";
+      exportButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出";
+      exportButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+      exportButton.addEventListener("click", () => {
+        const format = exportFormat.value as "markdown" | "html" | "image" | "image-compact";
+        void executeHardwareInspectorExportReport(format);
       });
+      exportGroup.append(exportFormat, exportButton);
 
-      const exportImageCompactButton = document.createElement("button");
-      exportImageCompactButton.type = "button";
-      exportImageCompactButton.className = "settings-btn settings-btn-secondary";
-      exportImageCompactButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出精简图";
-      exportImageCompactButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
-      exportImageCompactButton.addEventListener("click", () => {
-        void executeHardwareInspectorExportReport("image-compact");
+      const copyGroup = document.createElement("div");
+      copyGroup.className = "hardware-inspector-action-cluster";
+      const copyFormat = document.createElement("select");
+      copyFormat.className = "settings-value hardware-inspector-action-select";
+      copyFormat.setAttribute("aria-label", "复制内容");
+      [
+        { value: "summary", label: "摘要" },
+        { value: "json", label: "JSON" }
+      ].forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.value;
+        option.textContent = entry.label;
+        copyFormat.appendChild(option);
       });
-
-      const exportImageButton = document.createElement("button");
-      exportImageButton.type = "button";
-      exportImageButton.className = "settings-btn settings-btn-secondary";
-      exportImageButton.textContent = hardwareInspectorExporting ? "导出中..." : "导出长图";
-      exportImageButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
-      exportImageButton.addEventListener("click", () => {
-        void executeHardwareInspectorExportReport("image");
-      });
-
-      const copySummaryButton = document.createElement("button");
-      copySummaryButton.type = "button";
-      copySummaryButton.className = "settings-btn settings-btn-secondary";
-      copySummaryButton.textContent = "复制摘要";
-      copySummaryButton.disabled = !hardwareInspectorSnapshot;
-      copySummaryButton.addEventListener("click", () => {
+      copyFormat.disabled = !hardwareInspectorSnapshot;
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "settings-btn settings-btn-secondary";
+      copyButton.textContent = "复制";
+      copyButton.disabled = !hardwareInspectorSnapshot;
+      copyButton.addEventListener("click", () => {
         if (!hardwareInspectorSnapshot) {
-          setStatus("暂无可复制的硬件摘要");
+          setStatus("暂无可复制的硬件信息");
           return;
         }
         void (async () => {
-          const ok = await copyTextToClipboard(
-            buildHardwareInspectorSummaryText(hardwareInspectorSnapshot)
-          );
-          setStatus(ok ? "已复制硬件摘要" : "复制失败");
+          const copyJson = copyFormat.value === "json";
+          const text = copyJson
+            ? JSON.stringify(hardwareInspectorSnapshot, null, 2)
+            : buildHardwareInspectorSummaryText(hardwareInspectorSnapshot);
+          const ok = await copyTextToClipboard(text);
+          setStatus(ok ? `已复制硬件${copyJson ? " JSON" : "摘要"}` : "复制失败");
         })();
       });
-
-      const copyJsonButton = document.createElement("button");
-      copyJsonButton.type = "button";
-      copyJsonButton.className = "settings-btn settings-btn-secondary";
-      copyJsonButton.textContent = "复制 JSON";
-      copyJsonButton.disabled = !hardwareInspectorSnapshot;
-      copyJsonButton.addEventListener("click", () => {
-        if (!hardwareInspectorSnapshot) {
-          setStatus("暂无可复制的硬件数据");
-          return;
-        }
-        void (async () => {
-          const ok = await copyTextToClipboard(
-            JSON.stringify(hardwareInspectorSnapshot, null, 2)
-          );
-          setStatus(ok ? "已复制硬件 JSON" : "复制失败");
-        })();
-      });
+      copyGroup.append(copyFormat, copyButton);
 
       actions.append(
         refreshButton,
-        exportMarkdownButton,
-        exportHtmlButton,
-        exportImageCompactButton,
-        exportImageButton,
-        copySummaryButton,
-        copyJsonButton
+        exportGroup,
+        copyGroup
       );
       header.append(titleWrap, actions);
       form.appendChild(header);
@@ -1531,7 +1541,8 @@ namespace RendererPanelRuntime {
               [
                 `厂商：${formatHardwareInspectorText(gpu.manufacturer)}`,
                 `视频处理器：${formatHardwareInspectorText(gpu.videoProcessor)}`,
-                `显存：${formatHardwareInspectorBytes(gpu.adapterRam)}`,
+                `显存：${formatHardwareInspectorGpuMemory(gpu)}`,
+                `显存来源：${formatHardwareInspectorGpuMemorySource(gpu)}`,
                 `驱动版本：${formatHardwareInspectorText(gpu.driverVersion)}`,
                 `驱动日期：${formatHardwareInspectorDate(gpu.driverDate)}`,
                 `温度(可选)：${formatHardwareInspectorTemperature(gpu.temperatureCelsius)}`,
@@ -1553,7 +1564,8 @@ namespace RendererPanelRuntime {
             createHardwareInspectorMetricGrid(createHardwareInspectorMetricItems([
               { label: "厂商", value: formatHardwareInspectorText(gpu.manufacturer) },
               { label: "视频处理器", value: formatHardwareInspectorText(gpu.videoProcessor) },
-              { label: "显存", value: formatHardwareInspectorBytes(gpu.adapterRam) },
+              { label: "显存", value: formatHardwareInspectorGpuMemory(gpu) },
+              { label: "显存来源", value: formatHardwareInspectorGpuMemorySource(gpu) },
               { label: "驱动版本", value: formatHardwareInspectorText(gpu.driverVersion) },
               { label: "驱动日期", value: formatHardwareInspectorDate(gpu.driverDate) },
               { label: "温度(可选)", value: formatHardwareInspectorTemperature(gpu.temperatureCelsius) },

@@ -38,6 +38,13 @@ function formatBytes(value: number | null | undefined): string {
   return `${next.toFixed(digits)} ${units[index]}`;
 }
 
+function formatGpuMemory(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  if (gpu.adapterRamSource === "wmi-uint32-limited") {
+    return "无法准确读取（旧接口 4 GB 上限）";
+  }
+  return formatBytes(gpu.adapterRam);
+}
+
 function formatClock(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return "未知";
@@ -124,7 +131,7 @@ function formatGpuResolution(gpu: HardwareInspectorSnapshot["gpus"][number]): st
     width <= 0 ||
     height <= 0
   ) {
-    return "—";
+    return "未提供（可能未直连显示器）";
   }
 
   const refresh =
@@ -455,7 +462,7 @@ function buildGpuRows(snapshot: HardwareInspectorSnapshot): string {
       <tr>
         <td>显卡 ${index + 1}</td>
         <td>${escapeHtml(formatText(gpu.name))}</td>
-        <td>${escapeHtml(formatBytes(gpu.adapterRam))}</td>
+        <td>${escapeHtml(formatGpuMemory(gpu))}</td>
         <td>${escapeHtml(formatText(gpu.driverVersion))}</td>
         <td>${escapeHtml(formatReportDate(gpu.driverDate))}</td>
         <td>${escapeHtml(formatGpuResolution(gpu))}</td>

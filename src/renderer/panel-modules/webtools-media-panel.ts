@@ -384,22 +384,25 @@ namespace RendererPanelRuntime {
       ) {
         webtoolsImagePromptStyleGroup = activePreset.group;
       }
-      const presetGroupTabs = document.createElement("div");
-      presetGroupTabs.className = "webtools-image-prompt-preset-groups";
+      const presetGroupField = document.createElement("label");
+      presetGroupField.className = "webtools-image-prompt-preset-group-field";
+      const presetGroupLabel = document.createElement("span");
+      presetGroupLabel.textContent = "风格分类";
+      const presetGroupSelect = document.createElement("select");
+      presetGroupSelect.className = "settings-value webtools-image-prompt-preset-group-select";
+      presetGroupSelect.name = "webtoolsImagePromptStyleGroup";
       styleGroups.forEach((group) => {
-        const groupButton = document.createElement("button");
-        groupButton.type = "button";
-        groupButton.className = "webtools-image-prompt-preset-group";
-        groupButton.name = "webtoolsImagePromptStyleGroup";
-        groupButton.value = group;
-        groupButton.dataset.selected = String(webtoolsImagePromptStyleGroup === group);
-        groupButton.textContent = group;
-        groupButton.addEventListener("click", () => {
-          webtoolsImagePromptStyleGroup = group;
-          renderList();
-        });
-        presetGroupTabs.appendChild(groupButton);
+        const option = document.createElement("option");
+        option.value = group;
+        option.textContent = group;
+        option.selected = webtoolsImagePromptStyleGroup === group;
+        presetGroupSelect.appendChild(option);
       });
+      presetGroupSelect.addEventListener("change", () => {
+        webtoolsImagePromptStyleGroup = presetGroupSelect.value as WebtoolsImagePromptStylePresetGroup;
+        renderList();
+      });
+      presetGroupField.append(presetGroupLabel, presetGroupSelect);
       const presetOptions = document.createElement("div");
       presetOptions.className = "webtools-image-prompt-preset-options";
       WEBTOOLS_IMAGE_PROMPT_STYLE_PRESETS_FROM_SHARED.filter(
@@ -435,7 +438,7 @@ namespace RendererPanelRuntime {
         presetChip.append(input, label, description);
         presetOptions.appendChild(presetChip);
       });
-      presetSection.append(presetTitle, presetGroupTabs, presetOptions);
+      presetSection.append(presetTitle, presetGroupField, presetOptions);
 
       const grid = document.createElement("div");
       grid.className = "webtools-image-prompt-grid";

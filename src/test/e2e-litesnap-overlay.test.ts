@@ -1012,6 +1012,38 @@ test(
         hasZoomCommand: false
       });
 
+      const beforeMove = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) =>
+          candidate.webContents.getURL().includes("/pin.html")
+        );
+        return window?.getBounds() ?? null;
+      });
+      assert.ok(beforeMove);
+      await pinPage.mouse.move(300, 150);
+      await pinPage.mouse.down();
+      await pinPage.mouse.move(340, 180, { steps: 6 });
+      await pinPage.mouse.up();
+      await pinPage.waitForTimeout(180);
+      const afterMove = await session.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) =>
+          candidate.webContents.getURL().includes("/pin.html")
+        );
+        return window
+          ? { bounds: window.getBounds(), resizable: window.isResizable() }
+          : null;
+      });
+      assert.ok(afterMove);
+      assert.deepEqual(
+        { width: afterMove.bounds.width, height: afterMove.bounds.height },
+        { width: beforeMove.width, height: beforeMove.height },
+        "dragging pinned image content should never change the whole-window size"
+      );
+      assert.ok(
+        afterMove.bounds.x !== beforeMove.x || afterMove.bounds.y !== beforeMove.y,
+        "dragging pinned image content should move the window"
+      );
+      assert.equal(afterMove.resizable, true, "native resizing should resume after the move ends");
+
       const pointerRouting = await pinPage.evaluate(() => {
         const shell = document.getElementById("pin-shell") as HTMLElement | null;
         if (!shell) {

@@ -334,6 +334,12 @@ interface HardwareInspectorGpu {
   name: string | null;
   manufacturer: string | null;
   adapterRam: number | null;
+  adapterRamSource:
+    | "registry-qword"
+    | "nvidia-smi"
+    | "wmi-uint32"
+    | "wmi-uint32-limited"
+    | null;
   driverVersion: string | null;
   driverDate: string | null;
   videoProcessor: string | null;

@@ -242,6 +242,9 @@ test(
           document.querySelectorAll(".webtools-json-shell > *").length >= 2
         );
       }, undefined, { timeout: 10000 });
+      await page.locator('select[name="webtoolsJsonRoutePreset"]').waitFor({ state: "visible" });
+      await page.locator('select[name="webtoolsJsonSample"]').waitFor({ state: "visible" });
+      await page.locator('select[name="webtoolsJsonCleanAction"]').waitFor({ state: "visible" });
       await assertPageHasNoHorizontalOverflow(page, "json panel");
       assertResponsiveItemLayout(
         "json control panel",
@@ -281,6 +284,33 @@ test(
         ".webtools-cron-guide-section",
         "cron guide rail"
       );
+      const cronTemplateSurfaces = await page.evaluate(() => {
+        const inactiveChip = document.querySelector<HTMLElement>(
+          ".webtools-cron-template-chip:not(.is-active)"
+        );
+        const deleteButton = document.querySelector<HTMLElement>(
+          ".webtools-cron-template-delete"
+        );
+        if (!inactiveChip || !deleteButton) {
+          throw new Error("missing Cron template controls");
+        }
+        return {
+          inactiveChip: window.getComputedStyle(inactiveChip).backgroundColor,
+          deleteButton: window.getComputedStyle(deleteButton).backgroundColor
+        };
+      });
+      for (const [control, background] of Object.entries(cronTemplateSurfaces)) {
+        assert.notEqual(
+          background,
+          "rgb(255, 255, 255)",
+          `${control} should not fall back to the native white button background`
+        );
+        assert.notEqual(
+          background,
+          "rgba(0, 0, 0, 0)",
+          `${control} should own an explicit themed background`
+        );
+      }
       await returnToSearch(page);
 
       await openPluginFromSearch(page, "plugin:ua", "UA 解析", "webtools-ua");

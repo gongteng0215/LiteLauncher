@@ -118,6 +118,36 @@ function formatBytes(value: number | null | undefined): string {
   return `${next.toFixed(digits)} ${units[index]}`;
 }
 
+function formatGpuMemory(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  if (gpu.adapterRamSource === "wmi-uint32-limited") {
+    return "无法准确读取（旧接口 4 GB 上限）";
+  }
+  return formatBytes(gpu.adapterRam);
+}
+
+function formatGpuMemorySource(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  switch (gpu.adapterRamSource) {
+    case "registry-qword":
+      return "Windows 驱动 64 位数据";
+    case "nvidia-smi":
+      return "NVIDIA 驱动";
+    case "wmi-uint32":
+      return "Windows WMI 兼容值";
+    case "wmi-uint32-limited":
+      return "Windows WMI 32 位字段（已忽略截断值）";
+    default:
+      return "不可用";
+  }
+}
+
+function formatGpuResolution(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  if (!gpu.horizontalResolution || !gpu.verticalResolution) {
+    return "未提供（可能未直连显示器）";
+  }
+  const base = `${gpu.horizontalResolution} × ${gpu.verticalResolution}`;
+  return gpu.refreshRate ? `${base} @ ${gpu.refreshRate} Hz` : base;
+}
+
 function formatClock(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return "未知";
@@ -365,12 +395,14 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
     lines.push(`### 显卡 ${index + 1}`);
     lines.push(`- 名称：${formatText(gpu.name)}`);
     lines.push(`- 厂商：${formatText(gpu.manufacturer)}`);
-    lines.push(`- 显存：${formatBytes(gpu.adapterRam)}`);
+    lines.push(`- 显存：${formatGpuMemory(gpu)}`);
+    lines.push(`- 显存来源：${formatGpuMemorySource(gpu)}`);
     lines.push(`- 驱动版本：${formatText(gpu.driverVersion)}`);
     lines.push(`- 驱动日期：${formatReportDate(gpu.driverDate)}`);
     lines.push(`- 视频处理器：${formatText(gpu.videoProcessor)}`);
     lines.push(`- 温度(可选)：${formatTemperature(gpu.temperatureCelsius)}`);
     lines.push(`- 温度来源：${formatOptionalText(gpu.temperatureSource)}`);
+    lines.push(`- 分辨率：${formatGpuResolution(gpu)}`);
     lines.push(`- 状态：${formatText(gpu.status)}`);
     lines.push("");
   });
@@ -604,12 +636,14 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
         gpu.name || `显卡 ${index + 1}`,
         buildMetricGridHtml([
           { label: "厂商", value: formatText(gpu.manufacturer) },
-          { label: "显存", value: formatBytes(gpu.adapterRam) },
+          { label: "显存", value: formatGpuMemory(gpu) },
+          { label: "显存来源", value: formatGpuMemorySource(gpu) },
           { label: "驱动版本", value: formatText(gpu.driverVersion) },
           { label: "驱动日期", value: formatReportDate(gpu.driverDate) },
           { label: "视频处理器", value: formatText(gpu.videoProcessor) },
           { label: "温度(可选)", value: formatTemperature(gpu.temperatureCelsius) },
           { label: "温度来源", value: formatOptionalText(gpu.temperatureSource) },
+          { label: "分辨率", value: formatGpuResolution(gpu) },
           { label: "状态", value: formatText(gpu.status) }
         ]),
         {
@@ -1271,4 +1305,3 @@ export const hardwareInspectorPlugin: LauncherPlugin = {
     return exportReport(context, command.action === "export-html" ? "html" : "markdown");
   }
 };
-

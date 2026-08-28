@@ -19,7 +19,13 @@ const pluginPath = path.join(
   "hardware-inspector",
   "index.ts"
 );
-const panelImplsPath = path.join(process.cwd(), "src", "renderer", "plugin-panel-impls.ts");
+const hardwarePanelPath = path.join(
+  process.cwd(),
+  "src",
+  "renderer",
+  "panel-modules",
+  "hardware-panel.ts"
+);
 
 test("hardware inspector collector uses cache and fast scan defaults", () => {
   const collectorSource = fs.readFileSync(collectorPath, "utf8");
@@ -54,11 +60,26 @@ test("hardware inspector collector uses cache and fast scan defaults", () => {
     /root\/LibreHardwareMonitor/,
     "hardware inspector fast scan should skip slow third-party monitor namespace probes"
   );
+  assert.match(
+    collectorSource,
+    /HardwareInformation\.qwMemorySize/,
+    "GPU memory collection should prefer the display driver's 64-bit memory value"
+  );
+  assert.match(
+    collectorSource,
+    /--query-gpu=name,memory\.total/,
+    "GPU memory collection should use NVIDIA's driver tool as an optional exact fallback"
+  );
+  assert.match(
+    collectorSource,
+    /wmi-uint32-limited/,
+    "saturated 32-bit WMI memory values should be marked as unreliable instead of shown as 4 GB"
+  );
 });
 
 test("hardware inspector plugin reuses cached snapshots on open and export", () => {
   const pluginSource = fs.readFileSync(pluginPath, "utf8");
-  const panelSource = fs.readFileSync(panelImplsPath, "utf8");
+  const panelSource = fs.readFileSync(hardwarePanelPath, "utf8");
   const reportImagePath = path.join(
     process.cwd(),
     "src",

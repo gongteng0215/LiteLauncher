@@ -885,6 +885,7 @@ namespace RendererPanelRuntime {
         card.append(statLabel, statValue);
         toolbarStats.appendChild(card);
       });
+      toolbarHead.appendChild(toolbarStats);
 
       const toolbarControls = document.createElement("div");
       toolbarControls.className = "clipboard-workbench-toolbar-controls";
@@ -1000,7 +1001,7 @@ namespace RendererPanelRuntime {
       composer.append(composerTitle, composerRow);
 
       toolbarControls.append(searchRow, toolbarActions, composer);
-      toolbar.append(toolbarHead, toolbarMeta, toolbarStats, toolbarControls);
+      toolbar.append(toolbarHead, toolbarMeta, toolbarControls);
 
       const rail = document.createElement("aside");
       rail.className = "clipboard-workbench-rail";

@@ -190,7 +190,7 @@ namespace RendererPanelRuntime {
       const description = document.createElement("p");
       description.className = "webtools-tool-subtitle";
       description.textContent =
-        activePluginPanel?.subtitle || "格式转换、校验、转义和样例测试集中在一个紧凑工作台。";
+        activePluginPanel?.subtitle || "输入内容后直接转换；路线、样例和清洗操作集中在紧凑选择框中。";
       titleGroup.append(title, description);
 
       const headerActions = document.createElement("div");
@@ -269,9 +269,6 @@ namespace RendererPanelRuntime {
       });
       targetGroup.append(targetLabel, targetSelect);
 
-      const formatHint = document.createElement("div");
-      formatHint.className = "webtools-json-route";
-
       const controlPanel = document.createElement("section");
       controlPanel.className = "webtools-json-control-panel";
 
@@ -280,43 +277,74 @@ namespace RendererPanelRuntime {
       const routePresetLabel = document.createElement("span");
       routePresetLabel.className = "webtools-json-mini-label";
       routePresetLabel.textContent = "常用路线";
-      const routeButtonWrap = document.createElement("div");
-      routeButtonWrap.className = "webtools-json-chip-row";
-      const routeButtons: HTMLButtonElement[] = [];
-      routePresets.forEach((preset) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "webtools-json-chip-btn";
-        button.textContent = preset.label;
-        button.addEventListener("click", () => {
-          sourceSelect.value = preset.source;
-          targetSelect.value = preset.target;
-          compressedInput.checked = preset.compressed ?? false;
-          updateJsonFormHead();
-          scheduleWebtoolsJsonAutoConvert(form, true);
-        });
-        routeButtons.push(button);
-        routeButtonWrap.appendChild(button);
+      const routePresetSelect = document.createElement("select");
+      routePresetSelect.className = "settings-number webtools-json-compact-select";
+      routePresetSelect.name = "webtoolsJsonRoutePreset";
+      routePresetSelect.setAttribute("aria-label", "选择常用转换路线");
+      const routePlaceholder = document.createElement("option");
+      routePlaceholder.value = "";
+      routePlaceholder.textContent = "选择转换路线";
+      routePresetSelect.appendChild(routePlaceholder);
+      routePresets.forEach((preset, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = preset.label.replaceAll("->", "→");
+        routePresetSelect.appendChild(option);
       });
-      routePresetWrap.append(routePresetLabel, routeButtonWrap);
+      routePresetSelect.addEventListener("change", () => {
+        if (routePresetSelect.value === "") {
+          return;
+        }
+        const preset = routePresets[Number(routePresetSelect.value)];
+        if (!preset) {
+          return;
+        }
+        sourceSelect.value = preset.source;
+        targetSelect.value = preset.target;
+        compressedInput.checked = preset.compressed ?? false;
+        updateJsonFormHead();
+        scheduleWebtoolsJsonAutoConvert(form, true);
+      });
+      routePresetWrap.append(routePresetLabel, routePresetSelect);
 
       const sampleWrap = document.createElement("div");
       sampleWrap.className = "webtools-json-sample-strip";
       const sampleLabel = document.createElement("span");
       sampleLabel.className = "webtools-json-mini-label";
       sampleLabel.textContent = "快速样例";
-      const sampleButtonWrap = document.createElement("div");
-      sampleButtonWrap.className = "webtools-json-sample-grid";
-      sampleInputs.forEach((sample) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "webtools-json-sample-btn";
-        const buttonTitle = document.createElement("strong");
-        buttonTitle.textContent = sample.label;
-        const buttonNote = document.createElement("span");
-        buttonNote.textContent = sample.note;
-        button.append(buttonTitle, buttonNote);
-        button.addEventListener("click", () => {
+      const sampleControl = document.createElement("div");
+      sampleControl.className = "webtools-json-compact-action";
+      const sampleSelect = document.createElement("select");
+      sampleSelect.className = "settings-number webtools-json-compact-select";
+      sampleSelect.name = "webtoolsJsonSample";
+      sampleSelect.setAttribute("aria-label", "选择快速样例");
+      const samplePlaceholder = document.createElement("option");
+      samplePlaceholder.value = "";
+      samplePlaceholder.textContent = "选择样例";
+      sampleSelect.appendChild(samplePlaceholder);
+      sampleInputs.forEach((sample, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = `${sample.label} · ${sample.note}`;
+        sampleSelect.appendChild(option);
+      });
+      const loadSampleButton = document.createElement("button");
+      loadSampleButton.type = "button";
+      loadSampleButton.className =
+        "settings-btn settings-btn-secondary webtools-json-compact-btn webtools-json-load-sample-btn";
+      loadSampleButton.textContent = "载入";
+      loadSampleButton.disabled = true;
+      sampleSelect.addEventListener("change", () => {
+        loadSampleButton.disabled = sampleSelect.value === "";
+      });
+      loadSampleButton.addEventListener("click", () => {
+        if (sampleSelect.value === "") {
+          return;
+        }
+        const sample = sampleInputs[Number(sampleSelect.value)];
+        if (!sample) {
+          return;
+        }
         inputArea.value = sample.input;
         outputArea.value = "";
         webtoolsJsonState.output = "";
@@ -324,14 +352,13 @@ namespace RendererPanelRuntime {
         sourceSelect.value = sample.source;
         targetSelect.value = sample.target;
         compressedInput.checked = sample.compressed ?? false;
-          updateJsonFormHead();
-          updateJsonStats();
-          scheduleWebtoolsJsonAutoConvert(form, true);
-          setStatus(`已载入${sample.label}样例`);
-        });
-        sampleButtonWrap.appendChild(button);
+        updateJsonFormHead();
+        updateJsonStats();
+        scheduleWebtoolsJsonAutoConvert(form, true);
+        setStatus(`已载入${sample.label}样例`);
       });
-      sampleWrap.append(sampleLabel, sampleButtonWrap);
+      sampleControl.append(sampleSelect, loadSampleButton);
+      sampleWrap.append(sampleLabel, sampleControl);
 
       const stats = document.createElement("div");
       stats.className = "webtools-json-stats";
@@ -345,27 +372,6 @@ namespace RendererPanelRuntime {
       payloadStat.className = "webtools-json-stat webtools-json-payload-stat";
       stats.append(routeStat, inputStat, outputStat, payloadStat);
 
-      const utilityDeck = document.createElement("section");
-      utilityDeck.className = "webtools-json-utility-deck";
-
-      const structureCard = document.createElement("section");
-      structureCard.className = "webtools-json-structure-card";
-      const structureHead = document.createElement("div");
-      structureHead.className = "webtools-json-card-head";
-      const structureTitle = document.createElement("span");
-      structureTitle.className = "webtools-json-card-title";
-      structureTitle.textContent = "结构预览";
-      const structureMeta = document.createElement("span");
-      structureMeta.className = "webtools-json-card-meta";
-      structureHead.append(structureTitle, structureMeta);
-      const structureSummary = document.createElement("div");
-      structureSummary.className = "webtools-json-structure-summary";
-      const structureFields = document.createElement("div");
-      structureFields.className = "webtools-json-structure-fields";
-      const structureSample = document.createElement("pre");
-      structureSample.className = "webtools-json-structure-sample";
-      structureCard.append(structureHead, structureSummary, structureFields, structureSample);
-
       const cleanActionsCard = document.createElement("section");
       cleanActionsCard.className = "webtools-json-clean-actions";
       const cleanHead = document.createElement("div");
@@ -377,9 +383,24 @@ namespace RendererPanelRuntime {
       cleanMeta.className = "webtools-json-card-meta";
       cleanMeta.textContent = "作用于输入区";
       cleanHead.append(cleanTitle, cleanMeta);
-      const cleanButtonGrid = document.createElement("div");
-      cleanButtonGrid.className = "webtools-json-clean-button-grid";
-      cleanActionsCard.append(cleanHead, cleanButtonGrid);
+      const cleanControl = document.createElement("div");
+      cleanControl.className = "webtools-json-compact-action";
+      const cleanSelect = document.createElement("select");
+      cleanSelect.className = "settings-number webtools-json-compact-select";
+      cleanSelect.name = "webtoolsJsonCleanAction";
+      cleanSelect.setAttribute("aria-label", "选择清洗操作");
+      const cleanPlaceholder = document.createElement("option");
+      cleanPlaceholder.value = "";
+      cleanPlaceholder.textContent = "选择清洗操作";
+      cleanSelect.appendChild(cleanPlaceholder);
+      const cleanApplyButton = document.createElement("button");
+      cleanApplyButton.type = "button";
+      cleanApplyButton.className =
+        "settings-btn settings-btn-secondary webtools-json-compact-btn webtools-json-clean-btn";
+      cleanApplyButton.textContent = "执行";
+      cleanApplyButton.disabled = true;
+      cleanControl.append(cleanSelect, cleanApplyButton);
+      cleanActionsCard.append(cleanHead, cleanControl);
 
       const fieldsCard = document.createElement("section");
       fieldsCard.className = "webtools-json-fields-card";
@@ -391,15 +412,51 @@ namespace RendererPanelRuntime {
       const fieldsMeta = document.createElement("span");
       fieldsMeta.className = "webtools-json-card-meta";
       fieldsHead.append(fieldsTitle, fieldsMeta);
-      const fieldsHint = document.createElement("div");
-      fieldsHint.className = "webtools-json-fields-hint";
-      const fieldActions = document.createElement("div");
-      fieldActions.className = "webtools-json-fields-actions";
-      const fieldChipWrap = document.createElement("div");
-      fieldChipWrap.className = "webtools-json-field-chip-row";
-      fieldsCard.append(fieldsHead, fieldsHint, fieldActions, fieldChipWrap);
-
-      utilityDeck.append(structureCard, cleanActionsCard, fieldsCard);
+      const fieldControl = document.createElement("div");
+      fieldControl.className = "webtools-json-compact-action";
+      const fieldPicker = document.createElement("details");
+      fieldPicker.className = "webtools-json-field-picker";
+      const fieldPickerSummary = document.createElement("summary");
+      fieldPickerSummary.className = "webtools-json-field-picker-summary";
+      fieldPickerSummary.textContent = "等待识别字段";
+      fieldPickerSummary.addEventListener("click", (event) => {
+        if (fieldPicker.dataset.disabled === "true") {
+          event.preventDefault();
+        }
+      });
+      fieldPicker.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape" || !fieldPicker.open) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        fieldPicker.open = false;
+        fieldPickerSummary.focus();
+      });
+      const fieldPickerMenu = document.createElement("div");
+      fieldPickerMenu.className = "webtools-json-field-picker-menu";
+      fieldPicker.append(fieldPickerSummary, fieldPickerMenu);
+      const applyFieldsButton = document.createElement("button");
+      applyFieldsButton.type = "button";
+      applyFieldsButton.className =
+        "settings-btn settings-btn-secondary webtools-json-compact-btn webtools-json-apply-fields-btn";
+      applyFieldsButton.textContent = "应用";
+      applyFieldsButton.disabled = true;
+      applyFieldsButton.addEventListener("click", () => {
+        applySelectedFields();
+        fieldPicker.open = false;
+      });
+      fieldControl.append(fieldPicker, applyFieldsButton);
+      fieldsCard.append(fieldsHead, fieldControl);
+      form.addEventListener("pointerdown", (event) => {
+        if (
+          fieldPicker.open &&
+          event.target instanceof Node &&
+          !fieldPicker.contains(event.target)
+        ) {
+          fieldPicker.open = false;
+        }
+      });
 
       const inputArea = document.createElement("textarea");
       inputArea.className = "settings-value webtools-textarea webtools-json-textarea";
@@ -559,36 +616,6 @@ namespace RendererPanelRuntime {
         }
       };
 
-      const renderPreviewFieldPills = (): void => {
-        structureFields.replaceChildren();
-        const fields = webtoolsJsonState.preview?.fields ?? [];
-        if (fields.length === 0) {
-          const empty = document.createElement("span");
-          empty.className = "webtools-json-inline-empty";
-          empty.textContent = "当前结构里还没有可识别字段";
-          structureFields.appendChild(empty);
-          return;
-        }
-        fields.slice(0, 8).forEach((field) => {
-          const pill = document.createElement("span");
-          pill.className = "webtools-json-inline-pill";
-          pill.textContent =
-            typeof field.count === "number" ? `${field.key} · ${field.count}` : field.key;
-          structureFields.appendChild(pill);
-        });
-      };
-
-      const renderStructurePreview = (): void => {
-        const preview = webtoolsJsonState.preview;
-        structureMeta.textContent = preview?.kind ?? "unknown";
-        structureSummary.textContent = preview?.summary ?? "等待自动识别输入结构";
-        renderPreviewFieldPills();
-        structureSample.textContent =
-          preview && preview.sampleRows.length > 0
-            ? JSON.stringify(preview.sampleRows, null, 2)
-            : "暂无样例行";
-      };
-
       const applySelectedFields = (): void => {
         const selected = webtoolsJsonState.selectedFields;
         if (selected.length === 0) {
@@ -644,17 +671,31 @@ namespace RendererPanelRuntime {
       };
 
       const renderFieldSelector = (): void => {
-        fieldChipWrap.replaceChildren();
-        fieldActions.replaceChildren();
+        fieldPickerMenu.replaceChildren();
         const fields = webtoolsJsonState.preview?.fields ?? [];
         fieldsMeta.textContent = fields.length > 0 ? `${fields.length} 个字段` : "不可用";
-        fieldsHint.textContent =
-          fields.length > 0
-            ? "选中后可直接把当前输入收敛成目标字段"
-            : "解析到对象数组或 CSV 表头后，这里会出现可选字段";
+        const selectedFields = webtoolsJsonState.selectedFields.filter((key) =>
+          fields.some((field) => field.key === key)
+        );
+        webtoolsJsonState.selectedFields = selectedFields;
+        applyFieldsButton.disabled = selectedFields.length === 0;
         if (fields.length === 0) {
+          fieldPicker.dataset.disabled = "true";
+          fieldPicker.open = false;
+          fieldPickerSummary.textContent = "等待识别字段";
+          fieldPickerSummary.setAttribute("aria-disabled", "true");
           return;
         }
+
+        fieldPicker.dataset.disabled = "false";
+        fieldPickerSummary.removeAttribute("aria-disabled");
+        fieldPickerSummary.textContent =
+          selectedFields.length > 0
+            ? `已选 ${selectedFields.length}/${fields.length}`
+            : `选择字段（${fields.length}）`;
+
+        const pickerActions = document.createElement("div");
+        pickerActions.className = "webtools-json-field-picker-actions";
 
         const selectAllButton = document.createElement("button");
         selectAllButton.type = "button";
@@ -663,6 +704,7 @@ namespace RendererPanelRuntime {
         selectAllButton.addEventListener("click", () => {
           webtoolsJsonState.selectedFields = fields.map((field) => field.key);
           renderFieldSelector();
+          fieldPicker.open = true;
         });
 
         const clearSelectButton = document.createElement("button");
@@ -672,41 +714,38 @@ namespace RendererPanelRuntime {
         clearSelectButton.addEventListener("click", () => {
           webtoolsJsonState.selectedFields = [];
           renderFieldSelector();
+          fieldPicker.open = true;
         });
 
-        const applyFieldsButton = document.createElement("button");
-        applyFieldsButton.type = "button";
-        applyFieldsButton.className = "settings-btn settings-btn-secondary webtools-json-mini-btn";
-        applyFieldsButton.textContent = "应用字段";
-        applyFieldsButton.addEventListener("click", () => {
-          applySelectedFields();
-        });
-
-        fieldActions.append(selectAllButton, clearSelectButton, applyFieldsButton);
+        pickerActions.append(selectAllButton, clearSelectButton);
+        fieldPickerMenu.appendChild(pickerActions);
 
         fields.forEach((field) => {
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "webtools-json-field-chip";
-          const selected = webtoolsJsonState.selectedFields.includes(field.key);
-          chip.dataset.active = String(selected);
-          chip.textContent =
+          const option = document.createElement("label");
+          option.className = "webtools-json-field-picker-option";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = selectedFields.includes(field.key);
+          const optionText = document.createElement("span");
+          optionText.textContent =
             typeof field.count === "number" ? `${field.key} (${field.count})` : field.key;
-          chip.addEventListener("click", () => {
-            if (selected) {
+          checkbox.addEventListener("change", () => {
+            if (!checkbox.checked) {
               webtoolsJsonState.selectedFields = webtoolsJsonState.selectedFields.filter(
                 (key) => key !== field.key
               );
-            } else {
+            } else if (!webtoolsJsonState.selectedFields.includes(field.key)) {
               webtoolsJsonState.selectedFields = [...webtoolsJsonState.selectedFields, field.key];
             }
             renderFieldSelector();
+            fieldPicker.open = true;
           });
-          fieldChipWrap.appendChild(chip);
+          option.append(checkbox, optionText);
+          fieldPickerMenu.appendChild(option);
         });
       };
 
-      [
+      const cleanActions = [
         {
           label: "格式化 JSON",
           action: () =>
@@ -733,13 +772,22 @@ namespace RendererPanelRuntime {
               JSON.stringify(pruneJsonValue(JSON.parse(source)), null, 2)
             )
         }
-      ].forEach((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "settings-btn settings-btn-secondary webtools-json-clean-btn";
-        button.textContent = item.label;
-        button.addEventListener("click", item.action);
-        cleanButtonGrid.appendChild(button);
+      ];
+      cleanActions.forEach((item, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = item.label;
+        cleanSelect.appendChild(option);
+      });
+      cleanSelect.addEventListener("change", () => {
+        cleanApplyButton.disabled = cleanSelect.value === "";
+      });
+      cleanApplyButton.addEventListener("click", () => {
+        if (cleanSelect.value === "") {
+          return;
+        }
+        const item = cleanActions[Number(cleanSelect.value)];
+        item?.action();
       });
 
       let jsonStatsDebounceHandle: number | null = null;
@@ -750,13 +798,12 @@ namespace RendererPanelRuntime {
         outputStat.textContent = `输出 ${summarizeText(outputArea.value)}`;
         payloadStat.textContent = describePayload(inputArea.value, sourceSelect.value);
         payloadStat.dataset.state = webtoolsJsonState.valid === false ? "error" : "idle";
-        renderStructurePreview();
         renderFieldSelector();
       };
 
-      // `describePayload` runs JSON.parse and the structure/field preview
-      // rebuilds DOM nodes; debounce the per-keystroke call so large payloads
-      // don't re-parse on every single character.
+      // `describePayload` runs JSON.parse and the field selector rebuilds DOM
+      // nodes; debounce the per-keystroke call so large payloads don't re-parse
+      // on every single character.
       const scheduleUpdateJsonStats = (): void => {
         if (jsonStatsDebounceHandle !== null) {
           window.clearTimeout(jsonStatsDebounceHandle);
@@ -768,22 +815,17 @@ namespace RendererPanelRuntime {
       };
 
       const updateJsonFormHead = (): void => {
-        const source = formatLabel(sourceSelect.value);
-        const target = formatLabel(targetSelect.value);
-        const minifyText = targetSelect.value === "json" && compressedInput.checked ? " · Minify" : "";
-        formatHint.textContent = `${source} -> ${target}${minifyText}`;
         compressedWrap.style.display = targetSelect.value === "json" ? "" : "none";
         inputMeta.textContent = sourceSelect.value.toUpperCase();
         outputMetaText.textContent = targetSelect.value.toUpperCase();
-        routeButtons.forEach((button, index) => {
-          const preset = routePresets[index];
-          button.dataset.active = String(
+        const activeRouteIndex = routePresets.findIndex(
+          (preset) =>
             sourceSelect.value === preset.source &&
-              targetSelect.value === preset.target &&
-              (preset.compressed === undefined ||
-                compressedInput.checked === Boolean(preset.compressed))
-          );
-        });
+            targetSelect.value === preset.target &&
+            (preset.compressed === undefined ||
+              compressedInput.checked === Boolean(preset.compressed))
+        );
+        routePresetSelect.value = activeRouteIndex >= 0 ? String(activeRouteIndex) : "";
         updateJsonStats();
       };
 
@@ -820,8 +862,15 @@ namespace RendererPanelRuntime {
         scheduleWebtoolsJsonAutoConvert(form);
       });
 
-      converterBar.append(sourceGroup, swapButton, targetGroup, formatHint);
-      controlPanel.append(converterBar, routePresetWrap, sampleWrap, stats);
+      converterBar.append(sourceGroup, swapButton, targetGroup);
+      controlPanel.append(
+        converterBar,
+        routePresetWrap,
+        sampleWrap,
+        cleanActionsCard,
+        fieldsCard,
+        stats
+      );
 
       const editors = document.createElement("div");
       editors.className = "webtools-json-shell webtools-json-editors";
@@ -832,7 +881,7 @@ namespace RendererPanelRuntime {
       inputHead.className = "webtools-json-pane-head";
       const inputTitle = document.createElement("span");
       inputTitle.className = "webtools-json-pane-title";
-      inputTitle.textContent = "输入";
+      inputTitle.textContent = "输入内容";
       const inputMeta = document.createElement("span");
       inputMeta.className = "webtools-json-pane-meta webtools-json-input-meta";
       inputMeta.textContent = webtoolsJsonState.sourceFormat.toUpperCase();
@@ -851,7 +900,7 @@ namespace RendererPanelRuntime {
       outputHead.className = "webtools-json-pane-head";
       const outputTitle = document.createElement("span");
       outputTitle.className = "webtools-json-pane-title";
-      outputTitle.textContent = "输出";
+      outputTitle.textContent = "输出结果";
       const outputTitleWrap = document.createElement("div");
       outputTitleWrap.className = "webtools-json-pane-title-wrap";
       const outputMetaText = document.createElement("span");
@@ -875,7 +924,7 @@ namespace RendererPanelRuntime {
       });
       updateJsonFormHead();
 
-      form.append(header, controlPanel, utilityDeck, editors, info);
+      form.append(header, controlPanel, editors, info);
       panel.append(form);
       panelItem.appendChild(panel);
       list.appendChild(panelItem);
