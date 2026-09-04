@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeHardwareInspectorGpuMemory } from "../main/plugins/hardware-inspector/collector";
+import {
+  classifyHardwareInspectorGpuMemory,
+  normalizeHardwareInspectorGpuMemory
+} from "../main/plugins/hardware-inspector/collector";
+import { resolveHardwareInspectorVendor } from "../main/plugins/hardware-inspector/vendor-resolver";
 
 const GIB = 1024 ** 3;
 
@@ -35,4 +39,38 @@ test("hardware inspector keeps smaller legacy WMI values as labeled compatibilit
     adapterRam: null,
     adapterRamSource: null
   });
+});
+
+test("hardware inspector distinguishes verified discrete memory from integrated shared memory", () => {
+  const nvidiaVendor = resolveHardwareInspectorVendor({
+    component: "gpu",
+    manufacturer: "NVIDIA"
+  });
+  assert.deepEqual(
+    classifyHardwareInspectorGpuMemory("NVIDIA GeForce RTX 5070 Ti", nvidiaVendor, {
+      adapterRam: 12 * GIB,
+      adapterRamSource: "registry-qword"
+    }),
+    {
+      memoryKind: "dedicated",
+      memoryVerified: true,
+      sharedMemoryBytes: null
+    }
+  );
+
+  const intelVendor = resolveHardwareInspectorVendor({
+    component: "gpu",
+    manufacturer: "Intel Corporation"
+  });
+  assert.deepEqual(
+    classifyHardwareInspectorGpuMemory("Intel(R) Iris(R) Xe Graphics", intelVendor, {
+      adapterRam: 1024 ** 3,
+      adapterRamSource: "wmi-uint32"
+    }),
+    {
+      memoryKind: "shared-dynamic",
+      memoryVerified: false,
+      sharedMemoryBytes: null
+    }
+  );
 });

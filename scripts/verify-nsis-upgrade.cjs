@@ -9,13 +9,13 @@ const { launchE2ESession } = require("../dist/test/e2e-test-utils.js");
 const projectRoot = path.resolve(__dirname, "..");
 const baselineInstaller = path.resolve(
   process.argv[2] ||
-    path.join(projectRoot, "artifacts", "release-baseline", "v1.1.18", "LiteLauncher-Setup-1.1.18.exe")
+    path.join(projectRoot, "artifacts", "release-baseline", "v1.1.19", "LiteLauncher-Setup-1.1.19.exe")
 );
 const candidateInstaller = path.resolve(
-  process.argv[3] || path.join(projectRoot, "release", "LiteLauncher-Setup-1.1.19.exe")
+  process.argv[3] || path.join(projectRoot, "release", "LiteLauncher-Setup-1.1.20.exe")
 );
-const baselineVersion = process.argv[4] || "1.1.18";
-const candidateVersion = process.argv[5] || "1.1.19";
+const baselineVersion = process.argv[4] || "1.1.19";
+const candidateVersion = process.argv[5] || "1.1.20";
 const reportDir = path.join(projectRoot, "artifacts", "nsis-upgrade");
 const reportPath = path.join(reportDir, `v${baselineVersion}-to-v${candidateVersion}.json`);
 let disposableRoot = "";

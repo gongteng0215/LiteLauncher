@@ -12,7 +12,7 @@ const {
 } = require("../dist/test/e2e-test-utils.js");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.19-candidate";
+const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.20-candidate";
 const OUTPUT_ROOT = path.join(PROJECT_ROOT, "artifacts", "ui-review", REVIEW_LABEL);
 const VIEWPORTS = [
   { label: "1440x900", width: 1440, height: 900 },
@@ -25,6 +25,15 @@ const PANELS = [
   { id: "hardware-inspector", title: "Hardware Inspector" },
   { id: "clipboard-workbench", title: "Clipboard Workbench" }
 ];
+const PANEL_FILTER = new Set(
+  (process.env.LITELAUNCHER_UI_REVIEW_PANELS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+);
+const ACTIVE_PANELS = PANEL_FILTER.size > 0
+  ? PANELS.filter((panel) => PANEL_FILTER.has(panel.id))
+  : PANELS;
 
 function slug(value) {
   return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
@@ -72,6 +81,18 @@ async function openPanel(page, panel) {
       panel.id,
       { timeout: 10_000 }
     );
+  }
+  if (panel.id === "hardware-inspector") {
+    await page.waitForFunction(() => {
+      const status = document.querySelector(".hardware-inspector-status");
+      const overview = document.querySelector(".hardware-inspector-overview");
+      return Boolean(
+        status &&
+          status.getAttribute("data-state") !== "loading" &&
+          overview &&
+          overview.querySelectorAll(".hardware-inspector-overview-card").length === 6
+      );
+    }, undefined, { timeout: 30_000 });
   }
   await settle(page);
 }
@@ -230,26 +251,32 @@ async function main() {
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await waitForMode(page, "search");
-      await capture(page, viewport, "home", records);
+      if (PANEL_FILTER.size === 0) {
+        await capture(page, viewport, "home", records);
 
-      await openSettings(page);
-      await capture(page, viewport, "settings", records);
-      await closeSettings(page);
+        await openSettings(page);
+        await capture(page, viewport, "settings", records);
+        await closeSettings(page);
+      }
 
-      for (const panel of PANELS.filter((candidate) => candidate.id !== "cashflow-game")) {
+      for (const panel of ACTIVE_PANELS.filter((candidate) => candidate.id !== "cashflow-game")) {
         await openPanel(page, panel);
         await capture(page, viewport, panel.id, records);
         await returnToSearch(page);
       }
-      await captureCashflowStates(page, viewport, records);
+      if (ACTIVE_PANELS.some((panel) => panel.id === "cashflow-game")) {
+        await captureCashflowStates(page, viewport, records);
+      }
     }
 
-    await page.evaluate(() => {
-      const api = window.__LL_UI_THEME__;
-      if (api) api.apply(api.fromAccent("#22c55e", api.DEFAULT));
-    });
-    await page.setViewportSize({ width: 960, height: 720 });
-    await capture(page, VIEWPORTS[1], "home-nondefault-accent", records);
+    if (PANEL_FILTER.size === 0) {
+      await page.evaluate(() => {
+        const api = window.__LL_UI_THEME__;
+        if (api) api.apply(api.fromAccent("#22c55e", api.DEFAULT));
+      });
+      await page.setViewportSize({ width: 960, height: 720 });
+      await capture(page, VIEWPORTS[1], "home-nondefault-accent", records);
+    }
     writeIndex(records);
     console.info(`[ui-review] wrote ${records.length} screenshots to ${OUTPUT_ROOT}`);
   } finally {

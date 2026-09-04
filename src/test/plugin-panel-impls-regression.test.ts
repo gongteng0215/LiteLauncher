@@ -1424,8 +1424,8 @@ test("shared webtools layouts stay compact instead of stretching cards edge to e
   );
   assert.match(
     panelImplsSource,
-    /hardware-inspector-action-select/,
-    "hardware export and copy variants should use compact selection controls"
+    /hardware-inspector-more/,
+    "hardware export and diagnostic actions should use a compact more menu"
   );
   assert.match(
     commonPanelStylesSource,

@@ -44,6 +44,7 @@ import { buildCatalogWithOptions } from "./catalog";
 import { CatalogChangeWatcher } from "./catalog-watcher";
 import { ClipService } from "./clip-service";
 import { LiteDatabase } from "./database";
+import { configureMainErrorLogReporter } from "./error-log-reporter";
 import { registerIpcHandlers } from "./ipc";
 import { LiteSnapCaptureSessionManager } from "./litesnap/capture-session-manager";
 import { LiteSnapHistoryStore } from "./litesnap/history-store";
@@ -395,6 +396,8 @@ function queueErrorLog(input: AppErrorLogInput): void {
     console.error("[error-log] failed to persist", error);
   });
 }
+
+configureMainErrorLogReporter(queueErrorLog);
 
 function formatLauncherWindowState(window: BrowserWindow): string {
   if (window.isDestroyed()) {

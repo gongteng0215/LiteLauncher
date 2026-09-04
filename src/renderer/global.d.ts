@@ -213,6 +213,7 @@ interface RendererPanelImpls {
   cleanupPluginPanelTransientState(activePluginId: string | null): void;
   applyHardwareInspectorPanelPayload(panel: unknown): void;
   renderHardwareInspectorPanel(): void;
+  handleHardwareInspectorEscape(): boolean;
   applyClipboardWorkbenchPanelPayload(panel: unknown): void;
   renderClipboardWorkbenchPanel(): void;
   applyLiteSnapPanelPayload(panel: unknown): void;

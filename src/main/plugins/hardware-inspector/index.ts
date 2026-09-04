@@ -1,16 +1,20 @@
 ﻿import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { app, dialog } from "electron";
+import { app, dialog, screen } from "electron";
 
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
 import { LauncherPlugin } from "../types";
+import { reportMainErrorLog } from "../../error-log-reporter";
 import {
   collectHardwareInspectorSnapshot,
   getCachedHardwareInspectorSnapshot,
+  HardwareInspectorCollectionError,
+  type HardwareInspectorDisplay,
   HardwareInspectorSnapshot
 } from "./collector";
+import { formatHardwareInspectorVendorName } from "./vendor-resolver";
 import { renderHardwareReportImage } from "./report-image";
 
 type HardwareInspectorAction =
@@ -119,10 +123,19 @@ function formatBytes(value: number | null | undefined): string {
 }
 
 function formatGpuMemory(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  if (gpu.memoryKind === "shared-dynamic") {
+    return "共享 / 动态分配";
+  }
+  if (gpu.memoryKind === "unavailable") {
+    return "无法确认";
+  }
   if (gpu.adapterRamSource === "wmi-uint32-limited") {
     return "无法准确读取（旧接口 4 GB 上限）";
   }
-  return formatBytes(gpu.adapterRam);
+  const value = formatBytes(gpu.adapterRam);
+  return gpu.memoryKind === "driver-reported" && value !== "未知"
+    ? `${value}（驱动报告，未验证）`
+    : value;
 }
 
 function formatGpuMemorySource(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
@@ -332,7 +345,13 @@ function isRiskDisk(snapshotDisk: HardwareInspectorSnapshot["disks"][number]): b
 
 function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
   const systemName =
-    [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+    [
+      formatHardwareInspectorVendorName(
+        snapshot.computerSystem.vendor,
+        snapshot.computerSystem.manufacturer
+      ),
+      snapshot.computerSystem.model
+    ]
       .filter(Boolean)
       .join(" ") || "未知设备";
   const riskDiskCount = snapshot.disks.filter((disk) => isRiskDisk(disk)).length;
@@ -356,7 +375,7 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
   snapshot.cpus.forEach((cpu, index) => {
     lines.push(`### 处理器 ${index + 1}`);
     lines.push(`- 型号：${formatText(cpu.name)}`);
-    lines.push(`- 厂商：${formatText(cpu.manufacturer)}`);
+    lines.push(`- 厂商：${formatHardwareInspectorVendorName(cpu.vendor, cpu.manufacturer)}`);
     lines.push(`- 插槽：${formatText(cpu.socketDesignation)}`);
     lines.push(`- 核心 / 线程：${cpu.numberOfCores ?? "?"} / ${cpu.numberOfLogicalProcessors ?? "?"}`);
     lines.push(`- 最大频率：${formatClock(cpu.maxClockSpeed)}`);
@@ -369,10 +388,10 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
   });
 
   lines.push("## 主板 / BIOS", "");
-  lines.push(`- 主板厂商：${formatText(snapshot.baseBoard.manufacturer)}`);
+  lines.push(`- 主板厂商：${formatHardwareInspectorVendorName(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer)}`);
   lines.push(`- 主板型号：${formatText(snapshot.baseBoard.product)}`);
   lines.push(`- 主板版本：${formatText(snapshot.baseBoard.version)}`);
-  lines.push(`- BIOS 厂商：${formatText(snapshot.bios.manufacturer)}`);
+  lines.push(`- BIOS 厂商：${formatHardwareInspectorVendorName(snapshot.bios.vendor, snapshot.bios.manufacturer)}`);
   lines.push(`- BIOS 版本：${formatText(snapshot.bios.smbiosBiosVersion || snapshot.bios.version)}`);
   lines.push(`- BIOS 发布日期：${formatReportDate(snapshot.bios.releaseDate)}`);
   lines.push("");
@@ -385,7 +404,7 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
     lines.push(`- 频率：${formatClock(memory.configuredClockSpeed || memory.speed)}`);
     lines.push(`- 类型：${formatText(memory.memoryType)}`);
     lines.push(`- 形态：${formatText(memory.formFactor)}`);
-    lines.push(`- 厂商：${formatText(memory.manufacturer)}`);
+    lines.push(`- 厂商：${formatHardwareInspectorVendorName(memory.vendor, memory.manufacturer)}`);
     lines.push(`- 型号：${formatText(memory.partNumber)}`);
     lines.push("");
   });
@@ -394,7 +413,7 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
   snapshot.gpus.forEach((gpu, index) => {
     lines.push(`### 显卡 ${index + 1}`);
     lines.push(`- 名称：${formatText(gpu.name)}`);
-    lines.push(`- 厂商：${formatText(gpu.manufacturer)}`);
+    lines.push(`- 厂商：${formatHardwareInspectorVendorName(gpu.vendor, gpu.manufacturer)}`);
     lines.push(`- 显存：${formatGpuMemory(gpu)}`);
     lines.push(`- 显存来源：${formatGpuMemorySource(gpu)}`);
     lines.push(`- 驱动版本：${formatText(gpu.driverVersion)}`);
@@ -410,7 +429,7 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
   lines.push("## 存储", "");
   snapshot.disks.forEach((disk, diskIndex) => {
     lines.push(`### 磁盘 ${diskIndex + 1} - ${formatText(disk.model)}`);
-    lines.push(`- 厂商：${formatText(disk.manufacturer)}`);
+    lines.push(`- 厂商：${formatHardwareInspectorVendorName(disk.vendor, disk.manufacturer)}`);
     lines.push(`- 容量：${formatBytes(disk.size)}`);
     lines.push(`- 媒体类型：${formatText(disk.storageMediaType || disk.mediaType)}`);
     lines.push(`- 总线：${formatText(disk.busType || disk.interfaceType)}`);
@@ -472,6 +491,21 @@ function buildHardwareReport(snapshot: HardwareInspectorSnapshot): string {
     }
     lines.push("");
   });
+
+  lines.push("## 显示器", "");
+  if (snapshot.displays.length === 0) {
+    lines.push("- 未获得独立显示器信息", "");
+  } else {
+    snapshot.displays.forEach((display, index) => {
+      lines.push(`### ${display.label || `显示器 ${index + 1}`}`);
+      lines.push(
+        `- 分辨率：${display.width && display.height ? `${display.width} × ${display.height}` : "未提供"}`
+      );
+      lines.push(`- 刷新率：${display.refreshRate ? `${display.refreshRate} Hz` : "未提供"}`);
+      lines.push(`- 缩放比例：${display.scaleFactor ? `${Math.round(display.scaleFactor * 100)}%` : "未提供"}`);
+      lines.push(`- 所在屏幕：${display.isPrimary ? "主屏幕" : "扩展屏幕"}`, "");
+    });
+  }
 
   return lines.join("\n").trim();
 }
@@ -550,7 +584,13 @@ function buildSectionHtml(
 
 function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
   const systemName =
-    [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+    [
+      formatHardwareInspectorVendorName(
+        snapshot.computerSystem.vendor,
+        snapshot.computerSystem.manufacturer
+      ),
+      snapshot.computerSystem.model
+    ]
       .filter(Boolean)
       .join(" ") || "未知设备";
   const riskDiskCount = snapshot.disks.filter((disk) => isRiskDisk(disk)).length;
@@ -594,7 +634,7 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
         `处理器 ${index + 1}`,
         buildMetricGridHtml([
           { label: "型号", value: formatText(cpu.name) },
-          { label: "厂商", value: formatText(cpu.manufacturer) },
+          { label: "厂商", value: formatHardwareInspectorVendorName(cpu.vendor, cpu.manufacturer) },
           { label: "插槽", value: formatText(cpu.socketDesignation) },
           {
             label: "核心 / 线程",
@@ -623,7 +663,7 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
           { label: "频率", value: formatClock(memory.configuredClockSpeed || memory.speed) },
           { label: "类型", value: formatText(memory.memoryType) },
           { label: "形态", value: formatText(memory.formFactor) },
-          { label: "厂商", value: formatText(memory.manufacturer) },
+          { label: "厂商", value: formatHardwareInspectorVendorName(memory.vendor, memory.manufacturer) },
           { label: "型号", value: formatText(memory.partNumber) }
         ])
       )
@@ -635,7 +675,7 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
       buildCardHtml(
         gpu.name || `显卡 ${index + 1}`,
         buildMetricGridHtml([
-          { label: "厂商", value: formatText(gpu.manufacturer) },
+          { label: "厂商", value: formatHardwareInspectorVendorName(gpu.vendor, gpu.manufacturer) },
           { label: "显存", value: formatGpuMemory(gpu) },
           { label: "显存来源", value: formatGpuMemorySource(gpu) },
           { label: "驱动版本", value: formatText(gpu.driverVersion) },
@@ -757,6 +797,36 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
       );
     })
     .join("");
+
+  const displayHtml = snapshot.displays.length > 0
+    ? snapshot.displays
+        .map((display, index) =>
+          buildCardHtml(
+            display.label || `显示器 ${index + 1}`,
+            buildMetricGridHtml([
+              {
+                label: "分辨率",
+                value:
+                  display.width && display.height
+                    ? `${display.width} × ${display.height}`
+                    : "未提供"
+              },
+              {
+                label: "刷新率",
+                value: display.refreshRate ? `${display.refreshRate} Hz` : "未提供"
+              },
+              {
+                label: "缩放比例",
+                value: display.scaleFactor
+                  ? `${Math.round(display.scaleFactor * 100)}%`
+                  : "未提供"
+              },
+              { label: "所在屏幕", value: display.isPrimary ? "主屏幕" : "扩展屏幕" }
+            ])
+          )
+        )
+        .join("")
+    : '<div class="muted">未获得独立显示器信息</div>';
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -983,6 +1053,7 @@ function buildHardwareReportHtml(snapshot: HardwareInspectorSnapshot): string {
       `共 ${snapshot.disks.length} 块${riskDiskCount > 0 ? ` / 风险 ${riskDiskCount} 块` : ""}`,
       diskHtml
     )}
+    ${buildSectionHtml("显示器", `共 ${snapshot.displays.length} 个`, displayHtml, false)}
   </main>
 </body>
 </html>`;
@@ -1054,9 +1125,18 @@ function matchesAlias(query: string): boolean {
 }
 
 function buildSummaryInfo(snapshot: HardwareInspectorSnapshot): string {
-  const cpu = snapshot.cpus[0]?.name ?? "未知 CPU";
+  const cpuItem = snapshot.cpus[0];
+  const cpu = cpuItem
+    ? `${formatHardwareInspectorVendorName(cpuItem.vendor, cpuItem.manufacturer)} · ${cpuItem.name ?? "未知 CPU"}`
+    : "未知 CPU";
   const board =
-    [snapshot.baseBoard.manufacturer, snapshot.baseBoard.product].filter(Boolean).join(" ") ||
+    [
+      formatHardwareInspectorVendorName(
+        snapshot.baseBoard.vendor,
+        snapshot.baseBoard.manufacturer
+      ),
+      snapshot.baseBoard.product
+    ].filter(Boolean).join(" ") ||
     "未知主板";
   const memoryCount = snapshot.memoryModules.length;
   const gpuCount = snapshot.gpus.length;
@@ -1064,15 +1144,47 @@ function buildSummaryInfo(snapshot: HardwareInspectorSnapshot): string {
   return `${cpu} / ${board} / 内存 ${memoryCount} 条 / 显卡 ${gpuCount} 张 / 磁盘 ${diskCount} 块`;
 }
 
+function collectElectronDisplays(): HardwareInspectorDisplay[] {
+  if (!screen) return [];
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((display) => ({
+    id: String(display.id),
+    label: display.label || null,
+    width: display.size.width,
+    height: display.size.height,
+    refreshRate:
+      typeof display.displayFrequency === "number" && Number.isFinite(display.displayFrequency)
+        ? display.displayFrequency
+        : null,
+    scaleFactor:
+      typeof display.scaleFactor === "number" && Number.isFinite(display.scaleFactor)
+        ? display.scaleFactor
+        : null,
+    isPrimary: display.id === primaryId,
+    internal:
+      typeof (display as typeof display & { internal?: boolean }).internal === "boolean"
+        ? (display as typeof display & { internal: boolean }).internal
+        : null
+  }));
+}
+
 async function executeRefresh(force = true): Promise<ExecuteResult> {
   try {
-    const snapshot = await collectHardwareInspectorSnapshot({ force });
+    const displayProbeStartedAt = Date.now();
+    const displays = collectElectronDisplays();
+    const displayProbeDurationMs = Date.now() - displayProbeStartedAt;
+    const snapshot = await collectHardwareInspectorSnapshot({
+      force,
+      displays,
+      displayProbeDurationMs
+    });
     return {
       ok: true,
       keepOpen: true,
       message: "硬件信息采集完成",
       data: {
         snapshot,
+        diagnostics: snapshot.diagnostics,
         info: buildSummaryInfo(snapshot),
         error: ""
       }
@@ -1080,12 +1192,31 @@ async function executeRefresh(force = true): Promise<ExecuteResult> {
   } catch (error) {
     const message =
         error instanceof Error && error.message ? error.message : "硬件信息采集失败";
+    const diagnostics =
+      error instanceof HardwareInspectorCollectionError ? error.diagnostics : undefined;
+    reportMainErrorLog({
+      scope: "system",
+      level: "error",
+      message: "Hardware Inspector 采集失败",
+      context: "hardware-inspector:refresh",
+      detail: diagnostics
+        ? [
+            `status=${diagnostics.status}`,
+            `durationMs=${diagnostics.totalDurationMs}`,
+            ...diagnostics.probes.map(
+              (probe) =>
+                `${probe.id}:${probe.status}:${probe.durationMs}ms:${probe.source}`
+            )
+          ].join("\n")
+        : `errorType=${error instanceof Error ? error.name : "unknown"}`
+    });
     return {
       ok: false,
       keepOpen: true,
       message,
       data: {
-        error: message
+        error: message,
+        diagnostics
       }
     };
   }

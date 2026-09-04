@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { type HardwareInspectorSnapshot } from "./collector";
+import { formatHardwareInspectorVendorName } from "./vendor-resolver";
 
 function escapeHtml(value: string): string {
   return value
@@ -39,10 +40,19 @@ function formatBytes(value: number | null | undefined): string {
 }
 
 function formatGpuMemory(gpu: HardwareInspectorSnapshot["gpus"][number]): string {
+  if (gpu.memoryKind === "shared-dynamic") {
+    return "共享 / 动态分配";
+  }
+  if (gpu.memoryKind === "unavailable") {
+    return "无法确认";
+  }
   if (gpu.adapterRamSource === "wmi-uint32-limited") {
     return "无法准确读取（旧接口 4 GB 上限）";
   }
-  return formatBytes(gpu.adapterRam);
+  const value = formatBytes(gpu.adapterRam);
+  return gpu.memoryKind === "driver-reported" && value !== "未知"
+    ? `${value}（未验证）`
+    : value;
 }
 
 function formatClock(value: number | null | undefined): string {
@@ -208,7 +218,10 @@ function getPrimaryGpuName(snapshot: HardwareInspectorSnapshot): string {
       !name.includes("virtual")
     );
   });
-  return formatText(discrete?.name ?? snapshot.gpus[0]?.name);
+  const selected = discrete ?? snapshot.gpus[0];
+  return selected
+    ? `${formatHardwareInspectorVendorName(selected.vendor, selected.manufacturer)} · ${formatText(selected.name)}`
+    : "未知";
 }
 
 function getIntegratedGpu(snapshot: HardwareInspectorSnapshot): string {
@@ -219,7 +232,9 @@ function getIntegratedGpu(snapshot: HardwareInspectorSnapshot): string {
       (name.includes("graphics") || name.includes("uhd") || name.includes("hd graphics"))
     );
   });
-  return integrated ? formatText(integrated.name) : "—";
+  return integrated
+    ? `${formatHardwareInspectorVendorName(integrated.vendor, integrated.manufacturer)} · ${formatText(integrated.name)}`
+    : "—";
 }
 
 function getMemorySummary(snapshot: HardwareInspectorSnapshot): string {
@@ -318,6 +333,7 @@ function buildMetricCards(snapshot: HardwareInspectorSnapshot): string {
     },
     { label: "显卡数量", value: String(snapshot.gpus.length), tone: "blue" },
     { label: "磁盘数量", value: String(snapshot.disks.length), tone: "blue" },
+    { label: "显示器", value: String(snapshot.displays.length), tone: "blue" },
     { label: "SATA 设备", value: String(sataCount), tone: sataCount > 0 ? "green" : "gray" },
     { label: "NVMe 设备", value: String(nvmeCount), tone: nvmeCount > 0 ? "green" : "gray" },
     {
@@ -349,10 +365,19 @@ function buildMetricCards(snapshot: HardwareInspectorSnapshot): string {
 
 function buildOverviewRows(snapshot: HardwareInspectorSnapshot): string {
   const board =
-    [snapshot.baseBoard.manufacturer, snapshot.baseBoard.product].filter(Boolean).join(" ") ||
+    [
+      formatHardwareInspectorVendorName(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer),
+      snapshot.baseBoard.product
+    ].filter(Boolean).join(" ") ||
     "未知主板";
   const deviceName =
-    [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+    [
+      formatHardwareInspectorVendorName(
+        snapshot.computerSystem.vendor,
+        snapshot.computerSystem.manufacturer
+      ),
+      snapshot.computerSystem.model
+    ]
       .filter(Boolean)
       .join(" ") || "未知设备";
 
@@ -408,11 +433,11 @@ function buildOverviewRows(snapshot: HardwareInspectorSnapshot): string {
 
 function buildBoardRows(snapshot: HardwareInspectorSnapshot): string {
   const rows: Array<[string, string]> = [
-    ["主板厂商", formatText(snapshot.baseBoard.manufacturer)],
+    ["主板厂商", formatHardwareInspectorVendorName(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer)],
     ["主板型号", formatText(snapshot.baseBoard.product)],
     ["主板版本", formatText(snapshot.baseBoard.version)],
     ["主板序列号", formatOptional(snapshot.baseBoard.serialNumber)],
-    ["BIOS 厂商", formatText(snapshot.bios.manufacturer)],
+    ["BIOS 厂商", formatHardwareInspectorVendorName(snapshot.bios.vendor, snapshot.bios.manufacturer)],
     ["BIOS 版本", formatText(snapshot.bios.smbiosBiosVersion || snapshot.bios.version)],
     ["BIOS 发布日期", formatReportDate(snapshot.bios.releaseDate)],
     ["BIOS 序列号", formatOptional(snapshot.bios.serialNumber)]
@@ -439,7 +464,7 @@ function buildCpuRows(snapshot: HardwareInspectorSnapshot): string {
       (cpu, index) => `
       <tr>
         <td>CPU ${index + 1}</td>
-        <td>${escapeHtml(formatText(cpu.name))}</td>
+        <td>${escapeHtml(`${formatHardwareInspectorVendorName(cpu.vendor, cpu.manufacturer)} · ${formatText(cpu.name)}`)}</td>
         <td>${escapeHtml(formatText(cpu.socketDesignation))}</td>
         <td>${cpu.numberOfCores ?? "?"} / ${cpu.numberOfLogicalProcessors ?? "?"}</td>
         <td>${escapeHtml(formatClock(cpu.maxClockSpeed))}</td>
@@ -461,7 +486,7 @@ function buildGpuRows(snapshot: HardwareInspectorSnapshot): string {
       (gpu, index) => `
       <tr>
         <td>显卡 ${index + 1}</td>
-        <td>${escapeHtml(formatText(gpu.name))}</td>
+        <td>${escapeHtml(`${formatHardwareInspectorVendorName(gpu.vendor, gpu.manufacturer)} · ${formatText(gpu.name)}`)}</td>
         <td>${escapeHtml(formatGpuMemory(gpu))}</td>
         <td>${escapeHtml(formatText(gpu.driverVersion))}</td>
         <td>${escapeHtml(formatReportDate(gpu.driverDate))}</td>
@@ -487,7 +512,7 @@ function buildMemoryRows(snapshot: HardwareInspectorSnapshot): string {
         <td>${escapeHtml(formatClock(module.configuredClockSpeed || module.speed))}</td>
         <td>${escapeHtml(formatText(module.memoryType))}</td>
         <td>${escapeHtml(formatText(module.formFactor))}</td>
-        <td>${escapeHtml(formatText(module.manufacturer))}</td>
+        <td>${escapeHtml(formatHardwareInspectorVendorName(module.vendor, module.manufacturer))}</td>
         <td>${escapeHtml(formatOptional(module.partNumber))}</td>
       </tr>`
     )
@@ -596,7 +621,7 @@ function buildDiskDetailRows(snapshot: HardwareInspectorSnapshot): string {
     .map((disk, index) => `
       <tr>
         <td>${escapeHtml(formatText(disk.model) || `磁盘 ${index + 1}`)}</td>
-        <td>${escapeHtml(formatText(disk.manufacturer))}</td>
+        <td>${escapeHtml(formatHardwareInspectorVendorName(disk.vendor, disk.manufacturer))}</td>
         <td>${escapeHtml(formatText(disk.firmwareVersion || disk.firmwareRevision))}</td>
         <td>${escapeHtml(formatSectorSize(disk.logicalSectorSize))}</td>
         <td>${escapeHtml(formatSectorSize(disk.physicalSectorSize))}</td>
@@ -970,7 +995,10 @@ export function buildHardwareReportImageHtml(
   variant: HardwareReportImageVariant = "full"
 ): string {
   const board =
-    [snapshot.baseBoard.manufacturer, snapshot.baseBoard.product].filter(Boolean).join(" ") ||
+    [
+      formatHardwareInspectorVendorName(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer),
+      snapshot.baseBoard.product
+    ].filter(Boolean).join(" ") ||
     "未知主板";
   const subtitle = [
     board,

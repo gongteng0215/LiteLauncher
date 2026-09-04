@@ -1,5 +1,44 @@
 namespace RendererPanelRuntime {
 
+  export let hardwareInspectorPreviewOpen = false;
+
+  export let hardwareInspectorExpandedSections = new Set<string>([
+    "cpu",
+    "memory",
+    "gpu"
+  ]);
+
+  export let hardwareInspectorExpandedMemoryGroups = new Set<string>();
+
+  export let hardwareInspectorPreviewReturnScrollTop = 0;
+
+  export function formatHardwareInspectorVendor(
+    vendor: HardwareInspectorVendorInfo | null | undefined,
+    fallback?: string | null
+  ): string {
+    return vendor?.displayName?.trim() || fallback?.trim() || "未提供";
+  }
+
+  export function formatHardwareInspectorVendorDetail(
+    vendor: HardwareInspectorVendorInfo | null | undefined,
+    fallback?: string | null
+  ): string {
+    const values = [
+      vendor?.displayName,
+      vendor?.englishName,
+      vendor?.originalName,
+      fallback
+    ]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value));
+    const unique = [...new Set(values)];
+    if (unique.length === 0) {
+      return "未提供";
+    }
+    const sourceSuffix = vendor?.source === "model" ? "（由型号识别）" : "";
+    return `${unique.join(" / ")}${sourceSuffix}`;
+  }
+
   export function formatHardwareInspectorBytes(value: number | null | undefined): string {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
       return "未知";
@@ -18,10 +57,19 @@ namespace RendererPanelRuntime {
   }
 
   export function formatHardwareInspectorGpuMemory(gpu: HardwareInspectorGpu): string {
+    if (gpu.memoryKind === "shared-dynamic") {
+      return "共享 / 动态分配";
+    }
+    if (gpu.memoryKind === "unavailable") {
+      return "无法确认";
+    }
     if (gpu.adapterRamSource === "wmi-uint32-limited") {
       return "无法准确读取（旧接口 4 GB 上限）";
     }
-    return formatHardwareInspectorBytes(gpu.adapterRam);
+    const formatted = formatHardwareInspectorBytes(gpu.adapterRam);
+    return gpu.memoryKind === "driver-reported" && formatted !== "未知"
+      ? `${formatted}（驱动报告，未验证）`
+      : formatted;
   }
 
   export function formatHardwareInspectorGpuMemorySource(gpu: HardwareInspectorGpu): string {
@@ -841,7 +889,7 @@ namespace RendererPanelRuntime {
     hardwareInspectorLastSnapshot = snapshot;
     hardwareInspectorInfo =
       infoText && infoText.trim() ? infoText : buildHardwareInspectorSummaryText(snapshot);
-    if (options?.loadPreview !== false) {
+    if (options?.loadPreview === true) {
       void loadHardwareInspectorPreview(hardwareInspectorRequestToken);
     }
   }
@@ -925,7 +973,7 @@ namespace RendererPanelRuntime {
     title.textContent = "配置预览图";
     const hint = document.createElement("p");
     hint.className = "hardware-inspector-preview-hint";
-    hint.textContent = "与「导出精简图」相同，采集完成后自动生成";
+    hint.textContent = "按需生成紧凑预览；可继续导出紧凑图或完整长图。";
     head.append(title, hint);
 
     const frame = document.createElement("div");
@@ -1001,18 +1049,28 @@ namespace RendererPanelRuntime {
   }
 
   export function buildHardwareInspectorSummaryText(snapshot: HardwareInspectorSnapshot): string {
-    const systemName = [snapshot.computerSystem.manufacturer, snapshot.computerSystem.model]
+    const systemName = [
+      formatHardwareInspectorVendor(snapshot.computerSystem.vendor, snapshot.computerSystem.manufacturer),
+      snapshot.computerSystem.model
+    ]
       .filter(Boolean)
       .join(" ");
-    const cpuName = snapshot.cpus[0]?.name ?? "未知 CPU";
+    const cpu = snapshot.cpus[0];
+    const cpuName = cpu
+      ? `${formatHardwareInspectorVendor(cpu.vendor, cpu.manufacturer)} ${cpu.name ?? "未知 CPU"}`
+      : "未知 CPU";
     const memoryText = formatHardwareInspectorBytes(
       snapshot.computerSystem.totalPhysicalMemory
     );
+    const primaryGpu =
+      snapshot.gpus.find((gpu) => gpu.memoryKind === "dedicated") || snapshot.gpus[0];
     return [
       systemName || "未知设备",
       cpuName,
       `内存 ${memoryText}`,
-      `显卡 ${snapshot.gpus.length} 张`,
+      primaryGpu
+        ? `显卡 ${formatHardwareInspectorVendor(primaryGpu.vendor, primaryGpu.manufacturer)} ${primaryGpu.name ?? "未知型号"} / ${formatHardwareInspectorGpuMemory(primaryGpu)}`
+        : "显卡 未提供",
       `磁盘 ${snapshot.disks.length} 块`
     ].join(" / ");
   }
@@ -1055,8 +1113,7 @@ namespace RendererPanelRuntime {
         snapshot,
         typeof data?.info === "string" ? data.info : ""
       );
-    } else {
-      hardwareInspectorSnapshot = null;
+    } else if (!hardwareInspectorSnapshot) {
       hardwareInspectorInfo = typeof data?.info === "string" ? data.info : "";
     }
 
@@ -1167,7 +1224,7 @@ namespace RendererPanelRuntime {
       hardwareInspectorSnapshot = null;
     }
 
-  export function renderHardwareInspectorPanel(): void {
+  function renderHardwareInspectorPanelLegacy(): void {
       const panelItem = document.createElement("li");
       panelItem.className = "settings-panel-item";
 
@@ -1876,5 +1933,719 @@ namespace RendererPanelRuntime {
         });
       }
     }
+
+  interface HardwareInspectorMemoryGroup {
+    key: string;
+    vendorName: string;
+    modules: HardwareInspectorMemoryModule[];
+    capacity: number | null;
+    type: string;
+    speed: number | null;
+  }
+
+  function groupHardwareInspectorMemory(
+    modules: HardwareInspectorMemoryModule[]
+  ): HardwareInspectorMemoryGroup[] {
+    const groups = new Map<string, HardwareInspectorMemoryGroup>();
+    modules.forEach((memory) => {
+      const vendorName = formatHardwareInspectorVendor(memory.vendor, memory.manufacturer);
+      const capacity = memory.capacity;
+      const type = formatHardwareInspectorText(memory.memoryType);
+      const speed = memory.configuredClockSpeed || memory.speed;
+      const key = [memory.vendor?.id || vendorName, capacity ?? "unknown", type, speed ?? "unknown"]
+        .join("|")
+        .toLowerCase();
+      const existing = groups.get(key);
+      if (existing) {
+        existing.modules.push(memory);
+      } else {
+        groups.set(key, {
+          key,
+          vendorName,
+          modules: [memory],
+          capacity,
+          type,
+          speed
+        });
+      }
+    });
+    return [...groups.values()];
+  }
+
+  function formatHardwareInspectorMemoryGroup(group: HardwareInspectorMemoryGroup): string {
+    const capacity = formatHardwareInspectorBytes(group.capacity);
+    const countAndCapacity =
+      group.modules.length > 1 ? `${group.modules.length}×${capacity}` : capacity;
+    const speed = group.speed ? `${group.speed} MHz` : "频率未提供";
+    return `${group.vendorName} · ${countAndCapacity} · ${group.type}-${speed}`;
+  }
+
+  function createHardwareInspectorAccordion(
+    id: string,
+    titleText: string,
+    descriptionText: string
+  ): { section: HTMLElement; body: HTMLDivElement } {
+    const section = document.createElement("section");
+    section.className = "hardware-inspector-section hardware-inspector-accordion";
+    section.dataset.sectionId = id;
+    const expanded = hardwareInspectorExpandedSections.has(id);
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "hardware-inspector-section-toggle";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    const heading = document.createElement("span");
+    heading.className = "hardware-inspector-section-heading";
+    const title = document.createElement("span");
+    title.className = "hardware-inspector-section-title";
+    title.textContent = titleText;
+    const description = document.createElement("span");
+    description.className = "hardware-inspector-section-description";
+    description.textContent = descriptionText;
+    heading.append(title, description);
+    const chevron = document.createElement("span");
+    chevron.className = "hardware-inspector-section-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = expanded ? "−" : "+";
+    toggle.append(heading, chevron);
+
+    const body = document.createElement("div");
+    body.className = "hardware-inspector-section-body";
+    body.hidden = !expanded;
+    toggle.addEventListener("click", () => {
+      if (hardwareInspectorExpandedSections.has(id)) {
+        hardwareInspectorExpandedSections.delete(id);
+      } else {
+        hardwareInspectorExpandedSections.add(id);
+      }
+      renderList();
+    });
+    section.append(toggle, body);
+    return { section, body };
+  }
+
+  function createHardwareInspectorTechnicalDetails(
+    items: Array<{ label: string; value: string }>,
+    summaryText = "技术详情"
+  ): HTMLDetailsElement {
+    const details = document.createElement("details");
+    details.className = "hardware-inspector-technical-details";
+    const summary = document.createElement("summary");
+    summary.textContent = summaryText;
+    details.append(summary, createHardwareInspectorMetricGrid(items));
+    return details;
+  }
+
+  function createHardwareInspectorOverviewCard(
+    labelText: string,
+    valueText: string,
+    detailText: string,
+    tone?: "success" | "warning" | "danger"
+  ): HTMLDivElement {
+    const card = document.createElement("div");
+    card.className = "hardware-inspector-overview-card";
+    if (tone) {
+      card.dataset.tone = tone;
+    }
+    const label = document.createElement("div");
+    label.className = "hardware-inspector-overview-label";
+    label.textContent = labelText;
+    const value = document.createElement("div");
+    value.className = "hardware-inspector-overview-value";
+    value.textContent = valueText;
+    const detail = document.createElement("div");
+    detail.className = "hardware-inspector-overview-detail";
+    detail.textContent = detailText;
+    card.append(label, value, detail);
+    return card;
+  }
+
+  function createHardwareInspectorSkeleton(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "hardware-inspector-loading-view";
+    const overview = document.createElement("div");
+    overview.className = "hardware-inspector-overview";
+    for (let index = 0; index < 6; index += 1) {
+      const card = document.createElement("div");
+      card.className = "hardware-inspector-overview-card hardware-inspector-skeleton-card";
+      const line = document.createElement("span");
+      line.className = "hardware-inspector-skeleton-line";
+      const lineWide = document.createElement("span");
+      lineWide.className = "hardware-inspector-skeleton-line hardware-inspector-skeleton-line-wide";
+      card.append(line, lineWide);
+      overview.appendChild(card);
+    }
+    const section = document.createElement("div");
+    section.className = "hardware-inspector-skeleton-section";
+    wrap.append(overview, section);
+    return wrap;
+  }
+
+  export function buildHardwareInspectorDiagnosticsText(
+    snapshot: HardwareInspectorSnapshot
+  ): string {
+    const diagnostics = snapshot.diagnostics;
+    const lines = [
+      "LiteLauncher 硬件检测诊断",
+      `应用版本：${appVersion || "未知"}`,
+      `系统：${formatHardwareInspectorText(snapshot.operatingSystem.caption)} ${formatHardwareInspectorText(snapshot.operatingSystem.architecture)}`,
+      `状态：${diagnostics.status}`,
+      `总耗时：${diagnostics.totalDurationMs} ms`,
+      `数量：CPU ${diagnostics.counts.cpus} / 内存 ${diagnostics.counts.memoryModules} / GPU ${diagnostics.counts.gpus} / 磁盘 ${diagnostics.counts.disks} / 显示器 ${diagnostics.counts.displays}`,
+      "",
+      "探测任务："
+    ];
+    diagnostics.probes.forEach((probe) => {
+      lines.push(
+        `- ${probe.label}：${probe.status}，${probe.durationMs} ms，来源 ${probe.source}${probe.detail ? `，${probe.detail}` : ""}`
+      );
+    });
+    if (diagnostics.warnings.length > 0) {
+      lines.push("", "警告：", ...diagnostics.warnings.map((warning) => `- ${warning}`));
+    }
+    return lines.join("\n");
+  }
+
+  async function copyHardwareInspectorDiagnostics(): Promise<void> {
+    if (!hardwareInspectorSnapshot) {
+      setStatus("暂无检测诊断");
+      return;
+    }
+    const ok = await copyTextToClipboard(
+      buildHardwareInspectorDiagnosticsText(hardwareInspectorSnapshot)
+    );
+    setStatus(ok ? "已复制检测诊断" : "复制失败");
+  }
+
+  function closeHardwareInspectorPreview(): void {
+    if (!hardwareInspectorPreviewOpen) {
+      return;
+    }
+    hardwareInspectorPreviewOpen = false;
+    renderList();
+    queueMicrotask(() => {
+      list.scrollTop = hardwareInspectorPreviewReturnScrollTop;
+      const previewButton = list.querySelector<HTMLButtonElement>(
+        '[data-hardware-inspector-open-preview="true"]'
+      );
+      previewButton?.focus();
+    });
+  }
+
+  export function handleHardwareInspectorEscape(): boolean {
+    if (!hardwareInspectorPreviewOpen) {
+      return false;
+    }
+    closeHardwareInspectorPreview();
+    return true;
+  }
+
+  function openHardwareInspectorPreview(): void {
+    if (!hardwareInspectorSnapshot) {
+      setStatus("请先完成硬件检测");
+      return;
+    }
+    hardwareInspectorPreviewReturnScrollTop = list.scrollTop;
+    hardwareInspectorPreviewOpen = true;
+    renderList();
+    queueMicrotask(() => {
+      list.scrollTop = hardwareInspectorPreviewReturnScrollTop;
+    });
+    if (!hardwareInspectorPreviewImageUrl && !hardwareInspectorPreviewLoading) {
+      void loadHardwareInspectorPreview(hardwareInspectorRequestToken);
+    }
+  }
+
+  function createHardwareInspectorPreviewDialog(): HTMLElement | null {
+    if (!hardwareInspectorPreviewOpen) {
+      return null;
+    }
+    const backdrop = document.createElement("div");
+    backdrop.className = "hardware-inspector-modal-backdrop";
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        closeHardwareInspectorPreview();
+      }
+    });
+    const dialog = document.createElement("div");
+    dialog.className = "hardware-inspector-modal";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "硬件报告预览");
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    const head = document.createElement("div");
+    head.className = "hardware-inspector-modal-head";
+    const title = document.createElement("h4");
+    title.textContent = "硬件报告预览";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "settings-btn settings-btn-secondary";
+    close.textContent = "关闭";
+    close.addEventListener("click", closeHardwareInspectorPreview);
+    head.append(title, close);
+    const preview = createHardwareInspectorPreviewPanel();
+    preview.classList.add("hardware-inspector-preview-modal-content");
+    preview.querySelector(".hardware-inspector-preview-head")?.remove();
+    dialog.append(head, preview);
+    backdrop.appendChild(dialog);
+    queueMicrotask(() => close.focus());
+    return backdrop;
+  }
+
+  function renderHardwareInspectorSnapshot(snapshot: HardwareInspectorSnapshot): HTMLElement {
+    const body = document.createElement("div");
+    body.className = "hardware-inspector-body";
+    const main = document.createElement("div");
+    main.className = "hardware-inspector-main";
+    const memoryGroups = groupHardwareInspectorMemory(snapshot.memoryModules);
+    const primaryCpu = snapshot.cpus[0];
+    const primaryGpu = snapshot.gpus.find((gpu) => gpu.memoryKind === "dedicated") || snapshot.gpus[0];
+    const totalStorage = snapshot.disks.reduce(
+      (total, disk) => total + (disk.size && Number.isFinite(disk.size) ? disk.size : 0),
+      0
+    );
+    const riskDiskCount = countHardwareInspectorRiskDisks(snapshot);
+
+    const overview = document.createElement("div");
+    overview.className = "hardware-inspector-overview";
+    overview.append(
+      createHardwareInspectorOverviewCard(
+        "设备",
+        `${formatHardwareInspectorVendor(snapshot.computerSystem.vendor, snapshot.computerSystem.manufacturer)} · ${formatHardwareInspectorText(snapshot.computerSystem.model)}`,
+        formatHardwareInspectorText(snapshot.computerSystem.systemType)
+      ),
+      createHardwareInspectorOverviewCard(
+        "系统",
+        formatHardwareInspectorText(snapshot.operatingSystem.caption),
+        `${formatHardwareInspectorText(snapshot.operatingSystem.architecture)} · Build ${formatHardwareInspectorText(snapshot.operatingSystem.buildNumber)}`
+      ),
+      createHardwareInspectorOverviewCard(
+        "CPU",
+        primaryCpu
+          ? `${formatHardwareInspectorVendor(primaryCpu.vendor, primaryCpu.manufacturer)} · ${formatHardwareInspectorText(primaryCpu.name)}`
+          : "未提供",
+        primaryCpu ? `${primaryCpu.numberOfCores ?? "?"} 核 / ${primaryCpu.numberOfLogicalProcessors ?? "?"} 线程` : "未检测到处理器"
+      ),
+      createHardwareInspectorOverviewCard(
+        "内存",
+        memoryGroups.length === 1
+          ? formatHardwareInspectorMemoryGroup(memoryGroups[0])
+          : `${formatHardwareInspectorBytes(snapshot.computerSystem.totalPhysicalMemory)} · ${memoryGroups.length} 组配置`,
+        `${snapshot.memoryModules.length} 条内存`
+      ),
+      createHardwareInspectorOverviewCard(
+        "显卡",
+        primaryGpu
+          ? `${formatHardwareInspectorVendor(primaryGpu.vendor, primaryGpu.manufacturer)} · ${formatHardwareInspectorText(primaryGpu.name)}`
+          : "未提供",
+        primaryGpu ? formatHardwareInspectorGpuMemory(primaryGpu) : "未检测到显卡"
+      ),
+      createHardwareInspectorOverviewCard(
+        "存储",
+        `${snapshot.disks.length} 块 · ${formatHardwareInspectorBytes(totalStorage)}`,
+        riskDiskCount > 0 ? `${riskDiskCount} 块需要关注` : "未发现健康风险",
+        riskDiskCount > 0 ? "danger" : "success"
+      )
+    );
+    main.appendChild(overview);
+
+    const meta = document.createElement("div");
+    meta.className = "hardware-inspector-meta";
+    meta.append(
+      createHardwareInspectorBadge(`采集 ${formatHardwareInspectorDate(snapshot.collectedAt)}`),
+      createHardwareInspectorBadge(
+        snapshot.diagnostics.status === "success" ? "检测完整" : "部分完成",
+        snapshot.diagnostics.status === "success" ? "success" : "warning"
+      ),
+      createHardwareInspectorBadge(`耗时 ${snapshot.diagnostics.totalDurationMs} ms`)
+    );
+    main.appendChild(meta);
+
+    const cpuSection = createHardwareInspectorAccordion("cpu", "CPU", `${snapshot.cpus.length} 颗处理器`);
+    snapshot.cpus.forEach((cpu) => {
+      const card = createHardwareInspectorCard(
+        `${formatHardwareInspectorVendor(cpu.vendor, cpu.manufacturer)} · ${formatHardwareInspectorText(cpu.name)}`
+      );
+      card.append(
+        createHardwareInspectorTemperatureBadgeRow(cpu.temperatureCelsius, cpu.temperatureSource),
+        createHardwareInspectorMetricGrid([
+          { label: "核心 / 线程", value: `${cpu.numberOfCores ?? "?"} / ${cpu.numberOfLogicalProcessors ?? "?"}` },
+          { label: "最大频率", value: formatHardwareInspectorClockMhz(cpu.maxClockSpeed) },
+          { label: "当前频率", value: formatHardwareInspectorClockMhz(cpu.currentClockSpeed) },
+          { label: "插槽", value: formatHardwareInspectorText(cpu.socketDesignation) },
+          { label: "架构", value: formatHardwareInspectorText(cpu.architecture) },
+          { label: "虚拟化", value: formatHardwareInspectorBoolean(cpu.virtualizationFirmwareEnabled) }
+        ]),
+        createHardwareInspectorTechnicalDetails([
+          { label: "厂商原始值", value: formatHardwareInspectorVendorDetail(cpu.vendor, cpu.manufacturer) },
+          { label: "描述", value: formatHardwareInspectorText(cpu.description) },
+          { label: "Processor ID", value: formatHardwareInspectorText(cpu.processorId) },
+          { label: "数据位宽", value: cpu.dataWidth ? `${cpu.dataWidth} bit` : "未提供" },
+          { label: "SLAT", value: formatHardwareInspectorBoolean(cpu.secondLevelAddressTranslationExtensions) },
+          { label: "温度来源", value: cpu.temperatureSource || "不可用" }
+        ])
+      );
+      cpuSection.body.appendChild(card);
+    });
+    main.appendChild(cpuSection.section);
+
+    const memorySection = createHardwareInspectorAccordion(
+      "memory",
+      "内存",
+      `${snapshot.memoryModules.length} 条 / ${memoryGroups.length} 组`
+    );
+    memoryGroups.forEach((group) => {
+      const card = createHardwareInspectorCard(formatHardwareInspectorMemoryGroup(group));
+      card.appendChild(
+        createHardwareInspectorMetricGrid([
+          { label: "品牌", value: group.vendorName },
+          { label: "数量", value: `${group.modules.length} 条` },
+          { label: "单条容量", value: formatHardwareInspectorBytes(group.capacity) },
+          { label: "类型", value: group.type },
+          { label: "频率", value: formatHardwareInspectorClockMhz(group.speed) }
+        ])
+      );
+      const expanded = hardwareInspectorExpandedMemoryGroups.has(group.key);
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "settings-btn settings-btn-secondary hardware-inspector-memory-toggle";
+      toggle.textContent = expanded ? "收起插槽" : "查看插槽";
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.addEventListener("click", () => {
+        if (expanded) {
+          hardwareInspectorExpandedMemoryGroups.delete(group.key);
+        } else {
+          hardwareInspectorExpandedMemoryGroups.add(group.key);
+        }
+        renderList();
+      });
+      card.appendChild(toggle);
+      if (expanded) {
+        const slots = document.createElement("div");
+        slots.className = "hardware-inspector-memory-slots";
+        group.modules.forEach((memory, index) => {
+          const slot = document.createElement("div");
+          slot.className = "hardware-inspector-memory-slot";
+          const heading = document.createElement("strong");
+          heading.textContent = memory.deviceLocator || memory.bankLabel || `插槽 ${index + 1}`;
+          slot.append(
+            heading,
+            createHardwareInspectorMetricGrid([
+              { label: "容量", value: formatHardwareInspectorBytes(memory.capacity) },
+              { label: "频率", value: formatHardwareInspectorClockMhz(memory.configuredClockSpeed || memory.speed) },
+              { label: "型号", value: formatHardwareInspectorText(memory.partNumber) },
+              { label: "形态", value: formatHardwareInspectorText(memory.formFactor) }
+            ]),
+            createHardwareInspectorTechnicalDetails([
+              { label: "厂商原始值", value: formatHardwareInspectorVendorDetail(memory.vendor, memory.manufacturer) },
+              { label: "序列号", value: formatHardwareInspectorText(memory.serialNumber) },
+              { label: "Bank", value: formatHardwareInspectorText(memory.bankLabel) }
+            ])
+          );
+          slots.appendChild(slot);
+        });
+        card.appendChild(slots);
+      }
+      memorySection.body.appendChild(card);
+    });
+    main.appendChild(memorySection.section);
+
+    const gpuSection = createHardwareInspectorAccordion("gpu", "显卡", `${snapshot.gpus.length} 张`);
+    snapshot.gpus.forEach((gpu) => {
+      const card = createHardwareInspectorCard(
+        `${formatHardwareInspectorVendor(gpu.vendor, gpu.manufacturer)} · ${formatHardwareInspectorText(gpu.name)}`
+      );
+      const memoryTone = gpu.memoryVerified ? "success" : gpu.memoryKind === "unavailable" ? "warning" : "neutral";
+      card.append(
+        createHardwareInspectorBadge(
+          gpu.memoryVerified ? "显存已验证" : gpu.memoryKind === "shared-dynamic" ? "共享显存" : "显存未验证",
+          memoryTone
+        ),
+        createHardwareInspectorMetricGrid([
+          { label: "显存", value: formatHardwareInspectorGpuMemory(gpu) },
+          { label: "视频处理器", value: formatHardwareInspectorText(gpu.videoProcessor) },
+          { label: "驱动版本", value: formatHardwareInspectorText(gpu.driverVersion) },
+          { label: "状态", value: formatHardwareInspectorText(gpu.status) },
+          { label: "温度", value: formatHardwareInspectorTemperature(gpu.temperatureCelsius) }
+        ]),
+        createHardwareInspectorTechnicalDetails([
+          { label: "厂商原始值", value: formatHardwareInspectorVendorDetail(gpu.vendor, gpu.manufacturer) },
+          { label: "显存来源", value: formatHardwareInspectorGpuMemorySource(gpu) },
+          { label: "显存类别", value: gpu.memoryKind },
+          { label: "驱动日期", value: formatHardwareInspectorDate(gpu.driverDate) },
+          { label: "PNP ID", value: formatHardwareInspectorText(gpu.pnpDeviceId) },
+          { label: "温度来源", value: gpu.temperatureSource || "不可用" }
+        ])
+      );
+      gpuSection.body.appendChild(card);
+    });
+    main.appendChild(gpuSection.section);
+
+    const boardSection = createHardwareInspectorAccordion("board", "主板 / BIOS", "技术信息默认收起");
+    const boardCard = createHardwareInspectorCard(
+      `${formatHardwareInspectorVendor(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer)} · ${formatHardwareInspectorText(snapshot.baseBoard.product)}`
+    );
+    boardCard.append(
+      createHardwareInspectorMetricGrid([
+        { label: "主板型号", value: formatHardwareInspectorText(snapshot.baseBoard.product) },
+        { label: "主板版本", value: formatHardwareInspectorText(snapshot.baseBoard.version) },
+        { label: "BIOS 版本", value: formatHardwareInspectorText(snapshot.bios.smbiosBiosVersion || snapshot.bios.version) },
+        { label: "发布日期", value: formatHardwareInspectorDate(snapshot.bios.releaseDate) }
+      ]),
+      createHardwareInspectorTechnicalDetails([
+        { label: "主板厂商原始值", value: formatHardwareInspectorVendorDetail(snapshot.baseBoard.vendor, snapshot.baseBoard.manufacturer) },
+        { label: "BIOS 厂商原始值", value: formatHardwareInspectorVendorDetail(snapshot.bios.vendor, snapshot.bios.manufacturer) },
+        { label: "主板序列号", value: formatHardwareInspectorText(snapshot.baseBoard.serialNumber) },
+        { label: "BIOS 序列号", value: formatHardwareInspectorText(snapshot.bios.serialNumber) }
+      ])
+    );
+    boardSection.body.appendChild(boardCard);
+    main.appendChild(boardSection.section);
+
+    const diskSection = createHardwareInspectorAccordion("storage", "存储", `${snapshot.disks.length} 块磁盘`);
+    snapshot.disks.forEach((disk) => {
+      const card = createHardwareInspectorCard(
+        `${formatHardwareInspectorVendor(disk.vendor, disk.manufacturer)} · ${formatHardwareInspectorText(disk.model)}`
+      );
+      const risk = isHardwareInspectorDiskAtRisk(disk);
+      card.append(
+        createHardwareInspectorBadge(
+          risk ? "需要关注" : formatHardwareInspectorText(disk.healthStatus),
+          risk ? "danger" : "success"
+        ),
+        createHardwareInspectorMetricGrid([
+          { label: "容量", value: formatHardwareInspectorBytes(disk.size) },
+          { label: "类型", value: formatHardwareInspectorText(disk.storageMediaType || disk.mediaType) },
+          { label: "总线", value: formatHardwareInspectorText(disk.busType || disk.interfaceType) },
+          { label: "健康状态", value: formatHardwareInspectorText(disk.healthStatus) },
+          { label: "温度", value: formatHardwareInspectorTemperature(disk.temperatureCelsius) },
+          { label: "分区 / 卷", value: `${disk.partitions.length} / ${countHardwareInspectorDiskVolumes(disk)}` }
+        ]),
+        createHardwareInspectorTechnicalDetails([
+          { label: "厂商原始值", value: formatHardwareInspectorVendorDetail(disk.vendor, disk.manufacturer) },
+          { label: "固件", value: formatHardwareInspectorText(disk.firmwareVersion || disk.firmwareRevision) },
+          { label: "序列号", value: formatHardwareInspectorText(disk.serialNumber) },
+          { label: "PNP ID", value: formatHardwareInspectorText(disk.pnpDeviceId) },
+          { label: "物理扇区", value: formatHardwareInspectorSectorSize(disk.physicalSectorSize) },
+          { label: "通电时长", value: formatHardwareInspectorHours(disk.powerOnHours) }
+        ])
+      );
+      diskSection.body.appendChild(card);
+    });
+    main.appendChild(diskSection.section);
+
+    const displaySection = createHardwareInspectorAccordion("display", "显示器", `${snapshot.displays.length} 个屏幕`);
+    if (snapshot.displays.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "hardware-inspector-empty";
+      empty.textContent = "当前平台未提供独立显示器信息。";
+      displaySection.body.appendChild(empty);
+    }
+    snapshot.displays.forEach((display, index) => {
+      const card = createHardwareInspectorCard(display.label || `显示器 ${index + 1}`);
+      card.appendChild(
+        createHardwareInspectorMetricGrid([
+          { label: "分辨率", value: display.width && display.height ? `${display.width} × ${display.height}` : "未提供" },
+          { label: "刷新率", value: display.refreshRate ? `${display.refreshRate} Hz` : "未提供" },
+          { label: "缩放比例", value: display.scaleFactor ? `${Math.round(display.scaleFactor * 100)}%` : "未提供" },
+          { label: "所在屏幕", value: display.isPrimary ? "主屏幕" : "扩展屏幕" },
+          { label: "内置屏幕", value: formatHardwareInspectorNullableBoolean(display.internal, "是", "否") }
+        ])
+      );
+      displaySection.body.appendChild(card);
+    });
+    main.appendChild(displaySection.section);
+
+    const diagnosticsSection = createHardwareInspectorAccordion(
+      "diagnostics",
+      "检测诊断",
+      `${snapshot.diagnostics.status === "success" ? "全部完成" : "部分完成"} · ${snapshot.diagnostics.totalDurationMs} ms`
+    );
+    const diagnosticsCard = createHardwareInspectorCard("采集任务");
+    addHardwareInspectorCardAction(diagnosticsCard, "复制检测诊断", () => {
+      void copyHardwareInspectorDiagnostics();
+    });
+    const probeList = document.createElement("div");
+    probeList.className = "hardware-inspector-probe-list";
+    snapshot.diagnostics.probes.forEach((probe) => {
+      const row = document.createElement("div");
+      row.className = "hardware-inspector-probe-row";
+      row.dataset.status = probe.status;
+      const name = document.createElement("strong");
+      name.textContent = probe.label;
+      const result = document.createElement("span");
+      result.textContent = `${probe.status} · ${probe.durationMs} ms · ${probe.source}`;
+      row.append(name, result);
+      probeList.appendChild(row);
+    });
+    diagnosticsCard.appendChild(probeList);
+    if (snapshot.diagnostics.warnings.length > 0) {
+      const warnings = document.createElement("ul");
+      warnings.className = "hardware-inspector-warning-list";
+      snapshot.diagnostics.warnings.forEach((warning) => {
+        const item = document.createElement("li");
+        item.textContent = warning;
+        warnings.appendChild(item);
+      });
+      diagnosticsCard.appendChild(warnings);
+    }
+    diagnosticsSection.body.appendChild(diagnosticsCard);
+    main.appendChild(diagnosticsSection.section);
+
+    body.appendChild(main);
+    return body;
+  }
+
+  export function renderHardwareInspectorPanel(): void {
+    const panelItem = document.createElement("li");
+    panelItem.className = "settings-panel-item";
+    const panel = document.createElement("section");
+    panel.className = "settings-panel hardware-inspector-panel";
+    const form = document.createElement("form");
+    form.className = "settings-form hardware-inspector-form hardware-inspector-shell";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void executeHardwareInspectorRefresh();
+    });
+
+    const header = document.createElement("div");
+    header.className = "hardware-inspector-header";
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "hardware-inspector-title-wrap";
+    const title = document.createElement("h3");
+    title.className = "settings-title";
+    title.textContent = activePluginPanel?.title || "硬件检测";
+    const description = document.createElement("p");
+    description.className = "settings-description";
+    description.textContent = "用直观品牌和可靠来源查看电脑硬件，底层原始值收在技术详情中。";
+    titleWrap.append(title, description);
+
+    const actions = document.createElement("div");
+    actions.className = "hardware-inspector-actions";
+    const refreshButton = document.createElement("button");
+    refreshButton.type = "button";
+    refreshButton.className = "settings-btn settings-btn-primary";
+    refreshButton.textContent = hardwareInspectorLoading ? "刷新中..." : "刷新";
+    refreshButton.disabled = hardwareInspectorLoading || hardwareInspectorExporting;
+    refreshButton.addEventListener("click", () => void executeHardwareInspectorRefresh());
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "settings-btn settings-btn-secondary";
+    copyButton.textContent = "复制摘要";
+    copyButton.disabled = !hardwareInspectorSnapshot;
+    copyButton.addEventListener("click", () => {
+      if (!hardwareInspectorSnapshot) {
+        setStatus("暂无可复制的硬件信息");
+        return;
+      }
+      void copyTextToClipboard(buildHardwareInspectorSummaryText(hardwareInspectorSnapshot)).then((ok) => {
+        setStatus(ok ? "已复制硬件摘要" : "复制失败");
+      });
+    });
+    const more = document.createElement("details");
+    more.className = "hardware-inspector-more";
+    const moreSummary = document.createElement("summary");
+    moreSummary.className = "settings-btn settings-btn-secondary";
+    moreSummary.textContent = "更多";
+    const menu = document.createElement("div");
+    menu.className = "hardware-inspector-more-menu";
+    const menuActions: Array<{ label: string; action: () => void; sensitive?: boolean; preview?: boolean }> = [
+      { label: "报告预览", action: openHardwareInspectorPreview, preview: true },
+      { label: "导出 Markdown", action: () => void executeHardwareInspectorExportReport("markdown") },
+      { label: "导出 HTML", action: () => void executeHardwareInspectorExportReport("html") },
+      { label: "导出紧凑图", action: () => void executeHardwareInspectorExportReport("image-compact") },
+      { label: "导出完整长图", action: () => void executeHardwareInspectorExportReport("image") },
+      { label: "复制检测诊断", action: () => void copyHardwareInspectorDiagnostics() },
+      {
+        label: "复制完整 JSON（含设备标识）",
+        action: () => {
+          if (!hardwareInspectorSnapshot) return;
+          void copyTextToClipboard(JSON.stringify(hardwareInspectorSnapshot, null, 2)).then((ok) => {
+            setStatus(ok ? "已复制完整硬件 JSON" : "复制失败");
+          });
+        },
+        sensitive: true
+      }
+    ];
+    menuActions.forEach((entry) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "hardware-inspector-menu-item";
+      button.textContent = entry.label;
+      if (entry.preview) button.dataset.hardwareInspectorOpenPreview = "true";
+      button.disabled = !hardwareInspectorSnapshot || hardwareInspectorExporting;
+      if (entry.sensitive) button.dataset.sensitive = "true";
+      button.addEventListener("click", entry.action);
+      menu.appendChild(button);
+    });
+    more.append(moreSummary, menu);
+    actions.append(refreshButton, copyButton, more);
+    header.append(titleWrap, actions);
+    form.appendChild(header);
+
+    const status = document.createElement("div");
+    status.className = "hardware-inspector-status";
+    status.dataset.state = hardwareInspectorError
+      ? "error"
+      : hardwareInspectorLoading || hardwareInspectorExporting
+        ? "loading"
+        : hardwareInspectorSnapshot
+          ? "ok"
+          : "idle";
+    status.textContent = hardwareInspectorError
+      ? hardwareInspectorSnapshot
+        ? `刷新失败，继续显示上次结果：${hardwareInspectorError}`
+        : hardwareInspectorError
+      : hardwareInspectorLoading
+        ? hardwareInspectorSnapshot
+          ? "正在刷新，当前仍显示上次结果..."
+          : "正在采集硬件信息..."
+        : hardwareInspectorExporting
+          ? "正在生成硬件报告..."
+          : hardwareInspectorInfo || "打开面板后会自动采集一次硬件信息";
+    form.appendChild(status);
+
+    if (hardwareInspectorSnapshot) {
+      form.appendChild(renderHardwareInspectorSnapshot(hardwareInspectorSnapshot));
+    } else if (hardwareInspectorLoading) {
+      form.appendChild(createHardwareInspectorSkeleton());
+    }
+
+    panel.appendChild(form);
+    panelItem.appendChild(panel);
+    list.appendChild(panelItem);
+    const modal = createHardwareInspectorPreviewDialog();
+    if (modal) {
+      panelItem.appendChild(modal);
+    }
+
+    if (!hardwareInspectorSnapshot && !hardwareInspectorLoading && !hardwareInspectorError) {
+      queueMicrotask(() => {
+        if (mode === "plugin" && activePluginPanel?.pluginId === HARDWARE_INSPECTOR_PLUGIN_ID) {
+          void executeHardwareInspectorRefresh();
+        }
+      });
+    }
+  }
 
 }

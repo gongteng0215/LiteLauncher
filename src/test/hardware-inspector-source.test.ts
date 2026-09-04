@@ -42,12 +42,12 @@ test("hardware inspector collector uses cache and fast scan defaults", () => {
   );
   assert.match(
     collectorSource,
-    /collectHardwareInspectorSnapshot\([\s\S]*options: \{ force\?: boolean \}/,
+    /collectHardwareInspectorSnapshot\([\s\S]*force\?: boolean;[\s\S]*displays\?: HardwareInspectorDisplay\[\];[\s\S]*displayProbeDurationMs\?: number;/,
     "hardware inspector collection should support bypassing the cache on manual refresh"
   );
   assert.match(
     collectorSource,
-    /timeout: COLLECTION_TIMEOUT_MS/,
+    /const COLLECTION_TIMEOUT_MS = 30_000;[\s\S]*timeout: COLLECTION_TIMEOUT_MS/,
     "hardware inspector collection should fail fast instead of hanging forever"
   );
   assert.doesNotMatch(
@@ -97,7 +97,7 @@ test("hardware inspector plugin reuses cached snapshots on open and export", () 
   );
   assert.match(
     pluginSource,
-    /async function executeRefresh\(force = true\)[\s\S]*collectHardwareInspectorSnapshot\(\{ force \}\)/,
+    /async function executeRefresh\(force = true\)[\s\S]*const displays = collectElectronDisplays\(\);[\s\S]*collectHardwareInspectorSnapshot\(\{[\s\S]*force,[\s\S]*displays,/,
     "manual refresh should bypass the cached snapshot"
   );
   assert.match(
@@ -162,13 +162,23 @@ test("hardware inspector plugin reuses cached snapshots on open and export", () 
   );
   assert.match(
     panelSource,
-    /hardware-inspector-preview/,
-    "hardware inspector panel should render a right-side preview column"
+    /hardware-inspector-modal-backdrop/,
+    "hardware inspector panel should render report preview on demand in a modal"
   );
   assert.match(
     panelSource,
-    /loadHardwareInspectorPreview/,
-    "hardware inspector panel should load preview images after snapshot collection"
+    /if \(!hardwareInspectorPreviewImageUrl && !hardwareInspectorPreviewLoading\)[\s\S]*loadHardwareInspectorPreview/,
+    "hardware inspector panel should only load preview images when the modal is opened"
+  );
+  assert.match(
+    panelSource,
+    /groupHardwareInspectorMemory/,
+    "hardware inspector should aggregate matching memory modules before rendering slots"
+  );
+  assert.match(
+    panelSource,
+    /buildHardwareInspectorDiagnosticsText/,
+    "hardware inspector should expose anonymous copyable collection diagnostics"
   );
   assert.match(
     panelSource,

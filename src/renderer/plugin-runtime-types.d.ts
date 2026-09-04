@@ -287,6 +287,15 @@ interface HardwareInspectorVolume {
   driveType: number | null;
 }
 
+interface HardwareInspectorVendorInfo {
+  id: string | null;
+  displayName: string | null;
+  englishName: string | null;
+  originalName: string | null;
+  source: "manufacturer" | "pnp-id" | "model" | "unknown";
+  confidence: "exact" | "alias" | "inferred" | "unknown";
+}
+
 interface HardwareInspectorPartition {
   index: number | null;
   name: string | null;
@@ -302,6 +311,7 @@ interface HardwareInspectorDisk {
   deviceId: string | null;
   model: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   serialNumber: string | null;
   interfaceType: string | null;
   mediaType: string | null;
@@ -333,6 +343,7 @@ interface HardwareInspectorDisk {
 interface HardwareInspectorGpu {
   name: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   adapterRam: number | null;
   adapterRamSource:
     | "registry-qword"
@@ -340,6 +351,9 @@ interface HardwareInspectorGpu {
     | "wmi-uint32"
     | "wmi-uint32-limited"
     | null;
+  memoryKind: "dedicated" | "shared-dynamic" | "driver-reported" | "unavailable";
+  memoryVerified: boolean;
+  sharedMemoryBytes: number | null;
   driverVersion: string | null;
   driverDate: string | null;
   videoProcessor: string | null;
@@ -356,6 +370,7 @@ interface HardwareInspectorMemoryModule {
   bankLabel: string | null;
   deviceLocator: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   partNumber: string | null;
   serialNumber: string | null;
   capacity: number | null;
@@ -368,6 +383,7 @@ interface HardwareInspectorMemoryModule {
 interface HardwareInspectorCpu {
   name: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   description: string | null;
   numberOfCores: number | null;
   numberOfLogicalProcessors: number | null;
@@ -390,6 +406,7 @@ interface HardwareInspectorSnapshot {
   computerSystem: {
     name: string | null;
     manufacturer: string | null;
+    vendor: HardwareInspectorVendorInfo;
     model: string | null;
     systemType: string | null;
     totalPhysicalMemory: number | null;
@@ -405,12 +422,14 @@ interface HardwareInspectorSnapshot {
   cpus: HardwareInspectorCpu[];
   baseBoard: {
     manufacturer: string | null;
+    vendor: HardwareInspectorVendorInfo;
     product: string | null;
     version: string | null;
     serialNumber: string | null;
   };
   bios: {
     manufacturer: string | null;
+    vendor: HardwareInspectorVendorInfo;
     smbiosBiosVersion: string | null;
     version: string | null;
     releaseDate: string | null;
@@ -419,6 +438,42 @@ interface HardwareInspectorSnapshot {
   memoryModules: HardwareInspectorMemoryModule[];
   gpus: HardwareInspectorGpu[];
   disks: HardwareInspectorDisk[];
+  displays: HardwareInspectorDisplay[];
+  diagnostics: HardwareInspectorDiagnostics;
+}
+
+interface HardwareInspectorDisplay {
+  id: string;
+  label: string | null;
+  width: number | null;
+  height: number | null;
+  refreshRate: number | null;
+  scaleFactor: number | null;
+  isPrimary: boolean;
+  internal: boolean | null;
+}
+
+interface HardwareInspectorProbeDiagnostic {
+  id: "core-cim" | "gpu-memory" | "storage-health" | "display" | "temperature";
+  label: string;
+  status: "success" | "degraded" | "timeout" | "failed";
+  durationMs: number;
+  source: string;
+  detail: string | null;
+}
+
+interface HardwareInspectorDiagnostics {
+  status: "success" | "partial" | "failed";
+  totalDurationMs: number;
+  probes: HardwareInspectorProbeDiagnostic[];
+  warnings: string[];
+  counts: {
+    cpus: number;
+    memoryModules: number;
+    gpus: number;
+    disks: number;
+    displays: number;
+  };
 }
 
 interface HardwareInspectorDiffState {

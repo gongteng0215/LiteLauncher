@@ -4,10 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  resolveHardwareInspectorVendor,
+  type HardwareInspectorVendorInfo
+} from "./vendor-resolver";
+
 const execFileAsync = promisify(execFile);
 
 const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
-const COLLECTION_TIMEOUT_MS = 90_000;
+const COLLECTION_TIMEOUT_MS = 30_000;
 const SNAPSHOT_CACHE_TTL_MS = 60_000;
 
 let cachedSnapshot: HardwareInspectorSnapshot | null = null;
@@ -29,6 +34,7 @@ export function clearHardwareInspectorSnapshotCache(): void {
 export interface HardwareInspectorComputerSystem {
   name: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   model: string | null;
   systemType: string | null;
   totalPhysicalMemory: number | null;
@@ -46,6 +52,7 @@ export interface HardwareInspectorOperatingSystem {
 export interface HardwareInspectorCpu {
   name: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   description: string | null;
   numberOfCores: number | null;
   numberOfLogicalProcessors: number | null;
@@ -65,6 +72,7 @@ export interface HardwareInspectorCpu {
 
 export interface HardwareInspectorBaseBoard {
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   product: string | null;
   version: string | null;
   serialNumber: string | null;
@@ -72,6 +80,7 @@ export interface HardwareInspectorBaseBoard {
 
 export interface HardwareInspectorBios {
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   smbiosBiosVersion: string | null;
   version: string | null;
   releaseDate: string | null;
@@ -82,6 +91,7 @@ export interface HardwareInspectorMemoryModule {
   bankLabel: string | null;
   deviceLocator: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   partNumber: string | null;
   serialNumber: string | null;
   capacity: number | null;
@@ -94,8 +104,12 @@ export interface HardwareInspectorMemoryModule {
 export interface HardwareInspectorGpu {
   name: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   adapterRam: number | null;
   adapterRamSource: HardwareInspectorGpuMemorySource;
+  memoryKind: HardwareInspectorGpuMemoryKind;
+  memoryVerified: boolean;
+  sharedMemoryBytes: number | null;
   driverVersion: string | null;
   driverDate: string | null;
   videoProcessor: string | null;
@@ -114,6 +128,12 @@ export type HardwareInspectorGpuMemorySource =
   | "wmi-uint32"
   | "wmi-uint32-limited"
   | null;
+
+export type HardwareInspectorGpuMemoryKind =
+  | "dedicated"
+  | "shared-dynamic"
+  | "driver-reported"
+  | "unavailable";
 
 export interface HardwareInspectorGpuMemory {
   adapterRam: number | null;
@@ -144,6 +164,7 @@ export interface HardwareInspectorDisk {
   deviceId: string | null;
   model: string | null;
   manufacturer: string | null;
+  vendor: HardwareInspectorVendorInfo;
   serialNumber: string | null;
   interfaceType: string | null;
   mediaType: string | null;
@@ -172,6 +193,42 @@ export interface HardwareInspectorDisk {
   partitions: HardwareInspectorPartition[];
 }
 
+export interface HardwareInspectorDisplay {
+  id: string;
+  label: string | null;
+  width: number | null;
+  height: number | null;
+  refreshRate: number | null;
+  scaleFactor: number | null;
+  isPrimary: boolean;
+  internal: boolean | null;
+}
+
+export type HardwareInspectorProbeStatus = "success" | "degraded" | "timeout" | "failed";
+
+export interface HardwareInspectorProbeDiagnostic {
+  id: "core-cim" | "gpu-memory" | "storage-health" | "display" | "temperature";
+  label: string;
+  status: HardwareInspectorProbeStatus;
+  durationMs: number;
+  source: string;
+  detail: string | null;
+}
+
+export interface HardwareInspectorDiagnostics {
+  status: "success" | "partial" | "failed";
+  totalDurationMs: number;
+  probes: HardwareInspectorProbeDiagnostic[];
+  warnings: string[];
+  counts: {
+    cpus: number;
+    memoryModules: number;
+    gpus: number;
+    disks: number;
+    displays: number;
+  };
+}
+
 export interface HardwareInspectorSnapshot {
   collectedAt: string;
   computerSystem: HardwareInspectorComputerSystem;
@@ -182,6 +239,174 @@ export interface HardwareInspectorSnapshot {
   memoryModules: HardwareInspectorMemoryModule[];
   gpus: HardwareInspectorGpu[];
   disks: HardwareInspectorDisk[];
+  displays: HardwareInspectorDisplay[];
+  diagnostics: HardwareInspectorDiagnostics;
+}
+
+export class HardwareInspectorCollectionError extends Error {
+  constructor(
+    message: string,
+    public readonly diagnostics: HardwareInspectorDiagnostics
+  ) {
+    super(message);
+    this.name = "HardwareInspectorCollectionError";
+  }
+}
+
+function normalizeDisplays(
+  displays: HardwareInspectorDisplay[] | undefined
+): HardwareInspectorDisplay[] {
+  if (!Array.isArray(displays)) return [];
+  return displays.map((display, index) => ({
+    id: String(display.id || `display-${index}`),
+    label: cleanText(display.label),
+    width: toNullableNumber(display.width),
+    height: toNullableNumber(display.height),
+    refreshRate: toNullableNumber(display.refreshRate),
+    scaleFactor: toNullableNumber(display.scaleFactor),
+    isPrimary: display.isPrimary === true,
+    internal: toNullableBoolean(display.internal)
+  }));
+}
+
+function createHardwareInspectorDiagnostics(
+  snapshot: HardwareInspectorSnapshot,
+  totalDurationMs: number,
+  probeTimings: {
+    coreCimMs: number;
+    gpuMemoryMs: number;
+    storageHealthMs: number;
+    temperatureMs: number;
+    displayMs: number;
+  }
+): HardwareInspectorDiagnostics {
+  const warnings: string[] = [];
+  const verifiedGpuMemoryCount = snapshot.gpus.filter((gpu) => gpu.memoryVerified).length;
+  const readableTemperatureCount = [
+    ...snapshot.cpus.map((cpu) => cpu.temperatureCelsius),
+    ...snapshot.gpus.map((gpu) => gpu.temperatureCelsius),
+    ...snapshot.disks.map((disk) => disk.temperatureCelsius)
+  ].filter((value) => typeof value === "number" && Number.isFinite(value)).length;
+
+  if (snapshot.gpus.length === 0) {
+    warnings.push("显卡探测未返回设备");
+  } else if (verifiedGpuMemoryCount === 0) {
+    warnings.push("显卡容量未获得可验证的 64 位驱动数据");
+  }
+  if (snapshot.disks.length === 0) {
+    warnings.push("存储探测未返回设备");
+  }
+  if (snapshot.displays.length === 0) {
+    warnings.push("未获得 Electron 显示器信息");
+  }
+  if (readableTemperatureCount === 0) {
+    warnings.push("可选温度传感器不可用");
+  }
+
+  const probes: HardwareInspectorProbeDiagnostic[] = [
+    {
+      id: "core-cim",
+      label: "Windows CIM / SMBIOS",
+      status: "success",
+      durationMs: probeTimings.coreCimMs,
+      source: "Windows CIM / SMBIOS",
+      detail: null
+    },
+    {
+      id: "gpu-memory",
+      label: "显卡与显存",
+      status:
+        snapshot.gpus.length === 0
+          ? "degraded"
+          : verifiedGpuMemoryCount > 0
+            ? "success"
+            : "degraded",
+      durationMs: probeTimings.gpuMemoryMs,
+      source: Array.from(
+        new Set(
+          snapshot.gpus
+            .map((gpu) => gpu.adapterRamSource)
+            .filter((value): value is Exclude<HardwareInspectorGpuMemorySource, null> => Boolean(value))
+        )
+      ).join(" + ") || "Windows WMI",
+      detail:
+        verifiedGpuMemoryCount > 0
+          ? `${verifiedGpuMemoryCount} 张显卡容量已验证`
+          : "未获得可验证的独立显存容量"
+    },
+    {
+      id: "storage-health",
+      label: "存储与健康状态",
+      status: snapshot.disks.length > 0 ? "success" : "degraded",
+      durationMs: probeTimings.storageHealthMs,
+      source: "Win32_DiskDrive / MSFT_PhysicalDisk / SMART",
+      detail: snapshot.disks.length > 0 ? `检测到 ${snapshot.disks.length} 块磁盘` : "未检测到磁盘"
+    },
+    {
+      id: "display",
+      label: "显示器",
+      status: snapshot.displays.length > 0 ? "success" : "degraded",
+      durationMs: probeTimings.displayMs,
+      source: "Electron screen",
+      detail:
+        snapshot.displays.length > 0
+          ? `检测到 ${snapshot.displays.length} 个显示器`
+          : "未获得显示器信息"
+    },
+    {
+      id: "temperature",
+      label: "可选温度",
+      status: readableTemperatureCount > 0 ? "success" : "degraded",
+      durationMs: probeTimings.temperatureMs,
+      source: "ACPI / Windows hardware monitor",
+      detail:
+        readableTemperatureCount > 0
+          ? `读取到 ${readableTemperatureCount} 个温度值`
+          : "系统没有提供可读温度源"
+    }
+  ];
+
+  return {
+    status: warnings.length > 0 ? "partial" : "success",
+    totalDurationMs: Math.max(0, Math.round(totalDurationMs)),
+    probes,
+    warnings,
+    counts: {
+      cpus: snapshot.cpus.length,
+      memoryModules: snapshot.memoryModules.length,
+      gpus: snapshot.gpus.length,
+      disks: snapshot.disks.length,
+      displays: snapshot.displays.length
+    }
+  };
+}
+
+function createFailedDiagnostics(
+  durationMs: number,
+  timedOut: boolean
+): HardwareInspectorDiagnostics {
+  return {
+    status: "failed",
+    totalDurationMs: Math.max(0, Math.round(durationMs)),
+    probes: [
+      {
+        id: "core-cim",
+        label: "Windows CIM / SMBIOS",
+        status: timedOut ? "timeout" : "failed",
+        durationMs: Math.max(0, Math.round(durationMs)),
+        source: "Windows CIM / SMBIOS",
+        detail: timedOut ? "整体采集超过 30 秒" : "核心探测未返回有效数据"
+      }
+    ],
+    warnings: [],
+    counts: {
+      cpus: 0,
+      memoryModules: 0,
+      gpus: 0,
+      disks: 0,
+      displays: 0
+    }
+  };
 }
 
 const POWERSHELL_SCRIPT = String.raw`
@@ -189,6 +414,9 @@ $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Console]::OutputEncoding
+$coreProbeStartedAt = Get-Date
+$coreProbeTimeoutSeconds = 15
+$optionalProbeTimeoutSeconds = 6
 
 function Get-SafeAssociatedInstances {
   param(
@@ -199,7 +427,7 @@ function Get-SafeAssociatedInstances {
   )
 
   try {
-    return @(Get-CimAssociatedInstance -InputObject $InputObject -Association $Association -ErrorAction Stop)
+    return @(Get-CimAssociatedInstance -InputObject $InputObject -Association $Association -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop)
   } catch {
     return @()
   }
@@ -369,35 +597,37 @@ function Find-MonitorTemperatureSensor {
     Select-Object -First 1).Sensor
 }
 
-$computerSystem = Get-CimInstance Win32_ComputerSystem |
+$computerSystem = Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object Name, Manufacturer, Model, SystemType, TotalPhysicalMemory
 
-$operatingSystem = Get-CimInstance Win32_OperatingSystem |
+$operatingSystem = Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object Caption, Version, BuildNumber, OSArchitecture, LastBootUpTime, InstallDate
 
-$baseBoard = Get-CimInstance Win32_BaseBoard |
+$baseBoard = Get-CimInstance Win32_BaseBoard -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object Manufacturer, Product, Version, SerialNumber
 
-$bios = Get-CimInstance Win32_BIOS |
+$bios = Get-CimInstance Win32_BIOS -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object Manufacturer, SMBIOSBIOSVersion, Version, ReleaseDate, SerialNumber
 
-$memoryModules = @(Get-CimInstance Win32_PhysicalMemory |
+$memoryModules = @(Get-CimInstance Win32_PhysicalMemory -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object BankLabel, DeviceLocator, Manufacturer, PartNumber, SerialNumber,
     Capacity, Speed, ConfiguredClockSpeed, FormFactor, SMBIOSMemoryType)
 
+$temperatureProbeStartedAt = Get-Date
 $monitorTemperatureSensors = @()
 # Fast scan: skip LibreHardwareMonitor/OpenHardwareMonitor namespace probes.
 # They can block for seconds when the provider is missing or slow to respond.
 
 try {
-  $acpiTemperatureZones = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop |
+  $acpiTemperatureZones = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSAcpi_ThermalZoneTemperature -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop |
     Select-Object InstanceName, CurrentTemperature)
 } catch {
   $acpiTemperatureZones = @()
 }
+$temperatureProbeDurationMs = [math]::Max(0, [int]((Get-Date) - $temperatureProbeStartedAt).TotalMilliseconds)
 
 $cpus = @()
-foreach ($cpu in @(Get-CimInstance Win32_Processor |
+foreach ($cpu in @(Get-CimInstance Win32_Processor -OperationTimeoutSec $coreProbeTimeoutSeconds |
   Select-Object Name, Manufacturer, Description, NumberOfCores, NumberOfLogicalProcessors,
     MaxClockSpeed, CurrentClockSpeed, SocketDesignation, AddressWidth, DataWidth,
     ProcessorId, Architecture, VirtualizationFirmwareEnabled,
@@ -444,6 +674,9 @@ foreach ($cpu in @(Get-CimInstance Win32_Processor |
   }
 }
 
+$coreProbeDurationMs = [math]::Max(0, [int]((Get-Date) - $coreProbeStartedAt).TotalMilliseconds)
+$gpuProbeStartedAt = Get-Date
+
 $gpuMemoryByPciId = @{}
 try {
   foreach ($videoKey in @(Get-ChildItem -Path 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Video' -Recurse -ErrorAction Stop |
@@ -486,10 +719,15 @@ try {
 }
 
 $gpus = @()
-foreach ($gpu in @(Get-CimInstance Win32_VideoController |
-  Select-Object Name, AdapterCompatibility, AdapterRAM, DriverVersion, DriverDate,
-    VideoProcessor, CurrentHorizontalResolution, CurrentVerticalResolution,
-    CurrentRefreshRate, Status, PNPDeviceID)) {
+try {
+  $gpuControllers = @(Get-CimInstance Win32_VideoController -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop |
+    Select-Object Name, AdapterCompatibility, AdapterRAM, DriverVersion, DriverDate,
+      VideoProcessor, CurrentHorizontalResolution, CurrentVerticalResolution,
+      CurrentRefreshRate, Status, PNPDeviceID)
+} catch {
+  $gpuControllers = @()
+}
+foreach ($gpu in $gpuControllers) {
   $gpuNeedles = @('GPU', 'GRAPHICS', 'HOTSPOT', 'EDGE') +
     @(Get-MatchKeywords $gpu.Name) +
     @(Get-MatchKeywords $gpu.AdapterCompatibility) +
@@ -530,8 +768,11 @@ foreach ($gpu in @(Get-CimInstance Win32_VideoController |
   }
 }
 
+$gpuProbeDurationMs = [math]::Max(0, [int]((Get-Date) - $gpuProbeStartedAt).TotalMilliseconds)
+$storageProbeStartedAt = Get-Date
+
 try {
-  $physicalDisks = @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_PhysicalDisk -ErrorAction Stop |
+  $physicalDisks = @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_PhysicalDisk -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop |
     Select-Object FriendlyName, SerialNumber, MediaType, BusType, Size, HealthStatus,
       OperationalStatus, SlotNumber, EnclosureNumber, FirmwareVersion, SpindleSpeed,
       LogicalSectorSize, PhysicalSectorSize, Usage, CanPool)
@@ -540,7 +781,7 @@ try {
 }
 
 try {
-  $smartStatuses = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction Stop |
+  $smartStatuses = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSStorageDriver_FailurePredictStatus -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop |
     Select-Object InstanceName, PredictFailure, Reason)
 } catch {
   $smartStatuses = @()
@@ -551,7 +792,12 @@ try {
 $reliabilityCounters = @()
 
 $disks = @()
-foreach ($disk in @(Get-CimInstance Win32_DiskDrive | Sort-Object Index)) {
+try {
+  $diskDrives = @(Get-CimInstance Win32_DiskDrive -OperationTimeoutSec $optionalProbeTimeoutSeconds -ErrorAction Stop | Sort-Object Index)
+} catch {
+  $diskDrives = @()
+}
+foreach ($disk in $diskDrives) {
   $partitionItems = @()
   foreach ($partition in @(Get-SafeAssociatedInstances -InputObject $disk -Association 'Win32_DiskDriveToDiskPartition' | Sort-Object Index)) {
     $volumeItems = @()
@@ -654,6 +900,8 @@ foreach ($disk in @(Get-CimInstance Win32_DiskDrive | Sort-Object Index)) {
   }
 }
 
+$storageProbeDurationMs = [math]::Max(0, [int]((Get-Date) - $storageProbeStartedAt).TotalMilliseconds)
+
 $json = [pscustomobject]@{
   collectedAt = (Get-Date).ToString('o')
   computerSystem = $computerSystem
@@ -664,6 +912,12 @@ $json = [pscustomobject]@{
   memoryModules = $memoryModules
   gpus = $gpus
   disks = $disks
+  probeTimings = [pscustomobject]@{
+    coreCimMs = $coreProbeDurationMs
+    gpuMemoryMs = $gpuProbeDurationMs
+    storageHealthMs = $storageProbeDurationMs
+    temperatureMs = $temperatureProbeDurationMs
+  }
 } | ConvertTo-Json -Depth 8 -Compress
 
 [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
@@ -960,6 +1214,50 @@ export function normalizeHardwareInspectorGpuMemory(
   return { adapterRam: legacy, adapterRamSource: "wmi-uint32" };
 }
 
+export function classifyHardwareInspectorGpuMemory(
+  gpuName: string | null,
+  vendor: HardwareInspectorVendorInfo,
+  memory: HardwareInspectorGpuMemory
+): Pick<
+  HardwareInspectorGpu,
+  "memoryKind" | "memoryVerified" | "sharedMemoryBytes"
+> {
+  if (memory.adapterRamSource === "registry-qword" || memory.adapterRamSource === "nvidia-smi") {
+    return {
+      memoryKind: "dedicated",
+      memoryVerified: true,
+      sharedMemoryBytes: null
+    };
+  }
+
+  const normalizedName = String(gpuName ?? "").toLowerCase();
+  const looksIntegrated =
+    vendor.id === "intel" ||
+    /\b(uhd|iris|integrated)\b/.test(normalizedName) ||
+    (vendor.id === "amd" && /\bradeon(?:\s+tm)?\s+graphics\b/.test(normalizedName));
+  if (looksIntegrated) {
+    return {
+      memoryKind: "shared-dynamic",
+      memoryVerified: false,
+      sharedMemoryBytes: null
+    };
+  }
+
+  if (memory.adapterRamSource === "wmi-uint32" && memory.adapterRam !== null) {
+    return {
+      memoryKind: "driver-reported",
+      memoryVerified: false,
+      sharedMemoryBytes: null
+    };
+  }
+
+  return {
+    memoryKind: "unavailable",
+    memoryVerified: false,
+    sharedMemoryBytes: null
+  };
+}
+
 function normalizeWearPercentage(value: unknown): number | null {
   const raw = toNullableNumber(value);
   if (raw === null || raw < 0 || raw > 100) {
@@ -980,6 +1278,11 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
     computerSystem: {
       name: cleanText(computerSystem.Name),
       manufacturer: cleanText(computerSystem.Manufacturer),
+      vendor: resolveHardwareInspectorVendor({
+        component: "system",
+        manufacturer: cleanText(computerSystem.Manufacturer),
+        model: cleanText(computerSystem.Model)
+      }),
       model: cleanText(computerSystem.Model),
       systemType: cleanText(computerSystem.SystemType),
       totalPhysicalMemory: toNullableNumber(computerSystem.TotalPhysicalMemory)
@@ -992,63 +1295,99 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
       lastBootUpTime: cleanText(operatingSystem.LastBootUpTime),
       installDate: cleanText(operatingSystem.InstallDate)
     },
-    cpus: toRecordList(raw.cpus).map((item) => ({
-      name: cleanText(item.Name),
-      manufacturer: cleanText(item.Manufacturer),
-      description: cleanText(item.Description),
-      numberOfCores: toNullableNumber(item.NumberOfCores),
-      numberOfLogicalProcessors: toNullableNumber(item.NumberOfLogicalProcessors),
-      maxClockSpeed: toNullableNumber(item.MaxClockSpeed),
-      currentClockSpeed: toNullableNumber(item.CurrentClockSpeed),
-      socketDesignation: cleanText(item.SocketDesignation),
-      addressWidth: toNullableNumber(item.AddressWidth),
-      dataWidth: toNullableNumber(item.DataWidth),
-      processorId: cleanText(item.ProcessorId),
-      architecture: normalizeCpuArchitecture(item.Architecture),
-      virtualizationFirmwareEnabled: toNullableBoolean(item.VirtualizationFirmwareEnabled),
-      vmMonitorModeExtensions: toNullableBoolean(item.VMMonitorModeExtensions),
-      secondLevelAddressTranslationExtensions: toNullableBoolean(
-        item.SecondLevelAddressTranslationExtensions
-      ),
-      temperatureCelsius: normalizeTemperature(item.TemperatureCelsius),
-      temperatureSource: cleanText(item.TemperatureSource)
-    })),
+    cpus: toRecordList(raw.cpus).map((item) => {
+      const name = cleanText(item.Name);
+      const manufacturer = cleanText(item.Manufacturer);
+      return {
+        name,
+        manufacturer,
+        vendor: resolveHardwareInspectorVendor({
+          component: "cpu",
+          manufacturer,
+          model: name
+        }),
+        description: cleanText(item.Description),
+        numberOfCores: toNullableNumber(item.NumberOfCores),
+        numberOfLogicalProcessors: toNullableNumber(item.NumberOfLogicalProcessors),
+        maxClockSpeed: toNullableNumber(item.MaxClockSpeed),
+        currentClockSpeed: toNullableNumber(item.CurrentClockSpeed),
+        socketDesignation: cleanText(item.SocketDesignation),
+        addressWidth: toNullableNumber(item.AddressWidth),
+        dataWidth: toNullableNumber(item.DataWidth),
+        processorId: cleanText(item.ProcessorId),
+        architecture: normalizeCpuArchitecture(item.Architecture),
+        virtualizationFirmwareEnabled: toNullableBoolean(item.VirtualizationFirmwareEnabled),
+        vmMonitorModeExtensions: toNullableBoolean(item.VMMonitorModeExtensions),
+        secondLevelAddressTranslationExtensions: toNullableBoolean(
+          item.SecondLevelAddressTranslationExtensions
+        ),
+        temperatureCelsius: normalizeTemperature(item.TemperatureCelsius),
+        temperatureSource: cleanText(item.TemperatureSource)
+      };
+    }),
     baseBoard: {
       manufacturer: cleanText(baseBoard.Manufacturer),
+      vendor: resolveHardwareInspectorVendor({
+        component: "baseboard",
+        manufacturer: cleanText(baseBoard.Manufacturer),
+        model: cleanText(baseBoard.Product)
+      }),
       product: cleanText(baseBoard.Product),
       version: cleanText(baseBoard.Version),
       serialNumber: cleanText(baseBoard.SerialNumber)
     },
     bios: {
       manufacturer: cleanText(bios.Manufacturer),
+      vendor: resolveHardwareInspectorVendor({
+        component: "bios",
+        manufacturer: cleanText(bios.Manufacturer)
+      }),
       smbiosBiosVersion: cleanText(bios.SMBIOSBIOSVersion),
       version: cleanText(bios.Version),
       releaseDate: cleanText(bios.ReleaseDate),
       serialNumber: cleanText(bios.SerialNumber)
     },
-    memoryModules: toRecordList(raw.memoryModules).map((item) => ({
-      bankLabel: cleanText(item.BankLabel),
-      deviceLocator: cleanText(item.DeviceLocator),
-      manufacturer: cleanText(item.Manufacturer),
-      partNumber: cleanText(item.PartNumber),
-      serialNumber: cleanText(item.SerialNumber),
-      capacity: toNullableNumber(item.Capacity),
-      speed: toNullableNumber(item.Speed),
-      configuredClockSpeed: toNullableNumber(item.ConfiguredClockSpeed),
-      formFactor: normalizeFormFactor(item.FormFactor),
-      memoryType: normalizeMemoryType(item.SMBIOSMemoryType)
-    })),
+    memoryModules: toRecordList(raw.memoryModules).map((item) => {
+      const manufacturer = cleanText(item.Manufacturer);
+      return {
+        bankLabel: cleanText(item.BankLabel),
+        deviceLocator: cleanText(item.DeviceLocator),
+        manufacturer,
+        vendor: resolveHardwareInspectorVendor({
+          component: "memory",
+          manufacturer
+        }),
+        partNumber: cleanText(item.PartNumber),
+        serialNumber: cleanText(item.SerialNumber),
+        capacity: toNullableNumber(item.Capacity),
+        speed: toNullableNumber(item.Speed),
+        configuredClockSpeed: toNullableNumber(item.ConfiguredClockSpeed),
+        formFactor: normalizeFormFactor(item.FormFactor),
+        memoryType: normalizeMemoryType(item.SMBIOSMemoryType)
+      };
+    }),
     gpus: toRecordList(raw.gpus).map((item) => {
+      const name = cleanText(item.Name);
+      const manufacturer = cleanText(item.AdapterCompatibility);
+      const pnpDeviceId = cleanText(item.PNPDeviceID);
+      const vendor = resolveHardwareInspectorVendor({
+        component: "gpu",
+        manufacturer,
+        pnpDeviceId,
+        model: name
+      });
       const memory = normalizeHardwareInspectorGpuMemory(
         item.DedicatedVideoMemory,
         item.DedicatedVideoMemorySource,
         item.AdapterRAM
       );
       return {
-        name: cleanText(item.Name),
-        manufacturer: cleanText(item.AdapterCompatibility),
+        name,
+        manufacturer,
+        vendor,
         adapterRam: memory.adapterRam,
         adapterRamSource: memory.adapterRamSource,
+        ...classifyHardwareInspectorGpuMemory(name, vendor, memory),
         driverVersion: cleanText(item.DriverVersion),
         driverDate: cleanText(item.DriverDate),
         videoProcessor: cleanText(item.VideoProcessor),
@@ -1056,23 +1395,33 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
         verticalResolution: toNullableNumber(item.CurrentVerticalResolution),
         refreshRate: toNullableNumber(item.CurrentRefreshRate),
         status: cleanText(item.Status),
-        pnpDeviceId: cleanText(item.PNPDeviceID),
+        pnpDeviceId,
         temperatureCelsius: normalizeTemperature(item.TemperatureCelsius),
         temperatureSource: cleanText(item.TemperatureSource)
       };
     }),
-    disks: toRecordList(raw.disks).map((item) => ({
+    disks: toRecordList(raw.disks).map((item) => {
+      const model = cleanText(item.model);
+      const manufacturer = cleanText(item.manufacturer);
+      const pnpDeviceId = cleanText(item.pnpDeviceId);
+      return {
       index: toNullableNumber(item.index),
       deviceId: cleanText(item.deviceId),
-      model: cleanText(item.model),
-      manufacturer: cleanText(item.manufacturer),
+      model,
+      manufacturer,
+      vendor: resolveHardwareInspectorVendor({
+        component: "disk",
+        manufacturer,
+        pnpDeviceId,
+        model
+      }),
       serialNumber: cleanText(item.serialNumber),
       interfaceType: cleanText(item.interfaceType),
       mediaType: normalizeStorageMediaType(item.storageMediaType, item.mediaType),
       size: toNullableNumber(item.size),
       partitionCount: toNullableNumber(item.partitionCount),
       firmwareRevision: cleanText(item.firmwareRevision),
-      pnpDeviceId: cleanText(item.pnpDeviceId),
+      pnpDeviceId,
       storageMediaType: normalizeStorageMediaType(item.storageMediaType, item.mediaType),
       busType: normalizeBusType(item.busType),
       healthStatus: normalizeHealthStatus(item.healthStatus),
@@ -1107,12 +1456,31 @@ function normalizeSnapshot(raw: Record<string, unknown>): HardwareInspectorSnaps
           driveType: toNullableNumber(volume.driveType)
         }))
       }))
-    }))
+    };
+    }),
+    displays: [],
+    diagnostics: {
+      status: "success",
+      totalDurationMs: 0,
+      probes: [],
+      warnings: [],
+      counts: {
+        cpus: 0,
+        memoryModules: 0,
+        gpus: 0,
+        disks: 0,
+        displays: 0
+      }
+    }
   };
 }
 
 export async function collectHardwareInspectorSnapshot(
-  options: { force?: boolean } = {}
+  options: {
+    force?: boolean;
+    displays?: HardwareInspectorDisplay[];
+    displayProbeDurationMs?: number;
+  } = {}
 ): Promise<HardwareInspectorSnapshot> {
   if (!options.force) {
     const cached = getCachedHardwareInspectorSnapshot();
@@ -1126,11 +1494,10 @@ export async function collectHardwareInspectorSnapshot(
     os.tmpdir(),
     `litelauncher-hardware-${process.pid}-${Date.now()}-${Math.round(Math.random() * 1e9)}.ps1`
   );
-
-  await fs.writeFile(scriptPath, POWERSHELL_SCRIPT, "utf8");
-
+  const startedAt = Date.now();
   let stdout: Buffer | string = Buffer.alloc(0);
   try {
+    await fs.writeFile(scriptPath, POWERSHELL_SCRIPT, "utf8");
     const result = await execFileAsync(
       powerShellPath,
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
@@ -1142,6 +1509,17 @@ export async function collectHardwareInspectorSnapshot(
       }
     );
     stdout = result.stdout;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const timedOut =
+      typeof error === "object" &&
+      error !== null &&
+      (("killed" in error && error.killed === true) ||
+        ("code" in error && error.code === "ETIMEDOUT"));
+    throw new HardwareInspectorCollectionError(
+      timedOut ? "硬件信息采集超时（30 秒）" : "硬件核心探测失败",
+      createFailedDiagnostics(durationMs, timedOut)
+    );
   } finally {
     await fs.rm(scriptPath, { force: true }).catch(() => undefined);
   }
@@ -1150,12 +1528,38 @@ export async function collectHardwareInspectorSnapshot(
     ? stdout.toString("utf8").trim()
     : String(stdout).trim();
   if (!encodedText) {
-    throw new Error("硬件信息采集为空");
+    throw new HardwareInspectorCollectionError(
+      "硬件信息采集为空",
+      createFailedDiagnostics(Date.now() - startedAt, false)
+    );
   }
 
-  const text = Buffer.from(encodedText, "base64").toString("utf8").trim();
-  const parsed = JSON.parse(text) as Record<string, unknown>;
-  const snapshot = normalizeSnapshot(parsed);
+  let snapshot: HardwareInspectorSnapshot;
+  let parsed: Record<string, unknown>;
+  try {
+    const text = Buffer.from(encodedText, "base64").toString("utf8").trim();
+    parsed = JSON.parse(text) as Record<string, unknown>;
+    snapshot = normalizeSnapshot(parsed);
+  } catch {
+    throw new HardwareInspectorCollectionError(
+      "硬件信息解析失败",
+      createFailedDiagnostics(Date.now() - startedAt, false)
+    );
+  }
+  snapshot.displays = normalizeDisplays(options.displays);
+  const rawTimings = toRecord(parsed.probeTimings);
+  const coreDurationMs = Math.max(0, Math.round(Date.now() - startedAt));
+  snapshot.diagnostics = createHardwareInspectorDiagnostics(
+    snapshot,
+    coreDurationMs + Math.max(0, options.displayProbeDurationMs ?? 0),
+    {
+      coreCimMs: Math.max(0, toNullableNumber(rawTimings.coreCimMs) ?? coreDurationMs),
+      gpuMemoryMs: Math.max(0, toNullableNumber(rawTimings.gpuMemoryMs) ?? 0),
+      storageHealthMs: Math.max(0, toNullableNumber(rawTimings.storageHealthMs) ?? 0),
+      temperatureMs: Math.max(0, toNullableNumber(rawTimings.temperatureMs) ?? 0),
+      displayMs: Math.max(0, options.displayProbeDurationMs ?? 0)
+    }
+  );
   cachedSnapshot = snapshot;
   cachedAt = Date.now();
   return snapshot;

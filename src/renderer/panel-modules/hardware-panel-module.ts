@@ -19,6 +19,9 @@
       if (form instanceof HTMLFormElement) {
         form.requestSubmit();
       }
+    },
+    onEscape(host): boolean {
+      return host.getLegacyImpls().handleHardwareInspectorEscape();
     }
   });
 })();

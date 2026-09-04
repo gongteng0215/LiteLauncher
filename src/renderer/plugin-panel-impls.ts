@@ -14,6 +14,7 @@ namespace RendererPanelRuntime {
     cleanupPluginPanelTransientState,
     applyHardwareInspectorPanelPayload,
     renderHardwareInspectorPanel,
+    handleHardwareInspectorEscape,
     applyClipboardWorkbenchPanelPayload,
     renderClipboardWorkbenchPanel,
     applyLiteSnapPanelPayload,
