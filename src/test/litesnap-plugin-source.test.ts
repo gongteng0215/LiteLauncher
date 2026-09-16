@@ -864,8 +864,8 @@ test("LiteSnap capture manager launches a first-party overlay instead of handing
   );
   assert.match(
     captureSource,
-    /await this\.emitOverlayStateChanged\(null\)[\s\S]*session\.overlayWindow\.hide\(\)/,
-    "LiteSnap should reset overlay renderer state before parking the overlay window"
+    /cancellingSession\.overlayWindow\.hide\(\)[\s\S]*this\.emitOverlayStateChanged\(null\)/,
+    "LiteSnap must release the overlay before waiting for renderer or diagnostic work"
   );
   assert.match(
     captureSource,
@@ -1941,12 +1941,16 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
     /目标窗口已关闭或选区已不再属于原窗口，长截图已取消/,
     "temporary target lookup failures must not dismiss long capture"
   );
-  assert.match(captureSource, /长截图控制窗口已恢复/);
-  assert.doesNotMatch(
-    captureSource,
-    /长截图辅助窗口意外关闭，本次长截图已取消/,
-    "helper window recovery must not cancel long capture"
-  );
+  assert.doesNotMatch(captureSource, /长截图控制窗口已恢复/);
+  assert.match(captureSource, /handleLongCaptureAuxiliaryWindowClosed[\s\S]*await this\.cancelCapture\(\)/);
+  const relayEnd = windowCoordinatorSource.split("public endScrollRelay")[1]!.split("public stopWatch")[0]!;
+  assert.doesNotMatch(relayEnd, /\.focus\(|\.show\(|\.moveTop\(/);
+  const stacking = windowCoordinatorSource.split("public ensureStack")[1]!.split("public beginScrollRelay")[0]!;
+  assert.doesNotMatch(stacking, /\.moveTop\(|\.showInactive\(/);
+  assert.match(windowCoordinatorSource, /unresponsive/);
+  assert.match(windowCoordinatorSource, /render-process-gone/);
+  assert.match(windowCoordinatorSource, /before-input-event/);
+  assert.match(guideSource, /contextmenu[\s\S]*liteSnapControlLongCapture\("cancel"\)/);
   assert.match(longCaptureCoordinatorSource, /sampleFrames/);
   assert.match(longCaptureCoordinatorSource, /acceptedFrames/);
   assert.match(longCaptureCoordinatorSource, /confirmFinalFrame/);

@@ -52,7 +52,8 @@ export class LiteSnapLongCaptureWindowCoordinator {
     overlayWindow.setFocusable(false);
     overlayWindow.setOpacity(0);
     overlayWindow.showInactive();
-    const ready = await overlayWindow.webContents.executeJavaScript(
+    let deadline: NodeJS.Timeout | undefined;
+    const ready = await Promise.race([overlayWindow.webContents.executeJavaScript(
       `new Promise((resolve) => {
         const startedAt = Date.now();
         const poll = () => {
@@ -85,8 +86,11 @@ export class LiteSnapLongCaptureWindowCoordinator {
         poll();
       });`,
       true
-    ).catch(() => false);
-    if (ready !== true || !isSessionActive() || overlayWindow.isDestroyed()) {
+    ).catch(() => false), new Promise<boolean>((resolve) => {
+      deadline = setTimeout(() => resolve(false), 2000);
+    })]).finally(() => clearTimeout(deadline));
+    if (!isSessionActive()) return false;
+    if (ready !== true || overlayWindow.isDestroyed()) {
       this.maskReady = false;
       if (!overlayWindow.isDestroyed()) {
         overlayWindow.setOpacity(0);
@@ -115,41 +119,10 @@ export class LiteSnapLongCaptureWindowCoordinator {
   }
 
   public ensureStack(overlayWindow: BrowserWindow, restoreGuideHitTesting: boolean): void {
-    if (this.maskReady && !overlayWindow.isDestroyed()) {
-      overlayWindow.setIgnoreMouseEvents(true);
-      overlayWindow.setFocusable(false);
-      if (!overlayWindow.isAlwaysOnTop()) {
-        overlayWindow.setAlwaysOnTop(true, "screen-saver");
-      }
-      if (!overlayWindow.isVisible()) {
-        overlayWindow.showInactive();
-      }
-      overlayWindow.moveTop();
-    }
-
+    // Never periodically raise or resurrect windows over another application.
     const guide = this.guideWindow;
-    if (guide && !guide.isDestroyed()) {
-      if (restoreGuideHitTesting) {
-        guide.setIgnoreMouseEvents(false);
-      }
-      if (!guide.isAlwaysOnTop()) {
-        guide.setAlwaysOnTop(true, "screen-saver");
-      }
-      if (!guide.isVisible()) {
-        guide.showInactive();
-      }
-      guide.moveTop();
-    }
-
-    const controller = this.controllerWindow;
-    if (controller && !controller.isDestroyed()) {
-      if (!controller.isAlwaysOnTop()) {
-        controller.setAlwaysOnTop(true, "screen-saver");
-      }
-      if (!controller.isVisible()) {
-        controller.showInactive();
-      }
-      controller.moveTop();
+    if (restoreGuideHitTesting && guide && !guide.isDestroyed()) {
+      guide.setIgnoreMouseEvents(false);
     }
   }
 
@@ -168,9 +141,7 @@ export class LiteSnapLongCaptureWindowCoordinator {
     guide.setFocusable(true);
     guide.setIgnoreMouseEvents(false);
     guide.setAlwaysOnTop(true, "screen-saver");
-    guide.show();
-    guide.focus();
-    guide.moveTop();
+    // Restoring wheel hit testing must not steal keyboard focus.
   }
 
   public stopWatch(): void {
@@ -188,14 +159,27 @@ export class LiteSnapLongCaptureWindowCoordinator {
     this.guideWindow = null;
     if (guide && !guide.isDestroyed()) {
       this.expectedCloses.add(guide);
-      guide.close();
+      guide.destroy();
     }
     const controller = this.controllerWindow;
     this.controllerWindow = null;
     if (controller && !controller.isDestroyed()) {
       this.expectedCloses.add(controller);
-      controller.close();
+      controller.destroy();
     }
+  }
+
+  private bindFailureHandlers(window: BrowserWindow): void {
+    const fail = () => this.onUnexpectedClose?.();
+    window.on("unresponsive", fail);
+    window.webContents.on("render-process-gone", fail);
+    window.webContents.on("did-fail-load", fail);
+    window.webContents.on("before-input-event", (event, input) => {
+      if (input.type === "keyDown" && input.key === "Escape") {
+        event.preventDefault();
+        fail();
+      }
+    });
   }
 
   private showController(display: Display, selection: LiteSnapOverlaySelection): void {
@@ -204,6 +188,7 @@ export class LiteSnapLongCaptureWindowCoordinator {
       controller = createLiteSnapLongCaptureController(display);
       const createdController = controller;
       this.controllerWindow = createdController;
+      this.bindFailureHandlers(createdController);
       createdController.on("closed", () => {
         if (this.controllerWindow === createdController) {
           this.controllerWindow = null;
@@ -264,6 +249,7 @@ export class LiteSnapLongCaptureWindowCoordinator {
       guide = createLiteSnapLongCaptureGuide(guideBounds);
       const createdGuide = guide;
       this.guideWindow = createdGuide;
+      this.bindFailureHandlers(createdGuide);
       createdGuide.on("closed", () => {
         if (this.guideWindow === createdGuide) {
           this.guideWindow = null;

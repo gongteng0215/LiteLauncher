@@ -194,7 +194,7 @@ const api = {
   liteSnapHistoryEdit(id: string): Promise<boolean> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapHistoryEdit, id);
   },
-  liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<boolean> {
+  liteSnapStartLongCapture(input: LiteSnapLongCaptureStartInput): Promise<import("../shared/litesnap").LiteSnapLongCaptureStartResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.liteSnapStartLongCapture, input);
   },
   liteSnapScrollLongCapture(deltaY: number): Promise<boolean> {

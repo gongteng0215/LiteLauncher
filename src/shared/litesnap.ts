@@ -352,3 +352,5 @@ export function createDefaultLiteSnapSettings(): LiteSnapSettings {
     historyMaxItems: LITESNAP_HISTORY_MAX_ITEMS_DEFAULT
   };
 }
+
+export type LiteSnapLongCaptureStartResult = { ok: true } | { ok: false; message: string };

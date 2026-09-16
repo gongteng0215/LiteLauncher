@@ -2868,16 +2868,16 @@
     setToolbarDisabled(true);
     try {
       const started = await window.launcher.liteSnapStartLongCapture({ selection });
-      if (!started) {
+      if (!started.ok) {
         committing = false;
         setToolbarDisabled(false);
-        showStatus("Long capture needs a selectable scrollable Windows window.", true);
+        showStatus(started.message, true);
       }
     } catch (error) {
       console.warn("[litesnap-overlay] long capture start failed", error);
       committing = false;
       setToolbarDisabled(false);
-      showStatus("Starting long capture failed.", true);
+      showStatus(`启动长截图失败：${error instanceof Error ? error.message : String(error)}`, true);
     }
   }
 

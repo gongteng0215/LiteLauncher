@@ -1,3 +1,4 @@
+import { NativeCaptureWorker } from "./native-capture-worker";
 import fs from "node:fs";
 import {
   desktopCapturer,
@@ -150,11 +151,11 @@ function resolvePreviewOutputSize(display: Display): { width: number; height: nu
 function createNativeImageFromResult(
   result: NativeLiteSnapCaptureResult | null | undefined
 ): NativeImage | null {
-  if (!result || !Buffer.isBuffer(result.data) || result.data.length === 0) {
+  if (!result || !(result.data instanceof Uint8Array) || result.data.length === 0) {
     return null;
   }
 
-  const image = nativeImage.createFromBitmap(result.data, {
+  const image = nativeImage.createFromBitmap(Buffer.from(result.data), {
     width: result.width,
     height: result.height
   });
@@ -253,8 +254,13 @@ export class ElectronLiteSnapCaptureProvider implements LiteSnapCaptureProvider 
   }
 }
 
+const nativeAddonPaths = new WeakMap<NativeLiteSnapCaptureAddon, string>();
+
 class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
-  public constructor(private readonly addon: NativeLiteSnapCaptureAddon) {}
+  private readonly captureWorker: NativeCaptureWorker;
+  public constructor(private readonly addon: NativeLiteSnapCaptureAddon) {
+    this.captureWorker = new NativeCaptureWorker(nativeAddonPaths.get(addon)!);
+  }
 
   public async capturePreviewImage(display: Display): Promise<NativeImage | null> {
     return this.captureDisplayImage(display, false);
@@ -281,7 +287,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
       return null;
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
-    return createNativeImageFromResult(this.addon.captureDisplayRect({
+    return createNativeImageFromResult(await this.captureWorker.call<NativeLiteSnapCaptureResult | null>("captureDisplayRect", {
       x: physicalRegion.x,
       y: physicalRegion.y,
       captureWidth: physicalRegion.width,
@@ -299,7 +305,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
       const physicalBounds = toPhysicalDisplayBounds(display);
       const previewSize = resolvePreviewOutputSize(display);
       await new Promise<void>((resolve) => setImmediate(resolve));
-      const result = this.addon.captureDisplayFrames({
+      const result = await this.captureWorker.call<NativeLiteSnapFramesResult | null>("captureDisplayFrames", {
         x: physicalBounds.x,
         y: physicalBounds.y,
         captureWidth: Math.max(1, physicalBounds.width),
@@ -337,7 +343,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
     }
 
     const screenPoint = toPhysicalDisplayPoint(display, x, y);
-    const rect = this.addon.getWindowRectAtPoint(screenPoint.x, screenPoint.y);
+    const rect = await this.captureWorker.call<LiteSnapTargetWindowRect | null>("getWindowRectAtPoint", screenPoint.x, screenPoint.y);
     if (!rect || rect.width <= 8 || rect.height <= 8) {
       return null;
     }
@@ -434,7 +440,7 @@ class NativeLiteSnapCaptureProvider implements LiteSnapCaptureProvider {
       includeLayeredWindows: options?.includeLayeredWindows
     };
 
-    const result = this.addon.captureDisplayRect(request);
+    const result = await this.captureWorker.call<NativeLiteSnapCaptureResult | null>("captureDisplayRect", request);
     return createNativeImageFromResult(result);
   }
 }
@@ -550,6 +556,7 @@ function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
             continue;
           }
         }
+        nativeAddonPaths.set(addon, candidate);
         return addon;
       }
     } catch (error) {

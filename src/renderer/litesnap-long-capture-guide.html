@@ -34,7 +34,10 @@
         document.addEventListener("pointerdown", block, true);
         document.addEventListener("pointerup", block, true);
         document.addEventListener("dblclick", block, true);
-        document.addEventListener("contextmenu", block, true);
+        document.addEventListener("contextmenu", (event) => {
+          block(event);
+          void window.launcher.liteSnapControlLongCapture("cancel");
+        }, true);
         document.addEventListener("wheel", (event) => {
           block(event);
           if (Math.abs(event.deltaY) >= .5) {

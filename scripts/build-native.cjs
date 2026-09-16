@@ -164,7 +164,24 @@ function isManifestAddonValid(manifest, expectedFingerprint) {
   if (!fs.existsSync(addonPath) || fs.statSync(addonPath).size <= 0) {
     return false;
   }
-  return sha256File(addonPath) === manifest.sha256;
+  return sha256File(addonPath) === manifest.sha256 && validateAddonExports(addonPath);
+}
+
+function validateAddonExports(addonPath) {
+  // Probe in a separate process so an incompatible DLL cannot crash the build.
+  const probe = spawnSync(process.execPath, ["-e", `
+    const addon = require(process.argv[1]);
+    const required = JSON.parse(process.argv[2]);
+    const missing = required.filter((name) => typeof addon[name] !== 'function');
+    if (missing.length) throw new Error('Missing native exports: ' + missing.join(', '));
+  `, addonPath, JSON.stringify(REQUIRED_EXPORTS)], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 10000
+  });
+  if (probe.status === 0) return true;
+  console.error(`[build-native] incompatible addon ${addonPath}: ${probe.error?.message ?? probe.stderr ?? "probe failed"}`);
+  return false;
 }
 
 function computeBuildFingerprint(vcVars64PathValue, windowsSdkVersion) {
@@ -229,6 +246,9 @@ function cleanupHashedAddons(activeFileName) {
 }
 
 function publishAddon(sourcePath, fingerprint, reason) {
+  if (!validateAddonExports(sourcePath)) {
+    fail("Native addon lacks required capabilities. Install the C++ build tools and Windows SDK, then rebuild; refusing to publish an incompatible addon.");
+  }
   fs.mkdirSync(distNativeDir, { recursive: true });
   const sha256 = sha256File(sourcePath);
   const fileName = `litesnap-capture-${sha256.slice(0, 16)}.node`;

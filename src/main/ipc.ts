@@ -133,7 +133,7 @@ type LiteSnapProvider = {
   historyCopy: (id: string) => Promise<boolean>;
   historyPin: (id: string) => Promise<boolean>;
   historyEdit: (id: string) => Promise<boolean>;
-  startLongCapture: (input: LiteSnapLongCaptureStartInput) => Promise<boolean>;
+  startLongCapture: (input: LiteSnapLongCaptureStartInput) => Promise<import("../shared/litesnap").LiteSnapLongCaptureStartResult>;
   scrollLongCapture: (deltaY: number) => Promise<boolean>;
   controlLongCapture: (control: LiteSnapLongCaptureControl) => Promise<boolean>;
   getLongCaptureProgress: () => LiteSnapLongCaptureProgress | null;
@@ -1639,7 +1639,7 @@ export function registerIpcHandlers(
     async (_, input: LiteSnapLongCaptureStartInput | null) => {
       const selection = input?.selection;
       if (!selection) {
-        return false;
+        return { ok: false, message: "请先框选截图区域。" };
       }
       return options.liteSnapProvider.startLongCapture({ selection });
     }

@@ -186,6 +186,13 @@ function startElectron() {
   }
   initialStartAttempted = true;
 
+  if (!fs.existsSync(electronBinary)) {
+    log(`Electron executable is missing: ${electronBinary}`);
+    log("Run node node_modules/electron/install.js, then restart pnpm dev.");
+    void shutdown().finally(() => process.exit(1));
+    return;
+  }
+
   const electronEnv = {
     ...process.env,
     NODE_ENV: "development",
@@ -224,9 +231,8 @@ function startElectron() {
   electronProcess.once("error", (error) => {
     log(`failed to start Electron: ${error.message}`);
     electronProcess = null;
-    // A spawn failure is different from Electron exiting normally. Allow the
-    // readiness loop to retry once the executable/files become available.
-    initialStartAttempted = false;
+    // Retrying a missing/unlaunchable executable every 250ms only floods logs.
+    void shutdown().finally(() => process.exit(1));
   });
 }
 

@@ -205,10 +205,16 @@ jobs:
               gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --notes-file "${notes_file}"
             fi
           elif [ -n "${notes_file}" ]; then
-            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --title "${tag}" --notes-file "${notes_file}"
+            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --draft --title "${tag}" --notes-file "${notes_file}"
           else
-            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --title "${tag}" --generate-notes
+            gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --draft --title "${tag}" --generate-notes
           fi
+
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "${GITHUB_REF_NAME}" artifacts/release/* --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Publish release if still draft
         env:
@@ -234,9 +240,3 @@ jobs:
             gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --draft=false
             echo "Published ${tag} without Latest (newer release is ${newest_tag})."
           fi
-
-      - name: Upload assets to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: gh release upload "${GITHUB_REF_NAME}" artifacts/release/* --repo "${GITHUB_REPOSITORY}" --clobber

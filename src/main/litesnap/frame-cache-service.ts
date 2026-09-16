@@ -102,7 +102,9 @@ export class LiteSnapFrameCacheService {
     if (this.warmPromise && this.warmDisplayId === display.id) return;
     const generation = this.warmGeneration;
     this.warmDisplayId = display.id;
-    this.warmPromise = task().finally(() => {
+    this.warmPromise = task().catch((error) => {
+      console.warn("[litesnap] background capture failed", error);
+    }).finally(() => {
       if (this.warmGeneration === generation) this.warmPromise = null;
     });
   }
