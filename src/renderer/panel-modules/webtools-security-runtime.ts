@@ -192,7 +192,9 @@ namespace RendererPanelRuntime {
       keywords: ["plugin", "port", "pid", "netstat", "端口", "占用"]
     };
 
-    const result = await launcher.execute(item);
+    const result = await launcher.execute(item).catch(() => ({
+      ok: false, message: "端口操作失败，请重试。", data: undefined
+    }));
     if (requestToken !== webtoolsPortHelperRequestToken) {
       return;
     }

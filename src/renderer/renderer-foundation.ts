@@ -292,6 +292,7 @@ interface LaunchAtLoginStatus {
 }
 
 interface AppUpdaterStatus {
+  failureStage?: "check" | "download";
   supported: boolean;
   phase:
     | "idle"
@@ -352,6 +353,7 @@ interface LauncherApi {
   getAllPluginItems(): Promise<LaunchItem[]>;
   getRequiredVisiblePluginIds(): Promise<string[]>;
   getLiteSnapSettings(): Promise<unknown>;
+  getLiteSnapNativeHealth(): Promise<import("../shared/litesnap-native-health").LiteSnapNativeHealth>;
   setLiteSnapSettings(patch: Record<string, unknown>): Promise<unknown>;
   liteSnapStartCapture(): Promise<boolean>;
   liteSnapStartColorCapture(): Promise<boolean>;

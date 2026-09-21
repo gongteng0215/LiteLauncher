@@ -84,6 +84,66 @@ namespace RendererPanelRuntime {
 
   export let liteSnapOcrIssue: "module_missing" | "language_pack" | null = null;
 
+  let liteSnapNativeHealth: import("../../shared/litesnap-native-health").LiteSnapNativeHealth | null = null;
+
+  function createLiteSnapNativeHealthSection(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "litesnap-native-health";
+    const summary = document.createElement("div");
+    const details = document.createElement("details");
+    const title = document.createElement("summary");
+    title.textContent = "查看模块诊断";
+    const output = document.createElement("pre");
+    output.style.whiteSpace = "pre-wrap";
+    output.style.overflowWrap = "anywhere";
+    details.append(title, output);
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "settings-btn settings-btn-secondary";
+    refresh.textContent = "刷新模块状态";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "settings-btn settings-btn-secondary";
+    copy.textContent = "复制模块诊断";
+    const render = () => {
+      const health = liteSnapNativeHealth;
+      summary.textContent = health?.message ?? "点击刷新查看原生截图模块状态。";
+      copy.disabled = !health;
+      output.textContent = health ? [
+        "LiteSnap 原生模块诊断",
+        `平台：${health.platform} / ${health.arch}`,
+        `运行时 N-API：${health.runtimeNapi}`,
+        `已加载：${health.loaded ? "是" : "否"}`,
+        `模块标识：${health.moduleFile ?? "无"}`,
+        `缺失接口：${health.missingExports.join(", ") || (health.loaded ? "无" : "模块未加载，无法检查")}`,
+        `状态：${health.message}`,
+        ...health.loadErrors
+      ].join("\n") : "尚未获取诊断";
+    };
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true;
+      try {
+        liteSnapNativeHealth = await getLauncherApi()!.getLiteSnapNativeHealth();
+        render();
+      } catch {
+        summary.textContent = "读取模块状态失败，请重试。";
+      } finally {
+        refresh.disabled = false;
+      }
+    });
+    copy.addEventListener("click", () => {
+      void copyTextToClipboard(output.textContent ?? "").then((ok) => {
+        setStatus(ok ? "模块诊断已复制" : "复制失败，请重试。");
+      });
+    });
+    render();
+    const actions = document.createElement("div");
+    actions.className = "litesnap-panel-actions";
+    actions.append(refresh, copy);
+    section.append(summary, details, actions);
+    return section;
+  }
+
   export let liteSnapPanelView: "main" | "settings" | "ocr" | "translate" | "history" | "diagnostics" =
     "main";
 
@@ -1227,6 +1287,7 @@ namespace RendererPanelRuntime {
 
     try {
       const settings = await launcher.getLiteSnapSettings();
+      liteSnapNativeHealth = await launcher.getLiteSnapNativeHealth().catch(() => null);
       liteSnapPanelData = normalizeLiteSnapPanelData({
         ...liteSnapPanelData,
         settings
@@ -2142,6 +2203,7 @@ namespace RendererPanelRuntime {
         form.append(
           settingsStatusRow,
           shortcutStatusRow,
+          createLiteSnapFormSection([createLiteSnapNativeHealthSection()]),
           createLiteSnapFormSection(ocrConfigurationNodes),
           createLiteSnapFieldsGrid(settingsRows),
           settingsActions

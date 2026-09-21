@@ -119,6 +119,9 @@ const api = {
   getLiteSnapSettings(): Promise<LiteSnapSettings> {
     return ipcRenderer.invoke(IPC_CHANNELS.getLiteSnapSettings);
   },
+  getLiteSnapNativeHealth(): Promise<import("../shared/litesnap-native-health").LiteSnapNativeHealth> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getLiteSnapNativeHealth);
+  },
   setLiteSnapSettings(
     patch: Partial<LiteSnapSettings>
   ): Promise<LiteSnapSettingsUpdateResult> {

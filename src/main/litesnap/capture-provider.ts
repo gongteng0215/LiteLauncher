@@ -1,5 +1,7 @@
 import { NativeCaptureWorker } from "./native-capture-worker";
 import fs from "node:fs";
+import path from "node:path";
+import { inspectLiteSnapNativeExports, type LiteSnapNativeHealth } from "../../shared/litesnap-native-health";
 import {
   desktopCapturer,
   nativeImage,
@@ -529,6 +531,22 @@ function toDisplayDipRect(display: Display, rect: Rectangle): Rectangle {
   };
 }
 
+const nativeHealth: LiteSnapNativeHealth = {
+  platform: process.platform,
+  arch: process.arch,
+  runtimeNapi: process.versions.napi ?? "unknown",
+  loaded: false,
+  moduleFile: null,
+  missingExports: [],
+  loadErrors: [],
+  message: process.platform === "win32" ? "原生截图模块尚未初始化。" : "当前系统使用标准截图，Windows 原生长截图不可用。"
+};
+
+/** Read the actual loader result without capturing the screen or loading another addon. */
+export function getLiteSnapNativeHealth(): LiteSnapNativeHealth {
+  return { ...nativeHealth, missingExports: [...nativeHealth.missingExports], loadErrors: [...nativeHealth.loadErrors] };
+}
+
 function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
   const requiredHashedAddonExports: Array<keyof NativeLiteSnapCaptureAddon> = [
     "captureDisplayRect",
@@ -544,12 +562,15 @@ function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
 
     try {
       const addon = require(candidate) as NativeLiteSnapCaptureAddon;
+      nativeHealth.moduleFile = path.basename(candidate);
+      nativeHealth.missingExports = inspectLiteSnapNativeExports(addon);
       if (addon && typeof addon.captureDisplayRect === "function") {
         if (/litesnap-capture-[a-f0-9]{16}\.node$/i.test(candidate)) {
           const missing = requiredHashedAddonExports.filter(
             (name) => typeof addon[name] !== "function"
           );
           if (missing.length > 0) {
+            nativeHealth.loadErrors.push(`${path.basename(candidate)}：缺少接口 ${missing.join(", ")}`);
             console.warn(
               `[litesnap] active native addon is missing required exports: ${missing.join(", ")}`
             );
@@ -557,13 +578,20 @@ function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
           }
         }
         nativeAddonPaths.set(addon, candidate);
+        nativeHealth.loaded = true;
+        nativeHealth.message = nativeHealth.missingExports.length === 0
+          ? "原生模块已加载，长截图所需接口齐全。"
+          : "已加载旧版模块，部分截图功能不可用。请安装最新版后重启。";
         return addon;
       }
+      nativeHealth.loadErrors.push(`${path.basename(candidate)}：缺少 captureDisplayRect 接口`);
     } catch (error) {
+      nativeHealth.loadErrors.push(`${path.basename(candidate)}：${error instanceof Error ? error.message : String(error)}`);
       console.warn(`[litesnap] failed to load native addon from ${candidate}`, error);
     }
   }
 
+  nativeHealth.message = "原生模块加载失败或接口不兼容。请重新安装最新版；仍失败时复制诊断信息反馈。";
   return null;
 }
 
@@ -573,6 +601,7 @@ function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {
   }
 
   if (!isLiteSnapNativeAddonPresent()) {
+    nativeHealth.message = "未找到可用原生模块（文件缺失或未通过版本、架构及完整性校验）。请重新安装最新版。";
     console.warn(
       "[litesnap] native addon file not found; checked paths:\n",
       formatLiteSnapNativeAddonProbePaths()

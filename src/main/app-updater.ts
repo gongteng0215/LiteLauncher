@@ -187,6 +187,9 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
       if (activeCheckPromise) {
         return activeCheckPromise;
       }
+      if (status.downloaded) {
+        return { ...status };
+      }
 
       updateCheckCycle += 1;
       if (e2eCheckFailureMessage) {
@@ -207,11 +210,13 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
       }
 
       activeCheckPromise = (async () => {
+        // Defer execution so even a synchronous throw can clear the assigned promise.
+        await Promise.resolve();
         try {
           const result = await autoUpdater.checkForUpdates();
           if (result?.isUpdateAvailable && result.downloadPromise) {
-            await result.downloadPromise.catch(() => {
-              // Updater events already carry the terminal state.
+            await result.downloadPromise.catch((error: unknown) => {
+              recordFailure(error, "download");
             });
           }
         } catch (error) {
@@ -219,13 +224,8 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
             error instanceof Error && error.message
               ? redactUpdaterErrorDetail(error.message)
               : "检查更新失败";
-          setStatus({
-            phase: "error",
-            downloaded: false,
-            progressPercent: undefined,
-            message: truncateText(detail)
-          });
-          reportUpdaterFailure(detail, "check");
+          recordFailure(detail, status.phase === "available" || status.phase === "downloading"
+            ? "download" : status.failureStage ?? "check");
         } finally {
           activeCheckPromise = null;
         }
@@ -264,6 +264,20 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
       periodicTimer.unref?.();
     }
   };
+
+  function recordFailure(error: unknown, stage: "check" | "download"): void {
+    const detail = redactUpdaterErrorDetail(
+      error instanceof Error ? error.message : String(error ?? "未知错误")
+    );
+    setStatus({
+      phase: "error",
+      failureStage: stage,
+      downloaded: false,
+      progressPercent: undefined,
+      message: `${stage === "download" ? "下载更新失败" : "检查更新失败"}：${detail}`
+    });
+    reportUpdaterFailure(detail, stage);
+  }
 
   async function promptForDownloadedUpdate(version: string): Promise<void> {
     if (installPromptInFlight || promptedDownloadedVersion === version) {
@@ -307,6 +321,9 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
     autoUpdater.on("checking-for-update", () => {
       setStatus({
         phase: "checking",
+        failureStage: undefined,
+        updateVersion: undefined,
+        releaseNotes: undefined,
         downloaded: false,
         progressPercent: undefined,
         message: "正在检查更新…"
@@ -341,6 +358,7 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
     autoUpdater.on("update-not-available", () => {
       setStatus({
         phase: "not-available",
+        updateVersion: undefined,
         downloaded: false,
         progressPercent: undefined,
         releaseNotes: undefined,
@@ -366,13 +384,8 @@ export function createAppUpdater(options: AppUpdaterOptions = {}): AppUpdaterPro
           ? message
           : error?.message ?? "检查更新失败"
       );
-      setStatus({
-        phase: "error",
-        downloaded: false,
-        progressPercent: undefined,
-        message: detail || "检查更新失败"
-      });
-      reportUpdaterFailure(detail || "检查更新失败", "updater-event");
+      recordFailure(detail, status.phase === "available" || status.phase === "downloading"
+        ? "download" : status.failureStage ?? "check");
     });
   }
 

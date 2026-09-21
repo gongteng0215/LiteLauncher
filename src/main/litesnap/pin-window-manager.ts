@@ -39,6 +39,7 @@ type PinWindowMeta = {
   usePng: boolean;
   clickThrough: boolean;
   dragOrigin: PinDragOrigin | null;
+  dragSize: { width: number; height: number } | null;
   rebakeTimer: NodeJS.Timeout | null;
   rebakeInFlight: boolean;
   rebakePending: boolean;
@@ -145,13 +146,14 @@ function ensurePinDragBeginHandler(): void {
     }
 
     const bounds = window.getBounds();
+    meta.dragSize ??= { width: bounds.width, height: bounds.height };
     meta.dragOrigin = {
       startScreenX: screenX,
       startScreenY: screenY,
       originX: bounds.x,
       originY: bounds.y,
-      width: bounds.width,
-      height: bounds.height
+      width: meta.dragSize.width,
+      height: meta.dragSize.height
     };
     // A content drag and the frameless native resize border must never remain
     // active together. Restore resizing when the pointer is released.
@@ -184,13 +186,14 @@ function ensurePinMoveHandler(): void {
 
     if (!meta.dragOrigin) {
       const bounds = window.getBounds();
+      meta.dragSize ??= { width: bounds.width, height: bounds.height };
       meta.dragOrigin = {
         startScreenX: screenX,
         startScreenY: screenY,
         originX: bounds.x,
         originY: bounds.y,
-        width: bounds.width,
-        height: bounds.height
+        width: meta.dragSize.width,
+        height: meta.dragSize.height
       };
       if (!meta.clickThrough) {
         window.setResizable(false);
@@ -326,6 +329,7 @@ function ensurePinDragEndHandler(): void {
       return;
     }
 
+    const dragOrigin = meta.dragOrigin;
     meta.dragOrigin = null;
 
     if (!meta.clickThrough) {
@@ -333,6 +337,11 @@ function ensurePinDragEndHandler(): void {
     }
 
     syncPinWindowConstraints(window, meta);
+    if (dragOrigin) {
+      // Toggling the native resize frame can round the bounds on fractional
+      // DPI displays. Restore the captured size after reenabling the frame.
+      window.setSize(dragOrigin.width, dragOrigin.height, false);
+    }
     schedulePinImageRebake(window, meta, 0);
   });
 }
@@ -428,6 +437,7 @@ function resetPinWindowSize(window: BrowserWindow, meta: PinWindowMeta): void {
     return;
   }
   const bounds = window.getBounds();
+  meta.dragSize = null;
   const display = screen.getDisplayMatching(bounds);
   const restoreScale = Math.min(
     1,
@@ -1264,6 +1274,7 @@ export class LiteSnapPinWindowManager {
       usePng: assets.usePng,
       clickThrough: false,
       dragOrigin: null,
+      dragSize: null,
       rebakeTimer: null,
       rebakeInFlight: false,
       rebakePending: false
@@ -1289,6 +1300,12 @@ export class LiteSnapPinWindowManager {
       }
     });
 
+    // Only a deliberate native resize starts a new logical size. Reusing
+    // rounded getBounds() values on each drag compounds fractional-DPI drift.
+    window.on("will-resize", () => {
+      const current = pinWindowMeta.get(window.id);
+      if (current && !current.dragOrigin) current.dragSize = null;
+    });
     window.on("resize", () => {
       const current = pinWindowMeta.get(window.id);
       if (current) {

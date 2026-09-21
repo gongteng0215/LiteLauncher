@@ -99,7 +99,7 @@ test("app updater reports sanitized terminal failures through the main-process l
   );
   assert.match(
     source,
-    /reportUpdaterFailure\(detail \|\| "检查更新失败", "updater-event"\)/,
+    /autoUpdater\.on\("error"[\s\S]*recordFailure\(detail,/,
     "updater event failures should also be logged"
   );
 });

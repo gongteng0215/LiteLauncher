@@ -110,6 +110,7 @@ export type AppUpdaterPhase =
   | "error";
 
 export interface AppUpdaterStatus {
+  failureStage?: "check" | "download";
   supported: boolean;
   phase: AppUpdaterPhase;
   currentVersion: string;

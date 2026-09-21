@@ -12,7 +12,7 @@ const {
 } = require("../dist/test/e2e-test-utils.js");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.20-candidate";
+const REVIEW_LABEL = process.env.LITELAUNCHER_UI_REVIEW_LABEL || "v1.1.22-candidate";
 const OUTPUT_ROOT = path.join(PROJECT_ROOT, "artifacts", "ui-review", REVIEW_LABEL);
 const VIEWPORTS = [
   { label: "1440x900", width: 1440, height: 900 },
@@ -21,6 +21,8 @@ const VIEWPORTS = [
 const PANELS = [
   { id: "litesnap", title: "LiteSnap" },
   { id: "codeagent-switch", title: "CodeAgent Switch" },
+  { id: "webtools-file-hash", title: "文件哈希" },
+  { id: "webtools-port-helper", title: "端口助手" },
   { id: "cashflow-game", title: "Cashflow" },
   { id: "hardware-inspector", title: "Hardware Inspector" },
   { id: "clipboard-workbench", title: "Clipboard Workbench" }
@@ -61,16 +63,16 @@ async function closeSettings(page) {
 }
 
 async function openPanel(page, panel) {
-  const result = await page.evaluate(async ({ id, title }) => {
+  const result = await page.evaluate(async ({ id, title, configPath }) => {
     return window.launcher.execute({
       id: `plugin:${id}`,
       type: "command",
       title,
       subtitle: title,
-      target: `command:plugin:${id}?action=open`,
+      target: `command:plugin:${id}?action=open${configPath ? `&configPath=${encodeURIComponent(configPath)}` : ""}`,
       keywords: ["plugin", id]
     });
-  }, panel);
+  }, { ...panel, configPath: panel.id === "codeagent-switch" ? path.join(OUTPUT_ROOT, "config.toml") : null });
   if (!result || result.ok !== true) {
     throw new Error(`failed to open ${panel.id}: ${JSON.stringify(result)}`);
   }
@@ -218,9 +220,10 @@ async function auditPage(page, label) {
   return result;
 }
 
-async function capture(page, viewport, name, records) {
+async function capture(page, viewport, name, records, anchor) {
   await settle(page);
   const audit = await auditPage(page, `${viewport.label}/${name}`);
+  if (anchor) await page.locator(anchor).scrollIntoViewIfNeeded();
   const fileName = `${viewport.label}-${slug(name)}.png`;
   await page.screenshot({ path: path.join(OUTPUT_ROOT, fileName), type: "png" });
   records.push({ viewport: viewport.label, name, fileName, audit });
@@ -244,6 +247,7 @@ function writeIndex(records) {
 
 async function main() {
   fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
+  fs.writeFileSync(path.join(OUTPUT_ROOT, "config.toml"), 'model = "example-model"\nmodel_reasoning_effort = "medium"\n', "utf8");
   const records = [];
   const session = await launchE2ESession();
   const { page } = session;
@@ -262,6 +266,28 @@ async function main() {
       for (const panel of ACTIVE_PANELS.filter((candidate) => candidate.id !== "cashflow-game")) {
         await openPanel(page, panel);
         await capture(page, viewport, panel.id, records);
+        if (panel.id === "litesnap") {
+          await page.getByRole("button", { name: "打开设置", exact: true }).click();
+          await page.locator(".litesnap-native-health").waitFor({ state: "visible" });
+          await page.locator(".litesnap-native-health button").filter({ hasText: "刷新模块状态" }).click();
+          await page.getByRole("button", { name: "复制模块诊断", exact: true }).click();
+          await page.waitForFunction(() => document.querySelector("#status-text")?.textContent?.includes("模块诊断已复制"));
+          const copied = await session.electronApp.evaluate(({ clipboard }) => clipboard.readText());
+          if (!copied.includes("LiteSnap 原生模块诊断") || !copied.includes("模块标识：")) {
+            throw new Error("native module diagnostics were not copied");
+          }
+          await page.evaluate(() => {
+            for (const node of document.querySelectorAll("*")) {
+              if (node.scrollTop) node.scrollTop = 0;
+            }
+          });
+          await capture(page, viewport, "litesnap-settings", records, ".litesnap-native-health");
+          await page.getByRole("button", { name: "返回搜索", exact: true }).click();
+          continue;
+        }
+        if (panel.id === "codeagent-switch") {
+          await capture(page, viewport, "codeagent-root-preview", records, ".codeagent-switch-root-preview");
+        }
         await returnToSearch(page);
       }
       if (ACTIVE_PANELS.some((panel) => panel.id === "cashflow-game")) {

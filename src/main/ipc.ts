@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
 import { spawn } from "node:child_process";
+import { getLiteSnapNativeHealth } from "./litesnap/capture-provider";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -269,6 +270,7 @@ const HANDLED_CHANNELS = [
   IPC_CHANNELS.getAllPluginItems,
   IPC_CHANNELS.getRequiredVisiblePluginIds,
   IPC_CHANNELS.getLiteSnapSettings,
+  IPC_CHANNELS.getLiteSnapNativeHealth,
   IPC_CHANNELS.setLiteSnapSettings,
   IPC_CHANNELS.liteSnapStartCapture,
   IPC_CHANNELS.liteSnapStartColorCapture,
@@ -1445,6 +1447,8 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getLiteSnapSettings, () => {
     return options.liteSnapProvider.getSettings();
   });
+
+  ipcMain.handle(IPC_CHANNELS.getLiteSnapNativeHealth, () => getLiteSnapNativeHealth());
 
   ipcMain.handle(IPC_CHANNELS.getLaunchAtLoginStatus, () => {
     return options.settingsProvider.getLaunchAtLoginStatus();

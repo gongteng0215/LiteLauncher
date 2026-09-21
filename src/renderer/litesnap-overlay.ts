@@ -54,6 +54,7 @@
     editorMode?: boolean;
     longCapture?: { phase: string; frameCount: number; stitchedHeight: number; message: string };
     longCaptureSelection?: SelectionRect;
+    longCaptureUnavailableReason?: string;
     editorSelection?: SelectionRect;
   };
 
@@ -4087,6 +4088,8 @@
     );
     if (longCaptureButton) {
       longCaptureButton.hidden = isEditorMode();
+      longCaptureButton.disabled = Boolean(state.longCaptureUnavailableReason);
+      longCaptureButton.title = state.longCaptureUnavailableReason || "长截图";
     }
 
     if (isEditorMode()) {

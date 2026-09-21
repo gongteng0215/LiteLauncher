@@ -196,6 +196,7 @@ export interface LiteSnapOverlayState {
   recentColors: string[];
   editorMode?: boolean;
   longCapture?: LiteSnapLongCaptureProgress;
+  longCaptureUnavailableReason?: string;
   /** The original area stays visible as a transparent guide during long capture. */
   longCaptureSelection?: LiteSnapOverlaySelection;
   /** Long-capture editing returns to the original selection instead of fullscreen. */

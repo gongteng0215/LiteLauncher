@@ -1,6 +1,12 @@
 # LiteLauncher 工作记录
 
-更新时间：2026-06-22
+更新时间：2026-09-21
+
+## 当前工作
+
+- 已发布基线 v1.1.21；本地候选 v1.1.22，尚未发布。
+- 本轮范围：更新失败与重试、LiteSnap 原生模块诊断、文件哈希/端口助手交互收口、相关界面复核。
+- 本轮验证结果与发布前剩余项见版本路线图。下方“最近完成”为历史工作记录，不作为当前待办。
 
 ## 最近完成
 - 启动 `LiteSnap` 第一批实现：新增 `src/shared/litesnap.ts` 共享类型与 Snipaste 风格默认快捷键（`F1` 截图、`F3` 贴图），补齐内置插件注册、默认可见插件列表、LiteSnap 面板壳、基础动作入口，以及 `get/setLiteSnapSettings`、`liteSnapStartCapture`、`liteSnapPinClipboard` 的 preload / IPC / main 脚手架；同时新增 `src/main/litesnap/settings.ts`、`capture-session-manager.ts`、`pin-window-manager.ts`、`image-store.ts` 作为后续 overlay / 贴图窗口能力的运行时基础。本轮按顺序完成 `pnpm run build`、`node dist/test/litesnap-plugin-source.test.js`、`node dist/test/visible-plugins-regression.test.js`、`node dist/test/plugin-panel-impls-regression.test.js`，结果均通过。
@@ -114,42 +120,11 @@
 - CodeAgent Switch 已对齐 Codex 0.134.0+ 的新版配置机制：插件现在会同时读取用户级 `config.toml`、同目录下的独立 `<profile>.config.toml` 文件，以及用户历史保留的 `config - xxx.toml` 快照文件；Profile 新增默认保存为独立 `*.config.toml`，预览 / 应用会把选中 Profile 的字段写回 `config.toml` 顶层，旧的顶层 `profile = "..."` 与嵌入式 `[profiles.xxx]` 会被识别为 legacy 并给出迁移告警；同时保留中文 Provider / Profile 名回归，避免 `淘宝1`、`银河` 这类值在插件链路中再次变成乱码。本轮已按串行顺序完成 `pnpm run build`、`node dist/test/codeagent-switch-parser.test.js`、`node dist/test/codeagent-switch-plugin.test.js` 验证，结果通过。
 - CodeAgent Switch 对齐官方 Codex 配置参考继续补字段：Provider 详情页新增 `env_key_instructions`、`supports_websockets`、`http_headers`、`env_http_headers`、`query_params`；Profile 详情页新增 `plan_mode_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`service_tier`、`web_search`；详情页新增“运行权限”区，可保存 `approval_policy`、`sandbox_mode`、`default_permissions`、`network_access` 和 `[windows] sandbox / sandbox_private_desktop`。保存路径仍走备份、临时文件、重读校验和替换流程，并新增 parser/plugin/source 回归覆盖。
 
-## 当前版本基线
+## 当前基线与后续
 
-- 应用版本：`v1.0.26`
-- 默认可见插件数量：26
-- 已开放 WebTools 插件数量：23（原 `webTools` 20 个 + 文件哈希 + 端口助手 + 图片提示词）
-- 非 WebTools 默认插件：`cashflow-game`、`hardware-inspector`、`codeagent-switch`
-- 开发模式：`pnpm dev`
-- 完整回归入口：`pnpm run test:regression:full`
-- 搜索首页布局回归：已接入 `pnpm run test:e2e:smoke`
-- 新增默认插件与 Crypto / JWT UI smoke：已接入 `pnpm run test:e2e:smoke`
-- Windows Store Codex 真机回归：`pnpm run test:e2e:windows-codex`
-- Windows 应用别名（如 `codex`）已支持搜索、启动、置顶和跨重启恢复
-- 自动更新说明支持受限富文本显示，避免 release notes HTML 标签原样出现在设置页
-- `plugin / settings / cashflow` 面板态已改为失焦不自动隐藏，仍保留 `Esc` / 返回等显式退出路径
-
-## 当前 worktree 状态
-
-- `E:\AI\LiteLauncher` -> `main`：当前主线 worktree，已经纳入本轮 round 2 已提交的样式 / 测试回填增量，以及新近回填的 `Clipboard Workbench` 本地化批次、`Hardware Inspector` helper/state 下沉批次、`Clipboard Workbench / CodeAgent Switch` Enter 收口批次、`Colors / QRCode / UA / API / Unit / Strings / URL` 共用结构回填批次和 `plugin-panel-impls-regression` 护栏补齐批次；最近一次完成的串行验证结果仍为 `pnpm run build` 通过，随后 `node dist/test/plugin-panel-impls-regression.test.js` 53/53 通过。
-- `E:\AI\LiteLauncher` -> `main`：本轮又额外回填了 `Image Base64` 的 round2 面板结构与上传/拖拽链路，并把 `Colors / Unit / Strings / API / QRCode / UA / ImageBase64` 的轻量结构 smoke 断言补进主线测试；这些增量已经通过本轮串行 `build + dist tests` 验证。
-- `E:\AI\LiteLauncher` -> `main`：当前主线 `renderer.ts` 已进一步收口为渲染壳层，插件与 standalone 面板实现统一以 `src/renderer/plugin-panel-impls.ts` 为主；`renderer.ts` 当前主要保留搜索 / 设置壳层、`panelImplsSafe` 分发、通用 DOM / status helper 与少量共享状态，行数约 3,499。
-- 当前状态结论：`codex/panel-baseline-round2` 已按“恢复现场 -> 复核 branch / patch -> 在 \`main\` 补记 merge 关系 -> 删除 worktree”的顺序完成收尾；其最终现场仍归档在 `.codex-recovery/worktree-archives/panel-baseline-round2-20260528-142402/`，包含 `status.txt`、`branch-divergence.txt`、`working-tree.patch` 与 worktree 内备份文件。当前 `git worktree list` 与磁盘 `.worktrees` 都只剩主仓库 `main`。
-
-## 当前主要风险
-
-1. round 2 已提交且可验证的样式 / 测试增量，以及 `Clipboard Workbench` 可独立回填的本地化批次、`Hardware Inspector` 可独立回填的 helper/state 下沉批次，已回填到 `main`；`codex/panel-baseline-round2` 也已在 `main` 上补记 merge 关系并完成 worktree 清理，剩余未提交的 `renderer` / `plugin-panel-impls` 大块 WIP 仅保留归档现场，后续若要追查需基于归档 patch 或主线继续收口。
-2. 渲染层执行 helper 与共享状态已大幅迁出，`renderer.ts` 当前剩余的插件尾巴已进一步收敛到状态变量、少量共享常量与 Cashflow / Clipboard 等尚未拆完区域，但仍未完全清空所有历史状态定义。
-3. CodeAgent Switch 的 Root 区虽然已经补齐内嵌完整预览和字段说明，但还没有做一轮新的 Electron / 真实 UI 视角确认，当前主要依赖源码回归 + build + 定向插件回归验证。
-4. 部分 WebTools 插件虽然可用，但还没有完全达到原版交互齐平。
-5. 基于 `dist` 的定向测试如果与 `pnpm run build` 并行执行，会读到旧产物并产生假阳性；后续验证必须采用串行顺序：先 build，再逐个运行 `node dist/test/...`。
-6. 仍有历史 UI 文案和编码问题需要持续清理，非本次新增插件范围仍需巡检。
-7. Cashflow `cash review` 复盘能力还未真正落地。
-
-## 下一步建议
-
-1. 先整理并发布当前收口版，把“面板失焦不自动隐藏”、设置页诊断与更新说明富文本显示一起带到线上验证。
-2. 发版前继续遵循“源码回归 -> `pnpm run build` -> 串行 `node dist/test/...` -> 必要时再 smoke / 打包”的顺序，避免 stale `dist` 假阳性。
-3. `v1.0.26` 的设置页诊断收口已经完成，下一步更适合补一条“检查更新失败 / unsupported 环境”的定向 smoke，继续把边界状态锁住。
-4. 同步做 CodeAgent Switch 小范围 UI 复核和历史文案 / 编码巡检。
-5. `Cashflow / Clipboard Workbench` 大扩展与 `renderer.ts` 大重构继续后置，优先先把当前版本收口发布。
+- 工作目录：`D:\AI\LiteLauncher`；发布记录以 `docs/version-roadmap.md` 为准。
+- 开发入口：`pnpm dev`；完整回归：`pnpm run test:regression:full`。
+- 插件实现已按面板模块拆分至 `src/renderer/panel-modules/`，旧的大文件行数与插件数量不再作为基线。
+- Cashflow 复盘、三类 AI、评分与建议已经发布，后续候选见 `docs/cashflow-game/cashflow-tasks.md`。
+- 验证顺序保持源码检查 → build → dist 测试 → 批次末尾 smoke / 打包，不并行生成和消费 dist。
+- v1.1.22 本地验证完成后交给用户测试，再决定发布。

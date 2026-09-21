@@ -463,6 +463,7 @@ declare global {
       getAllPluginItems(): Promise<LaunchItem[]>;
       getRequiredVisiblePluginIds(): Promise<string[]>;
       getLiteSnapSettings(): Promise<LiteSnapSettings>;
+      getLiteSnapNativeHealth(): Promise<import("../shared/litesnap-native-health").LiteSnapNativeHealth>;
       setLiteSnapSettings(
         patch: Partial<LiteSnapSettings>
       ): Promise<LiteSnapSettingsUpdateResult>;

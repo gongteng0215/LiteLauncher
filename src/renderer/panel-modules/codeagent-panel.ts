@@ -1694,7 +1694,7 @@ namespace RendererPanelRuntime {
       const saveButton = document.createElement("button");
       saveButton.type = "button";
       saveButton.className = "settings-btn settings-btn-primary";
-      saveButton.textContent = "Save Provider + Root";
+      saveButton.textContent = "保存 Provider 与 Root";
       saveButton.addEventListener("click", () => {
         if (providerDetailEditor && providerDetailRuntimeEditor) {
           void executeCodeAgentSwitchSaveProviderAndRuntime(

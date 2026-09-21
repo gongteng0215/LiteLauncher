@@ -69,9 +69,10 @@ namespace RendererPanelRuntime {
       pathInput.className = "settings-value webtools-tool-input webtools-tool-code";
       pathInput.name = "webtoolsFileHashPath";
       pathInput.type = "text";
-      pathInput.placeholder = "例如：C:\\\\Users\\\\me\\\\Downloads\\\\file.zip";
+      pathInput.placeholder = "例如：C:\\Users\\me\\Downloads\\file.zip";
       pathInput.addEventListener("input", () => {
         webtoolsFileHashFilePath = pathInput.value;
+        invalidateWebtoolsFileHashResult(form);
       });
       const pickButton = document.createElement("button");
       pickButton.type = "button";
@@ -90,6 +91,7 @@ namespace RendererPanelRuntime {
           .then((selectedPath) => {
             if (typeof selectedPath === "string" && selectedPath.trim()) {
               webtoolsFileHashFilePath = selectedPath.trim();
+              invalidateWebtoolsFileHashResult(form);
               webtoolsFileHashError = "";
               webtoolsFileHashInfo = "已选择文件，点击“计算哈希”开始";
             }
@@ -123,6 +125,7 @@ namespace RendererPanelRuntime {
       });
       algorithmSelect.addEventListener("change", () => {
         webtoolsFileHashAlgorithm = normalizeWebtoolsFileHashAlgorithm(algorithmSelect.value);
+        invalidateWebtoolsFileHashResult(form);
       });
       algorithmWrap.append(algorithmLabel, algorithmSelect);
 
@@ -138,6 +141,7 @@ namespace RendererPanelRuntime {
       expectedInput.placeholder = "粘贴用于对比的哈希值";
       expectedInput.addEventListener("input", () => {
         webtoolsFileHashExpectedHash = expectedInput.value;
+        invalidateWebtoolsFileHashResult(form);
       });
       expectedWrap.append(expectedLabel, expectedInput);
 
@@ -194,6 +198,7 @@ namespace RendererPanelRuntime {
       clearButton.className = "settings-btn settings-btn-secondary";
       clearButton.textContent = "清空";
       clearButton.addEventListener("click", () => {
+        ++webtoolsFileHashRequestToken;
         webtoolsFileHashFilePath = "";
         webtoolsFileHashExpectedHash = "";
         webtoolsFileHashOutput = "";
@@ -293,7 +298,7 @@ namespace RendererPanelRuntime {
       portInput.name = "webtoolsPortHelperPort";
       portInput.min = "1";
       portInput.max = "65535";
-      portInput.placeholder = "例如 3000（留空=全部）";
+      portInput.placeholder = "如 3000";
       portInput.addEventListener("input", () => {
         webtoolsPortHelperPort = portInput.value;
       });
@@ -363,6 +368,8 @@ namespace RendererPanelRuntime {
       clearButton.className = "settings-btn settings-btn-secondary";
       clearButton.textContent = "清空";
       clearButton.addEventListener("click", () => {
+        ++webtoolsPortHelperRequestToken;
+        webtoolsPortHelperBusy = false;
         webtoolsPortHelperPort = "";
         webtoolsPortHelperProtocol = "all";
         webtoolsPortHelperPid = "";

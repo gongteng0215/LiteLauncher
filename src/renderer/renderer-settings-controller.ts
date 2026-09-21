@@ -304,7 +304,7 @@ function formatAppUpdaterStatusSummary(status: AppUpdaterStatus): string {
 
 function formatAppUpdaterPhaseText(status: AppUpdaterStatus): string {
   if (status.phase === "error") {
-    return "检查失败";
+    return status.failureStage === "download" ? "下载失败" : "检查失败";
   }
 
   if (!status.supported) {
@@ -383,7 +383,7 @@ function formatAppUpdaterDiagnosticsForClipboard(status: AppUpdaterStatus): stri
 
 function formatAppUpdaterActionHint(status: AppUpdaterStatus): string {
   if (status.phase === "error") {
-    return status.message ?? "可稍后再次检查";
+    return "请检查网络后点击重试；仍失败时，可复制更新诊断并从项目发布页下载安装包。";
   }
 
   if (!status.supported) {
@@ -413,6 +413,8 @@ async function checkForAppUpdatesFromSettings(): Promise<void> {
   }
 
   setStatus("正在检查更新...");
+  appUpdaterStatus = { ...appUpdaterStatus, phase: "checking", failureStage: undefined };
+  refreshOpenSettingsOverlay();
   try {
     appUpdaterStatus = await launcher.checkForAppUpdates();
     setStatus(`自动更新：${formatAppUpdaterStatusSummary(appUpdaterStatus)}`);
@@ -1825,9 +1827,12 @@ function renderSettingsPanel(
   checkUpdatesButton.type = "button";
   checkUpdatesButton.className =
     "settings-btn settings-btn-secondary settings-system-action-btn";
-  checkUpdatesButton.textContent = "检查更新";
+  checkUpdatesButton.textContent = appUpdaterStatus.phase === "error" ? "重试更新" : "检查更新";
   checkUpdatesButton.disabled =
+    !appUpdaterStatus.supported ||
     appUpdaterStatus.phase === "checking" ||
+    appUpdaterStatus.phase === "available" ||
+    appUpdaterStatus.phase === "downloaded" ||
     appUpdaterStatus.phase === "downloading";
   checkUpdatesButton.addEventListener("click", () => {
     void checkForAppUpdatesFromSettings();

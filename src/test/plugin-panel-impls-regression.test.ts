@@ -1201,7 +1201,7 @@ test("CodeAgent Switch panel is implemented through plugin-panel-impls", () => {
   );
   assert.match(
     panelImplsSource,
-    /保存 Root 配置|Save Provider \+ Root/,
+    /保存 Root 配置|保存 Provider 与 Root/,
     "CodeAgent Switch actions should describe Root config saving semantics"
   );
   assert.match(

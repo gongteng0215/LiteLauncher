@@ -18,6 +18,34 @@ type SelectionSnapshot = {
   toolbarVisible: boolean;
 };
 
+test("electron smoke: long capture failure releases desktop and disables retry", { timeout: 60000, skip: process.platform !== "win32" }, async () => {
+  const session = await launchE2ESession({ extraEnv: { LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION: "1" } });
+  try {
+    let overlay = await waitForOverlayWindow(session);
+    await waitForOverlayReady(overlay);
+    await createOverlaySelection(overlay);
+    await clickOverlayToolbarButton(overlay, "long");
+    await waitForLongCaptureController(session);
+    await session.electronApp.evaluate(({ BrowserWindow }) => {
+      const controller = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes("litesnap-long-capture.html"));
+      if (!controller) throw new Error("missing controller");
+      controller.emit("unresponsive");
+    });
+    await waitForOverlayVisibility(session, false);
+    assert.equal(await session.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.webContents.getURL().includes("litesnap-long-capture"))), false);
+    overlay = await waitForOverlayWindow(session);
+    await waitForOverlayReady(overlay);
+    await createOverlaySelection(overlay);
+    const button = await overlay.locator('button[data-action="long"]').evaluate((element: HTMLButtonElement) => ({ disabled: element.disabled, title: element.title }));
+    assert.equal(button.disabled, true);
+    assert.match(button.title, /已停用/);
+    await clickOverlayToolbarButton(overlay, "copy");
+    await waitForOverlayVisibility(session, false);
+  } finally {
+    await closeLiteSnapE2ESession(session);
+  }
+});
+
 type NativeScrollFixtureStatus = {
   ready: boolean;
   pid: number;
@@ -1019,11 +1047,13 @@ test(
         return window?.getBounds() ?? null;
       });
       assert.ok(beforeMove);
-      await pinPage.mouse.move(300, 150);
-      await pinPage.mouse.down();
-      await pinPage.mouse.move(340, 180, { steps: 6 });
-      await pinPage.mouse.up();
-      await pinPage.waitForTimeout(180);
+      for (let move = 0; move < 3; move += 1) {
+        await pinPage.mouse.move(300, 150);
+        await pinPage.mouse.down();
+        await pinPage.mouse.move(340, 180, { steps: 6 });
+        await pinPage.mouse.up();
+        await pinPage.waitForTimeout(180);
+      }
       const afterMove = await session.electronApp.evaluate(({ BrowserWindow }) => {
         const window = BrowserWindow.getAllWindows().find((candidate) =>
           candidate.webContents.getURL().includes("/pin.html")
@@ -1033,10 +1063,10 @@ test(
           : null;
       });
       assert.ok(afterMove);
-      assert.deepEqual(
-        { width: afterMove.bounds.width, height: afterMove.bounds.height },
-        { width: beforeMove.width, height: beforeMove.height },
-        "dragging pinned image content should never change the whole-window size"
+      assert.ok(
+        Math.abs(afterMove.bounds.width - beforeMove.width) <= 1 &&
+        Math.abs(afterMove.bounds.height - beforeMove.height) <= 1,
+        `repeated moves must not accumulate size drift (allow one DIP for native rounding): ${JSON.stringify({ beforeMove, afterMove })}`
       );
       assert.ok(
         afterMove.bounds.x !== beforeMove.x || afterMove.bounds.y !== beforeMove.y,
@@ -1113,7 +1143,9 @@ test(
       assert.ok(resetBounds);
       assert.deepEqual(
         { width: resetBounds.width, height: resetBounds.height },
-        { width: initial.bounds.width, height: initial.bounds.height }
+        // Reset restores the requested source size, not creation-time native
+        // frame rounding (which can add a few DIP on fractional-scale screens).
+        { width: 400, height: 200 }
       );
 
       await pinPage.evaluate(() => {
@@ -1530,6 +1562,12 @@ test(
         );
       }
 
+      // Input windows now close before asynchronous saving finishes.
+      const saveDeadline = Date.now() + 15000;
+      while (await session.page.evaluate(async () => Boolean(await window.launcher.liteSnapGetOverlayState()))) {
+        assert.ok(Date.now() < saveDeadline, "long capture save should finish within 15 seconds");
+        await session.page.waitForTimeout(100);
+      }
       const completed = await session.page.evaluate(async () => {
         const state = await window.launcher.liteSnapGetOverlayState();
         const diagnostics = await window.launcher.liteSnapGetDiagnostics();
@@ -1756,7 +1794,13 @@ test(
       };
 
       for (let index = 0; index < 6; index += 1) {
+        const before = await session.page.evaluate(() => window.launcher.liteSnapGetLongCaptureProgress());
         await relayScroll(120);
+        // Wait for accepted content, not a fixed desktop timing assumption.
+        await session.page.waitForFunction(async (count) => {
+          const progress = await window.launcher.liteSnapGetLongCaptureProgress();
+          return Boolean(progress && progress.frameCount > count);
+        }, before?.frameCount ?? 0, { timeout: 10000 });
       }
       const atBottom = await session.page.evaluate(() =>
         window.launcher.liteSnapGetLongCaptureProgress()

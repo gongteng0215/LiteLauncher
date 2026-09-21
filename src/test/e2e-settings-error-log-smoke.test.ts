@@ -174,8 +174,13 @@ test(
       const updaterSummaryText = await page.locator(".settings-system-update-card").textContent();
       assert.match(updaterSummaryText ?? "", /打包后再验证/);
 
-      await page.getByRole("button", { name: "检查更新" }).click();
-      await waitForStatusText(page, "检查更新失败");
+      assert.equal(await page.getByRole("button", { name: "检查更新" }).isDisabled(), true);
+      // A development build cannot check publicly; inject the terminal state via the test hook.
+      await page.evaluate(() => window.launcher.checkForAppUpdates().catch(() => undefined));
+      await page.locator(".cc-settings-close").click();
+      await page.locator("#settings-shortcut-btn").click();
+      await waitForSettingsPanel(page);
+      await page.locator('button[data-settings-tab="updates"]').click();
       await page.waitForFunction(() => {
         const cardText = document.querySelector(".settings-system-update-card")?.textContent || "";
         return cardText.includes("检查失败") && cardText.includes("E2E 检查更新失败") && cardText.includes("[redacted]");

@@ -1471,6 +1471,16 @@ namespace RendererPanelRuntime {
     }
   }
 
+  export function invalidateWebtoolsFileHashResult(form: HTMLFormElement): void {
+    ++webtoolsFileHashRequestToken;
+    webtoolsFileHashOutput = "";
+    webtoolsFileHashMatched = null;
+    webtoolsFileHashSize = "";
+    webtoolsFileHashError = "";
+    webtoolsFileHashInfo = "输入已更改，请重新计算";
+    refreshWebtoolsFileHashPanelInForm(form);
+  }
+
   export async function executeWebtoolsFileHashCalculate(form: HTMLFormElement): Promise<void> {
     const launcher = getLauncherApi();
     if (!launcher) {
@@ -1503,7 +1513,9 @@ namespace RendererPanelRuntime {
       keywords: ["plugin", "hash", "checksum", "file", "文件哈希"]
     };
 
-    const result = await launcher.execute(item);
+    const result = await launcher.execute(item).catch(() => ({
+      ok: false, message: "哈希计算失败，请重试。", data: undefined
+    }));
     if (requestToken !== webtoolsFileHashRequestToken) {
       return;
     }

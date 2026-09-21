@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   getVisiblePluginIds: "launcher:get-visible-plugin-ids",
   setVisiblePluginIds: "launcher:set-visible-plugin-ids",
   getLiteSnapSettings: "launcher:get-litesnap-settings",
+  getLiteSnapNativeHealth: "launcher:get-litesnap-native-health",
   setLiteSnapSettings: "launcher:set-litesnap-settings",
   liteSnapStartCapture: "launcher:litesnap-start-capture",
   liteSnapStartColorCapture: "launcher:litesnap-start-color-capture",

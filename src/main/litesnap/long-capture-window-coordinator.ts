@@ -14,7 +14,7 @@ export class LiteSnapLongCaptureWindowCoordinator {
   private guideWindow: BrowserWindow | null = null;
   private stackWatchTimer: NodeJS.Timeout | null = null;
   private maskReady = false;
-  private onUnexpectedClose: (() => void) | null = null;
+  private onUnexpectedClose: ((failed?: boolean) => void) | null = null;
   private readonly expectedCloses = new WeakSet<BrowserWindow>();
 
   public get controller(): BrowserWindow | null {
@@ -32,7 +32,7 @@ export class LiteSnapLongCaptureWindowCoordinator {
   public open(
     display: Display,
     selection: LiteSnapOverlaySelection,
-    onUnexpectedClose?: () => void
+    onUnexpectedClose?: (failed?: boolean) => void
   ): void {
     this.stopWatch();
     this.maskReady = false;
@@ -157,27 +157,26 @@ export class LiteSnapLongCaptureWindowCoordinator {
     this.onUnexpectedClose = null;
     const guide = this.guideWindow;
     this.guideWindow = null;
-    if (guide && !guide.isDestroyed()) {
-      this.expectedCloses.add(guide);
-      guide.destroy();
-    }
     const controller = this.controllerWindow;
     this.controllerWindow = null;
-    if (controller && !controller.isDestroyed()) {
-      this.expectedCloses.add(controller);
-      controller.destroy();
+    for (const window of [guide, controller]) {
+      if (!window || window.isDestroyed()) continue;
+      this.expectedCloses.add(window);
+      try { window.setIgnoreMouseEvents(true); } catch { /* Continue releasing other windows. */ }
+      try { window.hide(); } catch { /* Destruction is the final fallback. */ }
+      try { window.destroy(); } catch (error) { console.warn("[litesnap] helper cleanup failed", error); }
     }
   }
 
   private bindFailureHandlers(window: BrowserWindow): void {
-    const fail = () => this.onUnexpectedClose?.();
+    const fail = () => this.onUnexpectedClose?.(true);
     window.on("unresponsive", fail);
     window.webContents.on("render-process-gone", fail);
     window.webContents.on("did-fail-load", fail);
     window.webContents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         event.preventDefault();
-        fail();
+        this.onUnexpectedClose?.(false);
       }
     });
   }
@@ -227,6 +226,9 @@ export class LiteSnapLongCaptureWindowCoordinator {
       height
     });
     controller.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Apply after positioning: Windows can reset the initial topmost flag
+    // while creating/positioning a transparent helper. Do this only on open.
+    controller.setAlwaysOnTop(true, "screen-saver");
     controller.showInactive();
     controller.moveTop();
   }

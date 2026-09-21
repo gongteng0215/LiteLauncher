@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { dialog, type BrowserWindow } from "electron";
 
 import { IPC_CHANNELS } from "../../../shared/channels";
 import { ExecuteResult, LaunchItem } from "../../../shared/types";
@@ -449,7 +450,7 @@ async function executeQuery(command: PortHelperCommand): Promise<ExecuteResult> 
   }
 }
 
-async function executeKill(command: PortHelperCommand): Promise<ExecuteResult> {
+async function executeKill(command: PortHelperCommand, owner: BrowserWindow): Promise<ExecuteResult> {
   if (command.port === null && command.pid === null) {
     return {
       ok: false,
@@ -514,6 +515,20 @@ async function executeKill(command: PortHelperCommand): Promise<ExecuteResult> {
   }
 
   try {
+    const processName = records.find((record) => record.pid === targetPid)?.processName;
+    const confirmation = await dialog.showMessageBox(owner, {
+      type: "warning",
+      title: "结束占用进程",
+      message: `确定结束 ${processName || "进程"}（PID ${targetPid}）？`,
+      detail: "这会强制关闭该进程，未保存的内容可能丢失。",
+      buttons: ["取消", "结束进程"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    if (confirmation.response !== 1) {
+      return { ok: true, keepOpen: true, message: "已取消结束进程", data: { records, info: "已取消结束进程" } };
+    }
     await runCommand("taskkill", ["/PID", String(targetPid), "/F"]);
   } catch (error) {
     return {
@@ -619,7 +634,7 @@ export const webtoolsPortHelperPlugin: LauncherPlugin = {
     }
 
     if (command.action === "kill") {
-      return executeKill(command);
+      return executeKill(command, context.window);
     }
 
     return executeQuery(command);

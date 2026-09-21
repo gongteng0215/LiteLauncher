@@ -376,6 +376,11 @@ test(
           expectedHash,
           { timeout: 15000 }
         );
+        await hashForm.locator('input[name="webtoolsFileHashExpected"]').fill("0".repeat(64));
+        assert.equal(await hashForm.locator('textarea[name="webtoolsFileHashOutput"]').inputValue(), "");
+        assert.doesNotMatch(await hashForm.locator(".webtools-file-hash-verify").innerText(), /校验结果：匹配/);
+        await hashForm.getByRole("button", { name: "计算哈希", exact: true }).click();
+        await page.waitForFunction(() => document.querySelector(".webtools-file-hash-verify")?.textContent === "校验结果：不匹配");
         await returnToSearch(page);
       } finally {
         await fs.rm(hashFixtureDir, { recursive: true, force: true });
@@ -399,7 +404,7 @@ test(
           ".webtools-port-helper-info"
         ) as HTMLDivElement | null;
         const results = document.querySelector(".webtools-port-helper-results");
-        return Boolean(info?.textContent?.trim() && results);
+        return Boolean(info?.textContent?.trim() && !info.textContent.includes("正在查询") && results);
       });
       await returnToSearch(page);
 
@@ -759,7 +764,7 @@ test(
       await page.waitForFunction(() => {
         const saveButton = Array.from(
           document.querySelectorAll<HTMLButtonElement>(".codeagent-switch-detail-hero-actions button")
-        ).find((node) => /Save Provider \+ Root/i.test(node.textContent ?? ""));
+        ).find((node) => /保存 Provider 与 Root/.test(node.textContent ?? ""));
         const rootPreview = document.querySelector(".codeagent-switch-root-preview");
         const rootSource = document.querySelector(".codeagent-switch-root-source");
         return Boolean(saveButton && rootPreview && rootSource);

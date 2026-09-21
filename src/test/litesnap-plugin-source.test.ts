@@ -1935,12 +1935,8 @@ test("LiteSnap long capture, history editing, and anonymous diagnostics are wire
   );
   assert.match(controllerSource, /程序不会判断是否到底，也不会自动完成/);
   assert.match(captureSource, /A screenshot shortcut pressed while long capture is active/);
-  assert.match(captureSource, /长截图会保持显示并继续重试/);
-  assert.doesNotMatch(
-    captureSource,
-    /目标窗口已关闭或选区已不再属于原窗口，长截图已取消/,
-    "temporary target lookup failures must not dismiss long capture"
-  );
+  assert.match(captureSource, /this\.disableLongCapture\(targetChanged/);
+  assert.doesNotMatch(captureSource, /长截图会保持显示并继续重试/);
   assert.doesNotMatch(captureSource, /长截图控制窗口已恢复/);
   assert.match(captureSource, /handleLongCaptureAuxiliaryWindowClosed[\s\S]*await this\.cancelCapture\(\)/);
   const relayEnd = windowCoordinatorSource.split("public endScrollRelay")[1]!.split("public stopWatch")[0]!;

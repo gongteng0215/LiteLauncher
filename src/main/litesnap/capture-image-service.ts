@@ -38,7 +38,11 @@ export class LiteSnapCaptureImageService {
         const contentRow = offset + y - edge;
         const topMarker = y >= edge && contentRow >= 4 && contentRow <= 8;
         const bottomMarker = y < height - edge && contentRow >= bottomMarkerStart && contentRow <= bottomMarkerStart + 4;
-        const value = y < edge ? 245 : y >= height - edge ? 12 : (contentRow * 37 + x * 17) % 251;
+        // A modulo-251 ramp repeats whole rows and creates false seams on
+        // larger/HiDPI selections. Keep fixture content deterministic but unique.
+        let seed = Math.imul(contentRow + 1, 0x45d9f3b) ^ Math.imul(x + 1, 0x119de1f3);
+        seed = Math.imul(seed ^ (seed >>> 16), 0x45d9f3b);
+        const value = y < edge ? 245 : y >= height - edge ? 12 : (seed ^ (seed >>> 16)) & 255;
         data[index] = topMarker ? 255 : bottomMarker ? 0 : value;
         data[index + 1] = topMarker ? 0 : bottomMarker ? 255 : (value * 3) % 255;
         data[index + 2] = topMarker || bottomMarker ? 255 : (value * 7) % 255;
