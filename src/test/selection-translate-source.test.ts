@@ -65,7 +65,7 @@ test("selection-translate settings store is wired", () => {
   const sharedSource = readSource("src/shared/selection-translate.ts");
   const popupSource = readSource("src/main/selection-translate/popup-window.ts");
   const mainSource = readSource("src/main/index.ts");
-  const panelImplsSource = readSource("src/renderer/plugin-panel-impls.ts");
+  const panelImplsSource = readSource("src/renderer/panel-modules/dictionary-translate-panel.ts");
   const channelsSource = readSource("src/shared/channels.ts");
   const ipcSource = readSource("src/main/ipc.ts");
   const preloadSource = readSource("src/preload/index.ts");
@@ -108,7 +108,10 @@ test("selection-translate settings store is wired", () => {
   assert.match(panelImplsSource, /默认 F4/);
   assert.doesNotMatch(panelImplsSource, /默认 F2/);
   const backdropHtml = readSource("src/renderer/selection-backdrop.html");
-  assert.match(backdropHtml, /screenX/);
+  assert.match(backdropHtml, /script src="\.\/selection-backdrop\.js"/);
+  assert.match(backdropHtml, /background: rgba\(0, 0, 0, 0\.01\)/);
+  const backdropScript = readSource("src/renderer/selection-backdrop.ts");
+  assert.match(backdropScript, /screenX/);
   const backdropPreload = readSource("src/preload/selection-backdrop.ts");
   assert.match(backdropPreload, /close\(point/);
   const copyAssets = readSource("scripts/copy-assets.cjs");

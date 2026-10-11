@@ -18,6 +18,29 @@ type SelectionSnapshot = {
   toolbarVisible: boolean;
 };
 
+test("electron smoke: direct capture pin preserves selection display size", { timeout: 60000 }, async () => {
+  const session = await launchE2ESession();
+  try {
+    const overlay = await waitForOverlayWindow(session);
+    await waitForOverlayReady(overlay);
+    const selection = await createOverlaySelection(overlay);
+    const contentSize = await overlay.evaluate(() => {
+      const node = document.getElementById("litesnap-selection")!;
+      return { width: parseFloat(node.style.width), height: parseFloat(node.style.height) };
+    });
+    const before = await session.electronApp.evaluate(({ BrowserWindow, screen }) => ({
+      displays: screen.getAllDisplays().map(display => ({ bounds: display.bounds, scaleFactor: display.scaleFactor })),
+      bounds: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes("litesnap-overlay.html"))?.getBounds()
+    }));
+    await clickOverlayToolbarButton(overlay, "pin");
+    await waitForPinWindow(session);
+    const pinned = await session.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes("/pin.html"))?.getBounds());
+    console.log(JSON.stringify({ selection, contentSize, before, pinned }));
+    assert.ok(pinned);
+    assert.ok(Math.abs(pinned.width - contentSize.width) <= 2 && Math.abs(pinned.height - contentSize.height) <= 2, "pin must retain selection size (excluding the selection outline)");
+  } finally { await closeLiteSnapE2ESession(session); }
+});
+
 test("electron smoke: long capture failure releases desktop and disables retry", { timeout: 60000, skip: process.platform !== "win32" }, async () => {
   const session = await launchE2ESession({ extraEnv: { LITELAUNCHER_E2E_LONG_CAPTURE_SIMULATION: "1" } });
   try {

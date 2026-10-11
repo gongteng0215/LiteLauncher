@@ -438,13 +438,13 @@ test("LiteSnap main-process runtime scaffolding exists", () => {
   );
   assert.match(
     pinSource,
-    /type PinDragOrigin[\s\S]*width: number;[\s\S]*height: number;[\s\S]*applyPinnedWindowBounds\([\s\S]*origin\.width[\s\S]*origin\.height/,
-    "LiteSnap pin windows should lock their drag-start size instead of inheriting concurrent resize frames"
+    /window\.setBounds\(\{ x: Math\.round\(x\), y: Math\.round\(y\), width, height \}, false\)/,
+    "LiteSnap drag must use stable dimensions instead of setPosition's rounded current size"
   );
   assert.match(
     pinSource,
-    /PIN_DRAG_BEGIN_CHANNEL[\s\S]*window\.setResizable\(false\)[\s\S]*PIN_DRAG_END_CHANNEL[\s\S]*window\.setResizable\(true\)/,
-    "LiteSnap content dragging should suspend native resizing until the drag ends"
+    /window\.on\("will-resize"[\s\S]*current\?\.dragOrigin[\s\S]*event\.preventDefault\(\)/,
+    "LiteSnap content dragging should veto native resizing without changing the frame"
   );
   assert.match(
     pinSource,

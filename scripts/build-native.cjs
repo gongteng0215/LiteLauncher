@@ -23,7 +23,10 @@ const REQUIRED_EXPORTS = [
   "supportsLayeredWindowExclusion",
   "getWindowRectAtPoint",
   "scrollWindowAtPoint",
-  "recognizeText"
+  "recognizeText",
+  "startPointerWatch",
+  "readPointerPresses",
+  "stopPointerWatch"
 ];
 const prebuiltAddonPath = path.join(
   nativeRoot,

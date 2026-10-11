@@ -1,4 +1,23 @@
 /* Settings page hierarchy: title, description, cards, form and visible actions. */
+.settings-system-group .settings-row.settings-system-update-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-system-update-row .settings-control,
+.settings-system-update-card {
+  width: 100%;
+  min-width: 0;
+}
+.settings-system-update-card .settings-row-hint {
+  width: 100%;
+  line-height: 1.5;
+}
+.settings-update-progress {
+  width: 100%;
+  height: 12px;
+  accent-color: var(--accent, #9b6cff);
+}
+.settings-update-progress[hidden] { display: none; }
+
 .settings-panel {
   border-radius: var(--ll-radius-card);
   min-width: 0;

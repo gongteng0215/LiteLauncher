@@ -69,7 +69,7 @@ test(
 );
 
 test(
-  "electron smoke: selection popup anchors to the trigger point and closes on outside focus",
+  "electron smoke: selection popup anchors to the trigger point and closes on outside pointer",
   { timeout: 180000 },
   async () => {
     const testName =
@@ -89,6 +89,11 @@ test(
         closeSelectionPopup();
         const { workArea } = screen.getPrimaryDisplay();
         const anchorPoint = { x: workArea.x + 48, y: workArea.y + 48 };
+        // Cover the DOM fallback independently of the Windows native watcher.
+        const provider = appRequire(path.join(process.cwd(), "dist/main/litesnap/capture-provider.js"));
+        const originalWatch = provider.createNativePointerWatch;
+        provider.createNativePointerWatch = () => null;
+        try {
         await showSelectionPopup(
           {
             mode: "dictionary",
@@ -107,6 +112,7 @@ test(
           },
           { dismissOnOutsideClick: true, anchorPoint }
         );
+        } finally { provider.createNativePointerWatch = originalWatch; }
         const popup = BrowserWindow.getAllWindows().find((window) =>
           window.webContents.getURL().includes("selection-popup.html")
         );
@@ -147,17 +153,24 @@ test(
         return Boolean(root && /apple/i.test(root.textContent ?? ""));
       });
 
-      const focusedBackdrop = await electronApp.evaluate(({ BrowserWindow }) => {
+      // The popup remains usable until an outside pointer event arrives.
+      await popupPage.locator(".selection-popup").click({ position: { x: 120, y: 80 } });
+      await popupPage.locator("#copyBtn").click();
+      assert.match(await electronApp.evaluate(({ clipboard }) => clipboard.readText()), /apple/);
+      await popupPage.mouse.wheel(0, 120);
+      assert.equal(popupPage.isClosed(), false);
+      const clickedBackdrop = await electronApp.evaluate(({ BrowserWindow }) => {
         const backdrop = BrowserWindow.getAllWindows().find((window) =>
           window.webContents.getURL().includes("selection-backdrop.html")
         );
         if (!backdrop) {
           return false;
         }
-        backdrop.focus();
+        // Deliberately avoid focus(): that used to hide a blocked CSP script.
+        backdrop.webContents.sendInputEvent({ type: "mouseDown", x: 8, y: 8, button: "left", clickCount: 1 });
         return true;
       });
-      assert.equal(focusedBackdrop, true, "dismiss backdrop window should exist");
+      assert.equal(clickedBackdrop, true, "dismiss backdrop window should exist");
 
       const closedAt = Date.now();
       while (Date.now() - closedAt < 10000) {
@@ -169,7 +182,7 @@ test(
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      assert.fail("selection popup window should close after the outside backdrop gains focus");
+      assert.fail("selection popup window should close after an outside pointer event");
     } catch (error) {
       if (session) {
         await captureE2EFailureArtifacts(session.page, testName, error, session.electronApp);
@@ -279,15 +292,15 @@ test(
         return { anchorPoint, workArea, bounds: popup.getBounds() };
       });
 
-      assert.deepEqual(
-        popupLaunch.bounds,
-        calculateSelectionPopupBounds(
+      const expectedBounds = calculateSelectionPopupBounds(
           popupLaunch.anchorPoint,
           { width: 420, height: 480 },
           popupLaunch.workArea
-        ),
-        "edge placement should flip before clamping the popup to the display"
       );
+      assert.equal(popupLaunch.bounds.x, expectedBounds.x);
+      assert.equal(popupLaunch.bounds.y, expectedBounds.y);
+      assert.ok(Math.abs(popupLaunch.bounds.width - expectedBounds.width) <= 1 && Math.abs(popupLaunch.bounds.height - expectedBounds.height) <= 1,
+        "native fractional-DPI rounding may differ by one DIP, while edge placement must remain exact");
 
       const popupPage = electronApp
         .windows()
@@ -300,6 +313,14 @@ test(
         /first/i,
         "the stale popup request must not replace the newest payload"
       );
+      const backdropExists = await electronApp.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        windows.find(window => !window.webContents.getURL().includes("selection-popup.html"))?.focus();
+        return windows.some(window => window.webContents.getURL().includes("selection-backdrop.html"));
+      });
+      assert.equal(backdropExists, false, "outside dismissal disabled must not install an input backdrop");
+      await popupPage.waitForTimeout(100);
+      assert.equal(popupPage.isClosed(), false, "outside focus must respect disabled dismissal");
 
       await electronApp.evaluate(() => {
         const moduleApi = process.getBuiltinModule("module") as typeof import("node:module");

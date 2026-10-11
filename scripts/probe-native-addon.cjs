@@ -43,7 +43,10 @@ const requiredExports = [
   "supportsLayeredWindowExclusion",
   "getWindowRectAtPoint",
   "scrollWindowAtPoint",
-  "recognizeText"
+  "recognizeText",
+  "startPointerWatch",
+  "readPointerPresses",
+  "stopPointerWatch"
 ];
 const missingExports = requiredExports.filter((name) => typeof addon[name] !== "function");
 if (missingExports.length > 0) {

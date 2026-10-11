@@ -76,6 +76,11 @@
             <div id="command-results" class="command-results" hidden></div>
           </div>
           <div id="command-suggestions" class="suggestion-row"></div>
+          <details id="search-history" class="search-history">
+            <summary>搜索历史</summary>
+            <div class="search-history-heading"><span>仅保存在本机 · 最近 50 条</span><button id="search-history-clear" type="button">清空历史</button></div>
+            <div id="search-history-list"></div>
+          </details>
         </section>
 
         <aside class="system-panel">
@@ -167,6 +172,7 @@
     <script src="./renderer-window-mode-controller.js"></script>
     <script src="./renderer-settings-controller.js"></script>
     <script src="./renderer-home-search-controller.js"></script>
+    <script src="./renderer-search-history.js"></script>
     <script src="./panel-module-registry.js"></script>
     <script src="./panel-runtime-foundation.js"></script>
     <script src="./panel-modules/password-panel.js"></script>

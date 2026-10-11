@@ -188,6 +188,7 @@ async function handleSidebarAction(action: {
     };
     const result = await launcher.execute(commandItem);
     if (result.ok) {
+      markHomeSectionsDirty();
       commandCenterUi.showToast(`已打开：${commandItem.title}`);
     } else {
       setStatus(result.message ?? "执行失败");
@@ -212,6 +213,7 @@ async function handleSidebarAction(action: {
     setStatus(result.message ?? "执行失败");
     return;
   }
+  markHomeSectionsDirty();
   commandCenterUi.showToast(`已打开：${item.title}`);
 }
 
@@ -1630,6 +1632,7 @@ function moveSelection(delta: number): void {
 }
 
 async function refreshEntries(query: string): Promise<void> {
+  scheduleSearchHistory(query);
   const token = ++latestSearchToken;
   const shouldShowLoading =
     mode === "clip" || (mode === "search" && Boolean(query.trim()));
@@ -1874,6 +1877,7 @@ async function executeSelected(index = selectedIndex): Promise<void> {
   }
 
   if (selected.kind === "launch") {
+    if (mode === "search") rememberSearchHistory(currentQuery);
     const modeBeforeExecute = mode;
     const queryBeforeExecute = currentQuery;
     const result = await launcher.execute(selected.item);

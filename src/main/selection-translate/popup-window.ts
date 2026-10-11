@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BrowserWindow, clipboard, ipcMain, screen } from "electron";
+import { createNativePointerWatch } from "../litesnap/capture-provider";
 
 import { IPC_CHANNELS } from "../../shared/channels";
 import type {
@@ -33,6 +34,41 @@ let popupLifecycleHooks: {
 } = {};
 let popupRequestSequence = 0;
 let activePopupRequestId = 0;
+let stopOutsidePointerWatch: (() => void) | null = null;
+
+function stopOutsideWatch(): void {
+  stopOutsidePointerWatch?.();
+  stopOutsidePointerWatch = null;
+}
+
+function startOutsideWatch(window: BrowserWindow, requestId: number): void {
+  stopOutsideWatch();
+  if (!dismissOnOutsideClickEnabled) return;
+  try {
+    const watch = createNativePointerWatch();
+    if (!watch) return;
+    const timer = setInterval(() => {
+      if (!isCurrentPopupRequest(requestId) || window.isDestroyed()) {
+        clearInterval(timer);
+        if (stopOutsidePointerWatch === stop) stopOutsideWatch();
+        return;
+      }
+      try {
+        for (const physicalPoint of watch.read()) {
+          const point = screen.screenToDipPoint(physicalPoint);
+          if (!isPointInBounds(point, window.getBounds())) { closeSelectionPopup(); break; }
+        }
+      } catch (error) { console.warn("[selection-popup] outside pointer watch failed", error); stopOutsideWatch(); }
+    }, 25);
+    timer.unref?.();
+    const stop = () => { clearInterval(timer); watch.stop(); };
+    stopOutsidePointerWatch = stop;
+    // Native observation leaves outside input with the original application;
+    // no transparent hit-test window is needed on Windows when it is available.
+    closeDismissBackdrop();
+    restoreElevatedWindows();
+  } catch (error) { console.warn("[selection-popup] native pointer watch unavailable", error); }
+}
 
 export function getVirtualDesktopBounds(): {
   x: number;
@@ -354,6 +390,7 @@ function createPopupWindow(bounds: {
       return;
     }
     popupWindow = null;
+    stopOutsideWatch();
     activePopupRequestId = 0;
     closeDismissBackdrop();
     restoreElevatedWindows();
@@ -366,6 +403,7 @@ function createPopupWindow(bounds: {
 }
 
 export function closeSelectionPopup(): void {
+  stopOutsideWatch();
   activePopupRequestId = 0;
   closeDismissBackdrop();
   restoreElevatedWindows();
@@ -391,6 +429,7 @@ export async function showSelectionPopup(
 ): Promise<void> {
   const requestId = ++popupRequestSequence;
   activePopupRequestId = requestId;
+  stopOutsideWatch();
   ensureHandlers();
   ensureDisplayMetricsListener();
   latestPayload = payload;
@@ -450,5 +489,6 @@ export async function showSelectionPopup(
     return;
   }
   popupWindow.focus();
+  startOutsideWatch(popupWindow, requestId);
   options.onOpen?.();
 }

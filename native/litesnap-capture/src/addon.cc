@@ -9,6 +9,7 @@
 #include <winrt/Windows.Media.Ocr.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +31,130 @@ struct __declspec(uuid("5b0d3235-4dba-4d44-865e-8f1d0e4fd04d"))
 namespace {
 
 std::mutex g_ocr_mutex;
+
+// Active only while the selection popup is open. The hook never consumes or
+// injects input; it queues presses for the Electron main thread to inspect.
+struct PointerWatch {
+  std::mutex mutex;
+  std::vector<POINT> presses;
+  HANDLE thread = nullptr;
+  HANDLE ready = nullptr;
+  std::atomic<DWORD> thread_id{0};
+  std::atomic<bool> installed{false};
+  std::atomic<bool> stop_requested{false};
+  std::atomic<DWORD> last_error{0};
+  napi_env owner = nullptr;
+};
+PointerWatch& PointerState() {
+  static auto* state = new PointerWatch();
+  return *state;
+}
+LRESULT CALLBACK PointerHook(int code, WPARAM message, LPARAM data) {
+  if (code >= 0 && (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ||
+                   message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN)) {
+    auto& state = PointerState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.presses.size() >= 64) state.presses.erase(state.presses.begin());
+    state.presses.push_back(reinterpret_cast<MSLLHOOKSTRUCT*>(data)->pt);
+  }
+  return CallNextHookEx(nullptr, code, message, data);
+}
+DWORD WINAPI PointerThread(void*) {
+  auto& state = PointerState();
+  MSG message;
+  PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+  state.thread_id = GetCurrentThreadId();
+  if (state.stop_requested.load()) { SetEvent(state.ready); return 0; }
+  HMODULE module = nullptr;
+  GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+    reinterpret_cast<LPCWSTR>(&PointerHook), &module);
+  HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, PointerHook, module, 0);
+  state.installed = hook != nullptr;
+  state.last_error = hook ? 0 : GetLastError();
+  SetEvent(state.ready);
+  if (hook) {
+    while (!state.stop_requested.load() && GetMessageW(&message, nullptr, 0, 0) > 0) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    UnhookWindowsHookEx(hook);
+  }
+  state.installed = false;
+  return 0;
+}
+void StopPointerWatch() {
+  auto& state = PointerState();
+  if (state.thread) {
+    state.stop_requested = true;
+    PostThreadMessageW(state.thread_id, WM_QUIT, 0, 0);
+    // A stalled thread must not block the desktop or be reused for another hook.
+    if (WaitForSingleObject(state.thread, 500) != WAIT_OBJECT_0) return;
+    CloseHandle(state.thread);
+    CloseHandle(state.ready);
+    state.thread = nullptr;
+    state.ready = nullptr;
+    state.thread_id = 0;
+  }
+  std::lock_guard<std::mutex> lock(state.mutex);
+  state.presses.clear();
+  state.owner = nullptr;
+}
+void CleanupPointerWatch(void* env) {
+  if (PointerState().owner == static_cast<napi_env>(env)) StopPointerWatch();
+}
+napi_value StartPointerWatch(napi_env env, napi_callback_info) {
+  auto& state = PointerState();
+  StopPointerWatch();
+  if (state.thread) {
+    napi_throw_error(env, nullptr, "Previous Windows mouse hook is still stopping");
+    return nullptr;
+  }
+  if (!state.thread) {
+    state.stop_requested = false;
+    state.installed = false;
+    state.last_error = 0;
+    state.ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!state.ready) {
+      napi_throw_error(env, nullptr, "Cannot create Windows mouse hook ready event");
+      return nullptr;
+    }
+    state.owner = env;
+    state.thread = CreateThread(nullptr, 0, PointerThread, nullptr, 0, nullptr);
+    if (state.thread) WaitForSingleObject(state.ready, 250);
+    else { state.last_error = GetLastError(); CloseHandle(state.ready); state.ready = nullptr; state.owner = nullptr; }
+  }
+  napi_value result;
+  if (!state.installed.load()) {
+    const auto detail = std::string("Windows mouse hook unavailable; error=") + std::to_string(state.last_error.load());
+    napi_throw_error(env, nullptr, detail.c_str());
+    return nullptr;
+  }
+  napi_get_boolean(env, state.installed.load(), &result);
+  return result;
+}
+napi_value ReadPointerPresses(napi_env env, napi_callback_info) {
+  auto& state = PointerState();
+  std::vector<POINT> presses;
+  { std::lock_guard<std::mutex> lock(state.mutex); presses.swap(state.presses); }
+  napi_value result;
+  napi_create_array_with_length(env, presses.size(), &result);
+  for (uint32_t i = 0; i < presses.size(); ++i) {
+    napi_value point, x, y;
+    napi_create_object(env, &point);
+    napi_create_int32(env, presses[i].x, &x);
+    napi_create_int32(env, presses[i].y, &y);
+    napi_set_named_property(env, point, "x", x);
+    napi_set_named_property(env, point, "y", y);
+    napi_set_element(env, result, i, point);
+  }
+  return result;
+}
+napi_value StopPointerWatchApi(napi_env env, napi_callback_info) {
+  StopPointerWatch();
+  napi_value result;
+  napi_get_undefined(env, &result);
+  return result;
+}
 
 struct CaptureRequest {
   int32_t x;
@@ -1300,6 +1425,13 @@ napi_value ProbeOcr(napi_env env, napi_callback_info /*info*/) {
 }  // namespace
 
 napi_value Init(napi_env env, napi_value exports) {
+  napi_add_env_cleanup_hook(env, CleanupPointerWatch, env);
+  const napi_property_descriptor pointer_properties[] = {
+    {"startPointerWatch", nullptr, StartPointerWatch, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"readPointerPresses", nullptr, ReadPointerPresses, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"stopPointerWatch", nullptr, StopPointerWatchApi, nullptr, nullptr, nullptr, napi_default, nullptr}
+  };
+  napi_define_properties(env, exports, 3, pointer_properties);
   napi_value capture_fn;
   napi_create_function(
       env,

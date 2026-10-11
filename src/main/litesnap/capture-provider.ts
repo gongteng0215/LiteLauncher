@@ -104,6 +104,9 @@ type NativeLiteSnapFramesResult = {
 };
 
 type NativeLiteSnapCaptureAddon = {
+  startPointerWatch?(): boolean;
+  readPointerPresses?(): Array<{ x: number; y: number }>;
+  stopPointerWatch?(): void;
   captureDisplayRect(
     request: NativeLiteSnapCaptureRequest
   ): NativeLiteSnapCaptureResult | null;
@@ -593,6 +596,17 @@ function loadNativeLiteSnapCaptureAddon(): NativeLiteSnapCaptureAddon | null {
 
   nativeHealth.message = "原生模块加载失败或接口不兼容。请重新安装最新版；仍失败时复制诊断信息反馈。";
   return null;
+}
+
+/** Observe native mouse presses without taking screenshots or intercepting input. */
+export function createNativePointerWatch(): { read(): Array<{ x: number; y: number }>; stop(): void } | null {
+  if (process.platform !== "win32") return null;
+  const addon = loadNativeLiteSnapCaptureAddon();
+  if (!addon?.startPointerWatch || !addon.readPointerPresses || !addon.stopPointerWatch) return null;
+  try {
+    if (!addon.startPointerWatch()) { addon.stopPointerWatch(); return null; }
+  } catch (error) { addon.stopPointerWatch(); throw error; }
+  return { read: () => addon.readPointerPresses!(), stop: () => addon.stopPointerWatch!() };
 }
 
 function createNativeLiteSnapCaptureProvider(): LiteSnapCaptureProvider | null {

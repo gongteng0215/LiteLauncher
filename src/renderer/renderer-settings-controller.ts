@@ -1767,6 +1767,7 @@ function renderSettingsPanel(
   versionHint.dataset.compact = "true";
   systemGroup.body.appendChild(versionRow);
 
+  const renderUpdaterRow = (): HTMLDivElement => {
   const {
     row: updaterRow,
     control: updaterControl,
@@ -1782,6 +1783,17 @@ function renderSettingsPanel(
   const updaterValue = document.createElement("div");
   updaterValue.className = "settings-static-value settings-system-value-chip";
   updaterValue.textContent = formatAppUpdaterStatusSummary(appUpdaterStatus);
+  updaterValue.setAttribute("role", "status");
+  const progress = document.createElement("progress");
+  progress.className = "settings-update-progress";
+  progress.max = 100;
+  progress.setAttribute("aria-label", "更新下载进度");
+  const phase = appUpdaterStatus.phase;
+  progress.hidden = !["checking", "available", "downloading", "downloaded"].includes(phase);
+  if (phase === "downloaded") progress.value = 100;
+  else if (phase === "downloading" && typeof appUpdaterStatus.progressPercent === "number") {
+    progress.value = Math.max(0, Math.min(100, appUpdaterStatus.progressPercent));
+  }
 
   const updaterMeta = document.createElement("div");
   updaterMeta.className = "settings-system-update-meta";
@@ -1868,13 +1880,37 @@ function renderSettingsPanel(
   updaterCard.append(
     updaterValue,
     updaterMeta,
+    progress,
+    updaterHint,
+    updaterActions,
     updaterDetails,
-    updaterNotes,
-    updaterActions
+    updaterNotes
   );
   updaterControl.appendChild(updaterCard);
   updaterHint.dataset.compact = "true";
-  systemGroup.body.appendChild(updaterRow);
+  return updaterRow;
+  };
+  let liveUpdaterRow = renderUpdaterRow();
+  systemGroup.body.appendChild(liveUpdaterRow);
+  let updatingStatus = false;
+  const updaterRefreshTimer = window.setInterval(async () => {
+    if (!liveUpdaterRow.isConnected) {
+      window.clearInterval(updaterRefreshTimer);
+      return;
+    }
+    if (updatingStatus) return;
+    updatingStatus = true;
+    try {
+      const next = await getLauncherApi()?.getAppUpdaterStatus();
+      if (next && liveUpdaterRow.isConnected && JSON.stringify(next) !== JSON.stringify(appUpdaterStatus)) {
+        appUpdaterStatus = next;
+        const replacement = renderUpdaterRow();
+        liveUpdaterRow.replaceWith(replacement);
+        liveUpdaterRow = replacement;
+      }
+    } catch { /* Keep the last known status during a transient bridge failure. */ }
+    finally { updatingStatus = false; }
+  }, 1000);
   settingsContent.appendChild(systemGroup.section);
 
   const logGroup = createGroup(

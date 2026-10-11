@@ -110,18 +110,9 @@ function applyPinnedWindowBounds(
   width: number,
   height: number
 ): void {
-  // Preserve the size captured at drag start. Reading getBounds() for every
-  // move can inherit a concurrent Windows native-resize frame and turn a move
-  // gesture into continuous growth.
-  window.setBounds(
-    {
-      x: Math.round(x),
-      y: Math.round(y),
-      width: Math.max(1, Math.round(width)),
-      height: Math.max(1, Math.round(height))
-    },
-    false
-  );
+  // Electron setPosition internally reuses rounded bounds on Windows. Supply
+  // the stable logical size instead, without toggling the native frame.
+  window.setBounds({ x: Math.round(x), y: Math.round(y), width, height }, false);
 }
 
 function ensurePinDragBeginHandler(): void {
@@ -155,11 +146,7 @@ function ensurePinDragBeginHandler(): void {
       width: meta.dragSize.width,
       height: meta.dragSize.height
     };
-    // A content drag and the frameless native resize border must never remain
-    // active together. Restore resizing when the pointer is released.
-    if (!meta.clickThrough) {
-      window.setResizable(false);
-    }
+    // will-resize vetoes native resizing while this content drag is active.
   });
 }
 
@@ -195,9 +182,6 @@ function ensurePinMoveHandler(): void {
         width: meta.dragSize.width,
         height: meta.dragSize.height
       };
-      if (!meta.clickThrough) {
-        window.setResizable(false);
-      }
     }
 
     const origin = meta.dragOrigin;
@@ -233,8 +217,8 @@ function syncPinWindowConstraints(window: BrowserWindow, meta: PinWindowMeta): v
     Math.max(1, Math.round(meta.initialHeight * effectiveMinScale))
   );
   window.setMaximumSize(
-    Math.max(1, Math.floor(meta.initialWidth * maxScale)),
-    Math.max(1, Math.floor(meta.initialHeight * maxScale))
+    Math.max(bounds.width, 1, Math.floor(meta.initialWidth * maxScale)),
+    Math.max(bounds.height, 1, Math.floor(meta.initialHeight * maxScale))
   );
 }
 
@@ -329,19 +313,7 @@ function ensurePinDragEndHandler(): void {
       return;
     }
 
-    const dragOrigin = meta.dragOrigin;
     meta.dragOrigin = null;
-
-    if (!meta.clickThrough) {
-      window.setResizable(true);
-    }
-
-    syncPinWindowConstraints(window, meta);
-    if (dragOrigin) {
-      // Toggling the native resize frame can round the bounds on fractional
-      // DPI displays. Restore the captured size after reenabling the frame.
-      window.setSize(dragOrigin.width, dragOrigin.height, false);
-    }
     schedulePinImageRebake(window, meta, 0);
   });
 }
@@ -1257,7 +1229,12 @@ export class LiteSnapPinWindowManager {
     ensurePinClickThroughHandler();
     ensurePinCloseAllHandler();
 
-    const window = this.takePrewarmedWindow({ x, y, width, height });
+    // A prewarmed off-screen HWND inherits another display's DPI. Moving it
+    // to a capture on a different-scale monitor can resize it during WM_DPICHANGED.
+    // Exact capture placement must start on the destination display.
+    const window = exactPlacement
+      ? new BrowserWindow(createPinBrowserWindowOptions({ x, y, width, height }))
+      : this.takePrewarmedWindow({ x, y, width, height });
     void this.prewarmPinWindow();
 
     const assets = await writePinWindowAssets(displayImage, exactPlacement);
@@ -1302,8 +1279,12 @@ export class LiteSnapPinWindowManager {
 
     // Only a deliberate native resize starts a new logical size. Reusing
     // rounded getBounds() values on each drag compounds fractional-DPI drift.
-    window.on("will-resize", () => {
+    window.on("will-resize", (event) => {
       const current = pinWindowMeta.get(window.id);
+      if (current?.dragOrigin) {
+        event.preventDefault();
+        return;
+      }
       if (current && !current.dragOrigin) current.dragSize = null;
     });
     window.on("resize", () => {
@@ -1342,6 +1323,11 @@ export class LiteSnapPinWindowManager {
 
     try {
       await window.loadFile(assets.htmlPath);
+      if (exactPlacement) {
+        // Chromium has now attached to the destination monitor. Reapply the
+        // selection in DIP after the initial per-monitor DPI transition.
+        window.setBounds({ x, y, width, height }, false);
+      }
       await this.revealPinWindow(window);
     } catch (error) {
       pinWindowMeta.delete(window.id);
